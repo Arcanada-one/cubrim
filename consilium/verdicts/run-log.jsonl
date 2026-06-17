@@ -1,0 +1,4 @@
+{"vendor_slot":"A","vendor":"deepseek","model":"deepseek-chat","status":"ok","position":"conditional-support","transport":"coworker ask --provider deepseek"}
+{"vendor_slot":"B","vendor":"moonshot","model":"kimi-k2.5","status":"ok","position":"conditional-support","transport":"coworker ask --provider moonshot --model kimi-k2.5"}
+{"vendor_slot":"C","vendor":"codex","model":"gpt-5.5","status":"degraded","reason":"local PreToolUse hook env blocked non-interactive run; no stdout verdict","transport":"codex exec"}
+{"vendor_slot":"D","vendor":"gemini","model":"2.x","status":"degraded","reason":"IDE-companion connect error + plan-mode produced no stdout verdict","transport":"gemini -p"}
