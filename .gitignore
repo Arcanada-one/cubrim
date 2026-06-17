@@ -1,0 +1,24 @@
+# Datarim workflow state (local-only)
+datarim/
+
+# Rust
+/target/
+code/target/
+**/*.rs.bk
+Cargo.lock
+
+# Python prototyping
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Benchmark corpora (large binaries — keep generators, not data)
+docs/ephemeral/research/corpus/
+*.bin
+*.cube
+
+# OS / editor
+.DS_Store
+*.swp
