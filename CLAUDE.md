@@ -71,7 +71,10 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 
 ## 🔒 Secrecy Constraint (operator decision 2026-06-17)
 
-**The archiver algorithm is STRICTLY SECRET.** Its working principle — the N-dimensional cube, corner-shift, distance-map, compact-row encoding, bit-packing — MUST NEVER be disclosed in any public content: the `cubrim.com` landing, OG tags, the arcanada.ai listing, marketing, or any external material. Public surface describes product **value / teaser only**, never the mechanism. Internal artefacts (`consilium/`, `code/`, `docs/`) live in the **private** repo `Arcanada-one/cubrim` and stay private. Before publishing anything for this project, scrub all cube / distance-map / bit-packing wording.
+**The archiver algorithm is STRICTLY SECRET.** Its working principle (specified privately in `consilium/` and `datarim/prd/`) MUST NEVER be disclosed in any public content: the `cubrim.com` landing, OG tags, the arcanada.ai listing, marketing, or any external material. Public surface describes product **value / teaser only**, never the mechanism.
+
+**Doc-surface split:** `docs/` (Diátaxis) is treated as a *public-facing* reference surface — it MUST NOT carry the compression mechanism (no internal-encoding lexicon). The algorithm lives only in `consilium/` (the private rulebook + brief) and internal `datarim/prd/` artefacts. The whole repo `Arcanada-one/cubrim` is **private**, but keep `docs/` mechanism-free regardless. Secrecy gate before any publish:
+`grep -rin -E 'distance-map|карт[аеуы] расстоян|bit-pack|gap-to-next|N-мерн|n-dimensional cube|edge bound' Projects/Cubrim/docs/ Projects/Cubrim/README*` → must be empty.
 
 ## Conventions
 
