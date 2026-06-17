@@ -69,6 +69,10 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 #   cargo bench                # compression-ratio / throughput benchmarks
 ```
 
+## 🔒 Secrecy Constraint (operator decision 2026-06-17)
+
+**The archiver algorithm is STRICTLY SECRET.** Its working principle — the N-dimensional cube, corner-shift, distance-map, compact-row encoding, bit-packing — MUST NEVER be disclosed in any public content: the `cubrim.com` landing, OG tags, the arcanada.ai listing, marketing, or any external material. Public surface describes product **value / teaser only**, never the mechanism. Internal artefacts (`consilium/`, `code/`, `docs/`) live in the **private** repo `Arcanada-one/cubrim` and stay private. Before publishing anything for this project, scrub all cube / distance-map / bit-packing wording.
+
 ## Conventions
 
 - **Algorithm before code.** Every implementation step traces to a rule in `consilium/` rulebook. No speculative encoding scheme lands in `code/` before the consilium accepts it.
