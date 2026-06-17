@@ -35,6 +35,7 @@ created: 2026-06-17
 - **Status:** `open`.
 - **Prior art it reduces to:** N-мерные решётки / sparse-tensor раскладки; 2D — это
   по сути sparse-matrix CSR/COO случай.
+- **Замер CUBR-0004 (2026-06-17):** v1-default N=2, B=256. Corpus: text_64kb + log_16kb (cube mode), random_64kb (raw-store). Cube ratio (cube-mode files): text=0.6260, log=0.7556, mean=0.6908. N=2 produces a fully-dense cube for L=B^2 inputs (ρ=1.0). At full density all gaps=1; RLE compresses the gap map to minimal overhead; compression comes entirely from value bitpacking (W=8 for 256 distinct values = no savings vs raw bytes). Status: `measured — open; N=2 gives cube mode for text/log (ratio < 1), raw-store for random (no blowup). Challengers (H-01 OQ-1) not measured — open for CUBR-0007.`
 
 ---
 
@@ -53,6 +54,7 @@ created: 2026-06-17
   логируется как H-02a.)*
 - **Prior art it reduces to:** mixed-radix позиционная нумерация; претенденты —
   Morton/Z-order, Hilbert space-filling curves (locality-preserving).
+- **Замер CUBR-0004 (2026-06-17):** fraction(gap=1)=1.0000 on all corpus files (text_64kb, random_64kb, log_16kb). Mean run-length(gap=1)=448 overall (text=512, random=512, log=320). Note: this result reflects fully-populated cube (L=B^2 or L=B^1.5 → ρ=1.0) where ALL gaps are 1 by definition — mixed-radix baseline maximally locality-trivial at ρ=1. Chalengers (Hilbert, Morton) not measured at this density level — gap=1 fraction does not discriminate Phi choices when ρ=1. Status: `measured-trivially — ρ=1 corpus; Phi challenger comparison needs sparse corpus. Open for CUBR-0007.`
 
 ---
 
@@ -83,6 +85,7 @@ created: 2026-06-17
 - **Status:** `open`.
 - **Prior art it reduces to:** выбор radix / word-size в позиционном кодировании;
   bit-width бюджет как во frame-of-reference кодах.
+- **Замер CUBR-0004 (2026-06-17):** B=256 confirmed in use. At ρ=1 (full density), b_k=256=B for all axes — invariant holds. Unique axis coords = 256 per axis. H-03 not independently testable at ρ=1 (all values of B give same gap distribution). Status: `not_measured independently — ρ=1 corpus; B variation needs sparse corpus. Open for CUBR-0007.`
 
 ---
 
@@ -97,6 +100,7 @@ created: 2026-06-17
 - **Status:** `open`.
 - **Prior art it reduces to:** structure-of-arrays vs array-of-structures раскладка
   координат; CSR хранит индексы по-осно.
+- **Замер CUBR-0004 (2026-06-17):** N=2 per-axis streams used. At ρ=1 each axis has 256 unique coords. Gap map = 256 gaps of value 1 per axis → RLE encodes as 1 pair per axis (value=1, run=256). N-streams overhead = N×4B RLE pairs = 8B per axis set. Interleaved layout would give 1 pair per (N-axis combo) — likely similar at ρ=1. Bits-per-point from gap map: 8B / 65536 points ≈ 0.0001 bits/point — gap map is negligible overhead at full density. Status: `measured — N-streams layout works; challenger (H-11 interleaved) not measured; gap overhead negligible at ρ=1. Open for CUBR-0007.`
 
 ---
 
@@ -115,6 +119,7 @@ created: 2026-06-17
 - **Status:** `open` (не измерена; зафиксирована как инвариант на Phase 0).
 - **Prior art it reduces to:** delta-кодирование разреженных индексов (CSR/COO delta);
   sentinel-начало — стандартный приём delta-кодеров.
+- **Замер CUBR-0004 (2026-06-17):** CONFIRMED as hard invariant. 9 round-trip tests pass including the R3.1 worked example {0,3,7}→D=(1,3,4)→{0,3,7}. 9 gap-invariant tests pass (gap=0 raises, gap>b_k raises, non-monotone raises). Sentinel=-1 start verified by unit tests. Status: `measured-confirmed as invariant — gap=1 semantics correct; sentinel=-1 works; all tests green.`
 
 ---
 
@@ -130,6 +135,7 @@ created: 2026-06-17
 - **Status:** `open`.
 - **Prior art it reduces to:** RLE; для скошенного-к-малым распределения gap —
   Golomb-Rice, Huffman, ANS (rANS/tANS) энтропийное кодирование.
+- **Замер CUBR-0004 (2026-06-17):** At ρ=1 the gap distribution is all-1 → RLE encodes as single run of 256 gaps of value 1 = 4 bytes per axis stream. Gap map overhead per axis = 4B / 65536 points = negligible. fraction(gap=1)=1.0, mean run-length=448 (corpus aggregate). This is the best possible case for RLE (entire stream = one run). Challengers (Golomb/ANS) would give the same result at ρ=1. Gap map benefit is unmeasurable at full density — needs sparse corpus (ρ < 0.3) to differentiate RLE vs alternatives. Status: `measured at ρ=1 — RLE overhead negligible; challenger comparison not_measured — open for CUBR-0007.`
 
 ---
 
@@ -164,6 +170,7 @@ created: 2026-06-17
 - **Status:** `open`.
 - **Prior art it reduces to:** препроцессоры компрессоров (дельта-фильтры, токенизация,
   type-split как в колоночных форматах).
+- **Замер CUBR-0004 (2026-06-17):** V = bytes as-is. text_64kb: 34 distinct values, W=6 bits (34 < 64), ratio=0.6260 (cube mode). log_16kb: distinct values measured through encode, ratio=0.7556. random_64kb: 256 distinct values, W=8 bits — no savings, raw-store triggered. Bytes-as-is gives meaningful compression only when input has low distinct-value entropy. With W=8 (all 256 values distinct), bitpack = same size as raw bytes. Status: `measured — bytes-as-is baseline works for text/log (low distinct count); fails on random (W=8, no savings). Challengers (OQ-5) not measured — open for CUBR-0007.`
 
 ---
 
@@ -182,6 +189,7 @@ created: 2026-06-17
 - **Status:** `open` (не измерена; зафиксирована как hard-правило на Phase 0).
 - **Prior art it reduces to:** «stored block» режим DEFLATE/zstd (несжимаемый блок
   хранится как есть с флагом) — стандартный guard любого компрессора.
+- **Замер CUBR-0004 (2026-06-17):** CONFIRMED. 1 MB uniform-random input (numpy seed 42): encode → mode=1 (raw-store). Output = 1,048,589 bytes. Input = 1,048,576 bytes. Overhead = 13 bytes (raw-mode header only). Ratio = 1.000012. HEADER_OVERHEAD_BOUND = 320 bytes. random_64kb (65,536 bytes): also raw-store, output = 65,549 bytes, overhead = 13 bytes. R7 decision rule: cube_size >= raw_output_size → raw-store. Round-trip OK on all raw-store inputs. Status: `measured-confirmed — R7 raw-store fires on random data; overhead bounded at 13 bytes (raw header); HEADER_OVERHEAD_BOUND=320B is conservative upper bound for any input size.`
 
 ---
 
@@ -198,6 +206,7 @@ created: 2026-06-17
 - **Status:** `open`.
 - **Prior art it reduces to:** контейнерные форматы со self-describing header
   (PNG/zstd frame header) — параметры декода едут в шапке.
+- **Замер CUBR-0004 (2026-06-17):** Header parse + deterministic decode verified by 32 pytest cases (test_round_trip, test_decode_robustness). Bad magic/version/truncation all raise explicitly. Round-trip byte-exact confirmed on text_1kb, random_1kb, log_16kb, plus edge cases (empty, single byte, all-same, all-distinct). Status: `measured-confirmed — V-AC-1 and V-AC-4 pass; deterministic decode from header alone verified.`
 
 ---
 
@@ -221,3 +230,4 @@ created: 2026-06-17
 - **Status:** `open`.
 - **Prior art it reduces to:** контекстное моделирование энтропийных кодеров (LZMA range coder,
   zstd FSE с общим контекстом); кросс-столбцовое кодирование в колоночных форматах (Parquet/ORC).
+- **Замер CUBR-0004 (2026-06-17):** `not_measured — H-11 is a challenger hypothesis (interleaved layout not v1-default). Baseline N-streams measured (see H-04). Interleaved vs N-streams comparison open for CUBR-0007.`
