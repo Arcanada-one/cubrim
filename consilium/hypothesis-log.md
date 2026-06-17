@@ -170,7 +170,7 @@ created: 2026-06-17
 - **Status:** `open`.
 - **Prior art it reduces to:** препроцессоры компрессоров (дельта-фильтры, токенизация,
   type-split как в колоночных форматах).
-- **Замер CUBR-0004 (2026-06-17):** V = bytes as-is. text_64kb: 34 distinct values, W=6 bits (34 < 64), ratio=0.6260 (cube mode). log_16kb: distinct values measured through encode, ratio=0.7556. random_64kb: 256 distinct values, W=8 bits — no savings, raw-store triggered. Bytes-as-is gives meaningful compression only when input has low distinct-value entropy. With W=8 (all 256 values distinct), bitpack = same size as raw bytes. Status: `measured — bytes-as-is baseline works for text/log (low distinct count); fails on random (W=8, no savings). Challengers (OQ-5) not measured — open for CUBR-0007.`
+- **Замер CUBR-0004 (2026-06-17):** V = bytes as-is. text_64kb: 27 distinct values, W=5 bits (27 < 32), ratio=0.6260 (cube mode). log_16kb: 53 distinct values, W=6 bits, ratio=0.7556. random_64kb: 256 distinct values, W=8 bits — no savings, raw-store triggered. Bytes-as-is gives meaningful compression only when input has low distinct-value entropy. With W=8 (all 256 values distinct), bitpack = same size as raw bytes. Status: `measured — bytes-as-is baseline works for text/log (low distinct count); fails on random (W=8, no savings). Challengers (OQ-5) not measured — open for CUBR-0007.`
 
 ---
 
