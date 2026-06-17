@@ -4,6 +4,7 @@ datarim/
 # Rust
 /target/
 code/target/
+**/target/
 **/*.rs.bk
 Cargo.lock
 
