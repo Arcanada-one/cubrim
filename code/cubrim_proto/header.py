@@ -86,7 +86,7 @@ def serialize_header(
     n_distinct = len(inverse_dict)
 
     # Pack variable-length fields
-    bk_bytes = struct.pack(f">{N}B", *[min(v, 255) for v in b_k])  # uint8: b_k <= B=256, fits in 1B
+    bk_bytes = struct.pack(f">{N}H", *b_k)  # uint16: b_k <= B (B may be 256, which does not fit in uint8)
     schemes = struct.pack(">BBB", MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, W)
     n_dist_bytes = struct.pack(">H", n_distinct)
     # inverse_dict uses uint8 (values are bytes 0..255) — halves dict overhead
@@ -144,9 +144,9 @@ def parse_header(data: bytes) -> tuple[dict, int]:
     (count,) = struct.unpack_from(">I", data, offset)
     offset += 4
 
-    # b_k (N * 1B) — uint8, b_k <= B=256 fits in 1 byte
-    b_k = list(struct.unpack_from(f">{N}B", data, offset))
-    offset += N * 1
+    # b_k (N * 2B) — uint16, b_k <= B (B=256 does not fit in uint8)
+    b_k = list(struct.unpack_from(f">{N}H", data, offset))
+    offset += N * 2
 
     # map_scheme (1B), value_scheme (1B), W (1B)
     map_scheme, value_scheme, W = struct.unpack_from(">BBB", data, offset)

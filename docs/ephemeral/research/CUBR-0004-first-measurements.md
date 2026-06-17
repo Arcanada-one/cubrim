@@ -53,15 +53,15 @@ If mean run-length < 8 → confirms consilium locality risk → OQ-3/OQ-5 priori
 
 | File | Input (B) | Output (B) | Ratio | Mode | RT |
 |------|-----------|-----------|-------|------|-----|
-| text_64kb       |     65,536 |     41,025 |  0.6260 | cube      | OK |
+| text_64kb       |     65,536 |     41,027 |  0.6260 | cube      | OK |
 | random_64kb     |     65,536 |     65,549 |  1.0002 | raw-store | OK |
-| log_16kb        |     16,384 |     12,379 |  0.7556 | cube      | OK |
+| log_16kb        |     16,384 |     12,381 |  0.7557 | cube      | OK |
 
 | **aggregate (cube only)** | — | — | **0.6908** | — | — |
-| **aggregate (all)** | — | — | **0.7939** | — | — |
+| **aggregate (all)** | — | — | **0.7940** | — | — |
 
 **H-01/H-03/H-08 evidence:**
-- Mean ratio all files: 0.7939
+- Mean ratio all files: 0.7940
 - ratio <= 0.9 on some files → some compression benefit observed
 - Mean ratio cube-mode only: 0.6908
 
