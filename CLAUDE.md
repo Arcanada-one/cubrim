@@ -87,7 +87,8 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 
 > Hard-won lessons. Each one line, imperative, specific.
 
-1. [TODO: Add gotchas as they are discovered — e.g. edge-bound vs entropy trade-offs, N-dim explosion costs.]
+1. **ρ=1 corpus trap.** A corpus where all inputs fully populate the N-dimensional cube (L = B^N → ρ=1.0) makes all gaps=1. The distance-map mechanism then carries zero information. Sub-1.0 compression at ρ=1 = value-bitpacking only, NOT the cube principle. ALWAYS include ≥1 sparse input (ρ < 0.3) in any prototype corpus meant to validate the cube mechanism — a dense-only corpus tests the scaffolding, not the principle. (Discovered in the first Python prototype: text 0.63 / log 0.76 ratios came entirely from value-width packing while the gap map was byte-identical across different inputs.)
+2. [TODO: Add gotchas as they are discovered — e.g. edge-bound vs entropy trade-offs, N-dim explosion costs.]
 
 ## Datarim Workflow
 
