@@ -1011,4 +1011,5 @@ mod tests {
         let encoded = rle_codes_encode(&seq_codes);
         assert_eq!(rle_codes_size(&seq_codes), encoded.len());
     }
+
 }
