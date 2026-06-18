@@ -58,3 +58,57 @@ differential_test!(all_same_100);
 differential_test!(all_distinct_256);
 differential_test!(text_1kb);
 differential_test!(random_1kb);
+
+/// RleCodes differential parity test.
+///
+/// Asserts:
+///   1. rust_encode_rlecodes(x) == python_encode_rlecodes(x)  (byte-identical blobs)
+///   2. rust_decode(python_rlecodes_blob) == x                 (cross-decode: Rust reads Python output)
+///   3. rust_decode(rust_rlecodes_blob) == x                   (Rust round-trip on its own blob)
+///
+/// This makes the Python oracle's RleCodes decode path machine-enforced: fixture
+/// sparse_clustered_rlecodes.python_blob was produced by cubrim_proto.codec.encode()
+/// with value_scheme=VALUE_SCHEME_RLE_CODES. If Python decode() crashes on it, the
+/// fixture capture itself fails — meaning the Python oracle fix is required before
+/// fixtures can be committed.
+#[test]
+fn sparse_clustered_rlecodes() {
+    use cubrim::{EncodeConfig, GapScheme, ValueScheme, encode_with_config, decode};
+
+    let fixture_name = "sparse_clustered_rlecodes";
+    let (input, python_blob) = load_fixture(fixture_name);
+
+    let config = EncodeConfig {
+        b: 256,
+        raw_store_bound: 320,
+        use_square_limit: true,
+        n_override: None,
+        gap_scheme: GapScheme::RleU16,
+        value_scheme: ValueScheme::RleCodes,
+    };
+
+    // Test 1: rust_encode_rlecodes(x) byte-identical to python_encode_rlecodes(x)
+    let rust_blob = encode_with_config(&input, &config);
+    assert_eq!(
+        rust_blob, python_blob,
+        "RleCodes parity FAIL [{fixture_name}]: Rust blob ({} bytes) != Python blob ({} bytes). First diff at byte {}",
+        rust_blob.len(), python_blob.len(),
+        rust_blob.iter().zip(python_blob.iter()).position(|(a, b)| a != b).unwrap_or(usize::MAX)
+    );
+
+    // Test 2: rust_decode(python_rlecodes_blob) == original input (cross-decode)
+    let recovered_from_python = decode(&python_blob)
+        .unwrap_or_else(|e| panic!("RleCodes parity FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}"));
+    assert_eq!(
+        recovered_from_python, input,
+        "RleCodes parity FAIL [{fixture_name}]: rust_decode(python_blob) != original input"
+    );
+
+    // Test 3: Rust round-trip on its own blob (redundant but explicit)
+    let recovered_from_rust = decode(&rust_blob)
+        .unwrap_or_else(|e| panic!("RleCodes parity FAIL [{fixture_name}]: rust_decode(rust_blob) error: {e}"));
+    assert_eq!(
+        recovered_from_rust, input,
+        "RleCodes parity FAIL [{fixture_name}]: rust_decode(rust_blob) != original input"
+    );
+}

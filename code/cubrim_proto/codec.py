@@ -314,6 +314,11 @@ def decode(blob: bytes) -> bytes:
     if map_scheme not in (MAP_SCHEME_RLE, MAP_SCHEME_PACKED_NIBBLE):
         raise ValueError(f"Unknown map_scheme={map_scheme} in header")
 
+    # Determine value scheme from header
+    value_scheme = hdr.get("value_scheme", VALUE_SCHEME_FIXED)
+    if value_scheme not in (VALUE_SCHEME_FIXED, VALUE_SCHEME_RLE_CODES):
+        raise ValueError(f"Unknown value_scheme={value_scheme} in header")
+
     # Read and decode gap streams for each axis (scheme-dispatched)
     axis_coords = []
     for k in range(N):
@@ -343,6 +348,53 @@ def decode(blob: bytes) -> bytes:
                 )
         coords_k = decode_axis_gaps(gaps_k)
         axis_coords.append(coords_k)
+
+    if value_scheme == VALUE_SCHEME_RLE_CODES:
+        # RleCodes path: value codes are stored in sequential (i-order) input order.
+        # Each RLE triplet: (code: u8, run_length: u16 BE) = 3 bytes.
+        # Decode: expand triplets -> seq_codes[i] for i in [0, count).
+        # Reconstruct: result[i] = inverse_dict[seq_codes[i]] directly (no lex rebuild).
+        import struct
+        seq_codes = []
+        pos = offset
+        while len(seq_codes) < count:
+            if pos + 3 > len(blob):
+                raise ValueError(
+                    f"RleCodes stream truncated at offset {pos}: need code+run (3B), "
+                    f"have {len(blob) - pos}B remaining"
+                )
+            code, run = struct.unpack_from(">BH", blob, pos)
+            pos += 3
+            if run == 0:
+                raise ValueError(
+                    f"RleCodes run_length=0 at offset {pos - 3}: invalid (stream corrupt)"
+                )
+            remaining = count - len(seq_codes)
+            if run > remaining:
+                raise ValueError(
+                    f"RleCodes run {run} would exceed remaining count {remaining}: "
+                    "corrupt stream"
+                )
+            seq_codes.extend([code] * run)
+
+        if len(seq_codes) != count:
+            raise ValueError(
+                f"RleCodes decoded {len(seq_codes)} codes but expected {count}"
+            )
+
+        result = bytearray(L)
+        for i, code in enumerate(seq_codes):
+            if code >= len(inverse_dict):
+                raise ValueError(
+                    f"RleCodes code {code} at position {i} >= n_distinct {len(inverse_dict)}"
+                )
+            if i < L:
+                result[i] = inverse_dict[code]
+
+        return bytes(result)
+
+    # VALUE_SCHEME_FIXED path (default):
+    # Bitpacked values are in lex-sorted point order (W bits each).
 
     # Read bitpacked values
     bitpack_bytes_count = (count * W + 7) // 8 if count > 0 else 0
