@@ -36,6 +36,7 @@ import hashlib
 import json
 import os
 import platform
+import shlex
 import shutil
 import struct
 import subprocess
@@ -219,6 +220,19 @@ def run_brotli(input_path: Path) -> int:
             pass
 
 
+def run_gzip(input_path: Path) -> int:
+    """Run gzip -9 on input, return compressed size (excluding gzip header overhead)."""
+    result = subprocess.run(
+        f"gzip -9 -c {shlex.quote(str(input_path))} | wc -c",
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"gzip -9 failed: {result.stderr}")
+    return int(result.stdout.strip())
+
+
 def gather_env() -> dict:
     """Collect environment info for reproducibility."""
     def run(cmd):
@@ -256,8 +270,8 @@ def benchmark(
     all_rt_ok = True
 
     print(f"\nBenchmark [{config_label}]:")
-    print(f"{'Name':20s}  {'Size':>7s}  {'Cubrim':>7s}  {'CRatio':>6s}  {'Mode':5s}  {'zstd':>7s}  {'zRatio':>6s}  {'brotli':>7s}  {'bRatio':>6s}  {'RT':4s}")
-    print("-" * 100)
+    print(f"{'Name':20s}  {'Size':>7s}  {'Cubrim':>7s}  {'CRatio':>6s}  {'Mode':5s}  {'gzip-9':>7s}  {'gRatio':>6s}  {'zstd':>7s}  {'zRatio':>6s}  {'brotli':>7s}  {'bRatio':>6s}  {'RT':4s}")
+    print("-" * 115)
 
     for entry in manifest:
         name = entry["name"]
@@ -292,6 +306,10 @@ def benchmark(
             if overhead > HEADER_OVERHEAD_BOUND:
                 print(f"  V-AC-7 FAIL {name}: raw-store overhead {overhead} > {HEADER_OVERHEAD_BOUND}")
 
+        # gzip -9 reference
+        gzip_size = run_gzip(corpus_path)
+        gzip_ratio = gzip_size / size
+
         # zstd reference
         zstd_size = run_zstd(corpus_path)
         zstd_ratio = zstd_size / size
@@ -301,7 +319,7 @@ def benchmark(
         brotli_ratio = brotli_size / size
 
         rt_str = "PASS" if rt_ok else "FAIL"
-        print(f"{name:20s}  {size:>7d}  {cubrim_size:>7d}  {cubrim_ratio:>6.4f}  {mode:5s}  {zstd_size:>7d}  {zstd_ratio:>6.4f}  {brotli_size:>7d}  {brotli_ratio:>6.4f}  {rt_str}")
+        print(f"{name:20s}  {size:>7d}  {cubrim_size:>7d}  {cubrim_ratio:>6.4f}  {mode:5s}  {gzip_size:>7d}  {gzip_ratio:>6.4f}  {zstd_size:>7d}  {zstd_ratio:>6.4f}  {brotli_size:>7d}  {brotli_ratio:>6.4f}  {rt_str}")
 
         results.append({
             "name": name,
@@ -310,6 +328,8 @@ def benchmark(
             "cubrim_bytes": cubrim_size,
             "cubrim_ratio": round(cubrim_ratio, 6),
             "cubrim_mode": mode,
+            "gzip_bytes": gzip_size,
+            "gzip_ratio": round(gzip_ratio, 6),
             "zstd_bytes": zstd_size,
             "zstd_ratio": round(zstd_ratio, 6),
             "brotli_bytes": brotli_size,
@@ -396,12 +416,15 @@ def write_report(runs: list[dict], report_id: str = "bench") -> None:
         lines.append(f"")
         lines.append(f"Round-trip (all inputs): **{rt_all}**")
         lines.append(f"")
-        lines.append(f"| Input | Size | Cubrim | CRatio | Mode | zstd | zRatio | brotli | bRatio | Round-trip |")
-        lines.append(f"|-------|------|--------|--------|------|------|--------|--------|--------|------------|")
+        lines.append(f"| Input | Size | Cubrim | CRatio | Mode | gzip-9 | gRatio | zstd | zRatio | brotli | bRatio | Round-trip |")
+        lines.append(f"|-------|------|--------|--------|------|--------|--------|------|--------|--------|--------|------------|")
         for r in run["results"]:
+            gzip_bytes = r.get("gzip_bytes", "n/a")
+            gzip_ratio = f"{r['gzip_ratio']:.4f}" if "gzip_ratio" in r else "n/a"
             lines.append(
                 f"| {r['name']} | {r['size_bytes']} | {r['cubrim_bytes']} | {r['cubrim_ratio']:.4f} "
-                f"| {r['cubrim_mode']} | {r['zstd_bytes']} | {r['zstd_ratio']:.4f} "
+                f"| {r['cubrim_mode']} | {gzip_bytes} | {gzip_ratio} "
+                f"| {r['zstd_bytes']} | {r['zstd_ratio']:.4f} "
                 f"| {r['brotli_bytes']} | {r['brotli_ratio']:.4f} | {r['round_trip']} |"
             )
         lines.append("")
@@ -455,8 +478,9 @@ def main():
                         help="N dimensions override (default: minimal N)")
     parser.add_argument("--gap-scheme", default=None, choices=["rle", "packed_nibble"],
                         help="Gap encoding scheme: rle (default) or packed_nibble")
-    parser.add_argument("--value-scheme", default=None, choices=["bitpack-fixed", "rle-codes"],
-                        help="Value encoding scheme: bitpack-fixed (default) or rle-codes")
+    parser.add_argument("--value-scheme", default=None,
+                        choices=["bitpack-fixed", "rle-codes", "entropy"],
+                        help="Value encoding scheme: bitpack-fixed (default), rle-codes, or entropy")
     parser.add_argument("--report-id", default="bench",
                         help="Report file prefix (e.g. bench, v1, axis-sweep; used in output filenames)")
     args = parser.parse_args()
