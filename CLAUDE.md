@@ -83,6 +83,7 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 - **Hypotheses are logged, not lost.** Each compression-approach hypothesis (N-dim choice, edge bound, distance-map encoding, bit-packing scheme) is recorded with its test result, even when rejected.
 - **Round-trip correctness is non-negotiable.** A compressor that loses data is a bug, not a trade-off. Every benchmark reports lossless round-trip first, ratio second.
 - **Real numbers only.** Compression ratios and throughput are measured on the benchmark corpus, never estimated in prose.
+- **Bench results carry their code SHA.** Every benchmark JSON MUST record the `code_sha` (git commit the sweep ran on) in each `environment` block — measured numbers are only reproducible against a known revision. The bench harness (`code/bench/`) should auto-capture `git rev-parse HEAD`; a result without a code SHA is not archivable.
 
 ## Gotchas
 
