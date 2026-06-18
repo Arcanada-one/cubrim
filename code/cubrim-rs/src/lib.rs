@@ -13,9 +13,11 @@ pub mod rle;
 pub mod bitpack;
 pub mod cube;
 pub mod header;
+pub mod config;
 pub mod codec;
 
-pub use codec::{encode, decode};
+pub use codec::{encode, decode, encode_with_config};
+pub use config::EncodeConfig;
 pub use error::CubrimError;
 
 // V-AC-8: traceability check module

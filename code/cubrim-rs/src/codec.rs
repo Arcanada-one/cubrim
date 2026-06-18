@@ -18,8 +18,9 @@
 // Matches prototype: max cube header ~286 bytes, bound = 320 with margin.
 // For inputs <= 320 bytes, raw-store always fires.
 
+use crate::config::EncodeConfig;
 use crate::error::CubrimError;
-use crate::phi::{phi as phi_fn, phi_inv as phi_inv_fn, compute_n_and_b, B_DEFAULT};
+use crate::phi::{phi as phi_fn, phi_inv as phi_inv_fn, compute_n_and_b};
 use crate::cube::build_cube;
 use crate::distance_map::{encode_axis_gaps, decode_axis_gaps};
 use crate::rle::{rle_encode, rle_decode, rle_size};
@@ -59,19 +60,31 @@ fn estimate_cube_size(
 
     let rle_total: usize = axis_gaps.iter().map(|g| rle_size(g)).sum();
 
-    let bitpack_total = if count > 0 { (count * w + 7) / 8 } else { 0 };
+    let bitpack_total = if count > 0 { (count * w).div_ceil(8) } else { 0 };
 
     hdr_size + rle_total + bitpack_total
 }
 
-/// R6/R7: Encode input bytes to Cubrim v1 format.
+/// R6/R7: Encode input bytes to Cubrim v1 format using v1-default configuration.
+///
+/// This is the canonical public API. It delegates to encode_with_config with
+/// EncodeConfig::v1_default(), guaranteeing byte-identical output to the pre-config
+/// implementation. The frozen default byte stream is enforced by the differential
+/// oracle fixtures (tests/differential.rs).
+pub fn encode(data: &[u8]) -> Vec<u8> {
+    encode_with_config(data, &EncodeConfig::v1_default())
+}
+
+/// R6/R7: Encode input bytes to Cubrim v1 format using the given configuration.
 ///
 /// Returns a blob that:
-/// - If mode=1 (raw-store): header + data verbatim; size <= len(data) + HEADER_OVERHEAD_BOUND
+/// - If mode=1 (raw-store): header + data verbatim; size <= len(data) + raw_store_bound
 /// - If mode=0 (cube): header + RLE gap streams + bitpacked values
-pub fn encode(data: &[u8]) -> Vec<u8> {
+///
+/// The header is self-describing; decode is config-independent (R6).
+pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let l = data.len();
-    let b = B_DEFAULT;
+    let b = config.b;
 
     // Special case: empty input -> raw-store
     if l == 0 {
@@ -81,8 +94,8 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 
     let n_min = compute_min_n(l, b);
 
-    // R7 fast-path: L > B^2 = 65536 requires N>2; cube mode always expands
-    if l > b * b {
+    // R7 fast-path: L > cube_size_limit; cube mode always expands beyond this point
+    if l > config.cube_size_limit() {
         let hdr = serialize_header(MODE_RAW, n_min, b, l, 0, &[], 0, &[], &[]);
         let mut out = hdr;
         out.extend_from_slice(data);
@@ -90,7 +103,7 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     }
 
     // R7: small inputs always raw-store (header alone would exceed any savings)
-    if l <= HEADER_OVERHEAD_BOUND {
+    if l <= config.raw_store_bound {
         let hdr = serialize_header(MODE_RAW, n_min, b, l, 0, &[], 0, &[], &[]);
         let mut out = hdr;
         out.extend_from_slice(data);
@@ -234,7 +247,7 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     }
 
     // Read bitpacked values
-    let bitpack_bytes_count = if count > 0 { (count * w + 7) / 8 } else { 0 };
+    let bitpack_bytes_count = if count > 0 { (count * w).div_ceil(8) } else { 0 };
     if offset + bitpack_bytes_count > blob.len() {
         return Err(CubrimError::Decode(format!(
             "Bitpack data truncated: need {} bytes at offset {}, have {} bytes total",
@@ -449,7 +462,7 @@ mod tests {
         // Use a pattern with exactly 2 distinct values to minimize W (W=1 bit).
         // 500 bytes > HEADER_OVERHEAD_BOUND=320, < 65536 -> eligible for cube.
         let data: Vec<u8> = (0..500)
-            .map(|i: usize| if i % 10 == 0 { 0x01 } else { 0x00 })
+            .map(|i: usize| if i.is_multiple_of(10) { 0x01 } else { 0x00 })
             .collect();
 
         let blob = encode(&data);

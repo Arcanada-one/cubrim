@@ -68,7 +68,7 @@ pub fn bitpack_encode(values: &[usize], value_to_code: &[(usize, usize)], w: usi
     // Build as a big integer (bits), then convert to bytes
     // MSB-first: first value's bits are the most significant
     let bit_count = values.len() * w;
-    let total_bytes = (bit_count + 7) / 8;
+    let total_bytes = bit_count.div_ceil(8);
     let _padding = total_bytes * 8 - bit_count;
 
     // Accumulate bits as a big integer
