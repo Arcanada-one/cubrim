@@ -18,16 +18,16 @@
 // Matches prototype: max cube header ~286 bytes, bound = 320 with margin.
 // For inputs <= 320 bytes, raw-store always fires.
 
-use crate::config::EncodeConfig;
+use crate::config::{EncodeConfig, GapScheme};
 use crate::error::CubrimError;
 use crate::phi::{phi as phi_fn, phi_inv as phi_inv_fn, compute_n_and_b};
-use crate::cube::build_cube;
+use crate::cube::build_cube_with_params;
 use crate::distance_map::{encode_axis_gaps, decode_axis_gaps};
-use crate::rle::{rle_encode, rle_decode, rle_size};
+use crate::rle::{rle_encode, rle_decode, rle_size, packed_nibble_encode, packed_nibble_decode, packed_nibble_size};
 use crate::bitpack::{build_value_dict, compute_width, bitpack_encode, bitpack_decode};
 use crate::header::{
     serialize_header, parse_header,
-    MODE_CUBE, MODE_RAW,
+    MODE_CUBE, MODE_RAW, MAP_SCHEME_RLE,
 };
 
 /// R7: Header overhead bound constant. Calibrated for v1-defaults.
@@ -52,17 +52,21 @@ fn estimate_cube_size(
     axis_gaps: &[Vec<usize>],
     inverse_dict: &[usize],
     w: usize,
+    gap_scheme: GapScheme,
 ) -> usize {
     let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
     let hdr_size = serialize_header(
-        MODE_CUBE, n, b, l, count, b_k, w, inverse_dict, &axis_gap_counts,
+        MODE_CUBE, n, b, l, count, b_k, gap_scheme.scheme_byte(), w, inverse_dict, &axis_gap_counts,
     ).len();
 
-    let rle_total: usize = axis_gaps.iter().map(|g| rle_size(g)).sum();
+    let gap_total: usize = match gap_scheme {
+        GapScheme::RleU16 => axis_gaps.iter().map(|g| rle_size(g)).sum(),
+        GapScheme::PackedNibble => axis_gaps.iter().map(|g| packed_nibble_size(g)).sum(),
+    };
 
     let bitpack_total = if count > 0 { (count * w).div_ceil(8) } else { 0 };
 
-    hdr_size + rle_total + bitpack_total
+    hdr_size + gap_total + bitpack_total
 }
 
 /// R6/R7: Encode input bytes to Cubrim v1 format using v1-default configuration.
@@ -85,18 +89,32 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let l = data.len();
     let b = config.b;
+    let gap_scheme = config.gap_scheme;
 
     // Special case: empty input -> raw-store
     if l == 0 {
-        let hdr = serialize_header(MODE_RAW, 2, b, 0, 0, &[], 0, &[], &[]);
+        let hdr = serialize_header(MODE_RAW, 2, b, 0, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
         return hdr;
     }
 
     let n_min = compute_min_n(l, b);
 
+    // Phase A: apply n_override if given; validate injectivity guard (B^n >= L).
+    // If the override would make phi non-injective, fall back to raw-store.
+    let n_requested = config.n_override.unwrap_or(n_min);
+    // Clamp up to at least n_min (cannot have fewer dimensions than required)
+    let n_effective = if n_requested < n_min { n_min } else { n_requested };
+
+    // Injectivity guard: B^n_effective >= L must hold. For n_effective = n_min this
+    // is always true by construction. For larger N it is trivially true (more capacity).
+    // The guard is against a caller supplying n_override < n_min via the field directly,
+    // which we've clamped above; this debug assert verifies invariant.
+    debug_assert!(b.checked_pow(n_effective as u32).unwrap_or(usize::MAX) >= l,
+        "n_effective={n_effective} B^N < L={l}: injectivity violated after clamp");
+
     // R7 fast-path: L > cube_size_limit; cube mode always expands beyond this point
     if l > config.cube_size_limit() {
-        let hdr = serialize_header(MODE_RAW, n_min, b, l, 0, &[], 0, &[], &[]);
+        let hdr = serialize_header(MODE_RAW, n_effective, b, l, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
         let mut out = hdr;
         out.extend_from_slice(data);
         return out;
@@ -104,15 +122,15 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
     // R7: small inputs always raw-store (header alone would exceed any savings)
     if l <= config.raw_store_bound {
-        let hdr = serialize_header(MODE_RAW, n_min, b, l, 0, &[], 0, &[], &[]);
+        let hdr = serialize_header(MODE_RAW, n_effective, b, l, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
         let mut out = hdr;
         out.extend_from_slice(data);
         return out;
     }
 
     // Step 1: R8 domainize (identity)
-    // Step 2: R1/R2 build cube
-    let cube = build_cube(data);
+    // Step 2: R1/R2 build cube — use n_effective and config.b
+    let cube = build_cube_with_params(data, b, n_effective);
     let n = cube.n;
     let b = cube.b;
     let b_k = &cube.b_k;
@@ -137,8 +155,8 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
     // Step 5: R7 decision — compare cube encoded size vs raw-store output size
     let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
-    let cube_size = estimate_cube_size(n, b, l, cube.count, b_k, &axis_gaps, &inverse_dict, w);
-    let raw_hdr = serialize_header(MODE_RAW, n, b, l, 0, &[], 0, &[], &[]);
+    let cube_size = estimate_cube_size(n, b, l, cube.count, b_k, &axis_gaps, &inverse_dict, w, gap_scheme);
+    let raw_hdr = serialize_header(MODE_RAW, n, b, l, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
     let raw_output_size = raw_hdr.len() + l;
 
     if cube_size >= raw_output_size {
@@ -148,20 +166,23 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         return out;
     }
 
-    // Step 6: R4 RLE-encode gap streams
-    let rle_streams: Vec<Vec<u8>> = axis_gaps.iter().map(|g| rle_encode(g)).collect();
+    // Step 6: Encode gap streams using the configured scheme
+    let gap_streams: Vec<Vec<u8>> = match gap_scheme {
+        GapScheme::RleU16 => axis_gaps.iter().map(|g| rle_encode(g)).collect(),
+        GapScheme::PackedNibble => axis_gaps.iter().map(|g| packed_nibble_encode(g)).collect(),
+    };
 
     // Step 7: R5 bitpack values (in lex-sorted point order)
     let point_values: Vec<usize> = populated.iter().map(|(_, v)| *v).collect();
     let packed_values = bitpack_encode(&point_values, &v2c, w);
 
-    // Step 8: R6 serialize header
+    // Step 8: R6 serialize header (with gap scheme byte)
     let hdr = serialize_header(
-        MODE_CUBE, n, b, l, cube.count, b_k, w, &inverse_dict, &axis_gap_counts,
+        MODE_CUBE, n, b, l, cube.count, b_k, gap_scheme.scheme_byte(), w, &inverse_dict, &axis_gap_counts,
     );
 
     let mut out = hdr;
-    for stream in &rle_streams {
+    for stream in &gap_streams {
         out.extend_from_slice(stream);
     }
     out.extend_from_slice(&packed_values);
@@ -215,19 +236,33 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         return Err(CubrimError::Decode(format!("axis_gap_counts length != N={}", n)));
     }
 
-    // Read RLE streams for each axis
+    // Decode gap scheme from header
+    let gap_scheme = GapScheme::from_byte(hdr.map_scheme).ok_or_else(|| {
+        CubrimError::Decode(format!("Unknown map_scheme byte: {} in header", hdr.map_scheme))
+    })?;
+
+    // Read gap streams for each axis (scheme-dispatched)
     // Each axis has axis_gap_counts[k] unique coordinate values -> that many gaps in the stream
     let mut axis_coords: Vec<Vec<usize>> = Vec::with_capacity(n);
     for k in 0..n {
         let n_gaps = axis_gap_counts[k];
-        // Read enough RLE pairs to decode n_gaps gaps
-        let (stream_bytes, consumed) = read_rle_stream(blob, offset, n_gaps)?;
-        let gaps_k = rle_decode(stream_bytes)?;
-        if gaps_k.len() != n_gaps {
-            return Err(CubrimError::Decode(format!(
-                "Axis {k}: decoded {} gaps, expected {n_gaps}", gaps_k.len()
-            )));
-        }
+
+        let (gaps_k, consumed) = match gap_scheme {
+            GapScheme::RleU16 => {
+                let (stream_bytes, consumed) = read_rle_stream(blob, offset, n_gaps)?;
+                let gaps = rle_decode(stream_bytes)?;
+                if gaps.len() != n_gaps {
+                    return Err(CubrimError::Decode(format!(
+                        "Axis {k}: decoded {} gaps, expected {n_gaps}", gaps.len()
+                    )));
+                }
+                (gaps, consumed)
+            }
+            GapScheme::PackedNibble => {
+                packed_nibble_decode(blob, offset, n_gaps)?
+            }
+        };
+
         // Validate gap invariant on decode (R3.1 fail-closed)
         for (i, &g) in gaps_k.iter().enumerate() {
             if g < 1 {
@@ -518,5 +553,144 @@ mod tests {
         let blob = encode(b"hello world test");
         let truncated = &blob[..5];
         assert!(decode(truncated).is_err());
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase A: N knob — non-minimal N round-trips, injectivity guard
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_non_minimal_n_round_trips() {
+        // N=3 for a 1024-byte input that normally uses N=2 (256^2=65536 >= 1024).
+        // With N=3 the cube has 256^3=16M slots, still injective — must round-trip.
+        use crate::header::parse_header;
+        let data: Vec<u8> = (0..1024).map(|i| (i % 256) as u8).collect();
+        let cfg = EncodeConfig {
+            n_override: Some(3),
+            ..EncodeConfig::v1_default()
+        };
+        let blob = encode_with_config(&data, &cfg);
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "N=3 round-trip failed for 1024-byte input");
+
+        // The header must record N=3
+        let (hdr, _) = parse_header(&blob).unwrap();
+        // Small inputs raw-store; for a cube-mode input verify N
+        if hdr.mode == crate::header::MODE_CUBE {
+            assert_eq!(hdr.n, 3, "header N must be 3 when n_override=Some(3)");
+        }
+    }
+
+    #[test]
+    fn test_n_override_none_is_minimal() {
+        // n_override=None must use minimal N (same as v1_default behavior)
+        let data: Vec<u8> = vec![0xABu8; 400]; // 400 bytes, minimal N = 2
+        let default_blob = encode(&data);
+        let cfg_none = EncodeConfig {
+            n_override: None,
+            ..EncodeConfig::v1_default()
+        };
+        let cfg_blob = encode_with_config(&data, &cfg_none);
+        assert_eq!(default_blob, cfg_blob,
+            "n_override=None must produce byte-identical output to v1_default");
+    }
+
+    #[test]
+    fn test_n_override_below_minimum_clamped_to_min() {
+        // If n_override < n_min (impossible to achieve injectivity), clamp up to n_min.
+        // 400-byte input needs N=2; n_override=1 must clamp to 2 and round-trip.
+        let data: Vec<u8> = vec![0xCCu8; 400];
+        let cfg = EncodeConfig {
+            n_override: Some(1), // 256^1 = 256 < 400: would be non-injective
+            ..EncodeConfig::v1_default()
+        };
+        let blob = encode_with_config(&data, &cfg);
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "n_override=1 clamped round-trip failed");
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase B: GapScheme — default byte-identity, alt diverges, header round-trip
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_default_gap_scheme_byte_identical_to_v1() {
+        // V-AC-8 core: with all config defaults, encode == encode_with_config(v1_default)
+        // This is already verified by the differential fixtures, but test explicitly.
+        let inputs: Vec<Vec<u8>> = vec![
+            vec![0xABu8; 400],
+            b"the quick brown fox jumps ".iter().copied().cycle().take(1024).collect(),
+        ];
+        for input in &inputs {
+            let v1_blob = encode(input);
+            let default_scheme_blob = encode_with_config(input, &EncodeConfig::v1_default());
+            assert_eq!(v1_blob, default_scheme_blob,
+                "default config must produce byte-identical output to encode()");
+        }
+    }
+
+    #[test]
+    fn test_packed_nibble_scheme_diverges_from_rle() {
+        // PackedNibble blob must differ from RleU16 blob for any cube-mode input.
+        // Use a 400-byte all-same-byte input known to trigger cube mode.
+        let data: Vec<u8> = vec![0xABu8; 400];
+        let rle_blob = encode(&data);   // RleU16 default
+        let pn_blob = encode_with_config(&data, &EncodeConfig {
+            gap_scheme: crate::config::GapScheme::PackedNibble,
+            ..EncodeConfig::v1_default()
+        });
+        assert_ne!(rle_blob, pn_blob,
+            "PackedNibble blob must differ from RleU16 blob (different wire encoding)");
+    }
+
+    #[test]
+    fn test_packed_nibble_round_trips_cube_mode() {
+        // PackedNibble-encoded cube-mode input must decode correctly.
+        let data: Vec<u8> = vec![0xABu8; 400]; // cube mode (verified elsewhere)
+        let cfg = EncodeConfig {
+            gap_scheme: crate::config::GapScheme::PackedNibble,
+            ..EncodeConfig::v1_default()
+        };
+        let blob = encode_with_config(&data, &cfg);
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "PackedNibble cube-mode round-trip failed");
+    }
+
+    #[test]
+    fn test_packed_nibble_header_map_scheme_byte() {
+        // Header must record map_scheme=2 (MAP_SCHEME_PACKED_NIBBLE) for PackedNibble.
+        use crate::header::{parse_header, MAP_SCHEME_PACKED_NIBBLE, MODE_CUBE};
+        let data: Vec<u8> = vec![0xABu8; 400];
+        let cfg = EncodeConfig {
+            gap_scheme: crate::config::GapScheme::PackedNibble,
+            ..EncodeConfig::v1_default()
+        };
+        let blob = encode_with_config(&data, &cfg);
+        let (hdr, _) = parse_header(&blob).unwrap();
+        if hdr.mode == MODE_CUBE {
+            assert_eq!(hdr.map_scheme, MAP_SCHEME_PACKED_NIBBLE,
+                "PackedNibble config must write map_scheme=2 to header");
+        }
+    }
+
+    #[test]
+    fn test_packed_nibble_round_trips_all_classes() {
+        // Round-trip under PackedNibble across multiple input classes
+        let cfg = EncodeConfig {
+            gap_scheme: crate::config::GapScheme::PackedNibble,
+            ..EncodeConfig::v1_default()
+        };
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("empty", vec![]),
+            ("1byte", vec![0x42]),
+            ("uniform_400", vec![0xAA; 400]),
+            ("text_1kb", b"the quick brown fox jumps over the lazy dog ".iter().copied().cycle().take(1024).collect()),
+            ("random_1kb", (0usize..1024).map(|i| (i as u8).wrapping_mul(113).wrapping_add(7)).collect()),
+        ];
+        for (name, data) in &cases {
+            let blob = encode_with_config(data, &cfg);
+            let recovered = decode(&blob).unwrap();
+            assert_eq!(&recovered, data, "PackedNibble round-trip failed for '{name}'");
+        }
     }
 }

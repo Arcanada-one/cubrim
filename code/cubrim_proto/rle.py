@@ -85,3 +85,64 @@ def rle_size(gaps: list[int]) -> int:
             current = g
             run = 1
     return pairs * PAIR_SIZE
+
+
+# ----- PackedNibble (varint-per-gap) encoding -----
+#
+# Each gap encoded as LEB128-style unsigned varint (little-endian 7-bit groups).
+# 1 byte for g in [1,127], 2 bytes for [128,16383], etc.
+# Mirrors Rust rle.rs packed_nibble_encode / packed_nibble_decode.
+
+def packed_nibble_encode(gaps: list[int]) -> bytes:
+    """Encode gaps as varint-per-gap (PackedNibble scheme)."""
+    out = bytearray()
+    for g in gaps:
+        while True:
+            b = g & 0x7F
+            g >>= 7
+            if g == 0:
+                out.append(b)      # last byte: high bit = 0
+                break
+            else:
+                out.append(b | 0x80)  # more bytes follow: high bit = 1
+    return bytes(out)
+
+
+def packed_nibble_decode(data: bytes, offset: int, n_gaps: int) -> tuple[list[int], int]:
+    """
+    Decode exactly n_gaps varints from data starting at offset.
+    Returns (gaps, bytes_consumed).
+    """
+    gaps = []
+    pos = offset
+    for _ in range(n_gaps):
+        value = 0
+        shift = 0
+        while True:
+            if pos >= len(data):
+                raise ValueError(f"PackedNibble varint truncated at offset {pos}")
+            byte = data[pos]
+            pos += 1
+            value |= (byte & 0x7F) << shift
+            shift += 7
+            if byte & 0x80 == 0:
+                break
+            if shift >= 64:
+                raise ValueError("PackedNibble varint overflow")
+        gaps.append(value)
+    return gaps, pos - offset
+
+
+def packed_nibble_size(gaps: list[int]) -> int:
+    """Compute encoded byte size for PackedNibble without allocating."""
+    total = 0
+    for g in gaps:
+        if g < 0x80:
+            total += 1
+        elif g < 0x4000:
+            total += 2
+        elif g < 0x200000:
+            total += 3
+        else:
+            total += 4
+    return total

@@ -31,7 +31,7 @@ from cubrim_proto.distance_map import (
     encode_axis_gaps,
     decode_axis_gaps,
 )
-from cubrim_proto.rle import rle_encode, rle_decode, rle_size
+from cubrim_proto.rle import rle_encode, rle_decode, rle_size, packed_nibble_encode, packed_nibble_decode, packed_nibble_size
 from cubrim_proto.bitpack import (
     build_value_dict,
     compute_width,
@@ -45,6 +45,8 @@ from cubrim_proto.header import (
     MODE_RAW,
     MAGIC,
     VERSION,
+    MAP_SCHEME_RLE,
+    MAP_SCHEME_PACKED_NIBBLE,
 )
 
 def _compute_min_N(L: int, B: int) -> int:
@@ -69,7 +71,8 @@ def _compute_min_N(L: int, B: int) -> int:
 HEADER_OVERHEAD_BOUND: int = 320
 
 
-def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int) -> int:
+def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int,
+                         gap_scheme: int = MAP_SCHEME_RLE) -> int:
     """
     Estimate the encoded size of the cube representation in bytes.
     Used for R7 mode decision.
@@ -88,13 +91,17 @@ def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int) -> 
         L=cube_data["L"],
         count=count,
         b_k=b_k,
+        map_scheme=gap_scheme,
         W=W,
         inverse_dict=inverse_dict,
         axis_gap_counts=[len(g) for g in dm["axis_gaps"]],
     ))
 
-    # RLE-encoded gap streams size
-    rle_total = sum(rle_size(gaps) for gaps in dm["axis_gaps"])
+    # Gap streams size (scheme-dependent)
+    if gap_scheme == MAP_SCHEME_PACKED_NIBBLE:
+        gap_total = sum(packed_nibble_size(gaps) for gaps in dm["axis_gaps"])
+    else:
+        gap_total = sum(rle_size(gaps) for gaps in dm["axis_gaps"])
 
     # Bit-packed values size
     if count > 0:
@@ -102,16 +109,19 @@ def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int) -> 
     else:
         bitpack_total = 0
 
-    return hdr_size + rle_total + bitpack_total
+    return hdr_size + gap_total + bitpack_total
 
 
-def encode(data: bytes) -> bytes:
+def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None = None) -> bytes:
     """
     R6/R7: Encode input bytes to Cubrim v1 format.
 
     Returns a blob that:
     - If mode=1 (raw-store): header + data verbatim; size <= len(data) + HEADER_OVERHEAD_BOUND
-    - If mode=0 (cube): header + RLE gap streams + bitpacked values
+    - If mode=0 (cube): header + gap streams + bitpacked values
+
+    gap_scheme: MAP_SCHEME_RLE (default, v1-compatible) or MAP_SCHEME_PACKED_NIBBLE.
+    n_override: force N dimensions; clamped up to N_min if smaller.
     """
     L = len(data)
     B = 256  # v1-default
@@ -122,32 +132,23 @@ def encode(data: bytes) -> bytes:
         return hdr
 
     # R7 fast-path: if L >= HEADER_OVERHEAD_BOUND, compute minimum N needed.
-    # At density=1 (all positions populated), the cube mode cannot compress —
-    # the gap stream has all gaps=1, RLE gives 1 pair per axis = tiny savings,
-    # but bitpacked values need L*W bits which is always >= L bytes for W>=8.
-    # For L > B^2 = 65536 (with B=256, N=2), cube mode ALWAYS expands:
-    # value stream alone = L * ceil(log2(256)) / 8 = L bytes (W=8 for 256 distinct values).
-    # Plus gap overhead + header. Skip cube build entirely, go straight to raw-store.
     N_min = _compute_min_N(L, B)
+    # Apply N override; clamp to N_min for injectivity
+    N_use = max(N_min, n_override) if n_override is not None else N_min
+
     if L > B ** 2:
-        # Cannot compress: L > 65536 requires N>2; density >= 1 at N=2.
-        # At N>2 the cube is larger; raw-store is always better.
-        hdr = serialize_header(mode=MODE_RAW, N=N_min, B=B, L=L)
+        hdr = serialize_header(mode=MODE_RAW, N=N_use, B=B, L=L)
         return hdr + data
 
-    # For small inputs that will always raw-store, skip the cube build too
-    # (size(values_bitpacked) >= L since W >= 1 and we have all L values)
     if L <= HEADER_OVERHEAD_BOUND:
-        # Output would be at least L bytes of values; plus header >= HEADER_OVERHEAD_BOUND
-        # So cube mode always >= L + HEADER_OVERHEAD_BOUND → raw-store wins.
-        hdr = serialize_header(mode=MODE_RAW, N=N_min, B=B, L=L)
+        hdr = serialize_header(mode=MODE_RAW, N=N_use, B=B, L=L)
         return hdr + data
 
     # Step 1: R8 domainize
     values = domainize(data)
 
-    # Step 2: R1/R2 build cube
-    cube_data = build_cube(data)
+    # Step 2: R1/R2 build cube (with N override)
+    cube_data = build_cube(data, B=B, N=N_use)
     N = cube_data["N"]
     B = cube_data["B"]
     b_k = cube_data["b_k"]
@@ -157,30 +158,27 @@ def encode(data: bytes) -> bytes:
     value_dict = build_value_dict(values)
     n_distinct = len(value_dict)
     W = compute_width(n_distinct)
-    # inverse_dict: list where index = dense code, value = original value
-    inverse_dict_list = sorted(value_dict.keys())  # original values in code order
+    inverse_dict_list = sorted(value_dict.keys())
 
     # Step 4: R3/R3.1 build distance map
     dm = encode_distance_map(cube_data)
 
-    # Step 5: R7 decision — compare cube encoded size vs raw-store output size.
-    # raw-store output = raw_header (fixed ~13B) + L bytes
-    # cube mode wins only if cube_size < raw_output_size (strictly smaller).
-    # R7 rule: "if size(cube) >= size(raw_input) + header_overhead → raw-store"
-    # where header_overhead is the raw-mode header size (not cube header).
-    cube_size = _estimate_cube_size(cube_data, dm, value_dict, W)
+    # Step 5: R7 decision
+    cube_size = _estimate_cube_size(cube_data, dm, value_dict, W, gap_scheme=gap_scheme)
     raw_header_bytes = serialize_header(mode=MODE_RAW, N=N, B=B, L=L)
     raw_output_size = len(raw_header_bytes) + L
 
     if cube_size >= raw_output_size:
-        # R7: cube does not improve on raw; use raw-store
         return raw_header_bytes + data
 
-    # Step 6: R4 RLE-encode gap streams
-    rle_streams = [rle_encode(gaps) for gaps in dm["axis_gaps"]]
+    # Step 6: Encode gap streams (scheme-dispatched)
+    if gap_scheme == MAP_SCHEME_PACKED_NIBBLE:
+        gap_streams = [packed_nibble_encode(gaps) for gaps in dm["axis_gaps"]]
+    else:
+        gap_streams = [rle_encode(gaps) for gaps in dm["axis_gaps"]]
     axis_gap_counts = [len(dm["axis_gaps"][k]) for k in range(N)]
 
-    # Step 7: R5 bitpack values (in lex-sorted point order)
+    # Step 7: R5 bitpack values
     point_values = [p[1] for p in populated]
     packed_values = bitpack_encode(point_values, value_dict, W)
 
@@ -192,12 +190,13 @@ def encode(data: bytes) -> bytes:
         L=L,
         count=len(populated),
         b_k=b_k,
+        map_scheme=gap_scheme,
         W=W,
         inverse_dict=inverse_dict_list,
         axis_gap_counts=axis_gap_counts,
     )
 
-    return hdr + b"".join(rle_streams) + packed_values
+    return hdr + b"".join(gap_streams) + packed_values
 
 
 def decode(blob: bytes) -> bytes:
@@ -244,30 +243,27 @@ def decode(blob: bytes) -> bytes:
     if len(axis_gap_counts) != N:
         raise ValueError(f"axis_gap_counts length != N={N}")
 
-    # Read RLE streams for each axis
-    rle_streams = []
-    for k in range(N):
-        n_gaps = axis_gap_counts[k]
-        # Each gap pair is 4 bytes (value u16 + run_length u16)
-        # But we need to read until we have enough gaps — we know n_gaps
-        # Read pairs until decoded gap count reaches n_gaps
-        stream_bytes = _read_rle_stream(blob, offset, n_gaps)
-        rle_streams.append(stream_bytes)
-        # Advance offset by actual bytes consumed
-        offset += len(stream_bytes)
+    # Determine gap scheme from header
+    map_scheme = hdr.get("map_scheme", MAP_SCHEME_RLE)
+    if map_scheme not in (MAP_SCHEME_RLE, MAP_SCHEME_PACKED_NIBBLE):
+        raise ValueError(f"Unknown map_scheme={map_scheme} in header")
 
-    # Read bitpacked values
-    bitpack_bytes_count = (count * W + 7) // 8 if count > 0 else 0
-    packed_values_bytes = blob[offset:offset + bitpack_bytes_count]
-    offset += bitpack_bytes_count
-
-    # Decode RLE gap streams -> axis coordinates
+    # Read and decode gap streams for each axis (scheme-dispatched)
     axis_coords = []
     for k in range(N):
-        gaps_k = rle_decode(rle_streams[k])
-        if len(gaps_k) != axis_gap_counts[k]:
+        n_gaps = axis_gap_counts[k]
+
+        if map_scheme == MAP_SCHEME_PACKED_NIBBLE:
+            gaps_k, consumed = packed_nibble_decode(blob, offset, n_gaps)
+            offset += consumed
+        else:
+            stream_bytes = _read_rle_stream(blob, offset, n_gaps)
+            gaps_k = rle_decode(stream_bytes)
+            offset += len(stream_bytes)
+
+        if len(gaps_k) != n_gaps:
             raise ValueError(
-                f"Axis {k}: decoded {len(gaps_k)} gaps, expected {axis_gap_counts[k]}"
+                f"Axis {k}: decoded {len(gaps_k)} gaps, expected {n_gaps}"
             )
         # Validate gap invariant on decode
         for i, g in enumerate(gaps_k):
@@ -281,6 +277,11 @@ def decode(blob: bytes) -> bytes:
                 )
         coords_k = decode_axis_gaps(gaps_k)
         axis_coords.append(coords_k)
+
+    # Read bitpacked values
+    bitpack_bytes_count = (count * W + 7) // 8 if count > 0 else 0
+    packed_values_bytes = blob[offset:offset + bitpack_bytes_count]
+    offset += bitpack_bytes_count
 
     # Decode bitpacked values
     values = bitpack_decode(packed_values_bytes, W, count, inverse_dict)

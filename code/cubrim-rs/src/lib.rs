@@ -17,7 +17,7 @@ pub mod config;
 pub mod codec;
 
 pub use codec::{encode, decode, encode_with_config};
-pub use config::EncodeConfig;
+pub use config::{EncodeConfig, GapScheme};
 pub use error::CubrimError;
 
 // V-AC-8: traceability check module

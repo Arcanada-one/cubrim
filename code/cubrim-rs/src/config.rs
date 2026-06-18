@@ -12,6 +12,39 @@
 use crate::phi::B_DEFAULT;
 use crate::codec::HEADER_OVERHEAD_BOUND;
 
+/// Gap encoding scheme for the per-axis distance map streams.
+///
+/// Default (RleU16) reproduces the v1 byte stream exactly.
+/// PackedNibble uses a LEB128-style varint per gap: 1 byte for gaps < 128,
+/// 2 bytes for gaps in [128, 16383], etc. Reduces gap-stream size on inputs
+/// where most gaps are small (e.g. sparse_clustered).
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum GapScheme {
+    /// v1-default: (value: u16, run_length: u16) pairs, 4 bytes per unique gap value.
+    RleU16,
+    /// Varint-per-gap: each gap g encoded as LEB128 (1 byte if g < 128, 2 if < 16384).
+    PackedNibble,
+}
+
+impl GapScheme {
+    /// Returns the map_scheme byte written to / read from the header.
+    pub fn scheme_byte(&self) -> u8 {
+        match self {
+            GapScheme::RleU16 => 1,
+            GapScheme::PackedNibble => 2,
+        }
+    }
+
+    /// Construct from header byte. Returns None for unknown values.
+    pub fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            1 => Some(GapScheme::RleU16),
+            2 => Some(GapScheme::PackedNibble),
+            _ => None,
+        }
+    }
+}
+
 /// Encode configuration for the cube algorithm.
 ///
 /// All fields are Approach-A tunable: they change which path is taken in
@@ -30,6 +63,16 @@ pub struct EncodeConfig {
     /// Upper limit for cube eligibility: inputs > b*b always raw-store.
     /// v1-default: true (use b*b = 65536 as the limit).
     pub use_square_limit: bool,
+
+    /// Optional N override. When Some(n), the cube is built with exactly n
+    /// dimensions. Must satisfy B^n >= L; if not, encode falls back to
+    /// raw-store (injectivity guard). When None, N = compute_min_n(L, B).
+    /// v1-default: None (minimal N).
+    pub n_override: Option<usize>,
+
+    /// Gap encoding scheme for the per-axis distance map streams.
+    /// v1-default: GapScheme::RleU16 (byte-identical to v1 output).
+    pub gap_scheme: GapScheme,
 }
 
 impl EncodeConfig {
@@ -40,6 +83,8 @@ impl EncodeConfig {
             b: B_DEFAULT,
             raw_store_bound: HEADER_OVERHEAD_BOUND,
             use_square_limit: true,
+            n_override: None,
+            gap_scheme: GapScheme::RleU16,
         }
     }
 
@@ -65,6 +110,23 @@ mod tests {
         assert_eq!(cfg.raw_store_bound, 320);
         assert!(cfg.use_square_limit);
         assert_eq!(cfg.cube_size_limit(), 65536);
+        assert_eq!(cfg.n_override, None, "v1-default: n_override must be None");
+        assert_eq!(cfg.gap_scheme, GapScheme::RleU16, "v1-default: gap_scheme must be RleU16");
+    }
+
+    #[test]
+    fn test_gap_scheme_byte_roundtrip() {
+        assert_eq!(GapScheme::from_byte(GapScheme::RleU16.scheme_byte()), Some(GapScheme::RleU16));
+        assert_eq!(GapScheme::from_byte(GapScheme::PackedNibble.scheme_byte()), Some(GapScheme::PackedNibble));
+        assert_eq!(GapScheme::from_byte(0), None, "0 is not a valid scheme byte");
+        assert_eq!(GapScheme::from_byte(99), None, "unknown byte returns None");
+    }
+
+    #[test]
+    fn test_gap_scheme_default_is_1() {
+        // RleU16 = 1 is the v1 byte on the wire; must not change
+        assert_eq!(GapScheme::RleU16.scheme_byte(), 1u8);
+        assert_eq!(GapScheme::PackedNibble.scheme_byte(), 2u8);
     }
 
     #[test]
@@ -102,6 +164,8 @@ mod tests {
             b: 256,
             raw_store_bound: 200,  // smaller threshold: let more inputs try cube mode
             use_square_limit: true,
+            n_override: None,
+            gap_scheme: GapScheme::RleU16,
         };
 
         let inputs: Vec<Vec<u8>> = vec![

@@ -9,13 +9,13 @@ For each corpus input:
   5. Computes compressed/input size ratios
 
 Writes:
-  docs/ephemeral/research/CUBR-0007-bench.json  (machine-readable)
-  docs/ephemeral/research/CUBR-0007-report.md   (human-readable, private)
+  docs/ephemeral/research/{REPORT_ID}-bench.json  (machine-readable)
+  docs/ephemeral/research/{REPORT_ID}-report.md   (human-readable, private)
 
 Usage:
-  python code/bench/run_bench.py [--config-label LABEL]
-  # or with a JSON config override:
-  python code/bench/run_bench.py --config-label t2_tuned
+  python code/bench/run_bench.py [--config-label LABEL] [--report-id REPORT_ID]
+  python code/bench/run_bench.py --config-label t1_v1_default --report-id my-report
+  python code/bench/run_bench.py --config-label t2_packed_nibble --gap-scheme packed_nibble --report-id my-report
 
 The harness reads the corpus from docs/ephemeral/research/corpus/manifest.json.
 Run generate_corpus.py first to produce the corpus data.
@@ -112,11 +112,18 @@ def run_cubrim(input_path: Path) -> tuple[bytes, str]:
             pass
 
 
-def run_cubrim_roundtrip(input_data: bytes, input_path: Path, raw_store_bound: int | None = None) -> tuple[bytes, bool, str]:
+def run_cubrim_roundtrip(
+    input_data: bytes,
+    input_path: Path,
+    raw_store_bound: int | None = None,
+    b: int | None = None,
+    n: int | None = None,
+    gap_scheme: str | None = None,
+) -> tuple[bytes, bool, str]:
     """
     Compress + decompress input; assert byte-exact round-trip.
     Returns (compressed_bytes, round_trip_ok: bool, mode_str).
-    If raw_store_bound is given, passes --raw-store-bound to the compress CLI.
+    Passes axis-sweep flags (--b, --n, --gap-scheme) to the compress CLI.
     """
     with tempfile.NamedTemporaryFile(suffix=".cubrim", delete=False) as tmp_out, \
          tempfile.NamedTemporaryFile(suffix=".dec", delete=False) as tmp_dec:
@@ -128,6 +135,12 @@ def run_cubrim_roundtrip(input_data: bytes, input_path: Path, raw_store_bound: i
         compress_cmd = [str(CUBRIM_BIN), "compress", str(input_path), out_path]
         if raw_store_bound is not None:
             compress_cmd += ["--raw-store-bound", str(raw_store_bound)]
+        if b is not None:
+            compress_cmd += ["--b", str(b)]
+        if n is not None:
+            compress_cmd += ["--n", str(n)]
+        if gap_scheme is not None:
+            compress_cmd += ["--gap-scheme", gap_scheme]
         result = subprocess.run(
             compress_cmd,
             capture_output=True, text=True,
@@ -221,7 +234,13 @@ def gather_env() -> dict:
     }
 
 
-def benchmark(config_label: str = "t1_v1_default", raw_store_bound: int | None = None) -> dict:
+def benchmark(
+    config_label: str = "t1_v1_default",
+    raw_store_bound: int | None = None,
+    b: int | None = None,
+    n: int | None = None,
+    gap_scheme: str | None = None,
+) -> dict:
     """Run the full benchmark for a given config label. Returns results dict."""
     manifest = json.loads(CORPUS_MANIFEST.read_text())
     env = gather_env()
@@ -249,7 +268,13 @@ def benchmark(config_label: str = "t1_v1_default", raw_store_bound: int | None =
         assert len(input_data) == size, f"Corpus file size mismatch for {name}"
 
         # Cubrim compress + round-trip
-        compressed, rt_ok, mode = run_cubrim_roundtrip(input_data, corpus_path, raw_store_bound=raw_store_bound)
+        compressed, rt_ok, mode = run_cubrim_roundtrip(
+            input_data, corpus_path,
+            raw_store_bound=raw_store_bound,
+            b=b,
+            n=n,
+            gap_scheme=gap_scheme,
+        )
         cubrim_size = len(compressed)
         cubrim_ratio = cubrim_size / size
 
@@ -296,7 +321,9 @@ def benchmark(config_label: str = "t1_v1_default", raw_store_bound: int | None =
         "config_label": config_label,
         "config_params": {
             "raw_store_bound": raw_store_bound if raw_store_bound is not None else 320,
-            "b": 256,
+            "b": b if b is not None else 256,
+            "n_override": n,
+            "gap_scheme": gap_scheme if gap_scheme is not None else "rle",
             "use_square_limit": True,
         },
         "timestamp": env["timestamp"],
@@ -306,27 +333,27 @@ def benchmark(config_label: str = "t1_v1_default", raw_store_bound: int | None =
     }
 
 
-def load_existing_json() -> list[dict]:
-    json_path = RESEARCH_DIR / "CUBR-0007-bench.json"
+def load_existing_json(report_id: str = "bench") -> list[dict]:
+    json_path = RESEARCH_DIR / f"{report_id}-bench.json"
     if json_path.exists():
         return json.loads(json_path.read_text())
     return []
 
 
-def save_results(runs: list[dict]) -> None:
+def save_results(runs: list[dict], report_id: str = "bench") -> None:
     RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
-    json_path = RESEARCH_DIR / "CUBR-0007-bench.json"
+    json_path = RESEARCH_DIR / f"{report_id}-bench.json"
     json_path.write_text(json.dumps(runs, indent=2))
     print(f"\nJSON written: {json_path}")
 
 
-def write_report(runs: list[dict]) -> None:
+def write_report(runs: list[dict], report_id: str = "bench") -> None:
     """Write human-readable markdown report with >=2 time-points."""
     RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
-    report_path = RESEARCH_DIR / "CUBR-0007-report.md"
+    report_path = RESEARCH_DIR / f"{report_id}-report.md"
 
     lines = [
-        "# CUBR-0007 Compression Report",
+        f"# {report_id} Compression Report",
         "",
         "> PRIVATE — internal research artefact. Lives only in docs/ephemeral/research/.",
         "> Algorithm mechanism is strictly secret — this file must not reach public surfaces.",
@@ -350,9 +377,15 @@ def write_report(runs: list[dict]) -> None:
         ts = run["timestamp"]
         rt_all = run["round_trip_all"]
         cfg = run.get("config_params", {})
+        n_str = str(cfg.get("n_override")) if cfg.get("n_override") is not None else "minimal"
         lines.append(f"### {label} — {ts}")
         lines.append(f"")
-        lines.append(f"Config: raw_store_bound={cfg.get('raw_store_bound', 320)}, b={cfg.get('b', 256)}, use_square_limit={cfg.get('use_square_limit', True)}")
+        lines.append(
+            f"Config: raw_store_bound={cfg.get('raw_store_bound', 320)}, "
+            f"b={cfg.get('b', 256)}, N={n_str}, "
+            f"gap_scheme={cfg.get('gap_scheme', 'rle')}, "
+            f"use_square_limit={cfg.get('use_square_limit', True)}"
+        )
         lines.append(f"")
         lines.append(f"Round-trip (all inputs): **{rt_all}**")
         lines.append(f"")
@@ -409,6 +442,14 @@ def main():
                         help="Skip cargo build (use existing binary)")
     parser.add_argument("--raw-store-bound", type=int, default=None,
                         help="Override raw_store_bound for this run (default: 320 = v1_default)")
+    parser.add_argument("--b", type=int, default=None,
+                        help="Edge bound B (default: 256 = v1_default)")
+    parser.add_argument("--n", type=int, default=None,
+                        help="N dimensions override (default: minimal N)")
+    parser.add_argument("--gap-scheme", default=None, choices=["rle", "packed_nibble"],
+                        help="Gap encoding scheme: rle (default) or packed_nibble")
+    parser.add_argument("--report-id", default="bench",
+                        help="Report file prefix (e.g. bench, v1, axis-sweep; used in output filenames)")
     args = parser.parse_args()
 
     if not args.skip_build:
@@ -417,16 +458,22 @@ def main():
     if not CUBRIM_BIN.exists():
         raise RuntimeError(f"cubrim binary not found: {CUBRIM_BIN}")
 
-    run_result = benchmark(args.config_label, raw_store_bound=args.raw_store_bound)
+    run_result = benchmark(
+        args.config_label,
+        raw_store_bound=args.raw_store_bound,
+        b=args.b,
+        n=args.n,
+        gap_scheme=args.gap_scheme,
+    )
 
     # Load existing runs and append
-    existing = load_existing_json()
+    existing = load_existing_json(args.report_id)
     # Replace existing run with same label, or append
     existing = [r for r in existing if r["config_label"] != args.config_label]
     existing.append(run_result)
 
-    save_results(existing)
-    write_report(existing)
+    save_results(existing, args.report_id)
+    write_report(existing, args.report_id)
 
     if run_result["round_trip_all"] != "PASS":
         print("\nFATAL: Round-trip failed for one or more inputs.")

@@ -7,6 +7,13 @@
 // Run-length capped at 65535 to fit uint16.
 // Encoding: big-endian (matches prototype struct.Struct(">HH")).
 //
+// PackedNibble scheme: each gap encoded as a LEB128-style unsigned varint.
+//   - g in [1, 127]:    1 byte  0b0ggggggg
+//   - g in [128, 16383]: 2 bytes 0b1ggggggg 0b0ggggggg (little-endian 7-bit groups)
+//   - larger: 3+ bytes (same pattern)
+// Gaps are always >= 1 (distance-map invariant R3.1). B <= 256 so all gaps fit in 1 byte.
+// Decode reads exactly axis_gap_counts[k] varints.
+//
 // Resolution criterion (OQ-2): a scheme minimising bits-per-populated-point
 // on the corpus beats this baseline.
 
@@ -95,6 +102,83 @@ pub fn rle_size(gaps: &[usize]) -> usize {
     pairs * PAIR_SIZE
 }
 
+// ----- PackedNibble (varint-per-gap) encoding -----
+
+/// Encode a single gap value as a LEB128-style unsigned varint.
+/// Each 7-bit group is emitted LSB-first; the high bit of each byte is 1 if more
+/// bytes follow, 0 on the last byte.
+fn encode_varint(mut v: usize, out: &mut Vec<u8>) {
+    loop {
+        let byte = (v & 0x7F) as u8;
+        v >>= 7;
+        if v == 0 {
+            out.push(byte); // high bit = 0: last byte
+            break;
+        } else {
+            out.push(byte | 0x80); // high bit = 1: more bytes follow
+        }
+    }
+}
+
+/// Decode one LEB128 varint from `data` starting at `pos`.
+/// Returns (value, bytes_consumed) or an error on truncation.
+fn decode_varint(data: &[u8], pos: usize) -> Result<(usize, usize), CubrimError> {
+    let mut value = 0usize;
+    let mut shift = 0usize;
+    let mut i = pos;
+    loop {
+        if i >= data.len() {
+            return Err(CubrimError::Decode(format!(
+                "PackedNibble varint truncated at offset {i}"
+            )));
+        }
+        let byte = data[i] as usize;
+        i += 1;
+        value |= (byte & 0x7F) << shift;
+        shift += 7;
+        if byte & 0x80 == 0 {
+            break;
+        }
+        if shift >= 64 {
+            return Err(CubrimError::Decode("PackedNibble varint overflow".to_string()));
+        }
+    }
+    Ok((value, i - pos))
+}
+
+/// Encode a list of gap values using the PackedNibble (varint-per-gap) scheme.
+/// Produces typically 1 byte per gap when B <= 256 (all gaps fit in [1, 256]).
+pub fn packed_nibble_encode(gaps: &[usize]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(gaps.len());
+    for &g in gaps {
+        encode_varint(g, &mut out);
+    }
+    out
+}
+
+/// Decode exactly `n_gaps` varints from `data` starting at `offset`.
+/// Returns (decoded_gaps, bytes_consumed).
+pub fn packed_nibble_decode(data: &[u8], offset: usize, n_gaps: usize) -> Result<(Vec<usize>, usize), CubrimError> {
+    let mut gaps = Vec::with_capacity(n_gaps);
+    let mut pos = offset;
+    for _ in 0..n_gaps {
+        let (val, consumed) = decode_varint(data, pos)?;
+        pos += consumed;
+        gaps.push(val);
+    }
+    Ok((gaps, pos - offset))
+}
+
+/// Compute encoded byte size for PackedNibble without allocating.
+pub fn packed_nibble_size(gaps: &[usize]) -> usize {
+    gaps.iter().map(|&g| {
+        if g < 0x80 { 1 }
+        else if g < 0x4000 { 2 }
+        else if g < 0x200000 { 3 }
+        else { 4 }
+    }).sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,5 +253,97 @@ mod tests {
         let encoded = rle_encode(&gaps);
         assert_eq!(encoded.len(), 5 * PAIR_SIZE);
         assert_eq!(rle_decode(&encoded).unwrap(), gaps);
+    }
+
+    // ----- PackedNibble tests -----
+
+    #[test]
+    fn test_packed_nibble_small_gaps_one_byte_each() {
+        // All gaps in [1,127] -> 1 byte each
+        let gaps = vec![1usize, 2, 3, 127];
+        let enc = packed_nibble_encode(&gaps);
+        assert_eq!(enc.len(), 4, "each gap < 128 should be 1 byte");
+        assert_eq!(enc[0], 1);
+        assert_eq!(enc[1], 2);
+        assert_eq!(enc[2], 3);
+        assert_eq!(enc[3], 127);
+        let (dec, consumed) = packed_nibble_decode(&enc, 0, 4).unwrap();
+        assert_eq!(dec, gaps);
+        assert_eq!(consumed, 4);
+    }
+
+    #[test]
+    fn test_packed_nibble_gap_128_is_two_bytes() {
+        // 128 = 0b10000000 -> varint: 0x80 0x01
+        let gaps = vec![128usize];
+        let enc = packed_nibble_encode(&gaps);
+        assert_eq!(enc.len(), 2, "gap=128 must encode to 2 bytes");
+        assert_eq!(enc[0], 0x80); // low 7 bits of 128 = 0, high bit set (more follows)
+        assert_eq!(enc[1], 0x01); // next group = 1
+        let (dec, _) = packed_nibble_decode(&enc, 0, 1).unwrap();
+        assert_eq!(dec[0], 128);
+    }
+
+    #[test]
+    fn test_packed_nibble_roundtrip_various() {
+        let gaps = vec![1usize, 64, 127, 128, 200, 255, 256];
+        let enc = packed_nibble_encode(&gaps);
+        let (dec, consumed) = packed_nibble_decode(&enc, 0, gaps.len()).unwrap();
+        assert_eq!(dec, gaps);
+        assert_eq!(consumed, enc.len());
+    }
+
+    #[test]
+    fn test_packed_nibble_empty() {
+        let enc = packed_nibble_encode(&[]);
+        assert!(enc.is_empty());
+        let (dec, consumed) = packed_nibble_decode(&enc, 0, 0).unwrap();
+        assert!(dec.is_empty());
+        assert_eq!(consumed, 0);
+    }
+
+    #[test]
+    fn test_packed_nibble_size_matches_encode_len() {
+        let cases = vec![
+            vec![1usize, 2, 3],
+            vec![127usize],
+            vec![128usize],
+            vec![255usize, 256],
+            vec![1usize; 50],
+        ];
+        for gaps in cases {
+            assert_eq!(
+                packed_nibble_size(&gaps),
+                packed_nibble_encode(&gaps).len(),
+                "size mismatch for {:?}", gaps
+            );
+        }
+    }
+
+    #[test]
+    fn test_packed_nibble_decode_partial_offset() {
+        // Decode from a non-zero offset in a larger buffer
+        let prefix = vec![0xFFu8; 3];
+        let gaps = vec![5usize, 10, 20];
+        let enc = packed_nibble_encode(&gaps);
+        let mut buf = prefix.clone();
+        buf.extend_from_slice(&enc);
+        let (dec, consumed) = packed_nibble_decode(&buf, 3, 3).unwrap();
+        assert_eq!(dec, gaps);
+        assert_eq!(consumed, enc.len());
+    }
+
+    #[test]
+    fn test_packed_nibble_vs_rle_all_distinct_gaps() {
+        // When every gap is a distinct small value (no RLE compressibility),
+        // PackedNibble (1 byte per gap < 128) wins over RleU16 (4 bytes per gap).
+        // This models an axis where coordinates are all distinct — no runs.
+        let gaps: Vec<usize> = (1..=20).collect(); // 20 distinct gaps in [1,20]
+        let rle_bytes = rle_encode(&gaps).len();    // 20 * 4 = 80 bytes
+        let pn_bytes = packed_nibble_encode(&gaps).len(); // 20 * 1 = 20 bytes
+        assert!(
+            pn_bytes < rle_bytes,
+            "PackedNibble ({pn_bytes}B) must be < RleU16 ({rle_bytes}B) for all-distinct small gaps"
+        );
     }
 }

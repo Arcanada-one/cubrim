@@ -2,18 +2,18 @@
 // R6: uses the library encode/decode API; no algorithm logic here.
 //
 // Usage:
-//   cubrim compress   <input> <output> [--raw-store-bound N]
+//   cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble]
 //   cubrim decompress <input> <output>
 
 use std::env;
 use std::fs;
 use std::process;
 
-use cubrim::{decode, encode_with_config, EncodeConfig};
+use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme};
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N]");
+    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble]");
     eprintln!("  cubrim decompress <input> <output>");
     process::exit(1);
 }
@@ -27,6 +27,15 @@ fn parse_flag_usize(args: &[String], flag: &str, default: usize) -> usize {
         }
     }
     default
+}
+
+fn parse_flag_str<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    for i in 0..args.len().saturating_sub(1) {
+        if args[i] == flag {
+            return Some(&args[i + 1]);
+        }
+    }
+    None
 }
 
 fn cmd_compress(input: &str, output: &str, config: &EncodeConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -68,6 +77,25 @@ fn main() {
         "compress" => {
             let mut config = EncodeConfig::v1_default();
             config.raw_store_bound = parse_flag_usize(extra_args, "--raw-store-bound", config.raw_store_bound);
+            config.b = parse_flag_usize(extra_args, "--b", config.b);
+            // --n: optional N override
+            if let Some(n_str) = parse_flag_str(extra_args, "--n") {
+                match n_str.parse::<usize>() {
+                    Ok(n) => config.n_override = Some(n),
+                    Err(_) => { eprintln!("Invalid --n value: {n_str}"); process::exit(1); }
+                }
+            }
+            // --gap-scheme: rle (default) or packed_nibble
+            if let Some(scheme_str) = parse_flag_str(extra_args, "--gap-scheme") {
+                config.gap_scheme = match scheme_str {
+                    "rle" | "rle_u16" => GapScheme::RleU16,
+                    "packed_nibble" => GapScheme::PackedNibble,
+                    other => {
+                        eprintln!("Unknown --gap-scheme: {other}. Use rle or packed_nibble.");
+                        process::exit(1);
+                    }
+                };
+            }
             cmd_compress(input, output, &config)
         }
         "decompress" => cmd_decompress(input, output),

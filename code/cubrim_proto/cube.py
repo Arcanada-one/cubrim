@@ -20,7 +20,7 @@ import math
 from cubrim_proto.phi import phi, phi_inv, compute_N_and_B, B_DEFAULT, N_DEFAULT
 
 
-def build_cube(data: bytes, B: int = B_DEFAULT) -> dict:
+def build_cube(data: bytes, B: int = B_DEFAULT, N: int | None = None) -> dict:
     """
     R1/R2: Build sparse cube from input bytes.
 
@@ -34,36 +34,39 @@ def build_cube(data: bytes, B: int = B_DEFAULT) -> dict:
       - 'density': float — rho = count / product(b_k)
     """
     L = len(data)
+    N_min, B = compute_N_and_B(L, B)
+
     if L == 0:
-        N = N_DEFAULT
+        N_use = N if N is not None else N_DEFAULT
         return {
-            "N": N,
+            "N": N_use,
             "B": B,
-            "b_k": [B] * N,
+            "b_k": [B] * N_use,
             "L": 0,
             "populated": [],
             "count": 0,
             "density": 0.0,
         }
 
-    N, B = compute_N_and_B(L, B)
-    b_k = [B] * N  # v1: all edges at max B
+    # N override: clamp to at least N_min for injectivity
+    N_use = max(N_min, N) if N is not None else N_min
+    b_k = [B] * N_use  # v1: all edges at max B
 
     # Build coordinate -> value mapping
     # Using lexicographic position (Phi maps index -> coords)
     points: list[tuple[tuple[int, ...], int]] = []
     for i, val in enumerate(data):
-        coords = phi(i, N=N, B=B)
+        coords = phi(i, N=N_use, B=B)
         points.append((coords, val))
 
     # Sort by lexicographic order of coordinates (x_0, x_1, ...)
     points.sort(key=lambda p: p[0])
 
-    cube_volume = B ** N
+    cube_volume = B ** N_use
     density = L / cube_volume
 
     return {
-        "N": N,
+        "N": N_use,
         "B": B,
         "b_k": b_k,
         "L": L,

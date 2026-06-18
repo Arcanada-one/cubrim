@@ -24,6 +24,47 @@ pub struct CubeData {
     pub density: f64,
 }
 
+/// R1/R2: Build sparse cube from input bytes with explicit B and N.
+///
+/// `n` MUST satisfy `b^n >= l` (caller responsibility; use compute_n_and_b or clamp).
+/// v1-default wrapper: `build_cube(data)` uses `B_DEFAULT` and `compute_n_and_b`.
+pub fn build_cube_with_params(data: &[u8], b: usize, n: usize) -> CubeData {
+    let l = data.len();
+
+    debug_assert!(b > 0, "b must be > 0");
+    debug_assert!(
+        b.checked_pow(n as u32).unwrap_or(usize::MAX) >= l.max(1),
+        "B^N={} < L={l}: phi non-injective — caller must clamp n",
+        b.checked_pow(n as u32).unwrap_or(usize::MAX)
+    );
+
+    if l == 0 {
+        return CubeData {
+            n,
+            b,
+            b_k: vec![b; n],
+            l: 0,
+            populated: vec![],
+            count: 0,
+            density: 0.0,
+        };
+    }
+
+    let b_k = vec![b; n];
+
+    let mut points: Vec<(Vec<usize>, usize)> = data
+        .iter()
+        .enumerate()
+        .map(|(i, &val)| (phi(i, n, b), val as usize))
+        .collect();
+    points.sort_by(|a, bv| a.0.cmp(&bv.0));
+
+    let cube_volume = b.checked_pow(n as u32).unwrap_or(usize::MAX);
+    let density = if cube_volume > 0 { l as f64 / cube_volume as f64 } else { 0.0 };
+
+    CubeData { n, b, b_k, l, populated: points, count: l, density }
+}
+
 /// R1/R2: Build sparse cube from input bytes.
 pub fn build_cube(data: &[u8]) -> CubeData {
     let l = data.len();
@@ -163,5 +204,34 @@ mod tests {
         let cube = build_cube(&data);
         let recovered = rebuild_from_cube(&cube.populated, cube.l, cube.b);
         assert_eq!(recovered, data);
+    }
+
+    #[test]
+    fn test_build_cube_with_params_non_minimal_n() {
+        // N=3 for a 100-byte input (minimal N=2 for B=256 since 256^2=65536 >= 100)
+        let data: Vec<u8> = (0u8..100).collect();
+        let cube = build_cube_with_params(&data, 256, 3);
+        assert_eq!(cube.n, 3);
+        assert_eq!(cube.b_k.len(), 3);
+        // All populated points must have 3-component coords
+        for (coords, _) in &cube.populated {
+            assert_eq!(coords.len(), 3, "each point must have N=3 coords");
+        }
+        // Round-trip via rebuild_from_cube
+        let recovered = rebuild_from_cube(&cube.populated, cube.l, cube.b);
+        assert_eq!(recovered, data.to_vec(), "non-minimal N=3 round-trip failed");
+    }
+
+    #[test]
+    fn test_build_cube_with_params_default_n_matches_build_cube() {
+        // build_cube_with_params(data, B_DEFAULT, minimal_n) must equal build_cube(data)
+        use crate::phi::compute_n_and_b;
+        let data: Vec<u8> = (0u8..100).collect();
+        let (n_min, _) = compute_n_and_b(data.len(), B_DEFAULT);
+        let cube_param = build_cube_with_params(&data, B_DEFAULT, n_min);
+        let cube_default = build_cube(&data);
+        assert_eq!(cube_param.n, cube_default.n);
+        assert_eq!(cube_param.populated, cube_default.populated,
+            "build_cube_with_params with min N must produce same result as build_cube");
     }
 }
