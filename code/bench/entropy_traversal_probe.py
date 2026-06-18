@@ -183,7 +183,7 @@ def verdict(rows: list[dict], threshold: float = 0.05) -> tuple[str, str]:
 
 
 def render_markdown(rows: list[dict], go_verdict: str, rationale: str,
-                    manifest_sha: str, manifest_path: str) -> str:
+                    manifest_path: str) -> str:
     """Render the result table + verdict as markdown."""
     import subprocess
     py_ver = sys.version.split()[0]
@@ -260,8 +260,7 @@ def main():
 
     go_verdict, rationale = verdict(rows)
 
-    md = render_markdown(rows, go_verdict, rationale,
-                         manifest_sha='', manifest_path=manifest_path)
+    md = render_markdown(rows, go_verdict, rationale, manifest_path=manifest_path)
     Path(args.out).write_text(md)
     print(f"\nOutput written to {args.out}", file=sys.stderr)
 
