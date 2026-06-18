@@ -50,9 +50,11 @@ from cubrim_proto.header import (
     VALUE_SCHEME_FIXED,
     VALUE_SCHEME_RLE_CODES,
     VALUE_SCHEME_ENTROPY,
+    VALUE_SCHEME_ENTROPY_CONTEXT,
 )
 from cubrim_proto.huffman import (
     canonical_code_lengths,
+    assign_canonical_codes,
     huffman_encode,
     huffman_decode,
     huffman_bitstream_size,
@@ -141,6 +143,8 @@ def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int,
         codes = seq_codes or []
         code_len = canonical_code_lengths(codes, n_distinct)
         value_total = n_distinct + huffman_bitstream_size(codes, code_len)
+    elif value_scheme == VALUE_SCHEME_ENTROPY_CONTEXT:
+        value_total = _context_huffman_size(seq_codes or [], n_distinct)
     else:
         # Bit-packed values size
         if count > 0:
@@ -169,6 +173,211 @@ def _rle_codes_encode(seq_codes: list[int]) -> bytes:
             run = 1
     out.append(struct.pack(">BH", current, run))
     return b"".join(out)
+
+
+# ─── T4 Order-1 Context-Adaptive Huffman ─────────────────────────────────────
+#
+# Byte-exact mirror of the Rust context_huffman_encode / context_huffman_decode.
+# Context = previous value-code (sentinel 0 for position 0).
+# Contexts with < MIN_CTX_COUNT observations fall back to the shared order-0
+# table stored at ctx_id=0 (FALLBACK_CTX).
+
+_MIN_CTX_COUNT: int = 16
+_FALLBACK_CTX: int = 0
+
+
+def _build_context_tables(seq_codes: list[int], n_distinct: int) -> list[tuple[int, list[int]]]:
+    """
+    Build per-context canonical Huffman code-length tables.
+    Returns list of (ctx_id, code_len) sorted ascending by ctx_id.
+    ctx_id=0 is always the fallback (order-0) table.
+    """
+    if not seq_codes or n_distinct == 0:
+        return []
+
+    # Count per-context occurrences and global (fallback) counts.
+    from collections import defaultdict
+    ctx_freq: dict[int, list[int]] = defaultdict(lambda: [0] * n_distinct)
+    fallback_freq: list[int] = [0] * n_distinct
+
+    prev_ctx: int = 0  # sentinel for position 0
+    for code in seq_codes:
+        ctx_freq[prev_ctx][code] += 1
+        fallback_freq[code] += 1
+        prev_ctx = code
+
+    # Build fallback code_len (global order-0).
+    fallback_seq: list[int] = []
+    for sym, cnt in enumerate(fallback_freq):
+        fallback_seq.extend([sym] * cnt)
+    fallback_code_len = canonical_code_lengths(fallback_seq, n_distinct)
+
+    result: list[tuple[int, list[int]]] = [(_FALLBACK_CTX, fallback_code_len)]
+
+    # Add per-context tables for contexts meeting MIN_CTX_COUNT.
+    for ctx, freq in sorted(ctx_freq.items()):
+        obs = sum(freq)
+        if obs < _MIN_CTX_COUNT:
+            continue
+        ctx_seq: list[int] = []
+        for sym, cnt in enumerate(freq):
+            ctx_seq.extend([sym] * cnt)
+        ctx_len = canonical_code_lengths(ctx_seq, n_distinct)
+        result.append((ctx, ctx_len))
+
+    # Sort ascending by ctx_id (fallback=0 first).
+    result.sort(key=lambda x: x[0])
+    return result
+
+
+def _context_huffman_size(seq_codes: list[int], n_distinct: int) -> int:
+    """Estimate byte size of T4 encoded stream without full allocation."""
+    if not seq_codes:
+        return 2  # n_contexts=0 header
+    ctx_tables = _build_context_tables(seq_codes, n_distinct)
+    n_ctx = len(ctx_tables)
+    header_bytes = 2 + n_ctx * (2 + n_distinct)
+
+    # Build index for lookup.
+    ctx_idx: dict[int, int] = {ctx_id: i for i, (ctx_id, _) in enumerate(ctx_tables)}
+    fallback_idx = ctx_idx.get(_FALLBACK_CTX, 0)
+    canonical: list[list[tuple[int, int]]] = [
+        assign_canonical_codes(code_len) for _, code_len in ctx_tables
+    ]
+
+    total_bits = 0
+    prev_ctx = 0
+    for code in seq_codes:
+        tbl_idx = ctx_idx.get(prev_ctx, fallback_idx)
+        _, length = canonical[tbl_idx][code]
+        total_bits += length
+        prev_ctx = code
+
+    return header_bytes + (total_bits + 7) // 8
+
+
+def _context_huffman_encode(seq_codes: list[int], n_distinct: int) -> bytes:
+    """Encode value-code stream with order-1 context-adaptive canonical Huffman."""
+    if not seq_codes:
+        return b"\x00\x00"  # n_contexts=0
+
+    ctx_tables = _build_context_tables(seq_codes, n_distinct)
+    n_ctx = len(ctx_tables)
+
+    ctx_idx: dict[int, int] = {ctx_id: i for i, (ctx_id, _) in enumerate(ctx_tables)}
+    fallback_idx = ctx_idx.get(_FALLBACK_CTX, 0)
+    canonical: list[list[tuple[int, int]]] = [
+        assign_canonical_codes(code_len) for _, code_len in ctx_tables
+    ]
+
+    # Encode bitstream.
+    bit_acc: int = 0
+    bit_count: int = 0
+    bitstream: bytearray = bytearray()
+
+    prev_ctx: int = 0
+    for code in seq_codes:
+        tbl_idx = ctx_idx.get(prev_ctx, fallback_idx)
+        codeword, length = canonical[tbl_idx][code]
+        bit_acc = (bit_acc << length) | codeword
+        bit_count += length
+        while bit_count >= 8:
+            bit_count -= 8
+            bitstream.append((bit_acc >> bit_count) & 0xFF)
+        prev_ctx = code
+
+    if bit_count > 0:
+        bitstream.append((bit_acc << (8 - bit_count)) & 0xFF)
+
+    # Serialize header.
+    import struct
+    out = bytearray()
+    out += struct.pack(">H", n_ctx)
+    for ctx_id, code_len in ctx_tables:
+        out += struct.pack(">H", ctx_id)
+        out += bytes(code_len)
+    out += bitstream
+    return bytes(out)
+
+
+def _context_huffman_decode(blob: bytes, offset: int, count: int, n_distinct: int) -> tuple[list[int], int]:
+    """Decode order-1 context-adaptive Huffman from blob at offset."""
+    import struct
+
+    if count == 0:
+        if offset + 2 > len(blob):
+            raise ValueError("EntropyContext: blob too short for n_contexts")
+        n_ctx = struct.unpack_from(">H", blob, offset)[0]
+        header_bytes = 2 + n_ctx * (2 + n_distinct)
+        return [], header_bytes
+
+    if offset + 2 > len(blob):
+        raise ValueError("EntropyContext: blob too short for n_contexts")
+
+    n_ctx = struct.unpack_from(">H", blob, offset)[0]
+    pos = offset + 2
+
+    header_entry_size = 2 + n_distinct
+    if pos + n_ctx * header_entry_size > len(blob):
+        raise ValueError(
+            f"EntropyContext: context table header truncated: "
+            f"need {n_ctx * header_entry_size} bytes"
+        )
+
+    # Read context tables and build decode maps: (codeword, length) -> symbol.
+    ctx_tables: list[tuple[int, dict[tuple[int, int], int]]] = []
+    for _ in range(n_ctx):
+        ctx_id = struct.unpack_from(">H", blob, pos)[0]
+        pos += 2
+        code_len = list(blob[pos:pos + n_distinct])
+        pos += n_distinct
+        canonical = assign_canonical_codes(code_len)
+        decode_table: dict[tuple[int, int], int] = {}
+        for sym, (codeword, length) in enumerate(canonical):
+            if length > 0:
+                decode_table[(codeword, length)] = sym
+        ctx_tables.append((ctx_id, decode_table))
+
+    ctx_idx: dict[int, int] = {ctx_id: i for i, (ctx_id, _) in enumerate(ctx_tables)}
+    fallback_idx = ctx_idx.get(_FALLBACK_CTX, 0)
+
+    # Decode bitstream.
+    bitstream_offset = pos
+    bit_pos = 0  # bit position from bitstream_offset
+    decoded: list[int] = []
+    prev_ctx: int = 0
+
+    for sym_num in range(count):
+        tbl_idx = ctx_idx.get(prev_ctx, fallback_idx)
+        decode_table = ctx_tables[tbl_idx][1]
+
+        codeword = 0
+        found = False
+        for length in range(1, 33):
+            byte_off = bitstream_offset + bit_pos // 8
+            bit_off = 7 - (bit_pos % 8)
+            if byte_off >= len(blob):
+                raise ValueError(
+                    f"EntropyContext: bitstream exhausted at bit {bit_pos} "
+                    f"decoding symbol {sym_num}/{count}"
+                )
+            bit = (blob[byte_off] >> bit_off) & 1
+            codeword = (codeword << 1) | bit
+            bit_pos += 1
+            if (codeword, length) in decode_table:
+                sym = decode_table[(codeword, length)]
+                decoded.append(sym)
+                prev_ctx = sym
+                found = True
+                break
+        if not found:
+            raise ValueError(
+                f"EntropyContext: no codeword match after 32 bits at symbol {sym_num}/{count}"
+            )
+
+    bitstream_bytes = (bit_pos + 7) // 8
+    total_consumed = (pos - offset) + bitstream_bytes
+    return decoded, total_consumed
 
 
 def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None = None,
@@ -261,6 +470,9 @@ def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None
         n_distinct_enc = len(inverse_dict_list)
         code_len = canonical_code_lengths(seq_codes, n_distinct_enc)
         encoded_values = bytes(code_len) + huffman_encode(seq_codes, code_len)
+    elif value_scheme == VALUE_SCHEME_ENTROPY_CONTEXT:
+        # Order-1 context-adaptive canonical Huffman (T4).
+        encoded_values = _context_huffman_encode(seq_codes, len(inverse_dict_list))
     else:
         # BitpackFixed: lex-order point values, W bits each (v1-default)
         point_values = [p[1] for p in populated]
@@ -335,7 +547,8 @@ def decode(blob: bytes) -> bytes:
 
     # Determine value scheme from header
     value_scheme = hdr.get("value_scheme", VALUE_SCHEME_FIXED)
-    if value_scheme not in (VALUE_SCHEME_FIXED, VALUE_SCHEME_RLE_CODES, VALUE_SCHEME_ENTROPY):
+    if value_scheme not in (VALUE_SCHEME_FIXED, VALUE_SCHEME_RLE_CODES,
+                            VALUE_SCHEME_ENTROPY, VALUE_SCHEME_ENTROPY_CONTEXT):
         raise ValueError(f"Unknown value_scheme={value_scheme} in header")
 
     # Read and decode gap streams for each axis (scheme-dispatched)
@@ -367,6 +580,27 @@ def decode(blob: bytes) -> bytes:
                 )
         coords_k = decode_axis_gaps(gaps_k)
         axis_coords.append(coords_k)
+
+    if value_scheme == VALUE_SCHEME_ENTROPY_CONTEXT:
+        # Order-1 context-adaptive Huffman decode (T4).
+        n_distinct = hdr["n_distinct"]
+        seq_codes_dec, _consumed = _context_huffman_decode(blob, offset, count, n_distinct)
+
+        if len(seq_codes_dec) != count:
+            raise ValueError(
+                f"EntropyContext decoded {len(seq_codes_dec)} codes but expected {count}"
+            )
+
+        result = bytearray(L)
+        for i, code in enumerate(seq_codes_dec):
+            if code >= n_distinct:
+                raise ValueError(
+                    f"EntropyContext code {code} at position {i} >= n_distinct {n_distinct}"
+                )
+            if i < L:
+                result[i] = inverse_dict[code]
+
+        return bytes(result)
 
     if value_scheme == VALUE_SCHEME_ENTROPY:
         # Entropy decode: read n_distinct code-length bytes, then Huffman bitstream.

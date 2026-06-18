@@ -13,7 +13,7 @@ use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy]");
+    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context]");
     eprintln!("  cubrim decompress <input> <output>");
     process::exit(1);
 }
@@ -102,8 +102,9 @@ fn main() {
                     "bitpack-fixed" | "bitpack_fixed" => ValueScheme::BitpackFixed,
                     "rle-codes" | "rle_codes" => ValueScheme::RleCodes,
                     "entropy" => ValueScheme::Entropy,
+                    "entropy-context" | "entropy_context" => ValueScheme::EntropyContext,
                     other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, or entropy.");
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, or entropy-context.");
                         process::exit(1);
                     }
                 };

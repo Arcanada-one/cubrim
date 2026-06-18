@@ -111,6 +111,58 @@ fn text_entropy() {
     );
 }
 
+/// EntropyContext (T4) differential parity test.
+///
+/// Asserts:
+///   1. rust_encode_entropy_context(x) == python_encode_entropy_context(x)  (byte-identical blobs)
+///   2. rust_decode(python_entropy_context_blob) == x                         (cross-decode: Rust reads Python output)
+///   3. rust_decode(rust_entropy_context_blob) == x                           (Rust round-trip on its own blob)
+///
+/// Fixture was captured by cubrim_proto.codec.encode(x, value_scheme=VALUE_SCHEME_ENTROPY_CONTEXT).
+/// SHA256: input=0160b7a1b4311fa6b273b63125f8cff4603205d8dc7fcc7cf9186691570c5415
+///         blob =29f5de04681c4a8ec07bf2646113badf4b179d96c8401254951937d1fd69dfdd
+#[test]
+fn text_entropy_context() {
+    use cubrim::{EncodeConfig, GapScheme, ValueScheme, encode_with_config, decode};
+
+    let fixture_name = "text_entropy_context";
+    let (input, python_blob) = load_fixture(fixture_name);
+
+    let config = EncodeConfig {
+        b: 256,
+        raw_store_bound: 320,
+        use_square_limit: true,
+        n_override: None,
+        gap_scheme: GapScheme::RleU16,
+        value_scheme: ValueScheme::EntropyContext,
+    };
+
+    // Test 1: rust_encode_entropy_context(x) byte-identical to python_encode_entropy_context(x)
+    let rust_blob = encode_with_config(&input, &config);
+    assert_eq!(
+        rust_blob, python_blob,
+        "EntropyContext parity FAIL [{fixture_name}]: Rust blob ({} bytes) != Python blob ({} bytes). First diff at byte {}",
+        rust_blob.len(), python_blob.len(),
+        rust_blob.iter().zip(python_blob.iter()).position(|(a, b)| a != b).unwrap_or(usize::MAX)
+    );
+
+    // Test 2: rust_decode(python_entropy_context_blob) == original input (cross-decode)
+    let recovered_from_python = decode(&python_blob)
+        .unwrap_or_else(|e| panic!("EntropyContext parity FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}"));
+    assert_eq!(
+        recovered_from_python, input,
+        "EntropyContext parity FAIL [{fixture_name}]: rust_decode(python_blob) != original input"
+    );
+
+    // Test 3: Rust round-trip on its own blob (redundant but explicit)
+    let recovered_from_rust = decode(&rust_blob)
+        .unwrap_or_else(|e| panic!("EntropyContext parity FAIL [{fixture_name}]: rust_decode(rust_blob) error: {e}"));
+    assert_eq!(
+        recovered_from_rust, input,
+        "EntropyContext parity FAIL [{fixture_name}]: rust_decode(rust_blob) != original input"
+    );
+}
+
 /// RleCodes differential parity test.
 ///
 /// Asserts:

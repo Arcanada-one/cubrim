@@ -74,6 +74,10 @@ fn estimate_cube_size(
             let code_len = canonical_code_lengths(seq_codes, n_distinct);
             n_distinct + huffman_bitstream_size(seq_codes, &code_len)
         }
+        ValueScheme::EntropyContext => {
+            // Wire: n_contexts(2) + per-context (2 + n_distinct) headers + bitstream
+            context_huffman_size(seq_codes, state.inverse_dict.len())
+        }
     };
 
     hdr_size + gap_total + value_total
@@ -308,6 +312,10 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             out.extend_from_slice(&huffman_encode(&seq_codes, &code_len));
             out
         }
+        ValueScheme::EntropyContext => {
+            // Order-1 context-adaptive canonical Huffman on the value-code stream.
+            context_huffman_encode(&seq_codes, inverse_dict.len())
+        }
     };
 
     // Step 8: R6 serialize header
@@ -524,6 +532,34 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             }
             result
         }
+        ValueScheme::EntropyContext => {
+            // Order-1 context-adaptive Huffman decode.
+            let (seq_codes, _consumed) =
+                context_huffman_decode(blob, offset, count, inverse_dict.len())?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(), count
+                )));
+            }
+
+            // Reconstruct: result[i] = inverse_dict[seq_codes[i]] as u8.
+            let n_distinct = inverse_dict.len();
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "EntropyContext code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
     };
 
     Ok(result)
@@ -561,6 +597,311 @@ fn read_rle_stream(blob: &[u8], offset: usize, n_gaps: usize) -> Result<(&[u8], 
     }
 
     Ok((&blob[offset..offset + bytes_read], bytes_read))
+}
+
+// ─── T4 Order-1 Context-Adaptive Huffman ─────────────────────────────────────
+//
+// Context = previous value-code in i-order (sentinel 0 for position 0).
+// Each context with >= MIN_CTX_COUNT observations gets its own canonical
+// Huffman table.  Sparse contexts fall back to a shared order-0 "fallback"
+// table stored at ctx_id = 0 in the header.
+//
+// Wire format (after header + gap streams):
+//   [n_contexts : u16 BE]                       — number of entries (including fallback)
+//   for each entry (ascending ctx_id order):
+//     [ctx_id : u16 BE]                          — 0 = fallback/order-0
+//     [code_len[0..n_distinct] : u8 × n_distinct]
+//   [coded bitstream : MSB-first, byte-aligned, zero-padded]
+//
+// Byte-exact invariant: identical algorithm in Python twin (context_huffman.py).
+
+/// Minimum observation count for a context to get its own table.
+const MIN_CTX_COUNT: usize = 16;
+
+/// Context-id sentinel for the shared fallback (order-0) table.
+const FALLBACK_CTX: u16 = 0;
+
+/// Collect per-context frequency tables from seq_codes.
+/// Returns (ctx_id -> freq_vec[n_distinct]) sorted ascending by ctx_id.
+/// ctx_id = FALLBACK_CTX (0) holds the global order-0 frequencies used for
+/// fallback contexts (built from all tokens, regardless of context).
+fn build_context_tables(seq_codes: &[usize], n_distinct: usize) -> Vec<(u16, Vec<u8>)> {
+    if seq_codes.is_empty() || n_distinct == 0 {
+        return vec![];
+    }
+
+    // 1. Count per-context occurrences: context_counts[ctx][sym] = count.
+    //    Use a BTreeMap so insertion order is deterministic.
+    use std::collections::BTreeMap;
+    let mut ctx_freq: BTreeMap<u16, Vec<usize>> = BTreeMap::new();
+
+    // Fallback (order-0) counts: all tokens.
+    let mut fallback_freq = vec![0usize; n_distinct];
+
+    let mut prev_ctx: u16 = 0; // sentinel for position 0
+    for &code in seq_codes.iter() {
+        // Track for current context
+        let entry = ctx_freq.entry(prev_ctx).or_insert_with(|| vec![0usize; n_distinct]);
+        if code < n_distinct {
+            entry[code] += 1;
+        }
+        if code < n_distinct {
+            fallback_freq[code] += 1;
+        }
+        prev_ctx = code as u16;
+    }
+
+    // 2. Determine which contexts meet MIN_CTX_COUNT.
+    let mut total_ctx_obs: BTreeMap<u16, usize> = BTreeMap::new();
+    for (&ctx, freq) in &ctx_freq {
+        total_ctx_obs.insert(ctx, freq.iter().sum());
+    }
+
+    // 3. Build fallback code_len from global order-0 frequencies.
+    //    Always emit fallback at ctx_id=0, even if it overlaps with a real ctx=0.
+    let fallback_code_len = canonical_code_lengths(
+        // Build a seq from fallback_freq to feed into canonical_code_lengths
+        &{
+            let mut seq = Vec::with_capacity(seq_codes.len());
+            for (sym, &cnt) in fallback_freq.iter().enumerate() {
+                for _ in 0..cnt {
+                    seq.push(sym);
+                }
+            }
+            seq
+        },
+        n_distinct,
+    );
+
+    // 4. Emit: fallback first (ctx_id=0), then any non-zero real contexts that
+    //    meet MIN_CTX_COUNT, in ascending ctx_id order.
+    let mut result: Vec<(u16, Vec<u8>)> = vec![(FALLBACK_CTX, fallback_code_len)];
+
+    for (&ctx, freq) in &ctx_freq {
+        let obs: usize = *total_ctx_obs.get(&ctx).unwrap_or(&0);
+        if obs < MIN_CTX_COUNT {
+            continue; // use fallback for this context
+        }
+        // Build seq_codes for this context only
+        let ctx_seq: Vec<usize> = freq.iter().enumerate()
+            .flat_map(|(sym, &cnt)| std::iter::repeat(sym).take(cnt))
+            .collect();
+        let ctx_len = canonical_code_lengths(&ctx_seq, n_distinct);
+        result.push((ctx, ctx_len));
+    }
+
+    // Sort ascending by ctx_id (fallback=0 is always first; real contexts follow).
+    result.sort_by_key(|(ctx, _)| *ctx);
+    result
+}
+
+/// Encode the value-code stream with order-1 context-adaptive canonical Huffman.
+/// Returns the wire bytes: context-table header + MSB-first bitstream.
+pub(crate) fn context_huffman_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    if seq_codes.is_empty() {
+        // Emit n_contexts=0 + empty bitstream (zero bytes).
+        return vec![0u8, 0u8];
+    }
+
+    let ctx_tables = build_context_tables(seq_codes, n_distinct);
+    let n_ctx = ctx_tables.len() as u16;
+
+    // Build lookup: ctx_id -> index in ctx_tables (for fast encode-time lookup).
+    use std::collections::HashMap;
+    let mut ctx_idx: HashMap<u16, usize> = HashMap::new();
+    for (i, (ctx_id, _)) in ctx_tables.iter().enumerate() {
+        ctx_idx.insert(*ctx_id, i);
+    }
+    // Index 0 is always the fallback.
+    let fallback_idx = *ctx_idx.get(&FALLBACK_CTX).unwrap_or(&0);
+
+    // 1. Encode bitstream: use per-context table or fallback.
+    //    We need all codewords for the encode pass.
+    //    Pre-build assign_canonical_codes for each context table.
+    let canonical_codes: Vec<Vec<(u32, u8)>> = ctx_tables.iter()
+        .map(|(_, code_len)| crate::huffman::assign_canonical_codes(code_len))
+        .collect();
+
+    let mut bit_acc: u64 = 0;
+    let mut bit_count: u32 = 0;
+    let mut bitstream: Vec<u8> = Vec::new();
+
+    let mut prev_ctx: u16 = 0;
+    for &code in seq_codes.iter() {
+        let table_idx = ctx_idx.get(&prev_ctx).copied().unwrap_or(fallback_idx);
+        let (codeword, length) = canonical_codes[table_idx][code];
+        // MSB-first: shift left by bit_count, OR in codeword
+        bit_acc = (bit_acc << length) | (codeword as u64);
+        bit_count += length as u32;
+        while bit_count >= 8 {
+            bit_count -= 8;
+            bitstream.push((bit_acc >> bit_count) as u8);
+        }
+        prev_ctx = code as u16;
+    }
+    // Flush remaining bits (zero-pad)
+    if bit_count > 0 {
+        bitstream.push((bit_acc << (8 - bit_count)) as u8);
+    }
+
+    // 2. Serialize header: n_contexts(u16 BE) + for each ctx: ctx_id(u16) + code_len[n_distinct]
+    let mut out: Vec<u8> = Vec::new();
+    out.extend_from_slice(&n_ctx.to_be_bytes());
+    for (ctx_id, code_len) in &ctx_tables {
+        out.extend_from_slice(&ctx_id.to_be_bytes());
+        out.extend_from_slice(code_len);
+    }
+    out.extend_from_slice(&bitstream);
+    out
+}
+
+/// Decode the order-1 context-adaptive Huffman stream from blob at offset.
+/// Returns (decoded seq_codes, bytes consumed from offset).
+pub(crate) fn context_huffman_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if count == 0 {
+        // Edge case: nothing to decode; consume n_contexts header only.
+        if offset + 2 > blob.len() {
+            return Err(CubrimError::Decode("EntropyContext: blob too short for n_contexts".into()));
+        }
+        let n_ctx = u16::from_be_bytes([blob[offset], blob[offset + 1]]) as usize;
+        // Skip context table entries.
+        let header_bytes = 2 + n_ctx * (2 + n_distinct);
+        return Ok((vec![], header_bytes));
+    }
+
+    // 1. Read n_contexts.
+    if offset + 2 > blob.len() {
+        return Err(CubrimError::Decode("EntropyContext: blob too short for n_contexts".into()));
+    }
+    let n_ctx = u16::from_be_bytes([blob[offset], blob[offset + 1]]) as usize;
+    let mut pos = offset + 2;
+
+    // 2. Read context tables.
+    let header_entry_size = 2 + n_distinct; // ctx_id(u16) + code_len[n_distinct]
+    if pos + n_ctx * header_entry_size > blob.len() {
+        return Err(CubrimError::Decode(format!(
+            "EntropyContext: context table header truncated: need {} bytes, have {}",
+            n_ctx * header_entry_size,
+            blob.len().saturating_sub(pos)
+        )));
+    }
+
+    // ctx_tables: Vec<(ctx_id, decode_table)>
+    // decode_table: HashMap<(codeword, length), symbol> for that context.
+    use std::collections::HashMap;
+    let mut ctx_tables: Vec<(u16, HashMap<(u32, u8), usize>)> = Vec::with_capacity(n_ctx);
+
+    for _ in 0..n_ctx {
+        let ctx_id = u16::from_be_bytes([blob[pos], blob[pos + 1]]);
+        pos += 2;
+        let code_len: Vec<u8> = blob[pos..pos + n_distinct].to_vec();
+        pos += n_distinct;
+
+        // Build decode table: (codeword, length) -> symbol.
+        // Reuse assign_canonical_codes from huffman.rs.
+        let canonical = crate::huffman::assign_canonical_codes(&code_len);
+        let mut decode_table: HashMap<(u32, u8), usize> = HashMap::new();
+        for (sym, &(codeword, length)) in canonical.iter().enumerate() {
+            if length > 0 {
+                decode_table.insert((codeword, length), sym);
+            }
+        }
+        ctx_tables.push((ctx_id, decode_table));
+    }
+
+    // Build ctx_id -> index map for O(1) lookup.
+    let mut ctx_idx: HashMap<u16, usize> = HashMap::new();
+    for (i, (ctx_id, _)) in ctx_tables.iter().enumerate() {
+        ctx_idx.insert(*ctx_id, i);
+    }
+    let fallback_idx = *ctx_idx.get(&FALLBACK_CTX).unwrap_or(&0);
+
+    // 3. Decode bitstream.
+    let bitstream_offset = pos;
+    let mut bit_pos: usize = 0; // position in bits from bitstream_offset
+    let mut decoded: Vec<usize> = Vec::with_capacity(count);
+    let mut prev_ctx: u16 = 0;
+
+    for _ in 0..count {
+        let table_idx = ctx_idx.get(&prev_ctx).copied().unwrap_or(fallback_idx);
+        let decode_table = &ctx_tables[table_idx].1;
+
+        // Try increasing lengths until we find a match.
+        let mut codeword: u32 = 0;
+        let mut found = false;
+        for length in 1u8..=32u8 {
+            // Read one more bit.
+            let byte_off = bitstream_offset + bit_pos / 8;
+            let bit_off = 7 - (bit_pos % 8);
+            if byte_off >= blob.len() {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext: bitstream exhausted at bit {bit_pos} decoding symbol {}/{}",
+                    decoded.len(), count
+                )));
+            }
+            let bit = (blob[byte_off] >> bit_off) & 1;
+            codeword = (codeword << 1) | (bit as u32);
+            bit_pos += 1;
+
+            if let Some(&sym) = decode_table.get(&(codeword, length)) {
+                decoded.push(sym);
+                prev_ctx = sym as u16;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(CubrimError::Decode(format!(
+                "EntropyContext: no codeword match after 32 bits at symbol {}/{}",
+                decoded.len(), count
+            )));
+        }
+    }
+
+    // Total bytes consumed = n_contexts header + context table headers + bitstream bytes used.
+    let bitstream_bytes = bit_pos.div_ceil(8);
+    let total_consumed = (pos - offset) + bitstream_bytes;
+    Ok((decoded, total_consumed))
+}
+
+/// Estimate byte size of T4 encoded stream without allocating the full output.
+pub(crate) fn context_huffman_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    if seq_codes.is_empty() {
+        return 2; // n_contexts=0 header
+    }
+    let ctx_tables = build_context_tables(seq_codes, n_distinct);
+    let n_ctx = ctx_tables.len();
+
+    // Header: 2 (n_contexts) + n_ctx * (2 + n_distinct)
+    let header_bytes = 2 + n_ctx * (2 + n_distinct);
+
+    // Bitstream: encode each symbol with its context's table.
+    use std::collections::HashMap;
+    let mut ctx_idx: HashMap<u16, usize> = HashMap::new();
+    for (i, (ctx_id, _)) in ctx_tables.iter().enumerate() {
+        ctx_idx.insert(*ctx_id, i);
+    }
+    let fallback_idx = *ctx_idx.get(&FALLBACK_CTX).unwrap_or(&0);
+
+    let canonical_codes: Vec<Vec<(u32, u8)>> = ctx_tables.iter()
+        .map(|(_, code_len)| crate::huffman::assign_canonical_codes(code_len))
+        .collect();
+
+    let mut total_bits: usize = 0;
+    let mut prev_ctx: u16 = 0;
+    for &code in seq_codes.iter() {
+        let table_idx = ctx_idx.get(&prev_ctx).copied().unwrap_or(fallback_idx);
+        let (_, length) = canonical_codes[table_idx][code];
+        total_bits += length as usize;
+        prev_ctx = code as u16;
+    }
+
+    header_bytes + total_bits.div_ceil(8)
 }
 
 #[cfg(test)]
@@ -1228,6 +1569,74 @@ mod tests {
         let truncated = blob[..13 + 1].to_vec();
         let result = decode(&truncated);
         assert!(result.is_err(), "Truncated blob must return Err");
+    }
+
+    // ─── T4 EntropyContext round-trip tests ───────────────────────────────────
+
+    #[test]
+    fn test_entropy_context_round_trip_text() {
+        // Text-like input: T4 should compress well and round-trip byte-exact.
+        let data: Vec<u8> = b"the quick brown fox jumps over the lazy dog "
+            .iter().copied().cycle().take(4096).collect();
+        let config = EncodeConfig {
+            value_scheme: ValueScheme::EntropyContext,
+            ..EncodeConfig::v1_default()
+        };
+        let blob = encode_with_config(&data, &config);
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "T4 EntropyContext text round-trip failed");
+        // Should compress (be < input size) since this input has strong context correlation
+        assert!(blob.len() < data.len(),
+            "T4 EntropyContext should compress text-like 4KB input: got {}B for {}B input",
+            blob.len(), data.len());
+    }
+
+    #[test]
+    fn test_entropy_context_round_trip_all_classes() {
+        // V-AC-5a: round-trip must hold for all input classes with T4.
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("empty",          vec![]),
+            ("single_byte",    vec![0x42]),
+            ("uniform_256",    vec![0xAAu8; 400]),
+            ("all_distinct",   (0u8..=255).collect()),
+            ("text_1kb",       b"the quick brown fox ".iter().copied().cycle().take(1024).collect()),
+            ("text_4kb",       b"the quick brown fox ".iter().copied().cycle().take(4096).collect()),
+            ("random_1kb",     (0usize..1024).map(|i| (i as u8).wrapping_mul(71).wrapping_add(13)).collect()),
+        ];
+        let config = EncodeConfig {
+            value_scheme: ValueScheme::EntropyContext,
+            ..EncodeConfig::v1_default()
+        };
+        for (name, data) in &cases {
+            let blob = encode_with_config(data, &config);
+            let recovered = decode(&blob).unwrap();
+            assert_eq!(&recovered, data, "T4 EntropyContext round-trip failed for '{name}'");
+        }
+    }
+
+    #[test]
+    fn test_entropy_context_non_regression_over_t3() {
+        // V-AC-5a: T4 must not expand any input vs raw-store (selector must fall back).
+        // We check that T4 output size <= raw-store output size on every input.
+        // The encoder's R7 decision ensures this: if T4 cube > raw, it falls back to raw.
+        let cases: Vec<Vec<u8>> = vec![
+            vec![0xFFu8; 1024],   // binary uniform
+            (0usize..1024).map(|i| (i as u8).wrapping_mul(71).wrapping_add(13)).collect(),
+            b"the quick brown fox ".iter().copied().cycle().take(4096).collect(),
+        ];
+        let config_t4 = EncodeConfig {
+            value_scheme: ValueScheme::EntropyContext,
+            ..EncodeConfig::v1_default()
+        };
+        for data in &cases {
+            let raw_bound = data.len() + HEADER_OVERHEAD_BOUND;
+            let blob = encode_with_config(data, &config_t4);
+            assert!(blob.len() <= raw_bound,
+                "T4 output {} > raw-store bound {} for {}-byte input — non-regression violated",
+                blob.len(), raw_bound, data.len());
+            // Must round-trip
+            assert_eq!(decode(&blob).unwrap(), *data, "T4 non-regression round-trip failed");
+        }
     }
 
     // ── Default byte-identity: BitpackFixed + RleCodes unchanged after adding Entropy
