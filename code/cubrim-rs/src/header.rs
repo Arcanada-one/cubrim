@@ -47,6 +47,8 @@ pub const MAP_SCHEME_PACKED_NIBBLE: u8 = 2;
 pub const VALUE_SCHEME_FIXED: u8 = 1;
 /// RLE-codes value scheme: sequential-order codes, (code:u8, run:u16) triples.
 pub const VALUE_SCHEME_RLE_CODES: u8 = 2;
+/// Entropy value scheme: canonical Huffman on the value-code stream (order-0).
+pub const VALUE_SCHEME_ENTROPY: u8 = 3;
 
 // Traversal and Phi identifiers (R1)
 pub const TRAVERSAL_LEX: u8 = 1;

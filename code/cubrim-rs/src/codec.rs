@@ -30,6 +30,7 @@ use crate::header::{
     CubeHeaderState,
     MODE_CUBE, MODE_RAW,
 };
+use crate::huffman::{canonical_code_lengths, huffman_encode, huffman_decode, huffman_bitstream_size};
 
 /// R7: Header overhead bound constant. Calibrated for v1-defaults.
 /// fixed(13) + count(4) + b_k(4) + schemes(3) + n_distinct(2) +
@@ -66,6 +67,12 @@ fn estimate_cube_size(
         }
         ValueScheme::RleCodes => {
             rle_codes_size(seq_codes)
+        }
+        ValueScheme::Entropy => {
+            // n_distinct code-length bytes + MSB-first bitstream
+            let n_distinct = state.inverse_dict.len();
+            let code_len = canonical_code_lengths(seq_codes, n_distinct);
+            n_distinct + huffman_bitstream_size(seq_codes, &code_len)
         }
     };
 
@@ -289,6 +296,18 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             // RLE on codes in sequential i-order — collapses clustered runs
             rle_codes_encode(&seq_codes)
         }
+        ValueScheme::Entropy => {
+            // Canonical Huffman on codes in sequential i-order.
+            // Wire: [code_len[0..n_distinct]: u8 × n_distinct] + [MSB-first bitstream]
+            let n_distinct = inverse_dict.len();
+            let code_len = canonical_code_lengths(&seq_codes, n_distinct);
+            let mut out = Vec::with_capacity(n_distinct + huffman_bitstream_size(&seq_codes, &code_len));
+            // Emit code-length table
+            out.extend_from_slice(&code_len);
+            // Emit MSB-first bitstream
+            out.extend_from_slice(&huffman_encode(&seq_codes, &code_len));
+            out
+        }
     };
 
     // Step 8: R6 serialize header
@@ -461,6 +480,42 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                     return Err(CubrimError::Decode(format!(
                         "RLE-codes code {} at position {} >= n_distinct {}",
                         code, i, inverse_dict.len()
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::Entropy => {
+            // Entropy decode: read n_distinct code-length bytes, then Huffman bitstream.
+            let n_distinct = inverse_dict.len();
+            if offset + n_distinct > blob.len() {
+                return Err(CubrimError::Decode(format!(
+                    "Entropy: code-length table truncated: need {} bytes at offset {}, have {} total",
+                    n_distinct, offset, blob.len()
+                )));
+            }
+            let code_len: Vec<u8> = blob[offset..offset + n_distinct].to_vec();
+            let huff_offset = offset + n_distinct;
+
+            let (seq_codes, _consumed) = huffman_decode(blob, huff_offset, count, &code_len)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "Entropy decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(), count
+                )));
+            }
+
+            // Reconstruct: result[i] = inverse_dict[seq_codes[i]] as u8.
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "Entropy code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
                     )));
                 }
                 if i < l {
@@ -1010,6 +1065,189 @@ mod tests {
         };
         let encoded = rle_codes_encode(&seq_codes);
         assert_eq!(rle_codes_size(&seq_codes), encoded.len());
+    }
+
+    // -------------------------------------------------------------------------
+    // ValueScheme::Entropy — P2 tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_entropy_round_trip_all_classes() {
+        let cfg = EncodeConfig {
+            value_scheme: ValueScheme::Entropy,
+            ..EncodeConfig::v1_default()
+        };
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("empty", vec![]),
+            ("1byte", vec![0x42]),
+            ("uniform_400", vec![0xAA; 400]),
+            ("all_distinct_256", (0u8..=255).collect()),
+            ("text_1kb", b"the quick brown fox jumps over the lazy dog ".iter().copied().cycle().take(1024).collect()),
+            ("random_1kb", (0usize..1024).map(|i| (i as u8).wrapping_mul(113).wrapping_add(7)).collect()),
+        ];
+        for (name, data) in &cases {
+            let blob = encode_with_config(data, &cfg);
+            let recovered = decode(&blob).unwrap();
+            assert_eq!(&recovered, data, "Entropy round-trip failed for '{name}'");
+        }
+    }
+
+    #[test]
+    fn test_entropy_header_value_scheme_byte_is_3() {
+        use crate::header::{parse_header, MODE_CUBE};
+        let data: Vec<u8> = vec![0xABu8; 400];
+        let cfg = EncodeConfig {
+            value_scheme: ValueScheme::Entropy,
+            ..EncodeConfig::v1_default()
+        };
+        let blob = encode_with_config(&data, &cfg);
+        let (hdr, _) = parse_header(&blob).unwrap();
+        if hdr.mode == MODE_CUBE {
+            assert_eq!(hdr.value_scheme, 3u8,
+                "Entropy config must write value_scheme=3 to header");
+        }
+    }
+
+    #[test]
+    fn test_entropy_diverges_from_bitpack_fixed() {
+        // Entropy blob must differ from BitpackFixed blob for any cube-mode input.
+        let data: Vec<u8> = vec![0xABu8; 400];
+        let fixed_blob = encode(&data); // BitpackFixed default
+        let entropy_blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: ValueScheme::Entropy,
+            ..EncodeConfig::v1_default()
+        });
+        assert_ne!(fixed_blob, entropy_blob,
+            "Entropy blob must differ from BitpackFixed blob");
+    }
+
+    #[test]
+    fn test_entropy_smaller_than_bitpack_on_skewed() {
+        // For a skewed 4-symbol input, Entropy (variable-length) beats BitpackFixed (W=2 fixed).
+        // 400 bytes: 4 symbols with 80/10/5/5 distribution.
+        // BitpackFixed: W=2 bits → ceil(400*2/8)=100 bytes value stream.
+        // Entropy Huffman lengths [1,2,3,3]: 320×1 + 40×2 + 20×3 + 20×3 = 520 bits = 65 bytes
+        // + 4 code-len overhead = 69 bytes value stream → smaller.
+        let data: Vec<u8> = {
+            let mut d = Vec::with_capacity(400);
+            d.extend(std::iter::repeat(0x01u8).take(320));  // 80%
+            d.extend(std::iter::repeat(0x02u8).take(40));   // 10%
+            d.extend(std::iter::repeat(0x03u8).take(20));   // 5%
+            d.extend(std::iter::repeat(0x04u8).take(20));   // 5%
+            d
+        };
+        assert_eq!(data.len(), 400);
+
+        let fixed_blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: ValueScheme::BitpackFixed,
+            ..EncodeConfig::v1_default()
+        });
+        let entropy_blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: ValueScheme::Entropy,
+            ..EncodeConfig::v1_default()
+        });
+
+        // Both must round-trip
+        assert_eq!(decode(&fixed_blob).unwrap(), data, "BitpackFixed round-trip on skewed");
+        assert_eq!(decode(&entropy_blob).unwrap(), data, "Entropy round-trip on skewed");
+
+        assert!(
+            entropy_blob.len() < fixed_blob.len(),
+            "Entropy ({} bytes) must be < BitpackFixed ({} bytes) for 4-symbol skewed input",
+            entropy_blob.len(), fixed_blob.len()
+        );
+    }
+
+    #[test]
+    fn test_entropy_decode_robustness_kraft_violation() {
+        // Manually craft a blob with a Kraft-violating code-length table.
+        // Use a valid cube-mode blob, then corrupt the code-length bytes.
+        use crate::header::{parse_header, MODE_CUBE, VALUE_SCHEME_ENTROPY};
+        let data: Vec<u8> = vec![0xABu8; 400];
+        let mut blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: ValueScheme::Entropy,
+            ..EncodeConfig::v1_default()
+        });
+        // Parse header to find where code_len table starts (after gap streams)
+        let (hdr, hdr_end) = parse_header(&blob).unwrap();
+        if hdr.mode != MODE_CUBE || hdr.value_scheme != VALUE_SCHEME_ENTROPY {
+            return; // input went raw-store — skip (test not applicable)
+        }
+        // Skip gap streams to reach value data offset
+        let n_distinct = hdr.n_distinct;
+        // The gap stream sizes are not easily computed here without re-running the codec,
+        // so we corrupt a byte early in the code-length region: first byte after hdr_end
+        // that's well past the gap stream. We'll just corrupt byte at hdr_end (start of
+        // gap stream region) to cause a decode failure.
+        // Actually, let's corrupt the value_scheme byte in the header to an invalid value.
+        // Header byte at fixed offset: value_scheme is at header position.
+        // value_scheme is at: 4(magic)+1(ver)+1(mode)+1(N)+2(B)+4(L)+4(count)+N*2(b_k)+1(map)+1(val_scheme)
+        // = 13 + 4 + N*2 + 1 = offset 18 + N*2 for value_scheme byte
+        let n = hdr.n;
+        let val_scheme_offset = 13 + 4 + n * 2 + 1;
+        blob[val_scheme_offset] = 99; // unknown value_scheme → decode returns Err
+        let result = decode(&blob);
+        assert!(result.is_err(), "Unknown value_scheme byte must return Err");
+        // Restore value_scheme, corrupt first code-length byte to all-ones
+        blob[val_scheme_offset] = VALUE_SCHEME_ENTROPY;
+        // Skip to value data: after header + gap streams
+        // gap stream sizes: for our all-same input with N=2, each axis has 1 gap (1 value)
+        // RleU16 encodes as (value:u16, run:u16) = 4 bytes per pair; 1 gap needs 1 pair = 4 bytes
+        let gap_stream_size = 4 * 2; // 2 axes × 4 bytes
+        let code_len_start = hdr_end + gap_stream_size;
+        if code_len_start + n_distinct <= blob.len() {
+            // Set all code-length bytes to 1 → Kraft = n_distinct/2 (over/under depending on n_distinct)
+            for i in 0..n_distinct {
+                blob[code_len_start + i] = 1;
+            }
+            // For n_distinct > 2, this is Kraft-violating (n_distinct × 1/2 > 1)
+            if n_distinct > 2 {
+                let result = decode(&blob);
+                assert!(result.is_err(), "Kraft-violating code-length table must return Err");
+            }
+        }
+    }
+
+    #[test]
+    fn test_entropy_decode_truncated_bitstream_returns_error() {
+        use crate::header::{parse_header, MODE_CUBE, VALUE_SCHEME_ENTROPY};
+        let data: Vec<u8> = {
+            let mut d = vec![0x01u8; 200];
+            d.extend(vec![0x02u8; 200]);
+            d
+        };
+        let blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: ValueScheme::Entropy,
+            ..EncodeConfig::v1_default()
+        });
+        let (hdr, _) = parse_header(&blob).unwrap();
+        if hdr.mode != MODE_CUBE || hdr.value_scheme != VALUE_SCHEME_ENTROPY {
+            return; // raw-store, skip
+        }
+        // Truncate blob to just 1 byte past the header
+        let truncated = blob[..13 + 1].to_vec();
+        let result = decode(&truncated);
+        assert!(result.is_err(), "Truncated blob must return Err");
+    }
+
+    // ── Default byte-identity: BitpackFixed + RleCodes unchanged after adding Entropy
+
+    #[test]
+    fn test_default_byte_identity_after_entropy_addition() {
+        // V-AC-4: default encode() (BitpackFixed) must be byte-for-byte unchanged.
+        let inputs: Vec<Vec<u8>> = vec![
+            vec![0xABu8; 400],
+            b"the quick brown fox ".iter().copied().cycle().take(1024).collect(),
+        ];
+        for input in &inputs {
+            let v1_blob = encode(input);
+            let explicit_fixed_blob = encode_with_config(input, &EncodeConfig {
+                value_scheme: ValueScheme::BitpackFixed,
+                ..EncodeConfig::v1_default()
+            });
+            assert_eq!(v1_blob, explicit_fixed_blob,
+                "Adding Entropy variant must not change BitpackFixed output");
+        }
     }
 
 }

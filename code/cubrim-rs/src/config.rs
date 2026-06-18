@@ -34,6 +34,9 @@ pub enum GapScheme {
 /// then run-length encodes them as (code: u8, run_length: u16) triplets.
 /// Codes are in [0, n_distinct) so they fit u8.  Run-length capped at 65535
 /// (same MAX_RUN cap as rle.rs).
+/// Entropy applies static canonical Huffman coding (order-0) to the value-code
+/// stream: n_distinct code-length bytes followed by the MSB-first bitstream.
+/// Header byte = 3.
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum ValueScheme {
     /// v1-default: bitpack values in lex-sorted point order, W bits each.
@@ -43,6 +46,10 @@ pub enum ValueScheme {
     /// Collapses clustered runs into compact (code: u8, run: u16) triples.
     /// Header byte = 2.
     RleCodes,
+    /// Static canonical Huffman on the value-code stream (order-0).
+    /// Wire: [code_len[0..n_distinct]: u8 × n_distinct] + [MSB-first bitstream].
+    /// Header byte = 3.
+    Entropy,
 }
 
 impl GapScheme {
@@ -70,6 +77,7 @@ impl ValueScheme {
         match self {
             ValueScheme::BitpackFixed => 1,
             ValueScheme::RleCodes => 2,
+            ValueScheme::Entropy => 3,
         }
     }
 
@@ -78,6 +86,7 @@ impl ValueScheme {
         match b {
             1 => Some(ValueScheme::BitpackFixed),
             2 => Some(ValueScheme::RleCodes),
+            3 => Some(ValueScheme::Entropy),
             _ => None,
         }
     }
@@ -162,6 +171,7 @@ mod tests {
     fn test_value_scheme_byte_roundtrip() {
         assert_eq!(ValueScheme::from_byte(ValueScheme::BitpackFixed.scheme_byte()), Some(ValueScheme::BitpackFixed));
         assert_eq!(ValueScheme::from_byte(ValueScheme::RleCodes.scheme_byte()), Some(ValueScheme::RleCodes));
+        assert_eq!(ValueScheme::from_byte(ValueScheme::Entropy.scheme_byte()), Some(ValueScheme::Entropy));
         assert_eq!(ValueScheme::from_byte(0), None, "0 is not a valid value_scheme byte");
         assert_eq!(ValueScheme::from_byte(99), None, "unknown byte returns None");
     }
@@ -171,6 +181,7 @@ mod tests {
         // BitpackFixed = 1 is the v1 byte on the wire; must not change (V-AC-8)
         assert_eq!(ValueScheme::BitpackFixed.scheme_byte(), 1u8);
         assert_eq!(ValueScheme::RleCodes.scheme_byte(), 2u8);
+        assert_eq!(ValueScheme::Entropy.scheme_byte(), 3u8);
     }
 
     #[test]
