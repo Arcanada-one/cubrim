@@ -69,12 +69,13 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 #   cargo bench                # compression-ratio / throughput benchmarks
 ```
 
-## 🔒 Secrecy Constraint (operator decision 2026-06-17)
+## 📖 Algorithm Disclosure (operator decision 2026-06-18 — supersedes the 2026-06-17 secrecy constraint)
 
-**The archiver algorithm is STRICTLY SECRET.** Its working principle (specified privately in `consilium/` and `datarim/prd/`) MUST NEVER be disclosed in any public content: the `cubrim.com` landing, OG tags, the arcanada.ai listing, marketing, or any external material. Public surface describes product **value / teaser only**, never the mechanism.
+**The archiver algorithm is now PUBLICLY DISCLOSABLE.** The operator decided on 2026-06-18 to explain the mechanism openly — including an educational, step-by-step visualisation of the pipeline on `cubrim.com` (the `/algorithm` page). The earlier "STRICTLY SECRET" constraint (operator decision 2026-06-17) is **retired**. Public surfaces (`cubrim.com`, `docs/`, OG tags, the arcanada.ai listing, marketing) MAY describe and illustrate the real mechanism: the N-dimensional cube, the φ (mixed-radix) coordinate mapping, the per-axis distance map, RLE of that map, and the value-stream coding (bitpack / RLE-codes / Huffman entropy).
 
-**Doc-surface split:** `docs/` (Diátaxis) is treated as a *public-facing* reference surface — it MUST NOT carry the compression mechanism (no internal-encoding lexicon). The algorithm lives only in `consilium/` (the private rulebook + brief) and internal `datarim/prd/` artefacts. The whole repo `Arcanada-one/cubrim` is **private**, but keep `docs/` mechanism-free regardless. Secrecy gate before any publish:
-`grep -rin -E 'distance-map|карт[аеуы] расстоян|bit-pack|gap-to-next|N-мерн|n-dimensional cube|edge bound' Projects/Cubrim/docs/ Projects/Cubrim/README*` → must be empty.
+**Accuracy supersedes secrecy.** The only remaining hard rule for the disclosed mechanism is *truthfulness*: any public description MUST match the actual code (`code/cubrim-rs/src/`), not an invented or aspirational version. Read the real pipeline (`codec.rs` encode comment block, `phi.rs`, `cube.rs`, `distance_map.rs`, `rle.rs`, `bitpack.rs`, `huffman.rs`) before writing public content about how it works. Real measured numbers only — never estimated ratios in prose.
+
+**The secrecy grep gate is retired** — `docs/` and public pages no longer need to be mechanism-free. (Disclosure is reversible only in policy, not in fact: once published, treat the mechanism as public knowledge.)
 
 ## Conventions
 

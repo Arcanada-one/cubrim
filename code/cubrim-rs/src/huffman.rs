@@ -1,9 +1,7 @@
 // Canonical Huffman coding over the value-code stream.
 //
 // All functions are pub(crate) — this module is internal only.
-// Codec wiring lands in P2; suppress dead-code lint until then.
 // No task IDs in source; provenance lives in git log.
-#![allow(dead_code)]
 //
 // Canonical assignment rule (identical in Rust and Python):
 //   1. Count frequencies of symbol codes over seq_codes.
