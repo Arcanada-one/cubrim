@@ -119,11 +119,12 @@ def run_cubrim_roundtrip(
     b: int | None = None,
     n: int | None = None,
     gap_scheme: str | None = None,
+    value_scheme: str | None = None,
 ) -> tuple[bytes, bool, str]:
     """
     Compress + decompress input; assert byte-exact round-trip.
     Returns (compressed_bytes, round_trip_ok: bool, mode_str).
-    Passes axis-sweep flags (--b, --n, --gap-scheme) to the compress CLI.
+    Passes axis-sweep flags (--b, --n, --gap-scheme, --value-scheme) to the compress CLI.
     """
     with tempfile.NamedTemporaryFile(suffix=".cubrim", delete=False) as tmp_out, \
          tempfile.NamedTemporaryFile(suffix=".dec", delete=False) as tmp_dec:
@@ -141,6 +142,8 @@ def run_cubrim_roundtrip(
             compress_cmd += ["--n", str(n)]
         if gap_scheme is not None:
             compress_cmd += ["--gap-scheme", gap_scheme]
+        if value_scheme is not None:
+            compress_cmd += ["--value-scheme", value_scheme]
         result = subprocess.run(
             compress_cmd,
             capture_output=True, text=True,
@@ -240,6 +243,7 @@ def benchmark(
     b: int | None = None,
     n: int | None = None,
     gap_scheme: str | None = None,
+    value_scheme: str | None = None,
 ) -> dict:
     """Run the full benchmark for a given config label. Returns results dict."""
     manifest = json.loads(CORPUS_MANIFEST.read_text())
@@ -274,6 +278,7 @@ def benchmark(
             b=b,
             n=n,
             gap_scheme=gap_scheme,
+            value_scheme=value_scheme,
         )
         cubrim_size = len(compressed)
         cubrim_ratio = cubrim_size / size
@@ -324,6 +329,7 @@ def benchmark(
             "b": b if b is not None else 256,
             "n_override": n,
             "gap_scheme": gap_scheme if gap_scheme is not None else "rle",
+            "value_scheme": value_scheme if value_scheme is not None else "bitpack-fixed",
             "use_square_limit": True,
         },
         "timestamp": env["timestamp"],
@@ -384,6 +390,7 @@ def write_report(runs: list[dict], report_id: str = "bench") -> None:
             f"Config: raw_store_bound={cfg.get('raw_store_bound', 320)}, "
             f"b={cfg.get('b', 256)}, N={n_str}, "
             f"gap_scheme={cfg.get('gap_scheme', 'rle')}, "
+            f"value_scheme={cfg.get('value_scheme', 'bitpack-fixed')}, "
             f"use_square_limit={cfg.get('use_square_limit', True)}"
         )
         lines.append(f"")
@@ -448,6 +455,8 @@ def main():
                         help="N dimensions override (default: minimal N)")
     parser.add_argument("--gap-scheme", default=None, choices=["rle", "packed_nibble"],
                         help="Gap encoding scheme: rle (default) or packed_nibble")
+    parser.add_argument("--value-scheme", default=None, choices=["bitpack-fixed", "rle-codes"],
+                        help="Value encoding scheme: bitpack-fixed (default) or rle-codes")
     parser.add_argument("--report-id", default="bench",
                         help="Report file prefix (e.g. bench, v1, axis-sweep; used in output filenames)")
     args = parser.parse_args()
@@ -464,6 +473,7 @@ def main():
         b=args.b,
         n=args.n,
         gap_scheme=args.gap_scheme,
+        value_scheme=args.value_scheme,
     )
 
     # Load existing runs and append

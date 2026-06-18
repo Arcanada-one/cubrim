@@ -9,11 +9,11 @@ use std::env;
 use std::fs;
 use std::process;
 
-use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme};
+use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble]");
+    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes]");
     eprintln!("  cubrim decompress <input> <output>");
     process::exit(1);
 }
@@ -92,6 +92,17 @@ fn main() {
                     "packed_nibble" => GapScheme::PackedNibble,
                     other => {
                         eprintln!("Unknown --gap-scheme: {other}. Use rle or packed_nibble.");
+                        process::exit(1);
+                    }
+                };
+            }
+            // --value-scheme: bitpack-fixed (default) or rle-codes
+            if let Some(vs_str) = parse_flag_str(extra_args, "--value-scheme") {
+                config.value_scheme = match vs_str {
+                    "bitpack-fixed" | "bitpack_fixed" => ValueScheme::BitpackFixed,
+                    "rle-codes" | "rle_codes" => ValueScheme::RleCodes,
+                    other => {
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed or rle-codes.");
                         process::exit(1);
                     }
                 };

@@ -18,7 +18,7 @@
 // Matches prototype: max cube header ~286 bytes, bound = 320 with margin.
 // For inputs <= 320 bytes, raw-store always fires.
 
-use crate::config::{EncodeConfig, GapScheme};
+use crate::config::{EncodeConfig, GapScheme, ValueScheme};
 use crate::error::CubrimError;
 use crate::phi::{phi as phi_fn, phi_inv as phi_inv_fn, compute_n_and_b};
 use crate::cube::build_cube_with_params;
@@ -27,7 +27,7 @@ use crate::rle::{rle_encode, rle_decode, rle_size, packed_nibble_encode, packed_
 use crate::bitpack::{build_value_dict, compute_width, bitpack_encode, bitpack_decode};
 use crate::header::{
     serialize_header, parse_header,
-    MODE_CUBE, MODE_RAW, MAP_SCHEME_RLE,
+    MODE_CUBE, MODE_RAW, MAP_SCHEME_RLE, VALUE_SCHEME_FIXED,
 };
 
 /// R7: Header overhead bound constant. Calibrated for v1-defaults.
@@ -53,10 +53,15 @@ fn estimate_cube_size(
     inverse_dict: &[usize],
     w: usize,
     gap_scheme: GapScheme,
+    value_scheme: ValueScheme,
+    // sequential codes (i-order) needed for RleCodes size estimate
+    seq_codes: &[usize],
 ) -> usize {
     let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
     let hdr_size = serialize_header(
-        MODE_CUBE, n, b, l, count, b_k, gap_scheme.scheme_byte(), w, inverse_dict, &axis_gap_counts,
+        MODE_CUBE, n, b, l, count, b_k,
+        gap_scheme.scheme_byte(), value_scheme.scheme_byte(),
+        w, inverse_dict, &axis_gap_counts,
     ).len();
 
     let gap_total: usize = match gap_scheme {
@@ -64,9 +69,97 @@ fn estimate_cube_size(
         GapScheme::PackedNibble => axis_gaps.iter().map(|g| packed_nibble_size(g)).sum(),
     };
 
-    let bitpack_total = if count > 0 { (count * w).div_ceil(8) } else { 0 };
+    let value_total = match value_scheme {
+        ValueScheme::BitpackFixed => {
+            if count > 0 { (count * w).div_ceil(8) } else { 0 }
+        }
+        ValueScheme::RleCodes => {
+            rle_codes_size(seq_codes)
+        }
+    };
 
-    hdr_size + gap_total + bitpack_total
+    hdr_size + gap_total + value_total
+}
+
+/// Encode value codes in sequential (i-order) input order as RLE triplets.
+/// Each run emitted as: code(u8) + run_length(u16 BE) = 3 bytes.
+/// Codes are in [0, n_distinct) which fits u8 (n_distinct <= 256 by design).
+/// Run lengths capped at 65535 (same as rle.rs MAX_RUN).
+fn rle_codes_encode(seq_codes: &[usize]) -> Vec<u8> {
+    use crate::rle::MAX_RUN;
+    if seq_codes.is_empty() {
+        return vec![];
+    }
+    let mut out = Vec::new();
+    let mut current = seq_codes[0];
+    let mut run = 1usize;
+    for &c in &seq_codes[1..] {
+        if c == current && run < MAX_RUN {
+            run += 1;
+        } else {
+            out.push(current as u8);
+            out.extend_from_slice(&(run as u16).to_be_bytes());
+            current = c;
+            run = 1;
+        }
+    }
+    out.push(current as u8);
+    out.extend_from_slice(&(run as u16).to_be_bytes());
+    out
+}
+
+/// Compute byte size of the RLE-codes stream without allocating.
+fn rle_codes_size(seq_codes: &[usize]) -> usize {
+    use crate::rle::MAX_RUN;
+    if seq_codes.is_empty() {
+        return 0;
+    }
+    let mut triplets = 1usize;
+    let mut current = seq_codes[0];
+    let mut run = 1usize;
+    for &c in &seq_codes[1..] {
+        if c == current && run < MAX_RUN {
+            run += 1;
+        } else {
+            triplets += 1;
+            current = c;
+            run = 1;
+        }
+    }
+    triplets * 3  // 1 byte code + 2 bytes run_length
+}
+
+/// Decode `count` value codes from a RLE-codes stream starting at `offset`.
+/// Returns (decoded_codes, bytes_consumed).
+fn rle_codes_decode(blob: &[u8], offset: usize, count: usize) -> Result<(Vec<usize>, usize), CubrimError> {
+    let mut codes = Vec::with_capacity(count);
+    let mut pos = offset;
+    while codes.len() < count {
+        if pos + 3 > blob.len() {
+            return Err(CubrimError::Decode(format!(
+                "RLE-codes stream truncated at offset {pos}: need code+run (3B), have {}B remaining",
+                blob.len().saturating_sub(pos)
+            )));
+        }
+        let code = blob[pos] as usize;
+        let run = u16::from_be_bytes([blob[pos + 1], blob[pos + 2]]) as usize;
+        pos += 3;
+        if run == 0 {
+            return Err(CubrimError::Decode(
+                format!("RLE-codes run_length=0 at offset {}: invalid (stream corrupt)", pos - 3)
+            ));
+        }
+        let remaining = count - codes.len();
+        if run > remaining {
+            return Err(CubrimError::Decode(format!(
+                "RLE-codes run {run} would exceed remaining count {remaining}: corrupt stream"
+            )));
+        }
+        for _ in 0..run {
+            codes.push(code);
+        }
+    }
+    Ok((codes, pos - offset))
 }
 
 /// R6/R7: Encode input bytes to Cubrim v1 format using v1-default configuration.
@@ -90,10 +183,11 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let l = data.len();
     let b = config.b;
     let gap_scheme = config.gap_scheme;
+    let value_scheme = config.value_scheme;
 
     // Special case: empty input -> raw-store
     if l == 0 {
-        let hdr = serialize_header(MODE_RAW, 2, b, 0, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
+        let hdr = serialize_header(MODE_RAW, 2, b, 0, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
         return hdr;
     }
 
@@ -114,7 +208,7 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
     // R7 fast-path: L > cube_size_limit; cube mode always expands beyond this point
     if l > config.cube_size_limit() {
-        let hdr = serialize_header(MODE_RAW, n_effective, b, l, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
+        let hdr = serialize_header(MODE_RAW, n_effective, b, l, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
         let mut out = hdr;
         out.extend_from_slice(data);
         return out;
@@ -122,7 +216,7 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
     // R7: small inputs always raw-store (header alone would exceed any savings)
     if l <= config.raw_store_bound {
-        let hdr = serialize_header(MODE_RAW, n_effective, b, l, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
+        let hdr = serialize_header(MODE_RAW, n_effective, b, l, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
         let mut out = hdr;
         out.extend_from_slice(data);
         return out;
@@ -153,10 +247,33 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         axis_gaps.push(gaps);
     }
 
+    // Gather sequential codes (i-order) for RleCodes estimation and encoding.
+    // populated is in lex order; we need codes indexed by original position i.
+    // Build (i -> code) by inverting phi for each (coords, val) in populated.
+    let seq_codes: Vec<usize> = {
+        // Build a map from original index i to code
+        let mut idx_to_code = vec![0usize; l];
+        for (coords, val) in populated.iter() {
+            let i = phi_inv_fn(coords, b);
+            if i < l {
+                // v2c is sorted by value; look up code via binary search
+                let code = {
+                    let pos = v2c.partition_point(|&(v, _)| v < *val);
+                    v2c[pos].1
+                };
+                idx_to_code[i] = code;
+            }
+        }
+        idx_to_code
+    };
+
     // Step 5: R7 decision — compare cube encoded size vs raw-store output size
     let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
-    let cube_size = estimate_cube_size(n, b, l, cube.count, b_k, &axis_gaps, &inverse_dict, w, gap_scheme);
-    let raw_hdr = serialize_header(MODE_RAW, n, b, l, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
+    let cube_size = estimate_cube_size(
+        n, b, l, cube.count, b_k, &axis_gaps, &inverse_dict, w,
+        gap_scheme, value_scheme, &seq_codes,
+    );
+    let raw_hdr = serialize_header(MODE_RAW, n, b, l, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
     let raw_output_size = raw_hdr.len() + l;
 
     if cube_size >= raw_output_size {
@@ -172,20 +289,31 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         GapScheme::PackedNibble => axis_gaps.iter().map(|g| packed_nibble_encode(g)).collect(),
     };
 
-    // Step 7: R5 bitpack values (in lex-sorted point order)
-    let point_values: Vec<usize> = populated.iter().map(|(_, v)| *v).collect();
-    let packed_values = bitpack_encode(&point_values, &v2c, w);
+    // Step 7: Encode value stream using the configured value scheme
+    let encoded_values: Vec<u8> = match value_scheme {
+        ValueScheme::BitpackFixed => {
+            // R5: bitpack values in lex-sorted point order (v1-default)
+            let point_values: Vec<usize> = populated.iter().map(|(_, v)| *v).collect();
+            bitpack_encode(&point_values, &v2c, w)
+        }
+        ValueScheme::RleCodes => {
+            // RLE on codes in sequential i-order — collapses clustered runs
+            rle_codes_encode(&seq_codes)
+        }
+    };
 
-    // Step 8: R6 serialize header (with gap scheme byte)
+    // Step 8: R6 serialize header (with gap scheme byte and value scheme byte)
     let hdr = serialize_header(
-        MODE_CUBE, n, b, l, cube.count, b_k, gap_scheme.scheme_byte(), w, &inverse_dict, &axis_gap_counts,
+        MODE_CUBE, n, b, l, cube.count, b_k,
+        gap_scheme.scheme_byte(), value_scheme.scheme_byte(),
+        w, &inverse_dict, &axis_gap_counts,
     );
 
     let mut out = hdr;
     for stream in &gap_streams {
         out.extend_from_slice(stream);
     }
-    out.extend_from_slice(&packed_values);
+    out.extend_from_slice(&encoded_values);
     out
 }
 
@@ -281,44 +409,82 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         offset += consumed;
     }
 
-    // Read bitpacked values
-    let bitpack_bytes_count = if count > 0 { (count * w).div_ceil(8) } else { 0 };
-    if offset + bitpack_bytes_count > blob.len() {
-        return Err(CubrimError::Decode(format!(
-            "Bitpack data truncated: need {} bytes at offset {}, have {} bytes total",
-            bitpack_bytes_count, offset, blob.len()
-        )));
-    }
-    let packed_values_bytes = &blob[offset..offset + bitpack_bytes_count];
+    // Determine value scheme from header
+    let value_scheme = ValueScheme::from_byte(hdr.value_scheme).ok_or_else(|| {
+        CubrimError::Decode(format!("Unknown value_scheme byte: {} in header", hdr.value_scheme))
+    })?;
 
-    // Decode bitpacked values
-    let values = bitpack_decode(packed_values_bytes, w, count, inverse_dict)?;
+    // Decode value stream (scheme-dispatched)
+    let result = match value_scheme {
+        ValueScheme::BitpackFixed => {
+            // Read bitpacked values (lex order)
+            let bitpack_bytes_count = if count > 0 { (count * w).div_ceil(8) } else { 0 };
+            if offset + bitpack_bytes_count > blob.len() {
+                return Err(CubrimError::Decode(format!(
+                    "Bitpack data truncated: need {} bytes at offset {}, have {} bytes total",
+                    bitpack_bytes_count, offset, blob.len()
+                )));
+            }
+            let packed_values_bytes = &blob[offset..offset + bitpack_bytes_count];
 
-    // Reconstruct original byte sequence.
-    //
-    // During encode, cube.rs builds (phi(i), data[i]) for each i in [0, L-1],
-    // then sorts by phi(i) coordinates in lex order.
-    // Values are stored in that lex-sorted order.
-    //
-    // NOTE (PRD §2.4 item 8): lex order of phi(i) coords != sequential index order.
-    // Example: phi(256)=(0,1) < phi(1)=(1,0) in lex order.
-    // Therefore: rebuild lex-sorted list of phi(i) for i in [0, L-1],
-    // then result[phi_inv(coords)] = values[j].
-    //
-    // This is deterministic from (L, N, B) alone — no out-of-band state (R6).
+            // Decode bitpacked values (in lex-sorted point order)
+            let values = bitpack_decode(packed_values_bytes, w, count, inverse_dict)?;
 
-    let mut lex_sorted_coords: Vec<Vec<usize>> = (0..l)
-        .map(|i| phi_fn(i, n, b))
-        .collect();
-    lex_sorted_coords.sort();
+            // Reconstruct original byte sequence.
+            //
+            // During encode, cube.rs builds (phi(i), data[i]) for each i in [0, L-1],
+            // then sorts by phi(i) coordinates in lex order.
+            // Values are stored in that lex-sorted order.
+            //
+            // NOTE (PRD §2.4 item 8): lex order of phi(i) coords != sequential index order.
+            // Example: phi(256)=(0,1) < phi(1)=(1,0) in lex order.
+            // Therefore: rebuild lex-sorted list of phi(i) for i in [0, L-1],
+            // then result[phi_inv(coords)] = values[j].
+            //
+            // This is deterministic from (L, N, B) alone — no out-of-band state (R6).
 
-    let mut result = vec![0u8; l];
-    for (j, coords) in lex_sorted_coords.iter().enumerate() {
-        let orig_idx = phi_inv_fn(coords, b);
-        if orig_idx < l && j < values.len() {
-            result[orig_idx] = values[j] as u8;
+            let mut lex_sorted_coords: Vec<Vec<usize>> = (0..l)
+                .map(|i| phi_fn(i, n, b))
+                .collect();
+            lex_sorted_coords.sort();
+
+            let mut result = vec![0u8; l];
+            for (j, coords) in lex_sorted_coords.iter().enumerate() {
+                let orig_idx = phi_inv_fn(coords, b);
+                if orig_idx < l && j < values.len() {
+                    result[orig_idx] = values[j] as u8;
+                }
+            }
+            result
         }
-    }
+        ValueScheme::RleCodes => {
+            // Decode RLE-codes stream: sequential i-order codes.
+            // Each (code: u8, run: u16) encodes `run` copies of inverse_dict[code].
+            let (seq_codes, _consumed) = rle_codes_decode(blob, offset, count)?;
+
+            // seq_codes[i] is the code for original position i.
+            // Reconstruct: result[i] = inverse_dict[seq_codes[i]] as u8.
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "RLE-codes decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(), count
+                )));
+            }
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= inverse_dict.len() {
+                    return Err(CubrimError::Decode(format!(
+                        "RLE-codes code {} at position {} >= n_distinct {}",
+                        code, i, inverse_dict.len()
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+    };
 
     Ok(result)
 }
@@ -360,6 +526,7 @@ fn read_rle_stream(blob: &[u8], offset: usize, n_gaps: usize) -> Result<(&[u8], 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::header::VALUE_SCHEME_RLE_CODES;
 
     // -------------------------------------------------------------------------
     // V-AC-1: Byte-exact lossless round-trip (CORNERSTONE)
@@ -692,5 +859,171 @@ mod tests {
             let recovered = decode(&blob).unwrap();
             assert_eq!(&recovered, data, "PackedNibble round-trip failed for '{name}'");
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // ValueScheme::BitpackFixed — V-AC-8 default byte-identity
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_default_value_scheme_byte_identical_to_v1() {
+        // V-AC-8 sibling: BitpackFixed is the default; output must be byte-identical
+        // to encode() (which uses v1_default = BitpackFixed).
+        let inputs: Vec<Vec<u8>> = vec![
+            vec![0xABu8; 400],
+            b"the quick brown fox jumps ".iter().copied().cycle().take(1024).collect(),
+        ];
+        for input in &inputs {
+            let v1_blob = encode(input);
+            let fixed_blob = encode_with_config(input, &EncodeConfig {
+                value_scheme: crate::config::ValueScheme::BitpackFixed,
+                ..EncodeConfig::v1_default()
+            });
+            assert_eq!(v1_blob, fixed_blob,
+                "BitpackFixed must produce byte-identical output to encode() for {} bytes",
+                input.len());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // ValueScheme::RleCodes — TDD tests (written before implementation)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_rle_codes_round_trip_hand_made_run_heavy() {
+        // Hand-crafted input with 3 distinct values in long runs:
+        //   128 × 0x01, 128 × 0x02, 128 × 0x03 = 384 bytes total
+        // In sequential order codes are [0,0,...,0, 1,1,...,1, 2,2,...,2] — 3 long runs.
+        let mut data = vec![0x01u8; 128];
+        data.extend(vec![0x02u8; 128]);
+        data.extend(vec![0x03u8; 128]);
+        assert_eq!(data.len(), 384);
+
+        let cfg = EncodeConfig {
+            value_scheme: crate::config::ValueScheme::RleCodes,
+            ..EncodeConfig::v1_default()
+        };
+        let blob = encode_with_config(&data, &cfg);
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "RleCodes round-trip failed for run-heavy input");
+    }
+
+    #[test]
+    fn test_rle_codes_round_trip_all_classes() {
+        // Round-trip under RleCodes across all standard input classes
+        let cfg = EncodeConfig {
+            value_scheme: crate::config::ValueScheme::RleCodes,
+            ..EncodeConfig::v1_default()
+        };
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("empty", vec![]),
+            ("1byte", vec![0x42]),
+            ("uniform_400", vec![0xAA; 400]),
+            ("all_distinct_256", (0u8..=255).collect()),
+            ("text_1kb", b"the quick brown fox jumps over the lazy dog ".iter().copied().cycle().take(1024).collect()),
+            ("random_1kb", (0usize..1024).map(|i| (i as u8).wrapping_mul(113).wrapping_add(7)).collect()),
+        ];
+        for (name, data) in &cases {
+            let blob = encode_with_config(data, &cfg);
+            let recovered = decode(&blob).unwrap();
+            assert_eq!(&recovered, data, "RleCodes round-trip failed for '{name}'");
+        }
+    }
+
+    #[test]
+    fn test_rle_codes_sequential_order_property() {
+        // Property: for a run-heavy input (sequential blocks of same byte),
+        // RleCodes produces a SMALLER blob than BitpackFixed.
+        // This validates the core re-scoped V-AC-4 claim.
+        let mut data = vec![0x0Au8; 200];
+        data.extend(vec![0x0Bu8; 200]);
+        // 400 bytes total, 2 distinct values in 2 long runs.
+        // BitpackFixed: W=1 bit → ceil(400/8) = 50 bytes bitpack
+        // RleCodes: 2 triplets × 3B = 6 bytes — dramatically smaller
+        assert_eq!(data.len(), 400);
+
+        let fixed_blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: crate::config::ValueScheme::BitpackFixed,
+            ..EncodeConfig::v1_default()
+        });
+        let rle_blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: crate::config::ValueScheme::RleCodes,
+            ..EncodeConfig::v1_default()
+        });
+
+        // Both must round-trip correctly
+        assert_eq!(decode(&fixed_blob).unwrap(), data, "BitpackFixed round-trip");
+        assert_eq!(decode(&rle_blob).unwrap(), data, "RleCodes round-trip");
+
+        assert!(
+            rle_blob.len() < fixed_blob.len(),
+            "RleCodes ({} bytes) must be smaller than BitpackFixed ({} bytes) for sequential-run input",
+            rle_blob.len(), fixed_blob.len()
+        );
+    }
+
+    #[test]
+    fn test_rle_codes_header_value_scheme_byte() {
+        // Header must record value_scheme=2 (VALUE_SCHEME_RLE_CODES) for RleCodes.
+        use crate::header::{parse_header, MODE_CUBE};
+        let data: Vec<u8> = vec![0xABu8; 400];
+        let cfg = EncodeConfig {
+            value_scheme: crate::config::ValueScheme::RleCodes,
+            ..EncodeConfig::v1_default()
+        };
+        let blob = encode_with_config(&data, &cfg);
+        let (hdr, _) = parse_header(&blob).unwrap();
+        if hdr.mode == MODE_CUBE {
+            assert_eq!(hdr.value_scheme, VALUE_SCHEME_RLE_CODES,
+                "RleCodes config must write value_scheme=2 to header");
+        }
+    }
+
+    #[test]
+    fn test_rle_codes_diverges_from_bitpack_fixed() {
+        // RleCodes blob must differ from BitpackFixed blob for any cube-mode input.
+        let data: Vec<u8> = vec![0xABu8; 400];
+        let fixed_blob = encode(&data);
+        let rle_blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: crate::config::ValueScheme::RleCodes,
+            ..EncodeConfig::v1_default()
+        });
+        assert_ne!(fixed_blob, rle_blob,
+            "RleCodes blob must differ from BitpackFixed blob");
+    }
+
+    // Inline RLE-codes primitive tests (white-box, no public API needed)
+    #[test]
+    fn test_rle_codes_encode_decode_primitives() {
+        // Hand-check encode/decode internals: 3 codes with runs 5,3,2
+        let seq_codes = {
+            let mut v = vec![0usize; 5]; // code 0, run 5
+            v.extend(vec![1usize; 3]);  // code 1, run 3
+            v.extend(vec![2usize; 2]);  // code 2, run 2
+            v
+        };
+        let encoded = rle_codes_encode(&seq_codes);
+        // 3 triplets × 3 bytes = 9 bytes
+        assert_eq!(encoded.len(), 9);
+        // First triplet: code=0, run=5
+        assert_eq!(encoded[0], 0u8);
+        assert_eq!(u16::from_be_bytes([encoded[1], encoded[2]]), 5u16);
+
+        // Synthesize a blob fragment and decode
+        let (decoded_codes, consumed) = rle_codes_decode(&encoded, 0, 10).unwrap();
+        assert_eq!(decoded_codes, seq_codes);
+        assert_eq!(consumed, 9);
+    }
+
+    #[test]
+    fn test_rle_codes_size_matches_encode_len() {
+        let seq_codes: Vec<usize> = {
+            let mut v = vec![0usize; 100];
+            v.extend(vec![1usize; 50]);
+            v.extend(vec![0usize; 25]); // second run of 0
+            v
+        };
+        let encoded = rle_codes_encode(&seq_codes);
+        assert_eq!(rle_codes_size(&seq_codes), encoded.len());
     }
 }

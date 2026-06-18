@@ -28,7 +28,10 @@ pub const MODE_RAW: u8 = 1;
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).
 pub const MAP_SCHEME_PACKED_NIBBLE: u8 = 2;
+/// Bitpack-fixed value scheme: lex-order point values, W bits each (v1-default).
 pub const VALUE_SCHEME_FIXED: u8 = 1;
+/// RLE-codes value scheme: sequential-order codes, (code:u8, run:u16) triples.
+pub const VALUE_SCHEME_RLE_CODES: u8 = 2;
 
 // Traversal and Phi identifiers (R1)
 pub const TRAVERSAL_LEX: u8 = 1;
@@ -65,6 +68,8 @@ pub struct Header {
 ///
 /// `map_scheme` is the gap-encoding scheme byte (MAP_SCHEME_RLE=1 for v1-default;
 /// MAP_SCHEME_PACKED_NIBBLE=2 for the PackedNibble varint scheme).
+/// `value_scheme` is the value-encoding scheme byte (VALUE_SCHEME_FIXED=1 for v1-default;
+/// VALUE_SCHEME_RLE_CODES=2 for the sequential-order RLE-codes scheme).
 pub fn serialize_header(
     mode: u8,
     n: usize,
@@ -74,6 +79,7 @@ pub fn serialize_header(
     count: usize,
     b_k: &[usize],
     map_scheme: u8,
+    value_scheme: u8,
     w: usize,
     inverse_dict: &[usize],
     axis_gap_counts: &[usize],
@@ -103,7 +109,7 @@ pub fn serialize_header(
 
     // map_scheme(1) + value_scheme(1) + W(1)
     out.push(map_scheme);
-    out.push(VALUE_SCHEME_FIXED);
+    out.push(value_scheme);
     out.push(w as u8);
 
     // n_distinct (2B, uint16)
@@ -271,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_serialize_parse_raw_mode() {
-        let bytes = serialize_header(MODE_RAW, 2, 256, 1000, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
+        let bytes = serialize_header(MODE_RAW, 2, 256, 1000, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
         assert_eq!(&bytes[0..4], &MAGIC);
         assert_eq!(bytes[4], VERSION);
         assert_eq!(bytes[5], MODE_RAW);
@@ -295,7 +301,7 @@ mod tests {
 
         let bytes = serialize_header(
             MODE_CUBE, 2, 256, 500, 42,
-            &b_k, MAP_SCHEME_RLE, 2, &inverse_dict, &axis_gap_counts,
+            &b_k, MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 2, &inverse_dict, &axis_gap_counts,
         );
 
         let (hdr, _offset) = parse_header(&bytes).unwrap();
@@ -319,7 +325,7 @@ mod tests {
     fn test_b_k_is_u16_not_u8() {
         // PRD §2.4 item 3: b_k must be u16 (B=256 does not fit in u8)
         let b_k = vec![256usize, 256]; // B=256 exactly
-        let bytes = serialize_header(MODE_CUBE, 2, 256, 100, 10, &b_k, MAP_SCHEME_RLE, 8, &(0..256).collect::<Vec<_>>(), &[10, 8]);
+        let bytes = serialize_header(MODE_CUBE, 2, 256, 100, 10, &b_k, MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 8, &(0..256).collect::<Vec<_>>(), &[10, 8]);
         let (hdr, _) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.b_k[0], 256, "b_k=256 must survive round-trip through u16");
         assert_eq!(hdr.b_k[1], 256);
@@ -329,7 +335,7 @@ mod tests {
     fn test_inverse_dict_is_u8() {
         // PRD §2.4 item 4: inverse_dict entries are u8 (0..255)
         let inverse_dict: Vec<usize> = (0..256).collect();
-        let bytes = serialize_header(MODE_CUBE, 2, 256, 100, 10, &[256usize, 256], MAP_SCHEME_RLE, 8, &inverse_dict, &[10, 8]);
+        let bytes = serialize_header(MODE_CUBE, 2, 256, 100, 10, &[256usize, 256], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 8, &inverse_dict, &[10, 8]);
         let (hdr, _) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.inverse_dict, inverse_dict);
         // n_distinct bytes for inverse_dict (not 2 bytes each)
@@ -346,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_parse_rejects_bad_version() {
-        let mut bytes = serialize_header(MODE_RAW, 2, 256, 0, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
+        let mut bytes = serialize_header(MODE_RAW, 2, 256, 0, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
         bytes[4] = 99; // bad version
         assert!(parse_header(&bytes).is_err());
     }
@@ -358,7 +364,7 @@ mod tests {
         let axis_gap_counts = vec![5usize, 3];
         let bytes = serialize_header(
             MODE_CUBE, 2, 256, 400, 10,
-            &b_k, MAP_SCHEME_PACKED_NIBBLE, 2, &inverse_dict, &axis_gap_counts,
+            &b_k, MAP_SCHEME_PACKED_NIBBLE, VALUE_SCHEME_FIXED, 2, &inverse_dict, &axis_gap_counts,
         );
         let (hdr, _) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.map_scheme, MAP_SCHEME_PACKED_NIBBLE,
@@ -366,11 +372,25 @@ mod tests {
     }
 
     #[test]
+    fn test_value_scheme_rle_codes_survives_header_round_trip() {
+        let b_k = vec![256usize, 256];
+        let inverse_dict = vec![1usize, 2];
+        let axis_gap_counts = vec![5usize, 3];
+        let bytes = serialize_header(
+            MODE_CUBE, 2, 256, 400, 10,
+            &b_k, MAP_SCHEME_RLE, VALUE_SCHEME_RLE_CODES, 2, &inverse_dict, &axis_gap_counts,
+        );
+        let (hdr, _) = parse_header(&bytes).unwrap();
+        assert_eq!(hdr.value_scheme, VALUE_SCHEME_RLE_CODES,
+            "RleCodes value_scheme byte must survive header round-trip");
+    }
+
+    #[test]
     fn test_serialize_round_trip_golden_vector() {
         // Golden vector: raw-mode, L=4, "ABCD"
         // Must produce: CB 52 49 4D 01 01 02 01 00 00 00 04
         //               magic(4) version(1) mode=1(1) N=2(1) B=256->0100(2) L=4->00000004(4)
-        let bytes = serialize_header(MODE_RAW, 2, 256, 4, 0, &[], MAP_SCHEME_RLE, 0, &[], &[]);
+        let bytes = serialize_header(MODE_RAW, 2, 256, 4, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
         assert_eq!(&bytes[0..4], &[0xCB, 0x52, 0x49, 0x4D], "magic mismatch");
         assert_eq!(bytes[4], 1, "version");
         assert_eq!(bytes[5], MODE_RAW, "mode");

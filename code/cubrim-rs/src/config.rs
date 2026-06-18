@@ -26,6 +26,25 @@ pub enum GapScheme {
     PackedNibble,
 }
 
+/// Value encoding scheme for the bitpacked value stream.
+///
+/// Default (BitpackFixed) reproduces the v1 byte stream exactly — lex-order
+/// point values packed W bits each.
+/// RleCodes gathers value codes in SEQUENTIAL INPUT (i-order), not lex order,
+/// then run-length encodes them as (code: u8, run_length: u16) triplets.
+/// Codes are in [0, n_distinct) so they fit u8.  Run-length capped at 65535
+/// (same MAX_RUN cap as rle.rs).
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum ValueScheme {
+    /// v1-default: bitpack values in lex-sorted point order, W bits each.
+    /// Byte-identical to all previous output. Header byte = 1.
+    BitpackFixed,
+    /// RLE on the value CODE sequence in sequential (i-order) input order.
+    /// Collapses clustered runs into compact (code: u8, run: u16) triples.
+    /// Header byte = 2.
+    RleCodes,
+}
+
 impl GapScheme {
     /// Returns the map_scheme byte written to / read from the header.
     pub fn scheme_byte(&self) -> u8 {
@@ -40,6 +59,25 @@ impl GapScheme {
         match b {
             1 => Some(GapScheme::RleU16),
             2 => Some(GapScheme::PackedNibble),
+            _ => None,
+        }
+    }
+}
+
+impl ValueScheme {
+    /// Returns the value_scheme byte written to / read from the header.
+    pub fn scheme_byte(&self) -> u8 {
+        match self {
+            ValueScheme::BitpackFixed => 1,
+            ValueScheme::RleCodes => 2,
+        }
+    }
+
+    /// Construct from header byte. Returns None for unknown values.
+    pub fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            1 => Some(ValueScheme::BitpackFixed),
+            2 => Some(ValueScheme::RleCodes),
             _ => None,
         }
     }
@@ -73,6 +111,10 @@ pub struct EncodeConfig {
     /// Gap encoding scheme for the per-axis distance map streams.
     /// v1-default: GapScheme::RleU16 (byte-identical to v1 output).
     pub gap_scheme: GapScheme,
+
+    /// Value encoding scheme for the value stream.
+    /// v1-default: ValueScheme::BitpackFixed (byte-identical to v1 output).
+    pub value_scheme: ValueScheme,
 }
 
 impl EncodeConfig {
@@ -85,6 +127,7 @@ impl EncodeConfig {
             use_square_limit: true,
             n_override: None,
             gap_scheme: GapScheme::RleU16,
+            value_scheme: ValueScheme::BitpackFixed,
         }
     }
 
@@ -112,6 +155,22 @@ mod tests {
         assert_eq!(cfg.cube_size_limit(), 65536);
         assert_eq!(cfg.n_override, None, "v1-default: n_override must be None");
         assert_eq!(cfg.gap_scheme, GapScheme::RleU16, "v1-default: gap_scheme must be RleU16");
+        assert_eq!(cfg.value_scheme, ValueScheme::BitpackFixed, "v1-default: value_scheme must be BitpackFixed");
+    }
+
+    #[test]
+    fn test_value_scheme_byte_roundtrip() {
+        assert_eq!(ValueScheme::from_byte(ValueScheme::BitpackFixed.scheme_byte()), Some(ValueScheme::BitpackFixed));
+        assert_eq!(ValueScheme::from_byte(ValueScheme::RleCodes.scheme_byte()), Some(ValueScheme::RleCodes));
+        assert_eq!(ValueScheme::from_byte(0), None, "0 is not a valid value_scheme byte");
+        assert_eq!(ValueScheme::from_byte(99), None, "unknown byte returns None");
+    }
+
+    #[test]
+    fn test_value_scheme_default_is_1() {
+        // BitpackFixed = 1 is the v1 byte on the wire; must not change (V-AC-8)
+        assert_eq!(ValueScheme::BitpackFixed.scheme_byte(), 1u8);
+        assert_eq!(ValueScheme::RleCodes.scheme_byte(), 2u8);
     }
 
     #[test]
@@ -166,6 +225,7 @@ mod tests {
             use_square_limit: true,
             n_override: None,
             gap_scheme: GapScheme::RleU16,
+            value_scheme: ValueScheme::BitpackFixed,
         };
 
         let inputs: Vec<Vec<u8>> = vec![

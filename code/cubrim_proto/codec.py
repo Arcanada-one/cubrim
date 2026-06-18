@@ -47,6 +47,8 @@ from cubrim_proto.header import (
     VERSION,
     MAP_SCHEME_RLE,
     MAP_SCHEME_PACKED_NIBBLE,
+    VALUE_SCHEME_FIXED,
+    VALUE_SCHEME_RLE_CODES,
 )
 
 def _compute_min_N(L: int, B: int) -> int:
@@ -71,8 +73,28 @@ def _compute_min_N(L: int, B: int) -> int:
 HEADER_OVERHEAD_BOUND: int = 320
 
 
+def _rle_codes_size(seq_codes: list[int]) -> int:
+    """Compute byte size of RLE-codes stream (code:u8 + run:u16 = 3B per triplet)."""
+    if not seq_codes:
+        return 0
+    MAX_RUN = 65535
+    triplets = 1
+    current = seq_codes[0]
+    run = 1
+    for c in seq_codes[1:]:
+        if c == current and run < MAX_RUN:
+            run += 1
+        else:
+            triplets += 1
+            current = c
+            run = 1
+    return triplets * 3
+
+
 def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int,
-                         gap_scheme: int = MAP_SCHEME_RLE) -> int:
+                         gap_scheme: int = MAP_SCHEME_RLE,
+                         value_scheme: int = VALUE_SCHEME_FIXED,
+                         seq_codes: list[int] | None = None) -> int:
     """
     Estimate the encoded size of the cube representation in bytes.
     Used for R7 mode decision.
@@ -103,16 +125,41 @@ def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int,
     else:
         gap_total = sum(rle_size(gaps) for gaps in dm["axis_gaps"])
 
-    # Bit-packed values size
-    if count > 0:
-        bitpack_total = (count * W + 7) // 8
+    # Value stream size (value-scheme-dependent)
+    if value_scheme == VALUE_SCHEME_RLE_CODES:
+        value_total = _rle_codes_size(seq_codes or [])
     else:
-        bitpack_total = 0
+        # Bit-packed values size
+        if count > 0:
+            value_total = (count * W + 7) // 8
+        else:
+            value_total = 0
 
-    return hdr_size + gap_total + bitpack_total
+    return hdr_size + gap_total + value_total
 
 
-def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None = None) -> bytes:
+def _rle_codes_encode(seq_codes: list[int]) -> bytes:
+    """Encode sequential codes as (code:u8, run:u16 BE) triplets."""
+    import struct
+    MAX_RUN = 65535
+    if not seq_codes:
+        return b""
+    out = []
+    current = seq_codes[0]
+    run = 1
+    for c in seq_codes[1:]:
+        if c == current and run < MAX_RUN:
+            run += 1
+        else:
+            out.append(struct.pack(">BH", current, run))
+            current = c
+            run = 1
+    out.append(struct.pack(">BH", current, run))
+    return b"".join(out)
+
+
+def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None = None,
+           value_scheme: int = VALUE_SCHEME_FIXED) -> bytes:
     """
     R6/R7: Encode input bytes to Cubrim v1 format.
 
@@ -122,6 +169,7 @@ def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None
 
     gap_scheme: MAP_SCHEME_RLE (default, v1-compatible) or MAP_SCHEME_PACKED_NIBBLE.
     n_override: force N dimensions; clamped up to N_min if smaller.
+    value_scheme: VALUE_SCHEME_FIXED (default, v1-compatible) or VALUE_SCHEME_RLE_CODES.
     """
     L = len(data)
     B = 256  # v1-default
@@ -163,8 +211,21 @@ def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None
     # Step 4: R3/R3.1 build distance map
     dm = encode_distance_map(cube_data)
 
+    # Build sequential (i-order) codes for RleCodes estimation / encoding.
+    # populated is lex-sorted; build i->code by inverting phi for each populated point.
+    from cubrim_proto.phi import phi_inv as phi_inv_fn
+    idx_to_code = [0] * L
+    for coords, val in populated:
+        i = phi_inv_fn(coords, B=B)
+        if i < L:
+            idx_to_code[i] = value_dict[val]
+    seq_codes = idx_to_code  # codes in sequential (i) order
+
     # Step 5: R7 decision
-    cube_size = _estimate_cube_size(cube_data, dm, value_dict, W, gap_scheme=gap_scheme)
+    cube_size = _estimate_cube_size(cube_data, dm, value_dict, W,
+                                    gap_scheme=gap_scheme,
+                                    value_scheme=value_scheme,
+                                    seq_codes=seq_codes)
     raw_header_bytes = serialize_header(mode=MODE_RAW, N=N, B=B, L=L)
     raw_output_size = len(raw_header_bytes) + L
 
@@ -178,11 +239,15 @@ def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None
         gap_streams = [rle_encode(gaps) for gaps in dm["axis_gaps"]]
     axis_gap_counts = [len(dm["axis_gaps"][k]) for k in range(N)]
 
-    # Step 7: R5 bitpack values
-    point_values = [p[1] for p in populated]
-    packed_values = bitpack_encode(point_values, value_dict, W)
+    # Step 7: Encode value stream (value-scheme-dispatched)
+    if value_scheme == VALUE_SCHEME_RLE_CODES:
+        encoded_values = _rle_codes_encode(seq_codes)
+    else:
+        # BitpackFixed: lex-order point values, W bits each (v1-default)
+        point_values = [p[1] for p in populated]
+        encoded_values = bitpack_encode(point_values, value_dict, W)
 
-    # Step 8: R6 serialize header
+    # Step 8: R6 serialize header (with gap_scheme and value_scheme bytes)
     hdr = serialize_header(
         mode=MODE_CUBE,
         N=N,
@@ -194,9 +259,10 @@ def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None
         W=W,
         inverse_dict=inverse_dict_list,
         axis_gap_counts=axis_gap_counts,
+        value_scheme=value_scheme,
     )
 
-    return hdr + b"".join(gap_streams) + packed_values
+    return hdr + b"".join(gap_streams) + encoded_values
 
 
 def decode(blob: bytes) -> bytes:

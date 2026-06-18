@@ -43,6 +43,7 @@ MODE_RAW = 1
 MAP_SCHEME_RLE = 1
 MAP_SCHEME_PACKED_NIBBLE = 2
 VALUE_SCHEME_FIXED = 1
+VALUE_SCHEME_RLE_CODES = 2
 
 # Traversal and Phi identifiers (R1)
 TRAVERSAL_LEX = 1
@@ -65,6 +66,7 @@ def serialize_header(
     W: int = 0,
     inverse_dict: list[int] | None = None,
     axis_gap_counts: list[int] | None = None,
+    value_scheme: int = VALUE_SCHEME_FIXED,
 ) -> bytes:
     """
     R6: Serialize header to bytes.
@@ -89,7 +91,7 @@ def serialize_header(
 
     # Pack variable-length fields
     bk_bytes = struct.pack(f">{N}H", *b_k)  # uint16: b_k <= B (B may be 256, which does not fit in uint8)
-    schemes = struct.pack(">BBB", map_scheme, VALUE_SCHEME_FIXED, W)
+    schemes = struct.pack(">BBB", map_scheme, value_scheme, W)
     n_dist_bytes = struct.pack(">H", n_distinct)
     # inverse_dict uses uint8 (values are bytes 0..255) — halves dict overhead
     inv_dict_bytes = struct.pack(f">{n_distinct}B", *inverse_dict) if n_distinct else b""
