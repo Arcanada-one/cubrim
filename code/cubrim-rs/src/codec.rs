@@ -81,51 +81,46 @@ fn estimate_cube_size(
     hdr_size + gap_total + value_total
 }
 
+/// Iterate over (code, run_length) pairs in `seq_codes`, calling `emit` for each run.
+/// Run lengths are capped at MAX_RUN (65535).  Empty input produces zero calls.
+fn for_each_rle_run(seq_codes: &[usize], mut emit: impl FnMut(usize, usize)) {
+    use crate::rle::MAX_RUN;
+    if seq_codes.is_empty() {
+        return;
+    }
+    let mut current = seq_codes[0];
+    let mut run = 1usize;
+    for &c in &seq_codes[1..] {
+        if c == current && run < MAX_RUN {
+            run += 1;
+        } else {
+            emit(current, run);
+            current = c;
+            run = 1;
+        }
+    }
+    emit(current, run);
+}
+
 /// Encode value codes in sequential (i-order) input order as RLE triplets.
 /// Each run emitted as: code(u8) + run_length(u16 BE) = 3 bytes.
 /// Codes are in [0, n_distinct) which fits u8 (n_distinct <= 256 by design).
 /// Run lengths capped at 65535 (same as rle.rs MAX_RUN).
 fn rle_codes_encode(seq_codes: &[usize]) -> Vec<u8> {
-    use crate::rle::MAX_RUN;
-    if seq_codes.is_empty() {
-        return vec![];
-    }
     let mut out = Vec::new();
-    let mut current = seq_codes[0];
-    let mut run = 1usize;
-    for &c in &seq_codes[1..] {
-        if c == current && run < MAX_RUN {
-            run += 1;
-        } else {
-            out.push(current as u8);
-            out.extend_from_slice(&(run as u16).to_be_bytes());
-            current = c;
-            run = 1;
-        }
-    }
-    out.push(current as u8);
-    out.extend_from_slice(&(run as u16).to_be_bytes());
+    for_each_rle_run(seq_codes, |code, run| {
+        out.push(code as u8);
+        out.extend_from_slice(&(run as u16).to_be_bytes());
+    });
     out
 }
 
 /// Compute byte size of the RLE-codes stream without allocating.
 fn rle_codes_size(seq_codes: &[usize]) -> usize {
-    use crate::rle::MAX_RUN;
-    if seq_codes.is_empty() {
-        return 0;
-    }
-    let mut triplets = 1usize;
-    let mut current = seq_codes[0];
-    let mut run = 1usize;
-    for &c in &seq_codes[1..] {
-        if c == current && run < MAX_RUN {
-            run += 1;
-        } else {
-            triplets += 1;
-            current = c;
-            run = 1;
-        }
-    }
+    let mut triplets = 0usize;
+    for_each_rle_run(seq_codes, |_, _| {
+        triplets += 1;
+    });
     triplets * 3  // 1 byte code + 2 bytes run_length
 }
 
