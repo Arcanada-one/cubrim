@@ -13,6 +13,8 @@
 - **zstd:** *** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***
 - **brotli:** brotli 1.2.0
 - **timestamp:** 2026-06-18T01:23:43Z
+- **sweep-code commit (axis-sweep):** 1303e72 (feat/cubr-0012-axis-sweep)
+- **sweep-code commit (value-scheme):** 5357c3c (feat/cubr-0012-axis-sweep)
 
 ## Time-Series Results
 
@@ -147,6 +149,16 @@ Round-trip (all inputs): **PASS**
 | sparse_small | 1.0508 | 1.0508 | 0.0000 |
 
 > Negative delta = smaller output = better compression.
+>
+> **V-AC-4 result:** t3_bitpack_reconfirm → t4_rle_codes on sparse_clustered:
+> 1076B (0.5254) → **178B (0.0869)**, delta = −0.4385. STRICT improvement vs 0.5254 target.
+> Delta source: VALUE-STREAM SCHEME change (BitpackFixed → RleCodes sequential-order).
+> Gap streams unchanged; all other config params identical.
+> The improvement is real and the source is confirmed.
+>
+> Note on text/log_like: RleCodes expands value stream for non-sequential-clustered inputs
+> (no long runs in i-order). R7 raw-store guard correctly fires, preventing blowup.
+> These inputs benefit from BitpackFixed and are unaffected by the default config.
 
 ## Corpus Manifest (Generator Parameters)
 
