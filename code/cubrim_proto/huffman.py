@@ -1,5 +1,5 @@
 """
-Canonical Huffman coding over the value-code stream.
+Canonical Huffman coding over the value-code stream.  # R1
 
 Pinned tie-break during tree construction (identical to Rust twin):
   (frequency, monotonic insertion counter, symbol_value for leaves)

@@ -18,6 +18,7 @@
       "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "zstd": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***",
       "brotli": "brotli 1.2.0",
+      "code_sha": "734d540c1549ee144a131c2ada65b3c508216035",
       "timestamp": "2026-06-18T14:52:42Z"
     },
     "round_trip_all": "PASS",
@@ -155,6 +156,7 @@
       "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "zstd": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***",
       "brotli": "brotli 1.2.0",
+      "code_sha": "734d540c1549ee144a131c2ada65b3c508216035",
       "timestamp": "2026-06-18T14:52:47Z"
     },
     "round_trip_all": "PASS",
@@ -292,6 +294,7 @@
       "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "zstd": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***",
       "brotli": "brotli 1.2.0",
+      "code_sha": "734d540c1549ee144a131c2ada65b3c508216035",
       "timestamp": "2026-06-18T14:52:54Z"
     },
     "round_trip_all": "PASS",
