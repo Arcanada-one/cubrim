@@ -5,18 +5,18 @@
 
 ## Environment
 
-- **host:** mac.tailb1f805.ts.net
-- **os:** macOS-26.5.1-arm64-arm-64bit-Mach-O
-- **python:** 3.14.4
+- **host:** arcana-dev
+- **os:** Linux-6.8.0-106-generic-x86_64-with-glibc2.39
+- **python:** 3.12.3
 - **rustc:** rustc 1.96.0 (ac68faa20 2026-05-25)
 - **cargo:** cargo 1.96.0 (30a34c682 2026-05-25)
-- **zstd:** *** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***
-- **brotli:** brotli 1.2.0
-- **timestamp:** 2026-06-18T00:05:26Z
+- **zstd:** *** Zstandard CLI (64-bit) v1.5.5, by Yann Collet ***
+- **brotli:** brotli 1.1.0
+- **timestamp:** 2026-06-18T00:07:33Z
 
 ## Time-Series Results
 
-### t1_v1_default — 2026-06-18T00:05:26Z
+### t1_v1_default — 2026-06-18T00:07:33Z
 
 Config: raw_store_bound=320, b=256, use_square_limit=True
 
@@ -24,15 +24,15 @@ Round-trip (all inputs): **PASS**
 
 | Input | Size | Cubrim | CRatio | Mode | zstd | zRatio | brotli | bRatio | Round-trip |
 |-------|------|--------|--------|------|------|--------|--------|--------|------------|
-| sparse_clustered | 2048 | 1076 | 0.5254 | cube | 102 | 0.0498 | 87 | 0.0425 | PASS |
+| sparse_clustered | 2048 | 1076 | 0.5254 | cube | 105 | 0.0513 | 87 | 0.0425 | PASS |
 | dense | 4096 | 4109 | 1.0032 | raw | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
 | text | 16384 | 10307 | 0.6291 | cube | 1234 | 0.0753 | 1194 | 0.0729 | PASS |
-| log_like | 16384 | 12381 | 0.7557 | cube | 427 | 0.0261 | 379 | 0.0231 | PASS |
-| binary_mixed | 8192 | 8205 | 1.0016 | raw | 5241 | 0.6398 | 4803 | 0.5863 | PASS |
+| log_like | 16384 | 12381 | 0.7557 | cube | 426 | 0.0260 | 379 | 0.0231 | PASS |
+| binary_mixed | 8192 | 8205 | 1.0016 | raw | 5238 | 0.6394 | 4803 | 0.5863 | PASS |
 | random_high | 4096 | 4109 | 1.0032 | raw | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
 | sparse_small | 256 | 269 | 1.0508 | raw | 41 | 0.1602 | 31 | 0.1211 | PASS |
 
-### t2_raw_store_200 — 2026-06-18T00:05:32Z
+### t2_raw_store_200 — 2026-06-18T00:07:37Z
 
 Config: raw_store_bound=200, b=256, use_square_limit=True
 
@@ -40,11 +40,11 @@ Round-trip (all inputs): **PASS**
 
 | Input | Size | Cubrim | CRatio | Mode | zstd | zRatio | brotli | bRatio | Round-trip |
 |-------|------|--------|--------|------|------|--------|--------|--------|------------|
-| sparse_clustered | 2048 | 1076 | 0.5254 | cube | 102 | 0.0498 | 87 | 0.0425 | PASS |
+| sparse_clustered | 2048 | 1076 | 0.5254 | cube | 105 | 0.0513 | 87 | 0.0425 | PASS |
 | dense | 4096 | 4109 | 1.0032 | raw | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
 | text | 16384 | 10307 | 0.6291 | cube | 1234 | 0.0753 | 1194 | 0.0729 | PASS |
-| log_like | 16384 | 12381 | 0.7557 | cube | 427 | 0.0261 | 379 | 0.0231 | PASS |
-| binary_mixed | 8192 | 8205 | 1.0016 | raw | 5241 | 0.6398 | 4803 | 0.5863 | PASS |
+| log_like | 16384 | 12381 | 0.7557 | cube | 426 | 0.0260 | 379 | 0.0231 | PASS |
+| binary_mixed | 8192 | 8205 | 1.0016 | raw | 5238 | 0.6394 | 4803 | 0.5863 | PASS |
 | random_high | 4096 | 4109 | 1.0032 | raw | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
 | sparse_small | 256 | 108 | 0.4219 | cube | 41 | 0.1602 | 31 | 0.1211 | PASS |
 

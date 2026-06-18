@@ -9,7 +9,7 @@ use std::env;
 use std::fs;
 use std::process;
 
-use cubrim::{encode, decode, encode_with_config, EncodeConfig};
+use cubrim::{decode, encode_with_config, EncodeConfig};
 
 fn usage() {
     eprintln!("Usage:");
