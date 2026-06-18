@@ -13,6 +13,7 @@
 - **zstd:** *** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***
 - **brotli:** brotli 1.2.0
 - **timestamp:** 2026-06-18T01:23:43Z
+- **sweep-code commit:** 1303e72 (feat/cubr-0012-axis-sweep)
 
 ## Time-Series Results
 
