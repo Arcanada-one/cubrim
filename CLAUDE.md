@@ -88,7 +88,8 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 > Hard-won lessons. Each one line, imperative, specific.
 
 1. **ρ=1 corpus trap.** A corpus where all inputs fully populate the N-dimensional cube (L = B^N → ρ=1.0) makes all gaps=1. The distance-map mechanism then carries zero information. Sub-1.0 compression at ρ=1 = value-bitpacking only, NOT the cube principle. ALWAYS include ≥1 sparse input (ρ < 0.3) in any prototype corpus meant to validate the cube mechanism — a dense-only corpus tests the scaffolding, not the principle. (Discovered in the first Python prototype: text 0.63 / log 0.76 ratios came entirely from value-width packing while the gap map was byte-identical across different inputs.)
-2. [TODO: Add gotchas as they are discovered — e.g. edge-bound vs entropy trade-offs, N-dim explosion costs.]
+2. **Positional coordinates make the internal cube axes improvement-inert.** When values map to the cube by position (the coordinate is implied by order, not stored), sweeping the internal axes — N, edge-bound B, and the map-scheme — does not move the compression ratio: the distance-map collapses to a handful of bytes while the value stream is 99%+ of the output. Measured in the second iteration: all three axes were implemented correctly yet the ratio was unchanged. The real lever is **run-awareness in the value stream**, not the cube geometry — a run-encoding value scheme cut `sparse_clustered` 0.5254 → 0.0869 (≈6× smaller output) where the axis sweep did nothing. Before spending effort on cube-shape tuning, measure whether the map even carries weight; if it doesn't, attack the value stream.
+3. [TODO: Add gotchas as they are discovered — e.g. edge-bound vs entropy trade-offs, N-dim explosion costs.]
 
 ## Datarim Workflow
 
