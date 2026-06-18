@@ -18,6 +18,21 @@ use crate::error::CubrimError;
 // Format identification — byte-exact match with prototype
 // Python: MAGIC = b"\xCBRIM" = [0xCB, 0x52, 0x49, 0x4D]
 pub const MAGIC: [u8; 4] = [0xCB, b'R', b'I', b'M'];
+
+/// All fields needed to serialize the cube-mode portion of the header.
+/// Passed to serialize_cube_header; `mode` is implied (always MODE_CUBE).
+pub(crate) struct CubeHeaderState<'a> {
+    pub n: usize,
+    pub b: usize,
+    pub l: usize,
+    pub count: usize,
+    pub b_k: &'a [usize],
+    pub map_scheme: u8,
+    pub value_scheme: u8,
+    pub w: usize,
+    pub inverse_dict: &'a [usize],
+    pub axis_gap_counts: &'a [usize],
+}
 pub const VERSION: u8 = 1;
 
 // Mode constants (R6/R7)
@@ -62,74 +77,54 @@ pub struct Header {
     pub axis_gap_counts: Vec<usize>,
 }
 
-/// Serialize header to bytes.
-/// For mode=1 (raw-store): only fixed fields + L are meaningful.
-/// For mode=0 (cube): all fields required.
-///
-/// `map_scheme` is the gap-encoding scheme byte (MAP_SCHEME_RLE=1 for v1-default;
-/// MAP_SCHEME_PACKED_NIBBLE=2 for the PackedNibble varint scheme).
-/// `value_scheme` is the value-encoding scheme byte (VALUE_SCHEME_FIXED=1 for v1-default;
-/// VALUE_SCHEME_RLE_CODES=2 for the sequential-order RLE-codes scheme).
-pub fn serialize_header(
-    mode: u8,
-    n: usize,
-    b: usize,
-    l: usize,
-    // cube-mode only:
-    count: usize,
-    b_k: &[usize],
-    map_scheme: u8,
-    value_scheme: u8,
-    w: usize,
-    inverse_dict: &[usize],
-    axis_gap_counts: &[usize],
-) -> Vec<u8> {
-    let mut out = Vec::new();
-
-    // Fixed portion: magic(4) + version(1) + mode(1) + N(1) + B(2) + L(4) = 13 bytes
+/// Serialize the fixed portion of the header for raw-store mode (MODE_RAW).
+/// Only fixed fields are written; cube-specific fields are omitted.
+pub(crate) fn serialize_raw_header(n: usize, b: usize, l: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(FIXED_HEADER_SIZE);
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
-    out.push(mode);
+    out.push(MODE_RAW);
     out.push(n as u8);
     out.extend_from_slice(&(b as u16).to_be_bytes());
     out.extend_from_slice(&(l as u32).to_be_bytes());
+    out
+}
 
-    if mode == MODE_RAW {
-        return out;
-    }
-
-    // mode == MODE_CUBE: append cube-specific fields
-    // count (4B, uint32)
-    out.extend_from_slice(&(count as u32).to_be_bytes());
-
-    // b_k (N * 2B, uint16) — b_k can be 256 which doesn't fit in u8 (PRD §2.4 item 3)
-    for &bk in b_k {
+/// Serialize the full cube-mode header from a CubeHeaderState.
+/// `mode` is always MODE_CUBE; all cube-specific fields are written.
+pub(crate) fn serialize_cube_header(s: &CubeHeaderState<'_>) -> Vec<u8> {
+    let mut out = Vec::new();
+    // Fixed portion: magic(4) + version(1) + mode(1) + N(1) + B(2) + L(4) = 13 bytes
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_CUBE);
+    out.push(s.n as u8);
+    out.extend_from_slice(&(s.b as u16).to_be_bytes());
+    out.extend_from_slice(&(s.l as u32).to_be_bytes());
+    // count (4B)
+    out.extend_from_slice(&(s.count as u32).to_be_bytes());
+    // b_k (N * 2B)
+    for &bk in s.b_k {
         out.extend_from_slice(&(bk as u16).to_be_bytes());
     }
-
     // map_scheme(1) + value_scheme(1) + W(1)
-    out.push(map_scheme);
-    out.push(value_scheme);
-    out.push(w as u8);
-
-    // n_distinct (2B, uint16)
-    let n_distinct = inverse_dict.len();
+    out.push(s.map_scheme);
+    out.push(s.value_scheme);
+    out.push(s.w as u8);
+    // n_distinct (2B)
+    let n_distinct = s.inverse_dict.len();
     out.extend_from_slice(&(n_distinct as u16).to_be_bytes());
-
-    // inverse_dict (n_distinct * 1B, uint8) — values are bytes 0..255
-    for &v in inverse_dict {
+    // inverse_dict (n_distinct * 1B)
+    for &v in s.inverse_dict {
         out.push(v as u8);
     }
-
     // traversal(1) + phi_id(1)
     out.push(TRAVERSAL_LEX);
     out.push(PHI_MIXED_RADIX);
-
-    // axis_gap_counts (N * 2B, uint16)
-    for &gc in axis_gap_counts {
+    // axis_gap_counts (N * 2B)
+    for &gc in s.axis_gap_counts {
         out.extend_from_slice(&(gc as u16).to_be_bytes());
     }
-
     out
 }
 
@@ -277,7 +272,7 @@ mod tests {
 
     #[test]
     fn test_serialize_parse_raw_mode() {
-        let bytes = serialize_header(MODE_RAW, 2, 256, 1000, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
+        let bytes = serialize_raw_header(2, 256, 1000);
         assert_eq!(&bytes[0..4], &MAGIC);
         assert_eq!(bytes[4], VERSION);
         assert_eq!(bytes[5], MODE_RAW);
@@ -299,10 +294,11 @@ mod tests {
         let inverse_dict = vec![65usize, 66, 67]; // 'A', 'B', 'C'
         let axis_gap_counts = vec![10usize, 8];
 
-        let bytes = serialize_header(
-            MODE_CUBE, 2, 256, 500, 42,
-            &b_k, MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 2, &inverse_dict, &axis_gap_counts,
-        );
+        let bytes = serialize_cube_header(&CubeHeaderState {
+            n: 2, b: 256, l: 500, count: 42,
+            b_k: &b_k, map_scheme: MAP_SCHEME_RLE, value_scheme: VALUE_SCHEME_FIXED,
+            w: 2, inverse_dict: &inverse_dict, axis_gap_counts: &axis_gap_counts,
+        });
 
         let (hdr, _offset) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.mode, MODE_CUBE);
@@ -325,7 +321,12 @@ mod tests {
     fn test_b_k_is_u16_not_u8() {
         // PRD §2.4 item 3: b_k must be u16 (B=256 does not fit in u8)
         let b_k = vec![256usize, 256]; // B=256 exactly
-        let bytes = serialize_header(MODE_CUBE, 2, 256, 100, 10, &b_k, MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 8, &(0..256).collect::<Vec<_>>(), &[10, 8]);
+        let full_dict: Vec<usize> = (0..256).collect();
+        let bytes = serialize_cube_header(&CubeHeaderState {
+            n: 2, b: 256, l: 100, count: 10,
+            b_k: &b_k, map_scheme: MAP_SCHEME_RLE, value_scheme: VALUE_SCHEME_FIXED,
+            w: 8, inverse_dict: &full_dict, axis_gap_counts: &[10, 8],
+        });
         let (hdr, _) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.b_k[0], 256, "b_k=256 must survive round-trip through u16");
         assert_eq!(hdr.b_k[1], 256);
@@ -335,7 +336,11 @@ mod tests {
     fn test_inverse_dict_is_u8() {
         // PRD §2.4 item 4: inverse_dict entries are u8 (0..255)
         let inverse_dict: Vec<usize> = (0..256).collect();
-        let bytes = serialize_header(MODE_CUBE, 2, 256, 100, 10, &[256usize, 256], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 8, &inverse_dict, &[10, 8]);
+        let bytes = serialize_cube_header(&CubeHeaderState {
+            n: 2, b: 256, l: 100, count: 10,
+            b_k: &[256, 256], map_scheme: MAP_SCHEME_RLE, value_scheme: VALUE_SCHEME_FIXED,
+            w: 8, inverse_dict: &inverse_dict, axis_gap_counts: &[10, 8],
+        });
         let (hdr, _) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.inverse_dict, inverse_dict);
         // n_distinct bytes for inverse_dict (not 2 bytes each)
@@ -352,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_parse_rejects_bad_version() {
-        let mut bytes = serialize_header(MODE_RAW, 2, 256, 0, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
+        let mut bytes = serialize_raw_header(2, 256, 0);
         bytes[4] = 99; // bad version
         assert!(parse_header(&bytes).is_err());
     }
@@ -362,10 +367,11 @@ mod tests {
         let b_k = vec![256usize, 256];
         let inverse_dict = vec![1usize, 2];
         let axis_gap_counts = vec![5usize, 3];
-        let bytes = serialize_header(
-            MODE_CUBE, 2, 256, 400, 10,
-            &b_k, MAP_SCHEME_PACKED_NIBBLE, VALUE_SCHEME_FIXED, 2, &inverse_dict, &axis_gap_counts,
-        );
+        let bytes = serialize_cube_header(&CubeHeaderState {
+            n: 2, b: 256, l: 400, count: 10,
+            b_k: &b_k, map_scheme: MAP_SCHEME_PACKED_NIBBLE, value_scheme: VALUE_SCHEME_FIXED,
+            w: 2, inverse_dict: &inverse_dict, axis_gap_counts: &axis_gap_counts,
+        });
         let (hdr, _) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.map_scheme, MAP_SCHEME_PACKED_NIBBLE,
             "PackedNibble scheme byte must survive header round-trip");
@@ -376,10 +382,11 @@ mod tests {
         let b_k = vec![256usize, 256];
         let inverse_dict = vec![1usize, 2];
         let axis_gap_counts = vec![5usize, 3];
-        let bytes = serialize_header(
-            MODE_CUBE, 2, 256, 400, 10,
-            &b_k, MAP_SCHEME_RLE, VALUE_SCHEME_RLE_CODES, 2, &inverse_dict, &axis_gap_counts,
-        );
+        let bytes = serialize_cube_header(&CubeHeaderState {
+            n: 2, b: 256, l: 400, count: 10,
+            b_k: &b_k, map_scheme: MAP_SCHEME_RLE, value_scheme: VALUE_SCHEME_RLE_CODES,
+            w: 2, inverse_dict: &inverse_dict, axis_gap_counts: &axis_gap_counts,
+        });
         let (hdr, _) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.value_scheme, VALUE_SCHEME_RLE_CODES,
             "RleCodes value_scheme byte must survive header round-trip");
@@ -390,7 +397,7 @@ mod tests {
         // Golden vector: raw-mode, L=4, "ABCD"
         // Must produce: CB 52 49 4D 01 01 02 01 00 00 00 04
         //               magic(4) version(1) mode=1(1) N=2(1) B=256->0100(2) L=4->00000004(4)
-        let bytes = serialize_header(MODE_RAW, 2, 256, 4, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
+        let bytes = serialize_raw_header(2, 256, 4);
         assert_eq!(&bytes[0..4], &[0xCB, 0x52, 0x49, 0x4D], "magic mismatch");
         assert_eq!(bytes[4], 1, "version");
         assert_eq!(bytes[5], MODE_RAW, "mode");

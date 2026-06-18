@@ -26,8 +26,9 @@ use crate::distance_map::{encode_axis_gaps, decode_axis_gaps};
 use crate::rle::{rle_encode, rle_decode, rle_size, packed_nibble_encode, packed_nibble_decode, packed_nibble_size};
 use crate::bitpack::{build_value_dict, compute_width, bitpack_encode, bitpack_decode};
 use crate::header::{
-    serialize_header, parse_header,
-    MODE_CUBE, MODE_RAW, MAP_SCHEME_RLE, VALUE_SCHEME_FIXED,
+    serialize_raw_header, serialize_cube_header, parse_header,
+    CubeHeaderState,
+    MODE_CUBE, MODE_RAW,
 };
 
 /// R7: Header overhead bound constant. Calibrated for v1-defaults.
@@ -43,26 +44,16 @@ fn compute_min_n(l: usize, b: usize) -> usize {
 }
 
 /// Estimate the cube-mode encoded output size (without allocating the full output).
+/// `state` carries all header fields; `axis_gaps` and `seq_codes` are needed only
+/// for gap/value size computation and are not part of the header state.
 fn estimate_cube_size(
-    n: usize,
-    b: usize,
-    l: usize,
-    count: usize,
-    b_k: &[usize],
+    state: &CubeHeaderState<'_>,
     axis_gaps: &[Vec<usize>],
-    inverse_dict: &[usize],
-    w: usize,
     gap_scheme: GapScheme,
     value_scheme: ValueScheme,
-    // sequential codes (i-order) needed for RleCodes size estimate
     seq_codes: &[usize],
 ) -> usize {
-    let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
-    let hdr_size = serialize_header(
-        MODE_CUBE, n, b, l, count, b_k,
-        gap_scheme.scheme_byte(), value_scheme.scheme_byte(),
-        w, inverse_dict, &axis_gap_counts,
-    ).len();
+    let hdr_size = serialize_cube_header(state).len();
 
     let gap_total: usize = match gap_scheme {
         GapScheme::RleU16 => axis_gaps.iter().map(|g| rle_size(g)).sum(),
@@ -71,7 +62,7 @@ fn estimate_cube_size(
 
     let value_total = match value_scheme {
         ValueScheme::BitpackFixed => {
-            if count > 0 { (count * w).div_ceil(8) } else { 0 }
+            if state.count > 0 { (state.count * state.w).div_ceil(8) } else { 0 }
         }
         ValueScheme::RleCodes => {
             rle_codes_size(seq_codes)
@@ -182,8 +173,7 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
     // Special case: empty input -> raw-store
     if l == 0 {
-        let hdr = serialize_header(MODE_RAW, 2, b, 0, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
-        return hdr;
+        return serialize_raw_header(2, b, 0);
     }
 
     let n_min = compute_min_n(l, b);
@@ -203,16 +193,14 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
     // R7 fast-path: L > cube_size_limit; cube mode always expands beyond this point
     if l > config.cube_size_limit() {
-        let hdr = serialize_header(MODE_RAW, n_effective, b, l, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
-        let mut out = hdr;
+        let mut out = serialize_raw_header(n_effective, b, l);
         out.extend_from_slice(data);
         return out;
     }
 
     // R7: small inputs always raw-store (header alone would exceed any savings)
     if l <= config.raw_store_bound {
-        let hdr = serialize_header(MODE_RAW, n_effective, b, l, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
-        let mut out = hdr;
+        let mut out = serialize_raw_header(n_effective, b, l);
         out.extend_from_slice(data);
         return out;
     }
@@ -264,16 +252,22 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
     // Step 5: R7 decision — compare cube encoded size vs raw-store output size
     let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
-    let cube_size = estimate_cube_size(
-        n, b, l, cube.count, b_k, &axis_gaps, &inverse_dict, w,
-        gap_scheme, value_scheme, &seq_codes,
-    );
-    let raw_hdr = serialize_header(MODE_RAW, n, b, l, 0, &[], MAP_SCHEME_RLE, VALUE_SCHEME_FIXED, 0, &[], &[]);
-    let raw_output_size = raw_hdr.len() + l;
+    let cube_state = CubeHeaderState {
+        n, b, l,
+        count: cube.count,
+        b_k,
+        map_scheme: gap_scheme.scheme_byte(),
+        value_scheme: value_scheme.scheme_byte(),
+        w,
+        inverse_dict: &inverse_dict,
+        axis_gap_counts: &axis_gap_counts,
+    };
+    let cube_size = estimate_cube_size(&cube_state, &axis_gaps, gap_scheme, value_scheme, &seq_codes);
+    let raw_output_size = serialize_raw_header(n, b, l).len() + l;
 
     if cube_size >= raw_output_size {
         // R7: cube does not improve on raw; use raw-store
-        let mut out = raw_hdr;
+        let mut out = serialize_raw_header(n, b, l);
         out.extend_from_slice(data);
         return out;
     }
@@ -297,12 +291,8 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         }
     };
 
-    // Step 8: R6 serialize header (with gap scheme byte and value scheme byte)
-    let hdr = serialize_header(
-        MODE_CUBE, n, b, l, cube.count, b_k,
-        gap_scheme.scheme_byte(), value_scheme.scheme_byte(),
-        w, &inverse_dict, &axis_gap_counts,
-    );
+    // Step 8: R6 serialize header
+    let hdr = serialize_cube_header(&cube_state);
 
     let mut out = hdr;
     for stream in &gap_streams {
