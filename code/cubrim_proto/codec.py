@@ -49,6 +49,13 @@ from cubrim_proto.header import (
     MAP_SCHEME_PACKED_NIBBLE,
     VALUE_SCHEME_FIXED,
     VALUE_SCHEME_RLE_CODES,
+    VALUE_SCHEME_ENTROPY,
+)
+from cubrim_proto.huffman import (
+    canonical_code_lengths,
+    huffman_encode,
+    huffman_decode,
+    huffman_bitstream_size,
 )
 
 def _compute_min_N(L: int, B: int) -> int:
@@ -104,6 +111,7 @@ def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int,
     count = cube_data["count"]
     b_k = cube_data["b_k"]
     inverse_dict = sorted(value_dict.keys())  # original values
+    n_distinct = len(inverse_dict)
 
     # Header size
     hdr_size = len(serialize_header(
@@ -128,6 +136,11 @@ def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int,
     # Value stream size (value-scheme-dependent)
     if value_scheme == VALUE_SCHEME_RLE_CODES:
         value_total = _rle_codes_size(seq_codes or [])
+    elif value_scheme == VALUE_SCHEME_ENTROPY:
+        # n_distinct code-length bytes + MSB-first Huffman bitstream
+        codes = seq_codes or []
+        code_len = canonical_code_lengths(codes, n_distinct)
+        value_total = n_distinct + huffman_bitstream_size(codes, code_len)
     else:
         # Bit-packed values size
         if count > 0:
@@ -242,6 +255,12 @@ def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None
     # Step 7: Encode value stream (value-scheme-dispatched)
     if value_scheme == VALUE_SCHEME_RLE_CODES:
         encoded_values = _rle_codes_encode(seq_codes)
+    elif value_scheme == VALUE_SCHEME_ENTROPY:
+        # Canonical Huffman on codes in sequential i-order.
+        # Wire: [code_len[0..n_distinct]: u8 × n_distinct] + [MSB-first bitstream]
+        n_distinct_enc = len(inverse_dict_list)
+        code_len = canonical_code_lengths(seq_codes, n_distinct_enc)
+        encoded_values = bytes(code_len) + huffman_encode(seq_codes, code_len)
     else:
         # BitpackFixed: lex-order point values, W bits each (v1-default)
         point_values = [p[1] for p in populated]
@@ -316,7 +335,7 @@ def decode(blob: bytes) -> bytes:
 
     # Determine value scheme from header
     value_scheme = hdr.get("value_scheme", VALUE_SCHEME_FIXED)
-    if value_scheme not in (VALUE_SCHEME_FIXED, VALUE_SCHEME_RLE_CODES):
+    if value_scheme not in (VALUE_SCHEME_FIXED, VALUE_SCHEME_RLE_CODES, VALUE_SCHEME_ENTROPY):
         raise ValueError(f"Unknown value_scheme={value_scheme} in header")
 
     # Read and decode gap streams for each axis (scheme-dispatched)
@@ -348,6 +367,35 @@ def decode(blob: bytes) -> bytes:
                 )
         coords_k = decode_axis_gaps(gaps_k)
         axis_coords.append(coords_k)
+
+    if value_scheme == VALUE_SCHEME_ENTROPY:
+        # Entropy decode: read n_distinct code-length bytes, then Huffman bitstream.
+        n_distinct = hdr["n_distinct"]
+        if offset + n_distinct > len(blob):
+            raise ValueError(
+                f"Entropy: code-length table truncated: need {n_distinct} bytes at "
+                f"offset {offset}, have {len(blob)} total"
+            )
+        code_len = list(blob[offset:offset + n_distinct])
+        huff_offset = offset + n_distinct
+
+        seq_codes_dec, _consumed = huffman_decode(blob, huff_offset, count, code_len)
+
+        if len(seq_codes_dec) != count:
+            raise ValueError(
+                f"Entropy decoded {len(seq_codes_dec)} codes but expected {count}"
+            )
+
+        result = bytearray(L)
+        for i, code in enumerate(seq_codes_dec):
+            if code >= n_distinct:
+                raise ValueError(
+                    f"Entropy code {code} at position {i} >= n_distinct {n_distinct}"
+                )
+            if i < L:
+                result[i] = inverse_dict[code]
+
+        return bytes(result)
 
     if value_scheme == VALUE_SCHEME_RLE_CODES:
         # RleCodes path: value codes are stored in sequential (i-order) input order.
