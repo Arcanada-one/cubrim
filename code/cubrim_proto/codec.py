@@ -51,6 +51,7 @@ from cubrim_proto.header import (
     VALUE_SCHEME_RLE_CODES,
     VALUE_SCHEME_ENTROPY,
     VALUE_SCHEME_ENTROPY_CONTEXT,
+    VALUE_SCHEME_BWT_ENTROPY_CONTEXT,
 )
 from cubrim_proto.huffman import (
     canonical_code_lengths,
@@ -145,6 +146,17 @@ def _estimate_cube_size(cube_data: dict, dm: dict, value_dict: dict, W: int,
         value_total = n_distinct + huffman_bitstream_size(codes, code_len)
     elif value_scheme == VALUE_SCHEME_ENTROPY_CONTEXT:
         value_total = _context_huffman_size(seq_codes or [], n_distinct)
+    elif value_scheme == VALUE_SCHEME_BWT_ENTROPY_CONTEXT:
+        # Wire: varint(primary_index) + EntropyContext payload over BWT-permuted codes.
+        codes = seq_codes or []
+        if codes:
+            bwt_seq, primary_index = _bwt_forward(codes)
+            varint_bytes = len(_varint_encode(primary_index))
+            ctx_bytes = _context_huffman_size(bwt_seq, n_distinct)
+        else:
+            varint_bytes = 1  # varint(0) = 1 byte
+            ctx_bytes = 2     # empty EntropyContext header (n_contexts=0)
+        value_total = varint_bytes + ctx_bytes
     else:
         # Bit-packed values size
         if count > 0:
@@ -184,6 +196,126 @@ def _rle_codes_encode(seq_codes: list[int]) -> bytes:
 
 _MIN_CTX_COUNT: int = 16
 _FALLBACK_CTX: int = 0
+
+
+# ─── BWT (Burrows-Wheeler Transform) — primary-index variant ─────────────────
+#
+# Byte-exact mirror of bwt.rs bwt_forward / bwt_inverse / varint_encode / varint_decode.
+# Variant (B): primary-index, no sentinel. Alphabet unchanged.
+
+
+def _bwt_forward(seq_codes: list[int]) -> tuple[list[int], int]:
+    """
+    Forward BWT. Returns (L, primary_index).
+    L[k] = last symbol of k-th lexicographically-sorted rotation.
+    primary_index = the index k in the sorted list whose rotation is the identity (offset 0).
+
+    Matches bwt.rs bwt_forward byte-exactly.
+    """
+    n = len(seq_codes)
+    if n == 0:
+        return [], 0
+    if n == 1:
+        return [seq_codes[0]], 0
+
+    # Sort rotation indices. Uses Python's stable sort (timsort), consistent with
+    # Rust's stable sort (stable_sort_by). Equal rotations are ordered by original
+    # position, which is identical in both implementations (stable insertion order).
+    indices = list(range(n))
+    indices.sort(key=lambda a: [seq_codes[(a + k) % n] for k in range(n)])
+
+    # primary_index = position of the identity rotation (offset=0) in sorted list
+    primary_index = next(k for k, i in enumerate(indices) if i == 0)
+
+    # L[k] = last symbol of k-th sorted rotation = seq_codes[(indices[k] + n - 1) % n]
+    l = [seq_codes[(indices[k] + n - 1) % n] for k in range(n)]
+
+    return l, primary_index
+
+
+def _bwt_inverse(l: list[int], primary_index: int) -> list[int]:
+    """
+    Inverse BWT using the LF mapping. Reconstructs the original sequence.
+    Matches bwt.rs bwt_inverse byte-exactly.
+    """
+    n = len(l)
+    if n == 0:
+        return []
+    if n == 1:
+        return [l[0]]
+    if primary_index >= n:
+        raise ValueError(f"BWT inverse: primary_index {primary_index} >= n {n}")
+
+    max_sym = max(l)
+    n_sym = max_sym + 1
+
+    # Count symbol occurrences in L
+    count = [0] * n_sym
+    for sym in l:
+        count[sym] += 1
+
+    # Starting positions in F (sorted L) for each symbol
+    start = [0] * n_sym
+    pos = 0
+    for c in range(n_sym):
+        start[c] = pos
+        pos += count[c]
+
+    # Build LF array: lf[k] = start[l[k]] + rank_of_k_among_same_symbol_in_l
+    sym_rank = [0] * n_sym
+    lf = [0] * n
+    for k in range(n):
+        sym = l[k]
+        lf[k] = start[sym] + sym_rank[sym]
+        sym_rank[sym] += 1
+
+    # Walk LF mapping n times from primary_index to recover original in reverse
+    result = [0] * n
+    k = primary_index
+    for i in range(n - 1, -1, -1):
+        result[i] = l[k]
+        k = lf[k]
+
+    return result
+
+
+def _varint_encode(value: int) -> bytes:
+    """
+    Encode value as LEB128 varint. Matches bwt.rs varint_encode.
+    """
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value == 0:
+            out.append(byte)
+            break
+        else:
+            out.append(byte | 0x80)
+    return bytes(out)
+
+
+def _varint_decode(data: bytes, offset: int) -> tuple[int, int]:
+    """
+    Decode LEB128 varint from data at offset. Returns (value, bytes_consumed).
+    Matches bwt.rs varint_decode.
+    """
+    value = 0
+    shift = 0
+    consumed = 0
+    while True:
+        if offset + consumed >= len(data):
+            raise ValueError(f"BWT varint: truncated at offset {offset}+{consumed}")
+        byte = data[offset + consumed]
+        consumed += 1
+        low7 = byte & 0x7F
+        value |= low7 << shift
+        shift += 7
+        if byte & 0x80 == 0:
+            break
+        if shift >= 64:
+            raise ValueError("BWT varint: overflow (more than 9 bytes)")
+    return value, consumed
 
 
 def _build_context_tables(seq_codes: list[int], n_distinct: int) -> list[tuple[int, list[int]]]:
@@ -473,6 +605,11 @@ def encode(data: bytes, gap_scheme: int = MAP_SCHEME_RLE, n_override: int | None
     elif value_scheme == VALUE_SCHEME_ENTROPY_CONTEXT:
         # Order-1 context-adaptive canonical Huffman (T4).
         encoded_values = _context_huffman_encode(seq_codes, len(inverse_dict_list))
+    elif value_scheme == VALUE_SCHEME_BWT_ENTROPY_CONTEXT:
+        # BWT pre-pass + order-1 context-adaptive canonical Huffman (T5).
+        # Wire: [primary_index : LEB128 varint] [EntropyContext payload over BWT codes]
+        bwt_seq, primary_index = _bwt_forward(seq_codes)
+        encoded_values = _varint_encode(primary_index) + _context_huffman_encode(bwt_seq, len(inverse_dict_list))
     else:
         # BitpackFixed: lex-order point values, W bits each (v1-default)
         point_values = [p[1] for p in populated]
@@ -548,7 +685,8 @@ def decode(blob: bytes) -> bytes:
     # Determine value scheme from header
     value_scheme = hdr.get("value_scheme", VALUE_SCHEME_FIXED)
     if value_scheme not in (VALUE_SCHEME_FIXED, VALUE_SCHEME_RLE_CODES,
-                            VALUE_SCHEME_ENTROPY, VALUE_SCHEME_ENTROPY_CONTEXT):
+                            VALUE_SCHEME_ENTROPY, VALUE_SCHEME_ENTROPY_CONTEXT,
+                            VALUE_SCHEME_BWT_ENTROPY_CONTEXT):
         raise ValueError(f"Unknown value_scheme={value_scheme} in header")
 
     # Read and decode gap streams for each axis (scheme-dispatched)
@@ -580,6 +718,46 @@ def decode(blob: bytes) -> bytes:
                 )
         coords_k = decode_axis_gaps(gaps_k)
         axis_coords.append(coords_k)
+
+    if value_scheme == VALUE_SCHEME_BWT_ENTROPY_CONTEXT:
+        # BWT inverse + order-1 context-adaptive Huffman decode (T5).
+        # Wire: [primary_index : LEB128 varint] [EntropyContext payload over BWT codes]
+        n_distinct = hdr["n_distinct"]
+
+        # Step 1: read primary_index varint
+        primary_index, varint_consumed = _varint_decode(blob, offset)
+        ctx_offset = offset + varint_consumed
+
+        # Step 2: decode the BWT-permuted code sequence using EntropyContext
+        bwt_codes, _consumed = _context_huffman_decode(blob, ctx_offset, count, n_distinct)
+
+        if len(bwt_codes) != count:
+            raise ValueError(
+                f"BwtEntropyContext: EntropyContext decoded {len(bwt_codes)} codes "
+                f"but expected {count} (count from header)"
+            )
+
+        # Step 3: apply BWT inverse to restore i-order seq_codes
+        seq_codes_dec = _bwt_inverse(bwt_codes, primary_index)
+
+        if len(seq_codes_dec) != count:
+            raise ValueError(
+                f"BwtEntropyContext: BWT inverse produced {len(seq_codes_dec)} codes "
+                f"but expected {count}"
+            )
+
+        # Step 4: reconstruct original byte sequence
+        result = bytearray(L)
+        for i, code in enumerate(seq_codes_dec):
+            if code >= n_distinct:
+                raise ValueError(
+                    f"BwtEntropyContext: code {code} at position {i} >= n_distinct "
+                    f"{n_distinct} after BWT inverse"
+                )
+            if i < L:
+                result[i] = inverse_dict[code]
+
+        return bytes(result)
 
     if value_scheme == VALUE_SCHEME_ENTROPY_CONTEXT:
         # Order-1 context-adaptive Huffman decode (T4).
