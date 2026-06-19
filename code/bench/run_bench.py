@@ -239,6 +239,9 @@ def gather_env() -> dict:
         r = subprocess.run(cmd, capture_output=True, text=True, shell=True)
         return r.stdout.strip() if r.returncode == 0 else "unavailable"
 
+    # Capture git HEAD SHA for reproducibility (CLAUDE.md: bench results must carry code_sha)
+    code_sha = run(f"git -C {shlex.quote(str(_PROJECT))} rev-parse HEAD")
+
     return {
         "host": platform.node(),
         "os": platform.platform(),
@@ -248,6 +251,7 @@ def gather_env() -> dict:
         "zstd": run("zstd --version | head -1"),
         "brotli": run("brotli --version 2>&1 | head -1"),
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "code_sha": code_sha,
     }
 
 
@@ -479,8 +483,9 @@ def main():
     parser.add_argument("--gap-scheme", default=None, choices=["rle", "packed_nibble"],
                         help="Gap encoding scheme: rle (default) or packed_nibble")
     parser.add_argument("--value-scheme", default=None,
-                        choices=["bitpack-fixed", "rle-codes", "entropy", "entropy-context"],
-                        help="Value encoding scheme: bitpack-fixed (default), rle-codes, entropy, or entropy-context")
+                        choices=["bitpack-fixed", "rle-codes", "entropy", "entropy-context",
+                                 "bwt-entropy-context", "auto"],
+                        help="Value encoding scheme: bitpack-fixed (default), rle-codes, entropy, entropy-context, bwt-entropy-context, or auto (picks best per input)")
     parser.add_argument("--report-id", default="bench",
                         help="Report file prefix (e.g. bench, v1, axis-sweep; used in output filenames)")
     args = parser.parse_args()

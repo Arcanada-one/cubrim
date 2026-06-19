@@ -13,7 +13,7 @@ use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context]");
+    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|bwt-entropy-context|auto]");
     eprintln!("  cubrim decompress <input> <output>");
     process::exit(1);
 }
@@ -96,15 +96,18 @@ fn main() {
                     }
                 };
             }
-            // --value-scheme: bitpack-fixed (default), rle-codes, or entropy
+            // --value-scheme: bitpack-fixed (default), rle-codes, entropy, entropy-context,
+            //                 bwt-entropy-context, or auto (picks best per input)
             if let Some(vs_str) = parse_flag_str(extra_args, "--value-scheme") {
                 config.value_scheme = match vs_str {
                     "bitpack-fixed" | "bitpack_fixed" => ValueScheme::BitpackFixed,
                     "rle-codes" | "rle_codes" => ValueScheme::RleCodes,
                     "entropy" => ValueScheme::Entropy,
                     "entropy-context" | "entropy_context" => ValueScheme::EntropyContext,
+                    "bwt-entropy-context" | "bwt_entropy_context" => ValueScheme::BwtEntropyContext,
+                    "auto" => ValueScheme::Auto,
                     other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, or entropy-context.");
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, bwt-entropy-context, or auto.");
                         process::exit(1);
                     }
                 };

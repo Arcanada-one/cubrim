@@ -16,6 +16,7 @@ pub mod header;
 pub mod config;
 pub mod codec;
 pub(crate) mod huffman;
+pub(crate) mod bwt;
 
 pub use codec::{encode, decode, encode_with_config};
 pub use config::{EncodeConfig, GapScheme, ValueScheme};

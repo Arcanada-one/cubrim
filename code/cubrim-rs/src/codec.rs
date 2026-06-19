@@ -31,6 +31,7 @@ use crate::header::{
     MODE_CUBE, MODE_RAW,
 };
 use crate::huffman::{canonical_code_lengths, huffman_encode, huffman_decode, huffman_bitstream_size};
+use crate::bwt::{bwt_forward, bwt_inverse, varint_encode, varint_decode};
 
 /// R7: Header overhead bound constant. Calibrated for v1-defaults.
 /// fixed(13) + count(4) + b_k(4) + schemes(3) + n_distinct(2) +
@@ -77,6 +78,17 @@ fn estimate_cube_size(
         ValueScheme::EntropyContext => {
             // Wire: n_contexts(2) + per-context (2 + n_distinct) headers + bitstream
             context_huffman_size(seq_codes, state.inverse_dict.len())
+        }
+        ValueScheme::BwtEntropyContext => {
+            // Wire: varint(primary_index) + EntropyContext payload over BWT-permuted codes
+            let (bwt_seq, primary_index) = bwt_forward(seq_codes);
+            let varint_bytes = varint_encode(primary_index).len();
+            let ctx_bytes = context_huffman_size(&bwt_seq, state.inverse_dict.len());
+            varint_bytes + ctx_bytes
+        }
+        ValueScheme::Auto => {
+            // Auto is resolved before estimate_cube_size is called; should not reach here.
+            panic!("estimate_cube_size called with ValueScheme::Auto — resolve to concrete scheme first");
         }
     };
 
@@ -261,20 +273,56 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         idx_to_code
     };
 
-    // Step 5: R7 decision — compare cube encoded size vs raw-store output size
+    // Step 5: R7 decision — select best concrete value scheme and compare vs raw-store.
+    //
+    // Auto mode: estimate all concrete schemes and pick the smallest.
+    // Concrete mode: estimate only the configured scheme.
     let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
+    let raw_output_size = serialize_raw_header(n, b, l).len() + l;
+
+    // Resolve concrete value_scheme (may be the same as config, or winner of Auto sweep).
+    let concrete_value_scheme: ValueScheme = if value_scheme == ValueScheme::Auto {
+        // Try all concrete schemes; pick the smallest estimated size.
+        let all_schemes = [
+            ValueScheme::BitpackFixed,
+            ValueScheme::RleCodes,
+            ValueScheme::Entropy,
+            ValueScheme::EntropyContext,
+            ValueScheme::BwtEntropyContext,
+        ];
+        let mut best_scheme = ValueScheme::EntropyContext; // sensible default
+        let mut best_size = usize::MAX;
+        for &candidate in &all_schemes {
+            // Build a temporary cube_state with this scheme's byte for the header size computation
+            let tmp_state = CubeHeaderState {
+                n, b, l, count: cube.count, b_k,
+                map_scheme: gap_scheme.scheme_byte(),
+                value_scheme: candidate.scheme_byte(),
+                w, inverse_dict: &inverse_dict, axis_gap_counts: &axis_gap_counts,
+            };
+            let sz = estimate_cube_size(&tmp_state, &axis_gaps, gap_scheme, candidate, &seq_codes);
+            if sz < best_size {
+                best_size = sz;
+                best_scheme = candidate;
+            }
+        }
+        best_scheme
+    } else {
+        value_scheme
+    };
+
+    // Build cube_state with the concrete scheme byte
     let cube_state = CubeHeaderState {
         n, b, l,
         count: cube.count,
         b_k,
         map_scheme: gap_scheme.scheme_byte(),
-        value_scheme: value_scheme.scheme_byte(),
+        value_scheme: concrete_value_scheme.scheme_byte(),
         w,
         inverse_dict: &inverse_dict,
         axis_gap_counts: &axis_gap_counts,
     };
-    let cube_size = estimate_cube_size(&cube_state, &axis_gaps, gap_scheme, value_scheme, &seq_codes);
-    let raw_output_size = serialize_raw_header(n, b, l).len() + l;
+    let cube_size = estimate_cube_size(&cube_state, &axis_gaps, gap_scheme, concrete_value_scheme, &seq_codes);
 
     if cube_size >= raw_output_size {
         // R7: cube does not improve on raw; use raw-store
@@ -289,8 +337,8 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         GapScheme::PackedNibble => axis_gaps.iter().map(|g| packed_nibble_encode(g)).collect(),
     };
 
-    // Step 7: Encode value stream using the configured value scheme
-    let encoded_values: Vec<u8> = match value_scheme {
+    // Step 7: Encode value stream using the concrete value scheme
+    let encoded_values: Vec<u8> = match concrete_value_scheme {
         ValueScheme::BitpackFixed => {
             // R5: bitpack values in lex-sorted point order (v1-default)
             let point_values: Vec<usize> = populated.iter().map(|(_, v)| *v).collect();
@@ -315,6 +363,18 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         ValueScheme::EntropyContext => {
             // Order-1 context-adaptive canonical Huffman on the value-code stream.
             context_huffman_encode(&seq_codes, inverse_dict.len())
+        }
+        ValueScheme::BwtEntropyContext => {
+            // BWT pre-pass + order-1 context-adaptive Huffman.
+            // Wire: [primary_index : LEB128 varint] [EntropyContext payload over BWT codes]
+            let (bwt_seq, primary_index) = bwt_forward(&seq_codes);
+            let mut out = varint_encode(primary_index);
+            out.extend_from_slice(&context_huffman_encode(&bwt_seq, inverse_dict.len()));
+            out
+        }
+        ValueScheme::Auto => {
+            // Auto is resolved above; this arm is unreachable.
+            unreachable!("Auto resolved to concrete scheme before Step 7")
         }
     };
 
@@ -559,6 +619,58 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 }
             }
             result
+        }
+        ValueScheme::BwtEntropyContext => {
+            // BWT inverse + order-1 context-adaptive Huffman decode.
+            //
+            // Wire: [primary_index : LEB128 varint] [EntropyContext payload over BWT codes]
+            // Step 1: read primary_index varint
+            let (primary_index, varint_consumed) = varint_decode(blob, offset)?;
+            let ctx_offset = offset + varint_consumed;
+
+            // Step 2: decode the BWT-permuted code sequence using EntropyContext
+            let (bwt_codes, _consumed) =
+                context_huffman_decode(blob, ctx_offset, count, inverse_dict.len())?;
+
+            if bwt_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "BwtEntropyContext: EntropyContext decoded {} codes but expected {} (count from header)",
+                    bwt_codes.len(), count
+                )));
+            }
+
+            // Step 3: apply BWT inverse to restore i-order seq_codes
+            let seq_codes = bwt_inverse(&bwt_codes, primary_index)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "BwtEntropyContext: BWT inverse produced {} codes but expected {}",
+                    seq_codes.len(), count
+                )));
+            }
+
+            // Step 4: reconstruct original byte sequence
+            let n_distinct = inverse_dict.len();
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "BwtEntropyContext: code {} at position {} >= n_distinct {} after BWT inverse",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::Auto => {
+            // Auto is never stored in the header. Reaching here means a corrupt header
+            // or a decoder bug — fail closed.
+            return Err(CubrimError::Decode(
+                "BwtEntropyContext: value_scheme byte 0 (Auto) is not a valid stored scheme".to_string()
+            ));
         }
     };
 
@@ -1657,6 +1769,264 @@ mod tests {
             assert_eq!(v1_blob, explicit_fixed_blob,
                 "Adding Entropy variant must not change BitpackFixed output");
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // BwtEntropyContext — scheme byte, round-trip, non-regression, edge cases
+    // -------------------------------------------------------------------------
+
+    fn bwt_ec_config() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::BwtEntropyContext,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    fn auto_config() -> EncodeConfig {
+        EncodeConfig::auto()
+    }
+
+    #[test]
+    fn test_bwt_entropy_context_scheme_byte_is_5() {
+        // Header byte for BwtEntropyContext must be 5.
+        assert_eq!(ValueScheme::BwtEntropyContext.scheme_byte(), 5u8);
+        assert_eq!(ValueScheme::from_byte(5), Some(ValueScheme::BwtEntropyContext));
+    }
+
+    #[test]
+    fn test_bwt_ec_round_trip_text_like() {
+        // Text-like: structured, many repetitions. BWT should win here (probe: +65.7%).
+        let line = b"the quick brown fox jumps over the lazy dog\n";
+        let data: Vec<u8> = line.iter().copied().cycle().take(2048).collect();
+        let blob = encode_with_config(&data, &bwt_ec_config());
+        let recovered = decode(&blob).expect("BwtEntropyContext decode must succeed");
+        assert_eq!(recovered, data, "BwtEntropyContext round-trip FAIL on text-like");
+    }
+
+    #[test]
+    fn test_bwt_ec_round_trip_log_like() {
+        // Log-like: repeated structure. BWT probe showed +91.4% entropy reduction.
+        let prefixes = [b"INFO  ", b"WARN  ", b"DEBUG ", b"ERROR "];
+        let data: Vec<u8> = (0..500)
+            .flat_map(|i| {
+                let p = prefixes[i % prefixes.len()];
+                let msg = format!("cubrim event={:04} level=ok\n", i);
+                p.iter().chain(msg.as_bytes().iter()).copied().collect::<Vec<_>>()
+            })
+            .take(16384)
+            .collect();
+        let blob = encode_with_config(&data, &bwt_ec_config());
+        let recovered = decode(&blob).expect("BwtEntropyContext decode must succeed on log_like");
+        assert_eq!(recovered, data, "BwtEntropyContext round-trip FAIL on log-like");
+    }
+
+    #[test]
+    fn test_bwt_ec_round_trip_empty() {
+        // Empty input → raw-store, no BWT applied
+        let data: Vec<u8> = vec![];
+        let blob = encode_with_config(&data, &bwt_ec_config());
+        let recovered = decode(&blob).expect("decode empty");
+        assert_eq!(recovered, data);
+    }
+
+    #[test]
+    fn test_bwt_ec_round_trip_single_byte() {
+        let data = vec![0x42u8];
+        let blob = encode_with_config(&data, &bwt_ec_config());
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data);
+    }
+
+    #[test]
+    fn test_bwt_ec_round_trip_all_same() {
+        // All-same — n=1 alphabet, BWT trivial
+        let data: Vec<u8> = vec![0xBBu8; 1024];
+        let blob = encode_with_config(&data, &bwt_ec_config());
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "BwtEntropyContext all-same round-trip");
+    }
+
+    #[test]
+    fn test_bwt_ec_round_trip_all_distinct_256() {
+        // All 256 distinct bytes repeated 4× = 1024 bytes, n_distinct=256
+        let data: Vec<u8> = (0usize..1024).map(|i| i as u8).collect();
+        let blob = encode_with_config(&data, &bwt_ec_config());
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "BwtEntropyContext all-distinct round-trip");
+    }
+
+    #[test]
+    fn test_bwt_ec_round_trip_binary_periodic() {
+        // Binary periodic — adversarial for BWT (R5 risk: tie-breaking stability)
+        let data: Vec<u8> = (0usize..2048).map(|i| (i % 2) as u8).collect();
+        let blob = encode_with_config(&data, &bwt_ec_config());
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "BwtEntropyContext binary periodic round-trip");
+    }
+
+    #[test]
+    fn test_bwt_ec_round_trip_random_dense() {
+        // Dense pseudo-random — BWT should not help; non-regression (raw-store or T4 wins)
+        let data: Vec<u8> = (0usize..4096)
+            .map(|i| (i.wrapping_mul(6364136223846793005u64 as usize)
+                       .wrapping_add(1442695040888963407) >> 56) as u8)
+            .collect();
+        let blob = encode_with_config(&data, &bwt_ec_config());
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "BwtEntropyContext random dense round-trip");
+    }
+
+    #[test]
+    fn test_bwt_ec_non_regression_vs_raw_store() {
+        // BwtEntropyContext output must never exceed raw-store size (R7 guard)
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("random_1k", (0usize..1024).map(|i| (i.wrapping_mul(71).wrapping_add(13)) as u8).collect()),
+            ("text_4k", b"the quick brown fox ".iter().copied().cycle().take(4096).collect()),
+            ("all_same_1k", vec![0xCCu8; 1024]),
+        ];
+        for (name, data) in &cases {
+            let raw_bound = data.len() + HEADER_OVERHEAD_BOUND;
+            let blob = encode_with_config(data, &bwt_ec_config());
+            assert!(blob.len() <= raw_bound,
+                "BwtEntropyContext output {} > raw-store bound {} for '{name}' ({} bytes)",
+                blob.len(), raw_bound, data.len());
+            let recovered = decode(&blob).unwrap();
+            assert_eq!(&recovered, data, "BwtEntropyContext non-regression round-trip failed for '{name}'");
+        }
+    }
+
+    // ── Auto selector tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_auto_selector_round_trips_all_fixtures() {
+        // Auto must produce valid decodable output on all standard fixtures.
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("empty",      vec![]),
+            ("single",     vec![0x42]),
+            ("all_same",   vec![0xAAu8; 1024]),
+            ("all_distinct", (0u8..=255).collect()),
+            ("text_1k",    b"the quick brown fox ".iter().copied().cycle().take(1024).collect()),
+            ("random_1k",  (0usize..1024).map(|i| (i.wrapping_mul(71).wrapping_add(13)) as u8).collect()),
+            ("binary_periodic", (0usize..2048).map(|i| (i % 2) as u8).collect()),
+        ];
+        for (name, data) in &cases {
+            let blob = encode_with_config(data, &auto_config());
+            let recovered = decode(&blob).expect(&format!("auto decode failed for '{name}'"));
+            assert_eq!(&recovered, data, "auto round-trip FAIL for '{name}'");
+        }
+    }
+
+    #[test]
+    fn test_auto_selector_picks_bwt_on_text_like() {
+        // On a log-like input the selector should choose BwtEntropyContext (scheme byte 5).
+        // We can observe the scheme byte in the header.
+        let prefixes = [b"INFO  ", b"WARN  "];
+        let data: Vec<u8> = (0..2000)
+            .flat_map(|i| {
+                let p = prefixes[i % 2];
+                let msg = format!("log event={:05}\n", i);
+                p.iter().chain(msg.as_bytes().iter()).copied().collect::<Vec<_>>()
+            })
+            .take(16384)
+            .collect();
+
+        let blob = encode_with_config(&data, &auto_config());
+        // Parse the header to see which scheme was chosen.
+        // value_scheme byte is at a known location — parse via parse_header.
+        use crate::header::parse_header;
+        let (hdr, _) = parse_header(&blob).unwrap();
+        let chosen = ValueScheme::from_byte(hdr.value_scheme).unwrap();
+        // Must be BwtEntropyContext (5) on this structured log-like input.
+        assert_eq!(chosen, ValueScheme::BwtEntropyContext,
+            "Auto selector chose {:?} instead of BwtEntropyContext on log-like data", chosen);
+
+        // Must also round-trip correctly.
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "auto round-trip FAIL on log-like");
+    }
+
+    #[test]
+    fn test_auto_selector_does_not_pick_bwt_on_sparse_clustered() {
+        // Sparse clustered input: BWT harms it (probe: -84.4%).
+        // The selector should choose RleCodes or EntropyContext, NOT BwtEntropyContext.
+        let mut data: Vec<u8> = vec![0u8; 2048];
+        // Cluster 1: positions 0..512 = value 1
+        for i in 0..512 { data[i] = 1; }
+        // Cluster 2: positions 512..1024 = value 2
+        for i in 512..1024 { data[i] = 2; }
+        // Cluster 3: positions 1024..1536 = value 1 again
+        for i in 1024..1536 { data[i] = 1; }
+        // Rest: value 0 (already set)
+
+        let blob = encode_with_config(&data, &auto_config());
+        use crate::header::parse_header;
+        let (hdr, _) = parse_header(&blob).unwrap();
+        let chosen = ValueScheme::from_byte(hdr.value_scheme).unwrap();
+        assert_ne!(chosen, ValueScheme::BwtEntropyContext,
+            "Auto selector must NOT choose BwtEntropyContext on sparse clustered data; got {:?}", chosen);
+
+        let recovered = decode(&blob).unwrap();
+        assert_eq!(recovered, data, "auto round-trip FAIL on sparse clustered");
+    }
+
+    #[test]
+    fn test_auto_selector_output_le_bwt_alone_and_le_t4_alone() {
+        // Auto output must be <= BwtEntropyContext alone AND <= T4 alone (it picks the min).
+        let data: Vec<u8> = b"the quick brown fox jumps over the lazy dog\n"
+            .iter().copied().cycle().take(4096).collect();
+
+        let bwt_blob = encode_with_config(&data, &bwt_ec_config());
+        let t4_blob = encode_with_config(&data, &EncodeConfig {
+            value_scheme: ValueScheme::EntropyContext, ..EncodeConfig::v1_default()
+        });
+        let auto_blob = encode_with_config(&data, &auto_config());
+
+        let min_single = bwt_blob.len().min(t4_blob.len());
+        assert!(auto_blob.len() <= min_single,
+            "auto ({} bytes) > min(BWT={}, T4={}) — selector did not pick the best scheme",
+            auto_blob.len(), bwt_blob.len(), t4_blob.len());
+
+        // Round-trip
+        assert_eq!(decode(&auto_blob).unwrap(), data);
+    }
+
+    #[test]
+    fn test_bwt_ec_scheme_byte_survives_header_round_trip() {
+        // Verify scheme byte = 5 survives header parse (non-regression on existing header code).
+        use crate::header::{serialize_cube_header, parse_header, CubeHeaderState};
+        let b_k = vec![256usize, 256];
+        let inverse_dict = vec![65usize, 66, 67];
+        let axis_gap_counts = vec![5usize, 3];
+        let bytes = serialize_cube_header(&CubeHeaderState {
+            n: 2, b: 256, l: 500, count: 42,
+            b_k: &b_k,
+            map_scheme: 1,
+            value_scheme: ValueScheme::BwtEntropyContext.scheme_byte(),
+            w: 2,
+            inverse_dict: &inverse_dict,
+            axis_gap_counts: &axis_gap_counts,
+        });
+        let (hdr, _) = parse_header(&bytes).unwrap();
+        assert_eq!(hdr.value_scheme, 5, "BwtEntropyContext header byte must survive parse");
+        assert_eq!(ValueScheme::from_byte(hdr.value_scheme), Some(ValueScheme::BwtEntropyContext));
+    }
+
+    #[test]
+    fn test_existing_t4_output_unchanged_after_bwt_addition() {
+        // V-AC-8: adding BWT must not change T4 (EntropyContext) output byte-for-byte.
+        let data: Vec<u8> = b"the quick brown fox ".iter().copied().cycle().take(4096).collect();
+        let t4_config = EncodeConfig {
+            value_scheme: ValueScheme::EntropyContext,
+            ..EncodeConfig::v1_default()
+        };
+        let blob_before = encode_with_config(&data, &t4_config);
+        // Verify decode still works (byte stream unchanged from pre-BWT-addition)
+        let recovered = decode(&blob_before).unwrap();
+        assert_eq!(recovered, data);
+        // The scheme byte in the header must still be 4
+        use crate::header::parse_header;
+        let (hdr, _) = parse_header(&blob_before).unwrap();
+        assert_eq!(hdr.value_scheme, 4, "T4 output must still use scheme byte 4 after BWT addition");
     }
 
 }

@@ -64,6 +64,26 @@ pub enum ValueScheme {
     ///
     /// Header byte = 4.
     EntropyContext,
+    /// BWT pre-pass + order-1 context-adaptive canonical Huffman (T5).
+    ///
+    /// Pipeline: BWT(seq_codes) → order-1 context Huffman on permuted stream.
+    /// Forward: apply BWT, prepend primary_index as LEB128 varint, then encode
+    ///   the permuted code sequence with EntropyContext.
+    /// Inverse: read primary_index varint, decode permuted codes with EntropyContext
+    ///   inverse, apply BWT inverse to restore original i-order seq_codes.
+    ///
+    /// Wire (after header + gap streams):
+    ///   [primary_index : LEB128 varint]              — BWT primary index (1-3 bytes for n ≤ 65536)
+    ///   [EntropyContext payload : same format as scheme 4 over BWT-permuted codes]
+    ///
+    /// Header byte = 5.
+    BwtEntropyContext,
+    /// Selector mode: try all concrete schemes and emit the smallest output.
+    ///
+    /// This variant is NEVER written to the header. The encoder resolves it
+    /// to the winning concrete scheme before writing. Decoders only see concrete
+    /// scheme bytes 1–5. Use EncodeConfig::auto() to get this config.
+    Auto,
 }
 
 impl GapScheme {
@@ -87,24 +107,36 @@ impl GapScheme {
 
 impl ValueScheme {
     /// Returns the value_scheme byte written to / read from the header.
+    ///
+    /// Panics if called on `Auto` — Auto is never serialized; callers must
+    /// resolve Auto to a concrete scheme before writing the header.
     pub fn scheme_byte(&self) -> u8 {
         match self {
             ValueScheme::BitpackFixed => 1,
             ValueScheme::RleCodes => 2,
             ValueScheme::Entropy => 3,
             ValueScheme::EntropyContext => 4,
+            ValueScheme::BwtEntropyContext => 5,
+            ValueScheme::Auto => panic!("ValueScheme::Auto has no wire byte; resolve to concrete scheme before serializing"),
         }
     }
 
     /// Construct from header byte. Returns None for unknown values.
+    /// `Auto` is never decoded from the wire — only concrete bytes 1–5 appear.
     pub fn from_byte(b: u8) -> Option<Self> {
         match b {
             1 => Some(ValueScheme::BitpackFixed),
             2 => Some(ValueScheme::RleCodes),
             3 => Some(ValueScheme::Entropy),
             4 => Some(ValueScheme::EntropyContext),
+            5 => Some(ValueScheme::BwtEntropyContext),
             _ => None,
         }
+    }
+
+    /// Returns true if this is a concrete (storable) scheme.
+    pub fn is_concrete(&self) -> bool {
+        !matches!(self, ValueScheme::Auto)
     }
 }
 
@@ -156,6 +188,18 @@ impl EncodeConfig {
         }
     }
 
+    /// Returns an auto-select configuration.
+    ///
+    /// The encoder will try all concrete value schemes and emit the smallest.
+    /// Gap scheme defaults to RleU16; other fields match v1_default.
+    /// The concrete scheme chosen per input is written into the header.
+    pub fn auto() -> Self {
+        Self {
+            value_scheme: ValueScheme::Auto,
+            ..Self::v1_default()
+        }
+    }
+
     /// Returns the upper size limit for cube eligibility.
     /// Inputs strictly larger than this always use raw-store.
     pub fn cube_size_limit(&self) -> usize {
@@ -189,6 +233,7 @@ mod tests {
         assert_eq!(ValueScheme::from_byte(ValueScheme::RleCodes.scheme_byte()), Some(ValueScheme::RleCodes));
         assert_eq!(ValueScheme::from_byte(ValueScheme::Entropy.scheme_byte()), Some(ValueScheme::Entropy));
         assert_eq!(ValueScheme::from_byte(ValueScheme::EntropyContext.scheme_byte()), Some(ValueScheme::EntropyContext));
+        assert_eq!(ValueScheme::from_byte(ValueScheme::BwtEntropyContext.scheme_byte()), Some(ValueScheme::BwtEntropyContext));
         assert_eq!(ValueScheme::from_byte(0), None, "0 is not a valid value_scheme byte");
         assert_eq!(ValueScheme::from_byte(99), None, "unknown byte returns None");
     }
@@ -200,6 +245,28 @@ mod tests {
         assert_eq!(ValueScheme::RleCodes.scheme_byte(), 2u8);
         assert_eq!(ValueScheme::Entropy.scheme_byte(), 3u8);
         assert_eq!(ValueScheme::EntropyContext.scheme_byte(), 4u8);
+        assert_eq!(ValueScheme::BwtEntropyContext.scheme_byte(), 5u8);
+    }
+
+    #[test]
+    fn test_auto_scheme_is_concrete_false() {
+        assert!(!ValueScheme::Auto.is_concrete());
+        assert!(ValueScheme::BitpackFixed.is_concrete());
+        assert!(ValueScheme::BwtEntropyContext.is_concrete());
+    }
+
+    #[test]
+    #[should_panic(expected = "Auto has no wire byte")]
+    fn test_auto_scheme_byte_panics() {
+        let _ = ValueScheme::Auto.scheme_byte();
+    }
+
+    #[test]
+    fn test_auto_config() {
+        let cfg = EncodeConfig::auto();
+        assert_eq!(cfg.value_scheme, ValueScheme::Auto);
+        assert_eq!(cfg.gap_scheme, GapScheme::RleU16);
+        assert_eq!(cfg.b, 256);
     }
 
     #[test]
