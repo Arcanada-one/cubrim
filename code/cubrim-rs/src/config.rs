@@ -50,6 +50,20 @@ pub enum ValueScheme {
     /// Wire: [code_len[0..n_distinct]: u8 × n_distinct] + [MSB-first bitstream].
     /// Header byte = 3.
     Entropy,
+    /// Order-1 context-adaptive canonical Huffman on the value-code stream (T4).
+    /// Context = previous value-code (sentinel 0 for position 0).
+    /// Contexts with fewer than MIN_CTX_COUNT=16 observations fall back to the
+    /// shared order-0 table (ctx=FALLBACK_CTX sentinel, stored at index 0 in header).
+    ///
+    /// Wire (after header + gap streams):
+    ///   [n_contexts : u16 BE]                              — number of context entries
+    ///   for each context entry (ascending ctx_id order):
+    ///     [ctx_id : u16 BE]                                — context code (0=fallback/order-0)
+    ///     [code_len[0..n_distinct] : u8 × n_distinct]      — code-length table for this ctx
+    ///   [coded bitstream : MSB-first, byte-aligned, zero-padded tail]
+    ///
+    /// Header byte = 4.
+    EntropyContext,
 }
 
 impl GapScheme {
@@ -78,6 +92,7 @@ impl ValueScheme {
             ValueScheme::BitpackFixed => 1,
             ValueScheme::RleCodes => 2,
             ValueScheme::Entropy => 3,
+            ValueScheme::EntropyContext => 4,
         }
     }
 
@@ -87,6 +102,7 @@ impl ValueScheme {
             1 => Some(ValueScheme::BitpackFixed),
             2 => Some(ValueScheme::RleCodes),
             3 => Some(ValueScheme::Entropy),
+            4 => Some(ValueScheme::EntropyContext),
             _ => None,
         }
     }
@@ -172,6 +188,7 @@ mod tests {
         assert_eq!(ValueScheme::from_byte(ValueScheme::BitpackFixed.scheme_byte()), Some(ValueScheme::BitpackFixed));
         assert_eq!(ValueScheme::from_byte(ValueScheme::RleCodes.scheme_byte()), Some(ValueScheme::RleCodes));
         assert_eq!(ValueScheme::from_byte(ValueScheme::Entropy.scheme_byte()), Some(ValueScheme::Entropy));
+        assert_eq!(ValueScheme::from_byte(ValueScheme::EntropyContext.scheme_byte()), Some(ValueScheme::EntropyContext));
         assert_eq!(ValueScheme::from_byte(0), None, "0 is not a valid value_scheme byte");
         assert_eq!(ValueScheme::from_byte(99), None, "unknown byte returns None");
     }
@@ -182,6 +199,7 @@ mod tests {
         assert_eq!(ValueScheme::BitpackFixed.scheme_byte(), 1u8);
         assert_eq!(ValueScheme::RleCodes.scheme_byte(), 2u8);
         assert_eq!(ValueScheme::Entropy.scheme_byte(), 3u8);
+        assert_eq!(ValueScheme::EntropyContext.scheme_byte(), 4u8);
     }
 
     #[test]

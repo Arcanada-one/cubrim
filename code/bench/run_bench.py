@@ -479,8 +479,8 @@ def main():
     parser.add_argument("--gap-scheme", default=None, choices=["rle", "packed_nibble"],
                         help="Gap encoding scheme: rle (default) or packed_nibble")
     parser.add_argument("--value-scheme", default=None,
-                        choices=["bitpack-fixed", "rle-codes", "entropy"],
-                        help="Value encoding scheme: bitpack-fixed (default), rle-codes, or entropy")
+                        choices=["bitpack-fixed", "rle-codes", "entropy", "entropy-context"],
+                        help="Value encoding scheme: bitpack-fixed (default), rle-codes, entropy, or entropy-context")
     parser.add_argument("--report-id", default="bench",
                         help="Report file prefix (e.g. bench, v1, axis-sweep; used in output filenames)")
     args = parser.parse_args()

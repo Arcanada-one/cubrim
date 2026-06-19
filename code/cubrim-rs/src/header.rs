@@ -49,6 +49,8 @@ pub const VALUE_SCHEME_FIXED: u8 = 1;
 pub const VALUE_SCHEME_RLE_CODES: u8 = 2;
 /// Entropy value scheme: canonical Huffman on the value-code stream (order-0).
 pub const VALUE_SCHEME_ENTROPY: u8 = 3;
+/// EntropyContext value scheme: order-1 context-adaptive canonical Huffman (T4).
+pub const VALUE_SCHEME_ENTROPY_CONTEXT: u8 = 4;
 
 // Traversal and Phi identifiers (R1)
 pub const TRAVERSAL_LEX: u8 = 1;
