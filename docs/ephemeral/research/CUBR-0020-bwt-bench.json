@@ -412,5 +412,143 @@
         "sha256_input": "8c23d37b2230be9754c446b6cdef385fb4eb7dcac874905fcbb2e25b6f05672c"
       }
     ]
+  },
+  {
+    "config_label": "t4_precheck",
+    "config_params": {
+      "raw_store_bound": 320,
+      "b": 256,
+      "n_override": null,
+      "gap_scheme": "rle",
+      "value_scheme": "entropy-context",
+      "use_square_limit": true
+    },
+    "timestamp": "2026-06-19T09:05:55Z",
+    "environment": {
+      "host": "mac.tailb1f805.ts.net",
+      "os": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+      "python": "3.14.4",
+      "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+      "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+      "zstd": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***",
+      "brotli": "brotli 1.2.0",
+      "timestamp": "2026-06-19T09:05:55Z",
+      "code_sha": "1b8a9fc2c399df5d8e742cefaaebfbdc1f18cebb"
+    },
+    "round_trip_all": "PASS",
+    "results": [
+      {
+        "name": "sparse_clustered",
+        "size_bytes": 2048,
+        "rho": 0.03125,
+        "cubrim_bytes": 502,
+        "cubrim_ratio": 0.245117,
+        "cubrim_mode": "cube",
+        "gzip_bytes": 154,
+        "gzip_ratio": 0.075195,
+        "zstd_bytes": 102,
+        "zstd_ratio": 0.049805,
+        "brotli_bytes": 87,
+        "brotli_ratio": 0.04248,
+        "round_trip": "PASS",
+        "sha256_input": "d11533a77218a34e56285bf0df004ac06e845319e1ca07cb8d65f0911d75f7ce"
+      },
+      {
+        "name": "dense",
+        "size_bytes": 4096,
+        "rho": 0.0625,
+        "cubrim_bytes": 4109,
+        "cubrim_ratio": 1.003174,
+        "cubrim_mode": "raw",
+        "gzip_bytes": 4129,
+        "gzip_ratio": 1.008057,
+        "zstd_bytes": 4110,
+        "zstd_ratio": 1.003418,
+        "brotli_bytes": 4101,
+        "brotli_ratio": 1.001221,
+        "round_trip": "PASS",
+        "sha256_input": "a4ecb8ba6554b63d398076f1f00545c935d7b73b4e21988666185d6371c65c27"
+      },
+      {
+        "name": "text",
+        "size_bytes": 16384,
+        "rho": 0.25,
+        "cubrim_bytes": 5705,
+        "cubrim_ratio": 0.348206,
+        "cubrim_mode": "cube",
+        "gzip_bytes": 1295,
+        "gzip_ratio": 0.079041,
+        "zstd_bytes": 1234,
+        "zstd_ratio": 0.075317,
+        "brotli_bytes": 1194,
+        "brotli_ratio": 0.072876,
+        "round_trip": "PASS",
+        "sha256_input": "0160b7a1b4311fa6b273b63125f8cff4603205d8dc7fcc7cf9186691570c5415"
+      },
+      {
+        "name": "log_like",
+        "size_bytes": 16384,
+        "rho": 0.25,
+        "cubrim_bytes": 7318,
+        "cubrim_ratio": 0.446655,
+        "cubrim_mode": "cube",
+        "gzip_bytes": 430,
+        "gzip_ratio": 0.026245,
+        "zstd_bytes": 427,
+        "zstd_ratio": 0.026062,
+        "brotli_bytes": 379,
+        "brotli_ratio": 0.023132,
+        "round_trip": "PASS",
+        "sha256_input": "ac4ef4845750390362797bc33af63b3a3d480f827a8b7ff54090ce1c89a9543d"
+      },
+      {
+        "name": "binary_mixed",
+        "size_bytes": 8192,
+        "rho": 0.125,
+        "cubrim_bytes": 8205,
+        "cubrim_ratio": 1.001587,
+        "cubrim_mode": "raw",
+        "gzip_bytes": 5288,
+        "gzip_ratio": 0.645508,
+        "zstd_bytes": 5241,
+        "zstd_ratio": 0.639771,
+        "brotli_bytes": 4803,
+        "brotli_ratio": 0.586304,
+        "round_trip": "PASS",
+        "sha256_input": "669a93863d0fab21a599f70df7d8bc9ec98c9c933f60be5112612157622672d6"
+      },
+      {
+        "name": "random_high",
+        "size_bytes": 4096,
+        "rho": 0.0625,
+        "cubrim_bytes": 4109,
+        "cubrim_ratio": 1.003174,
+        "cubrim_mode": "raw",
+        "gzip_bytes": 4135,
+        "gzip_ratio": 1.009521,
+        "zstd_bytes": 4110,
+        "zstd_ratio": 1.003418,
+        "brotli_bytes": 4101,
+        "brotli_ratio": 1.001221,
+        "round_trip": "PASS",
+        "sha256_input": "0e232e8ae9db07cc67194aa713d7a287876fec886ded19cffddb732a1094b415"
+      },
+      {
+        "name": "sparse_small",
+        "size_bytes": 256,
+        "rho": 0.003906,
+        "cubrim_bytes": 269,
+        "cubrim_ratio": 1.050781,
+        "cubrim_mode": "raw",
+        "gzip_bytes": 65,
+        "gzip_ratio": 0.253906,
+        "zstd_bytes": 41,
+        "zstd_ratio": 0.160156,
+        "brotli_bytes": 31,
+        "brotli_ratio": 0.121094,
+        "round_trip": "PASS",
+        "sha256_input": "8c23d37b2230be9754c446b6cdef385fb4eb7dcac874905fcbb2e25b6f05672c"
+      }
+    ]
   }
 ]

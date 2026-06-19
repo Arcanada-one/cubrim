@@ -65,6 +65,22 @@ Round-trip (all inputs): **PASS**
 | random_high | 4096 | 4109 | 1.0032 | raw | 4135 | 1.0095 | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
 | sparse_small | 256 | 269 | 1.0508 | raw | 65 | 0.2539 | 41 | 0.1602 | 31 | 0.1211 | PASS |
 
+### t4_precheck — 2026-06-19T09:05:55Z
+
+Config: raw_store_bound=320, b=256, N=minimal, gap_scheme=rle, value_scheme=entropy-context, use_square_limit=True
+
+Round-trip (all inputs): **PASS**
+
+| Input | Size | Cubrim | CRatio | Mode | gzip-9 | gRatio | zstd | zRatio | brotli | bRatio | Round-trip |
+|-------|------|--------|--------|------|--------|--------|------|--------|--------|--------|------------|
+| sparse_clustered | 2048 | 502 | 0.2451 | cube | 154 | 0.0752 | 102 | 0.0498 | 87 | 0.0425 | PASS |
+| dense | 4096 | 4109 | 1.0032 | raw | 4129 | 1.0081 | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
+| text | 16384 | 5705 | 0.3482 | cube | 1295 | 0.0790 | 1234 | 0.0753 | 1194 | 0.0729 | PASS |
+| log_like | 16384 | 7318 | 0.4467 | cube | 430 | 0.0262 | 427 | 0.0261 | 379 | 0.0231 | PASS |
+| binary_mixed | 8192 | 8205 | 1.0016 | raw | 5288 | 0.6455 | 5241 | 0.6398 | 4803 | 0.5863 | PASS |
+| random_high | 4096 | 4109 | 1.0032 | raw | 4135 | 1.0095 | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
+| sparse_small | 256 | 269 | 1.0508 | raw | 65 | 0.2539 | 41 | 0.1602 | 31 | 0.1211 | PASS |
+
 ## Improvement Summary (T1 → T2)
 
 ### t4_baseline → t5_bwt_ec
@@ -88,6 +104,18 @@ Round-trip (all inputs): **PASS**
 | text | 0.3482 | 0.2187 | -0.1295 |
 | log_like | 0.4467 | 0.3160 | -0.1306 |
 | binary_mixed | 1.0016 | 0.9581 | -0.0435 |
+| random_high | 1.0032 | 1.0032 | 0.0000 |
+| sparse_small | 1.0508 | 1.0508 | 0.0000 |
+
+### t4_baseline → t4_precheck
+
+| Input | T1 CRatio | T2 CRatio | Delta |
+|-------|-----------|-----------|-------|
+| sparse_clustered | 0.2451 | 0.2451 | 0.0000 |
+| dense | 1.0032 | 1.0032 | 0.0000 |
+| text | 0.3482 | 0.3482 | 0.0000 |
+| log_like | 0.4467 | 0.4467 | 0.0000 |
+| binary_mixed | 1.0016 | 1.0016 | 0.0000 |
 | random_high | 1.0032 | 1.0032 | 0.0000 |
 | sparse_small | 1.0508 | 1.0508 | 0.0000 |
 
