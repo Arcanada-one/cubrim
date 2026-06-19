@@ -9,7 +9,7 @@
       "value_scheme": "entropy-context",
       "use_square_limit": true
     },
-    "timestamp": "2026-06-19T09:04:25Z",
+    "timestamp": "2026-06-19T09:05:07Z",
     "environment": {
       "host": "mac.tailb1f805.ts.net",
       "os": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
@@ -18,8 +18,8 @@
       "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "zstd": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***",
       "brotli": "brotli 1.2.0",
-      "timestamp": "2026-06-19T09:04:25Z",
-      "code_sha": "794148d85631bc0e2f351e2178d3ab7e7911e137"
+      "timestamp": "2026-06-19T09:05:07Z",
+      "code_sha": "1f4c30b7f06b6b06ee7d7afb1510868a812d733d"
     },
     "round_trip_all": "PASS",
     "results": [
@@ -147,7 +147,7 @@
       "value_scheme": "bwt-entropy-context",
       "use_square_limit": true
     },
-    "timestamp": "2026-06-19T09:04:29Z",
+    "timestamp": "2026-06-19T09:05:08Z",
     "environment": {
       "host": "mac.tailb1f805.ts.net",
       "os": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
@@ -156,8 +156,8 @@
       "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "zstd": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***",
       "brotli": "brotli 1.2.0",
-      "timestamp": "2026-06-19T09:04:29Z",
-      "code_sha": "794148d85631bc0e2f351e2178d3ab7e7911e137"
+      "timestamp": "2026-06-19T09:05:08Z",
+      "code_sha": "1f4c30b7f06b6b06ee7d7afb1510868a812d733d"
     },
     "round_trip_all": "PASS",
     "results": [
@@ -285,7 +285,7 @@
       "value_scheme": "auto",
       "use_square_limit": true
     },
-    "timestamp": "2026-06-19T09:04:30Z",
+    "timestamp": "2026-06-19T09:05:08Z",
     "environment": {
       "host": "mac.tailb1f805.ts.net",
       "os": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
@@ -294,8 +294,8 @@
       "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
       "zstd": "*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***",
       "brotli": "brotli 1.2.0",
-      "timestamp": "2026-06-19T09:04:30Z",
-      "code_sha": "794148d85631bc0e2f351e2178d3ab7e7911e137"
+      "timestamp": "2026-06-19T09:05:08Z",
+      "code_sha": "1f4c30b7f06b6b06ee7d7afb1510868a812d733d"
     },
     "round_trip_all": "PASS",
     "results": [

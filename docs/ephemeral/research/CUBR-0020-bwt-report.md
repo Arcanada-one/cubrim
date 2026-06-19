@@ -12,12 +12,12 @@
 - **cargo:** cargo 1.96.0 (30a34c682 2026-05-25)
 - **zstd:** *** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***
 - **brotli:** brotli 1.2.0
-- **timestamp:** 2026-06-19T09:04:25Z
-- **code_sha:** 794148d85631bc0e2f351e2178d3ab7e7911e137
+- **timestamp:** 2026-06-19T09:05:07Z
+- **code_sha:** 1f4c30b7f06b6b06ee7d7afb1510868a812d733d
 
 ## Time-Series Results
 
-### t4_baseline — 2026-06-19T09:04:25Z
+### t4_baseline — 2026-06-19T09:05:07Z
 
 Config: raw_store_bound=320, b=256, N=minimal, gap_scheme=rle, value_scheme=entropy-context, use_square_limit=True
 
@@ -33,7 +33,7 @@ Round-trip (all inputs): **PASS**
 | random_high | 4096 | 4109 | 1.0032 | raw | 4135 | 1.0095 | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
 | sparse_small | 256 | 269 | 1.0508 | raw | 65 | 0.2539 | 41 | 0.1602 | 31 | 0.1211 | PASS |
 
-### t5_bwt_ec — 2026-06-19T09:04:29Z
+### t5_bwt_ec — 2026-06-19T09:05:08Z
 
 Config: raw_store_bound=320, b=256, N=minimal, gap_scheme=rle, value_scheme=bwt-entropy-context, use_square_limit=True
 
@@ -49,7 +49,7 @@ Round-trip (all inputs): **PASS**
 | random_high | 4096 | 4109 | 1.0032 | raw | 4135 | 1.0095 | 4110 | 1.0034 | 4101 | 1.0012 | PASS |
 | sparse_small | 256 | 269 | 1.0508 | raw | 65 | 0.2539 | 41 | 0.1602 | 31 | 0.1211 | PASS |
 
-### t5_auto — 2026-06-19T09:04:30Z
+### t5_auto — 2026-06-19T09:05:08Z
 
 Config: raw_store_bound=320, b=256, N=minimal, gap_scheme=rle, value_scheme=auto, use_square_limit=True
 
