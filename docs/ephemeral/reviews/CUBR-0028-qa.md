@@ -43,7 +43,7 @@ Decoder branches the wire format needs (`codec.rs` decode path + `config.rs:88-1
 `bwt_entropy_size` (`codec.rs:1727-1730`) charges `2 + context_huffman_size(bwt_out)`. This is
 **term-for-term identical** to what the real encoder emits: `bwt_entropy_encode`
 (`:1686-1693`) writes `primary(2) + context_huffman_encode(bwt_out)`. The selector byte (#1)
-is the existing cube-header `value_scheme` field (`pre-existing`) charged once via `serialize_cube_header`
+is the already-present cube-header `value_scheme` field charged once via `serialize_cube_header`
 in both `estimate_cube_size` and the real emit — not an added branch. **Every decode branch
 has a matching cost term.** The decisive fact: the measured 25955 is the real `encode()` output
 length, so even if the model were wrong, the GO stands on the measured number. (CUBR-0026's
