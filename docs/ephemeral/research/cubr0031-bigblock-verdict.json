@@ -1,0 +1,113 @@
+{
+  "task": "CUBR-0031",
+  "probe": "suffix-array-bigblock-real",
+  "source": "fork of cubr0029_bigblock_probe.py (CUBR-0029 record preserved)",
+  "code_sha": "60ae94c802fa5bd36de067ee00e28ffbe2c301ec",
+  "measurement_source": "tests/cubr0031_bench.rs (real Rust codec)",
+  "corpus_total": 116992,
+  "original_corpus_total": 51456,
+  "t4_aggregate_original": 0.58724,
+  "bwt_aggregate_baseline_original": 0.504412,
+  "go_threshold": 0.575495,
+  "current_cube_size_limit": 65536,
+  "block_bound_files": [
+    "block_bound_runs"
+  ],
+  "new_file": {
+    "name": "block_bound_runs",
+    "size_bytes": 65536,
+    "bwt_bytes": 9011,
+    "t4_bytes": 9011,
+    "delta_bwt_minus_t4": 0,
+    "bwt_ratio": 0.137497,
+    "t4_ratio": 0.137497,
+    "bwt_gain_vs_t4": false
+  },
+  "extended_aggregate": {
+    "bwt_total_bytes": 34966,
+    "t4_total_bytes": 39228,
+    "bwt_aggregate": 0.298875,
+    "t4_aggregate": 0.335305,
+    "delta_vs_t4": -0.03643
+  },
+  "widening_overhead": {
+    "per_block_bytes": 2,
+    "num_blocks": 8,
+    "total_bytes": 16,
+    "bwt_aggregate_with_overhead": 0.299012
+  },
+  "gotcha_6_compliance": {
+    "decoder_branches": 4,
+    "cost_terms_charged": 4,
+    "assertion": "PASS"
+  },
+  "verdict": "NO-GO-WIDENING",
+  "widening_justified": false,
+  "reason": "BWT does NOT outperform T4 on the L=65536 block-bound file (delta=+0 bytes, measured by real Rust codec at code_sha=60ae94c802fa5bd36de067ee00e28ffbe2c301ec). Competitive selection means BWT == T4 on this file (tie -> T4 kept). Raising cube_size_limit beyond 65536 and widening primary_index to u32 would add +16 bytes overhead with zero ratio gain on this corpus. The overall BWT aggregate (0.298875) is excellent vs threshold (0.575495) but that is driven by the ORIGINAL 7 files, not by the large-block fixture. u16->u32 widening is NOT justified. CUBR-0029 Class B #2 CLOSED (measured, not modelled).",
+  "per_file": [
+    {
+      "file": "sparse_clustered",
+      "size_bytes": 2048,
+      "bwt_bytes": 502,
+      "t4_bytes": 502,
+      "delta": 0,
+      "block_bound": false
+    },
+    {
+      "file": "dense",
+      "size_bytes": 4096,
+      "bwt_bytes": 4109,
+      "t4_bytes": 4109,
+      "delta": 0,
+      "block_bound": false
+    },
+    {
+      "file": "text",
+      "size_bytes": 16384,
+      "bwt_bytes": 3583,
+      "t4_bytes": 5705,
+      "delta": -2122,
+      "block_bound": false
+    },
+    {
+      "file": "log_like",
+      "size_bytes": 16384,
+      "bwt_bytes": 5178,
+      "t4_bytes": 7318,
+      "delta": -2140,
+      "block_bound": false
+    },
+    {
+      "file": "binary_mixed",
+      "size_bytes": 8192,
+      "bwt_bytes": 8205,
+      "t4_bytes": 8205,
+      "delta": 0,
+      "block_bound": false
+    },
+    {
+      "file": "random_high",
+      "size_bytes": 4096,
+      "bwt_bytes": 4109,
+      "t4_bytes": 4109,
+      "delta": 0,
+      "block_bound": false
+    },
+    {
+      "file": "sparse_small",
+      "size_bytes": 256,
+      "bwt_bytes": 269,
+      "t4_bytes": 269,
+      "delta": 0,
+      "block_bound": false
+    },
+    {
+      "file": "block_bound_runs",
+      "size_bytes": 65536,
+      "bwt_bytes": 9011,
+      "t4_bytes": 9011,
+      "delta": 0,
+      "block_bound": true
+    }
+  ]
+}

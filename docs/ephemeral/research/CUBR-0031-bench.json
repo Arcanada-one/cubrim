@@ -1,0 +1,30 @@
+{
+  "task":"CUBR-0031",
+  "scheme":"BwtEntropy vs EntropyContext (T4)",
+  "code_sha":"60ae94c802fa5bd36de067ee00e28ffbe2c301ec",
+  "corpus_total":116992,
+  "original_corpus_total":51456,
+  "new_file_size":65536,
+  "t4_total_bytes":39228,
+  "bwt_total_bytes":34966,
+  "t4_aggregate":0.335305,
+  "bwt_aggregate":0.298875,
+  "delta_vs_t4":-0.036430,
+  "t4_baseline_original":0.587240,
+  "go_threshold":0.575495,
+  "verdict":"GO",
+  "widening_overhead_per_block_bytes":2,
+  "num_blocks":8,
+  "total_widening_overhead_bytes":16,
+  "gotcha_6":{"decoder_branches":4,"cost_terms":4,"assertion":"PASS"},
+  "per_file":[
+    {"file":"sparse_clustered","size_bytes":2048,"t4_bytes":502,"bwt_bytes":502,"delta":0,"t4_mode":"cube","block_bound":false},
+    {"file":"dense","size_bytes":4096,"t4_bytes":4109,"bwt_bytes":4109,"delta":0,"t4_mode":"raw","block_bound":false},
+    {"file":"text","size_bytes":16384,"t4_bytes":5705,"bwt_bytes":3583,"delta":-2122,"t4_mode":"cube","block_bound":false},
+    {"file":"log_like","size_bytes":16384,"t4_bytes":7318,"bwt_bytes":5178,"delta":-2140,"t4_mode":"cube","block_bound":false},
+    {"file":"binary_mixed","size_bytes":8192,"t4_bytes":8205,"bwt_bytes":8205,"delta":0,"t4_mode":"raw","block_bound":false},
+    {"file":"random_high","size_bytes":4096,"t4_bytes":4109,"bwt_bytes":4109,"delta":0,"t4_mode":"raw","block_bound":false},
+    {"file":"sparse_small","size_bytes":256,"t4_bytes":269,"bwt_bytes":269,"delta":0,"t4_mode":"raw","block_bound":false},
+    {"file":"block_bound_runs","size_bytes":65536,"t4_bytes":9011,"bwt_bytes":9011,"delta":0,"t4_mode":"cube","block_bound":true,"L_over_limit":1.0}
+  ]
+}
