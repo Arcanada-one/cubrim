@@ -1,0 +1,75 @@
+{
+  "task": "CUBR-0029-P3",
+  "probe": "suffix-array-bigblock",
+  "code_sha": "ebf485c",
+  "corpus_total": 51456,
+  "t4_aggregate": 0.58724,
+  "bwt_aggregate_baseline": 0.504412,
+  "go_threshold": 0.575495,
+  "current_cube_size_limit": 65536,
+  "largest_corpus_file_bytes": 16384,
+  "block_bound_files": [],
+  "u16_primary_index_bytes": 2,
+  "u32_primary_index_bytes": 4,
+  "widening_overhead_per_block_bytes": 2,
+  "total_widening_overhead_bytes": 14,
+  "bwt_with_widening_aggregate": 0.504684,
+  "verdict": "NO-GO",
+  "reason": "No corpus file reaches L = cube_size_limit = 65536. Largest file is 16384 bytes (25.0% of limit). Raising cube_size_limit cannot improve BWT on this corpus \u2014 files are not block-bound, so larger blocks produce identical BWT output. u16\u2192u32 primary_index widening would add +14 bytes overhead (+2 bytes \u00d7 7 blocks) with zero ratio gain. O(n) suffix-array (SA-IS) is a throughput prerequisite for a larger-block regime, not a present ratio lever \u2014 it does not change BWT output or compression ratio. primary_index u16 is correct for the current cube_size_limit = 65536 (L \u2264 u16::MAX+1). Widening to u32 deferred until a corpus justifying cube_size_limit > 65536 exists.",
+  "on_loop_complexity": "bwt_encode_codes is O(n\u00b7log n \u00d7 k) comparator sort, NOT O(n\u00b2\u00b7log n). SA-IS would make it O(n) \u2014 throughput win only, not a ratio lever. Prerequisite for a future larger-block regime.",
+  "primary_index_width_analysis": {
+    "current": "u16 (2 bytes/block, correct for L \u2264 65536)",
+    "required_for_larger_blocks": "u32 (4 bytes/block, +2 bytes overhead per block)",
+    "guard": "debug_assert!(primary <= u16::MAX) at codec.rs:1620",
+    "action": "deferred \u2014 no corpus justification for raising cube_size_limit"
+  },
+  "gotcha_6_compliance": {
+    "decoder_branches": 4,
+    "cost_terms_charged": 4,
+    "assertion": "PASS"
+  },
+  "per_file": [
+    {
+      "file": "sparse_clustered",
+      "size_bytes": 2048,
+      "pct_of_limit": 0.0312,
+      "block_bound": false
+    },
+    {
+      "file": "dense",
+      "size_bytes": 4096,
+      "pct_of_limit": 0.0625,
+      "block_bound": false
+    },
+    {
+      "file": "text",
+      "size_bytes": 16384,
+      "pct_of_limit": 0.25,
+      "block_bound": false
+    },
+    {
+      "file": "log_like",
+      "size_bytes": 16384,
+      "pct_of_limit": 0.25,
+      "block_bound": false
+    },
+    {
+      "file": "binary_mixed",
+      "size_bytes": 8192,
+      "pct_of_limit": 0.125,
+      "block_bound": false
+    },
+    {
+      "file": "random_high",
+      "size_bytes": 4096,
+      "pct_of_limit": 0.0625,
+      "block_bound": false
+    },
+    {
+      "file": "sparse_small",
+      "size_bytes": 256,
+      "pct_of_limit": 0.0039,
+      "block_bound": false
+    }
+  ]
+}

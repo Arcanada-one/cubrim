@@ -1,0 +1,93 @@
+{
+  "task": "CUBR-0029-P2",
+  "probe": "distance-map-revisit",
+  "code_sha": "ebf485c",
+  "corpus_total": 51456,
+  "t4_total_bytes": 30217,
+  "t4_aggregate": 0.58724,
+  "go_threshold": 0.575495,
+  "distmap_prior_savings_bytes": 26,
+  "hypothetical_aggregate_if_distmap_free": 0.586734,
+  "weighted_corpus_rho": 0.190318,
+  "sparse_files_rho_lt_0_3": [
+    "sparse_clustered",
+    "dense",
+    "text",
+    "log_like",
+    "binary_mixed",
+    "random_high",
+    "sparse_small"
+  ],
+  "verdict": "NO-GO",
+  "reason": "Even with zero distance-map cost, hypothetical aggregate 0.586734 > GO threshold 0.575495. NO-GO.",
+  "gotcha_6_compliance": {
+    "decoder_branches": 4,
+    "cost_terms_charged": 4,
+    "assertion": "PASS"
+  },
+  "per_file": [
+    {
+      "file": "sparse_clustered",
+      "size_bytes": 2048,
+      "rho": 0.03125,
+      "axis0_distinct": 256,
+      "axis1_distinct": 8,
+      "distmap_wire_bytes": 268,
+      "t4_mode": "cube"
+    },
+    {
+      "file": "dense",
+      "size_bytes": 4096,
+      "rho": 0.0625,
+      "axis0_distinct": 256,
+      "axis1_distinct": 16,
+      "distmap_wire_bytes": 276,
+      "t4_mode": "raw"
+    },
+    {
+      "file": "text",
+      "size_bytes": 16384,
+      "rho": 0.25,
+      "axis0_distinct": 256,
+      "axis1_distinct": 64,
+      "distmap_wire_bytes": 324,
+      "t4_mode": "cube"
+    },
+    {
+      "file": "log_like",
+      "size_bytes": 16384,
+      "rho": 0.25,
+      "axis0_distinct": 256,
+      "axis1_distinct": 64,
+      "distmap_wire_bytes": 324,
+      "t4_mode": "cube"
+    },
+    {
+      "file": "binary_mixed",
+      "size_bytes": 8192,
+      "rho": 0.125,
+      "axis0_distinct": 256,
+      "axis1_distinct": 32,
+      "distmap_wire_bytes": 292,
+      "t4_mode": "raw"
+    },
+    {
+      "file": "random_high",
+      "size_bytes": 4096,
+      "rho": 0.0625,
+      "axis0_distinct": 256,
+      "axis1_distinct": 16,
+      "distmap_wire_bytes": 276,
+      "t4_mode": "raw"
+    },
+    {
+      "file": "sparse_small",
+      "size_bytes": 256,
+      "rho": 0.003906,
+      "axis0_distinct": 256,
+      "axis1_distinct": 1,
+      "distmap_wire_bytes": 261,
+      "t4_mode": "raw"
+    }
+  ]
+}
