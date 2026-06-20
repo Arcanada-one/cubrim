@@ -1614,6 +1614,13 @@ pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
     let bwt_out: Vec<usize> = indices.iter().map(|&i| seq[(i + n - 1) % n]).collect();
     // Primary index = row where the rotation starting at 0 appears.
     let primary = indices.iter().position(|&i| i == 0).unwrap_or(0);
+    // Safety: cube mode is only reached when l <= cube_size_limit() = b*b = 65536
+    // (config.rs:216-222, codec.rs:217-224), so primary < l <= 65536 <= u16::MAX.
+    // If cube_size_limit() is ever raised above 65536, revisit this cast.
+    debug_assert!(
+        primary <= u16::MAX as usize,
+        "primary_index {primary} exceeds u16::MAX; cube_size_limit() may have been raised above 65536 without updating BWT wire format"
+    );
     (bwt_out, primary as u16)
 }
 

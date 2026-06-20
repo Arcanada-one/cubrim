@@ -12,7 +12,7 @@
 |--------|-------|
 | T4 baseline | 0.587240 (30217 / 51456 bytes) |
 | BWT real Rust | **0.504412** (25955 / 51456 bytes) |
-| Delta vs T4 | **−8.28%** (−4262 bytes) |
+| Delta vs T4 | **−0.0828 aggregate-ratio points** (−4262 bytes; −14.1% relative improvement) |
 | GO threshold | 0.575495 (−2% vs T4) |
 | **Verdict** | **GO** (beats threshold by 7.1 pp) |
 
