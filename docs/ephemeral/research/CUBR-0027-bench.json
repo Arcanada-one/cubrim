@@ -1,0 +1,172 @@
+{
+  "task_id": "CUBR-0027",
+  "scheme": "EntropyContext2",
+  "variant": "option_a_3level",
+  "description": "Order-2 context-key Huffman, 3-level wire (order-2 + order-1 + order-0 tables all serialized)",
+  "code_sha": "8ab23d6ae45ab8f67acf468d6073f825865c04ab",
+  "manifest_sha": "cdd613090c7a8b908a6850902554e06d23b8578c7b136bb24ff7fb9fb8fcea94",
+  "corpus_total_bytes": 51456,
+  "t4_baseline_aggregate": 0.58724,
+  "t4_real_aggregate": 0.58724,
+  "t4_real_total_bytes": 30217,
+  "round_trip_7_of_7": true,
+  "verdict": "NO_GO_vs_T4",
+  "best_min_ctx_count": 256,
+  "best_aggregate": 0.592215,
+  "best_total_bytes": 30473,
+  "best_delta_vs_t4": 0.004975,
+  "twin_predicted_aggregate": 0.54773,
+  "twin_prediction_gap_note": "Python twin omitted order-1 table serialization in header cost model. Real Option A includes order-1 tables \u2192 aggregate higher than twin predicted.",
+  "sweep": [
+    {
+      "min_ctx_count": 64,
+      "total_bytes": 33046,
+      "aggregate": 0.642219,
+      "delta_vs_t4": 0.054979,
+      "per_file": {
+        "sparse_clustered": 711,
+        "dense": 4109,
+        "text": 6756,
+        "log_like": 8887,
+        "binary_mixed": 8205,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 96,
+      "total_bytes": 32564,
+      "aggregate": 0.632851,
+      "delta_vs_t4": 0.045611,
+      "per_file": {
+        "sparse_clustered": 717,
+        "dense": 4109,
+        "text": 6661,
+        "log_like": 8494,
+        "binary_mixed": 8205,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 128,
+      "total_bytes": 31540,
+      "aggregate": 0.612951,
+      "delta_vs_t4": 0.025711,
+      "per_file": {
+        "sparse_clustered": 748,
+        "dense": 4109,
+        "text": 5839,
+        "log_like": 8261,
+        "binary_mixed": 8205,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 160,
+      "total_bytes": 31434,
+      "aggregate": 0.610891,
+      "delta_vs_t4": 0.023651,
+      "per_file": {
+        "sparse_clustered": 797,
+        "dense": 4109,
+        "text": 5738,
+        "log_like": 8207,
+        "binary_mixed": 8205,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 192,
+      "total_bytes": 31045,
+      "aggregate": 0.603331,
+      "delta_vs_t4": 0.016091,
+      "per_file": {
+        "sparse_clustered": 797,
+        "dense": 4109,
+        "text": 5716,
+        "log_like": 8191,
+        "binary_mixed": 7854,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 256,
+      "total_bytes": 30473,
+      "aggregate": 0.592215,
+      "delta_vs_t4": 0.004975,
+      "per_file": {
+        "sparse_clustered": 889,
+        "dense": 4109,
+        "text": 5642,
+        "log_like": 7601,
+        "binary_mixed": 7854,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 320,
+      "total_bytes": 30519,
+      "aggregate": 0.593109,
+      "delta_vs_t4": 0.005869,
+      "per_file": {
+        "sparse_clustered": 925,
+        "dense": 4109,
+        "text": 5636,
+        "log_like": 7617,
+        "binary_mixed": 7854,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 384,
+      "total_bytes": 31114,
+      "aggregate": 0.604672,
+      "delta_vs_t4": 0.017432,
+      "per_file": {
+        "sparse_clustered": 908,
+        "dense": 4109,
+        "text": 6074,
+        "log_like": 7791,
+        "binary_mixed": 7854,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 512,
+      "total_bytes": 33198,
+      "aggregate": 0.645173,
+      "delta_vs_t4": 0.057933,
+      "per_file": {
+        "sparse_clustered": 941,
+        "dense": 4109,
+        "text": 7833,
+        "log_like": 8083,
+        "binary_mixed": 7854,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    },
+    {
+      "min_ctx_count": 1024,
+      "total_bytes": 35227,
+      "aggregate": 0.684604,
+      "delta_vs_t4": 0.097364,
+      "per_file": {
+        "sparse_clustered": 941,
+        "dense": 4109,
+        "text": 8622,
+        "log_like": 9323,
+        "binary_mixed": 7854,
+        "random_high": 4109,
+        "sparse_small": 269
+      }
+    }
+  ]
+}
