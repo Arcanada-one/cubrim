@@ -17,7 +17,7 @@ pub mod config;
 pub mod codec;
 pub(crate) mod huffman;
 
-pub use codec::{encode, decode, encode_with_config};
+pub use codec::{encode, decode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
 pub use config::{EncodeConfig, GapScheme, ValueScheme};
 pub use error::CubrimError;
 

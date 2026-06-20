@@ -13,9 +13,20 @@ use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context]");
+    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2] [--min-ctx-count N]");
     eprintln!("  cubrim decompress <input> <output>");
     process::exit(1);
+}
+
+fn parse_flag_u16(args: &[String], flag: &str) -> Option<u16> {
+    for i in 0..args.len().saturating_sub(1) {
+        if args[i] == flag {
+            if let Ok(v) = args[i + 1].parse::<u16>() {
+                return Some(v);
+            }
+        }
+    }
+    None
 }
 
 fn parse_flag_usize(args: &[String], flag: &str, default: usize) -> usize {
@@ -96,18 +107,25 @@ fn main() {
                     }
                 };
             }
-            // --value-scheme: bitpack-fixed (default), rle-codes, or entropy
+            // --value-scheme: bitpack-fixed (default), rle-codes, entropy, entropy-context, entropy-context-2
             if let Some(vs_str) = parse_flag_str(extra_args, "--value-scheme") {
                 config.value_scheme = match vs_str {
                     "bitpack-fixed" | "bitpack_fixed" => ValueScheme::BitpackFixed,
                     "rle-codes" | "rle_codes" => ValueScheme::RleCodes,
                     "entropy" => ValueScheme::Entropy,
                     "entropy-context" | "entropy_context" => ValueScheme::EntropyContext,
+                    "entropy-context-2" | "entropy_context_2" => ValueScheme::EntropyContext2,
                     other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, or entropy-context.");
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, or entropy-context-2.");
                         process::exit(1);
                     }
                 };
+            }
+            // --min-ctx-count: minimum observation count for order-2 Huffman context tables.
+            // Only used when --value-scheme entropy-context-2 is set.
+            // Default = ORDER2_DEFAULT_MIN_CTX (128) when not specified.
+            if let Some(mcc) = parse_flag_u16(extra_args, "--min-ctx-count") {
+                config.min_ctx_count = Some(mcc);
             }
             cmd_compress(input, output, &config)
         }

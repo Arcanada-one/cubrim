@@ -64,6 +64,27 @@ pub enum ValueScheme {
     ///
     /// Header byte = 4.
     EntropyContext,
+    /// Order-2 context-adaptive canonical Huffman on the value-code stream (T5).
+    /// Context key = (prev2_code, prev_code) — a pair of the two most recently
+    /// decoded codes (sentinels: pos 0 → (0,0), pos 1 → (0, first_code)).
+    ///
+    /// Fallback chain (3 levels on the wire):
+    ///   1. (prev2, prev) has ≥ MIN_CTX_COUNT observations → own order-2 table
+    ///   2. else (prev) has ≥ MIN_CTX_COUNT observations   → order-1 fallback table
+    ///   3. else → shared order-0 global table (sentinel key (0,0))
+    ///
+    /// Wire (after header + gap streams):
+    ///   [min_ctx_count : u16 BE]                           — 2 bytes (sweepable threshold)
+    ///   [n_contexts    : u16 BE]                           — total context entries in header
+    ///   for each context entry (ascending key order):
+    ///     [tag : u8]                                       — 2 = order-2, 1 = order-1, 0 = order-0 fallback
+    ///     [prev2_code : u16 BE]  (tag=2 only)              — 2 bytes (order-2 entries only)
+    ///     [prev_code  : u16 BE]  (tag=2 or tag=1)          — 2 bytes
+    ///     [code_len[0..n_distinct] : u8 × n_distinct]
+    ///   [coded bitstream : MSB-first, byte-aligned, zero-padded tail]
+    ///
+    /// Header byte = 5.
+    EntropyContext2,
 }
 
 impl GapScheme {
@@ -93,6 +114,7 @@ impl ValueScheme {
             ValueScheme::RleCodes => 2,
             ValueScheme::Entropy => 3,
             ValueScheme::EntropyContext => 4,
+            ValueScheme::EntropyContext2 => 5,
         }
     }
 
@@ -103,6 +125,7 @@ impl ValueScheme {
             2 => Some(ValueScheme::RleCodes),
             3 => Some(ValueScheme::Entropy),
             4 => Some(ValueScheme::EntropyContext),
+            5 => Some(ValueScheme::EntropyContext2),
             _ => None,
         }
     }
@@ -140,6 +163,13 @@ pub struct EncodeConfig {
     /// Value encoding scheme for the value stream.
     /// v1-default: ValueScheme::BitpackFixed (byte-identical to v1 output).
     pub value_scheme: ValueScheme,
+
+    /// Minimum observation count for an order-2 context to get its own Huffman table.
+    /// Only used when value_scheme = EntropyContext2. Serialized as u16 BE in the
+    /// order-2 value stream header (self-describing — decoder reads this from the blob,
+    /// never from EncodeConfig).
+    /// None → use the scheme default (128). Range: 1..=65535.
+    pub min_ctx_count: Option<u16>,
 }
 
 impl EncodeConfig {
@@ -153,6 +183,7 @@ impl EncodeConfig {
             n_override: None,
             gap_scheme: GapScheme::RleU16,
             value_scheme: ValueScheme::BitpackFixed,
+            min_ctx_count: None,
         }
     }
 
@@ -189,7 +220,9 @@ mod tests {
         assert_eq!(ValueScheme::from_byte(ValueScheme::RleCodes.scheme_byte()), Some(ValueScheme::RleCodes));
         assert_eq!(ValueScheme::from_byte(ValueScheme::Entropy.scheme_byte()), Some(ValueScheme::Entropy));
         assert_eq!(ValueScheme::from_byte(ValueScheme::EntropyContext.scheme_byte()), Some(ValueScheme::EntropyContext));
+        assert_eq!(ValueScheme::from_byte(ValueScheme::EntropyContext2.scheme_byte()), Some(ValueScheme::EntropyContext2));
         assert_eq!(ValueScheme::from_byte(0), None, "0 is not a valid value_scheme byte");
+        assert_eq!(ValueScheme::from_byte(6), None, "6 is not a valid value_scheme byte");
         assert_eq!(ValueScheme::from_byte(99), None, "unknown byte returns None");
     }
 
@@ -200,6 +233,7 @@ mod tests {
         assert_eq!(ValueScheme::RleCodes.scheme_byte(), 2u8);
         assert_eq!(ValueScheme::Entropy.scheme_byte(), 3u8);
         assert_eq!(ValueScheme::EntropyContext.scheme_byte(), 4u8);
+        assert_eq!(ValueScheme::EntropyContext2.scheme_byte(), 5u8);
     }
 
     #[test]
@@ -255,6 +289,7 @@ mod tests {
             n_override: None,
             gap_scheme: GapScheme::RleU16,
             value_scheme: ValueScheme::BitpackFixed,
+            min_ctx_count: None,
         };
 
         let inputs: Vec<Vec<u8>> = vec![

@@ -83,6 +83,7 @@ fn text_entropy() {
         n_override: None,
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::Entropy,
+        min_ctx_count: None,
     };
 
     // Test 1: rust_encode_entropy(x) byte-identical to python_encode_entropy(x)
@@ -135,6 +136,7 @@ fn text_entropy_context() {
         n_override: None,
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::EntropyContext,
+        min_ctx_count: None,
     };
 
     // Test 1: rust_encode_entropy_context(x) byte-identical to python_encode_entropy_context(x)
@@ -189,6 +191,7 @@ fn sparse_clustered_rlecodes() {
         n_override: None,
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::RleCodes,
+        min_ctx_count: None,
     };
 
     // Test 1: rust_encode_rlecodes(x) byte-identical to python_encode_rlecodes(x)
