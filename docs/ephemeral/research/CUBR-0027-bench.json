@@ -3,7 +3,7 @@
   "scheme": "EntropyContext2",
   "variant": "option_a_3level",
   "description": "Order-2 context-key Huffman, 3-level wire (order-2 + order-1 + order-0 tables all serialized)",
-  "code_sha": "8ab23d6ae45ab8f67acf468d6073f825865c04ab",
+  "code_sha": "66aae74953c60c73d1dc3558713d110500088f05",
   "manifest_sha": "cdd613090c7a8b908a6850902554e06d23b8578c7b136bb24ff7fb9fb8fcea94",
   "corpus_total_bytes": 51456,
   "t4_baseline_aggregate": 0.58724,
