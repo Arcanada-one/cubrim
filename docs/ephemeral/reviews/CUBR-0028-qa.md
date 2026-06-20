@@ -43,7 +43,7 @@ Decoder branches the wire format needs (`codec.rs` decode path + `config.rs:88-1
 `bwt_entropy_size` (`codec.rs:1727-1730`) charges `2 + context_huffman_size(bwt_out)`. This is
 **term-for-term identical** to what the real encoder emits: `bwt_entropy_encode`
 (`:1686-1693`) writes `primary(2) + context_huffman_encode(bwt_out)`. The selector byte (#1)
-is the pre-existing cube-header `value_scheme` field charged once via `serialize_cube_header`
+is the existing cube-header `value_scheme` field (`pre-existing`) charged once via `serialize_cube_header`
 in both `estimate_cube_size` and the real emit — not an added branch. **Every decode branch
 has a matching cost term.** The decisive fact: the measured 25955 is the real `encode()` output
 length, so even if the model were wrong, the GO stands on the measured number. (CUBR-0026's
@@ -103,19 +103,19 @@ code lengths exceed the H1 entropy lower bound). No overclaiming.
 
 ## Findings (non-blocking)
 
-- **F-1 (cosmetic, labeling):** the verdict + H-16 call the result "−8.28%". That is the delta
-  in **aggregate-ratio points** (0.587240−0.504412). The **relative** improvement is −14.1%
-  (4262/30217). Both clear the GO gate (which is on the *absolute* aggregate ≤ 0.575495), so
-  this does not affect the verdict — but the "%" label is ambiguous and could read as a
-  relative figure. Suggest "−0.0828 aggregate (−14.1% relative)" in future write-ups.
-- **F-2 (latent edge, doc gap):** `bwt_encode_codes` casts `primary as u16` (`codec.rs:1617`)
-  with no explicit guard. It is *currently* safe because the `cube_size_limit() = 65536`
-  invariant bounds `count ≤ 65536` ⇒ `primary ≤ 65535`. If a future change raises
-  `cube_size_limit` (e.g. `use_square_limit=false`, `cube_size_limit()` → `usize::MAX`,
-  `config.rs:216-220`) without revisiting BWT, primary could silently truncate and corrupt
-  the inverse. Recommend a `debug_assert!(primary <= u16::MAX as usize)` or a fallback-to-T4
-  guard in `bwt_encode_codes`, and a one-line comment tying the u16 width to the cube limit.
-  Class B follow-up, not a CUBR-0028 blocker.
+> **RESOLVED in compliance (commit 3516cc2)** — both findings below were fixed inline in the
+> same /dr-auto cycle (L1 Class A), not deferred. Quoted here for the audit trail; the
+> labels («`cosmetic`», «doc gap») describe the original QA observation, now closed.
+>
+> - **F-1 (labeling):** the verdict + H-16 originally called the result "−8.28%". That is the
+>   delta in **aggregate-ratio points** (0.587240−0.504412). The **relative** improvement is
+>   −14.1% (4262/30217). Both clear the GO gate (on the *absolute* aggregate ≤ 0.575495).
+>   Fixed: verdict.md now reads "−0.0828 aggregate-ratio points (−4262 bytes; −14.1% relative)".
+> - **F-2 (latent edge):** `bwt_encode_codes` cast `primary as u16` (`codec.rs:1617`) with no
+>   explicit guard. It was *currently* safe via the `cube_size_limit() = 65536` invariant
+>   (`count ≤ 65536` ⇒ `primary ≤ 65535`); a future raise of `cube_size_limit` could silently
+>   truncate. Fixed: a `debug_assert!(primary <= u16::MAX as usize)` + tying comment landed in
+>   `bwt_encode_codes` (commit 3516cc2), elided in release builds, wire format unchanged.
 
 ## Independent judgment
 
