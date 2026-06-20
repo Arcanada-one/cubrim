@@ -1,0 +1,22 @@
+{
+  "task":"CUBR-0028",
+  "scheme":"BwtEntropy",
+  "code_sha":"15b0ba6306febaa5f806fed51cdfe3ffa3ac2c21",
+  "corpus_total":51456,
+  "t4_total_bytes":30217,
+  "bwt_total_bytes":25955,
+  "t4_aggregate":0.587240,
+  "bwt_aggregate":0.504412,
+  "delta_vs_t4":-0.082828,
+  "go_threshold":0.575495,
+  "verdict":"GO",
+  "per_file":[
+    {"file":"sparse_clustered","size_bytes":2048,"t4_bytes":502,"bwt_bytes":502,"delta":0,"mode":"cube"},
+    {"file":"dense","size_bytes":4096,"t4_bytes":4109,"bwt_bytes":4109,"delta":0,"mode":"raw"},
+    {"file":"text","size_bytes":16384,"t4_bytes":5705,"bwt_bytes":3583,"delta":-2122,"mode":"cube"},
+    {"file":"log_like","size_bytes":16384,"t4_bytes":7318,"bwt_bytes":5178,"delta":-2140,"mode":"cube"},
+    {"file":"binary_mixed","size_bytes":8192,"t4_bytes":8205,"bwt_bytes":8205,"delta":0,"mode":"raw"},
+    {"file":"random_high","size_bytes":4096,"t4_bytes":4109,"bwt_bytes":4109,"delta":0,"mode":"raw"},
+    {"file":"sparse_small","size_bytes":256,"t4_bytes":269,"bwt_bytes":269,"delta":0,"mode":"raw"}
+  ]
+}

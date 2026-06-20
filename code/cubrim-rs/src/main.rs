@@ -13,7 +13,7 @@ use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2] [--min-ctx-count N]");
+    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2|bwt-entropy] [--min-ctx-count N]");
     eprintln!("  cubrim decompress <input> <output>");
     process::exit(1);
 }
@@ -107,7 +107,8 @@ fn main() {
                     }
                 };
             }
-            // --value-scheme: bitpack-fixed (default), rle-codes, entropy, entropy-context, entropy-context-2
+            // --value-scheme: bitpack-fixed (default), rle-codes, entropy, entropy-context,
+            //   entropy-context-2, bwt-entropy
             if let Some(vs_str) = parse_flag_str(extra_args, "--value-scheme") {
                 config.value_scheme = match vs_str {
                     "bitpack-fixed" | "bitpack_fixed" => ValueScheme::BitpackFixed,
@@ -115,8 +116,9 @@ fn main() {
                     "entropy" => ValueScheme::Entropy,
                     "entropy-context" | "entropy_context" => ValueScheme::EntropyContext,
                     "entropy-context-2" | "entropy_context_2" => ValueScheme::EntropyContext2,
+                    "bwt-entropy" | "bwt_entropy" | "bwt" => ValueScheme::BwtEntropy,
                     other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, or entropy-context-2.");
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, or bwt-entropy.");
                         process::exit(1);
                     }
                 };

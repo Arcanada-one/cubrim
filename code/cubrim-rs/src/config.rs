@@ -85,6 +85,28 @@ pub enum ValueScheme {
     ///
     /// Header byte = 5.
     EntropyContext2,
+    /// BWT reorder + order-1 context-adaptive Huffman on the transformed code stream.
+    ///
+    /// The value-code sequence (i-order) is reordered using the Burrows-Wheeler
+    /// Transform (BWT), which groups runs of identical codes by sorting cyclic
+    /// rotations. The primary index (position of the original first element in the
+    /// sorted rotation list) is stored for exact inverse.  The BWT output is then
+    /// coded with T4 (EntropyContext) — the same order-1 context Huffman as scheme 4.
+    ///
+    /// The BWT preserves n_distinct → the cube header and gap map are unchanged.
+    /// Only the value bitstream changes.  The encoder selects this scheme only when
+    /// the BWT branch produces a smaller blob than EntropyContext (scheme 4).
+    ///
+    /// Wire (after header + gap streams):
+    ///   [primary_index : u16 BE]     — 2 bytes; BWT primary index (≤ L ≤ 65536)
+    ///   [n_contexts    : u16 BE]     — T4 context-table header (same as EntropyContext)
+    ///   for each context entry:
+    ///     [ctx_id : u16 BE]
+    ///     [code_len[0..n_distinct] : u8 × n_distinct]
+    ///   [coded bitstream : MSB-first, byte-aligned, zero-padded tail]
+    ///
+    /// Header byte = 6.
+    BwtEntropy,
 }
 
 impl GapScheme {
@@ -115,6 +137,7 @@ impl ValueScheme {
             ValueScheme::Entropy => 3,
             ValueScheme::EntropyContext => 4,
             ValueScheme::EntropyContext2 => 5,
+            ValueScheme::BwtEntropy => 6,
         }
     }
 
@@ -126,6 +149,7 @@ impl ValueScheme {
             3 => Some(ValueScheme::Entropy),
             4 => Some(ValueScheme::EntropyContext),
             5 => Some(ValueScheme::EntropyContext2),
+            6 => Some(ValueScheme::BwtEntropy),
             _ => None,
         }
     }
@@ -221,8 +245,9 @@ mod tests {
         assert_eq!(ValueScheme::from_byte(ValueScheme::Entropy.scheme_byte()), Some(ValueScheme::Entropy));
         assert_eq!(ValueScheme::from_byte(ValueScheme::EntropyContext.scheme_byte()), Some(ValueScheme::EntropyContext));
         assert_eq!(ValueScheme::from_byte(ValueScheme::EntropyContext2.scheme_byte()), Some(ValueScheme::EntropyContext2));
+        assert_eq!(ValueScheme::from_byte(ValueScheme::BwtEntropy.scheme_byte()), Some(ValueScheme::BwtEntropy));
         assert_eq!(ValueScheme::from_byte(0), None, "0 is not a valid value_scheme byte");
-        assert_eq!(ValueScheme::from_byte(6), None, "6 is not a valid value_scheme byte");
+        assert_eq!(ValueScheme::from_byte(7), None, "7 is not a valid value_scheme byte");
         assert_eq!(ValueScheme::from_byte(99), None, "unknown byte returns None");
     }
 
@@ -234,6 +259,7 @@ mod tests {
         assert_eq!(ValueScheme::Entropy.scheme_byte(), 3u8);
         assert_eq!(ValueScheme::EntropyContext.scheme_byte(), 4u8);
         assert_eq!(ValueScheme::EntropyContext2.scheme_byte(), 5u8);
+        assert_eq!(ValueScheme::BwtEntropy.scheme_byte(), 6u8);
     }
 
     #[test]

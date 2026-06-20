@@ -244,3 +244,42 @@ created: 2026-06-17
 - **Prior art it reduces to:** order-N Markov context models (PPM, LZMA range coder); double-symbol conditioning common in arithmetic coders.
 - **Замер CUBR-0026 (2026-06-20, Python twin):** GO in model. Best aggregate 0.547730 at MIN_CTX_COUNT=128 (−6.728% vs T4). Python twin charged no cost for order-1 fallback table serialization — only order-2 and order-0 tables counted in the size model.
 - **Замер CUBR-0027 (2026-06-20, Rust codec):** NO-GO in implementation. Best aggregate 0.592215 at MIN_CTX_COUNT=256 = +0.004975 above T4 (NOT beating baseline). Round-trip 7/7 byte-exact. Root cause of GO→NO-GO gap: the Python size-model did not charge for order-1 fallback table serialization; the real Rust encoder must serialize all three levels (order-2 + order-1 + order-0) to support correct fallback decoding — this additional header cost erases the gains predicted by the twin. Option B (2-level wire, no order-1 tables) was also measured and performed worse (~0.626 aggregate at MIN_CTX_COUNT=128) because mid-frequency context keys fall back to order-0 global rather than order-1. Conclusion: R4 (RLE pre-pass), R5 (grouped context), and R6 (order-2) are all NO-GO at implementation. The value-stream optimum for this corpus is T4 (order-1 per-code). Future hypotheses should target a different axis (distance-map encoding, BWT-style reordering of the value stream, or corpus-specific pre-processing).
+
+---
+
+### H-13 — BWT-style value-stream reordering (CUBR-0028)
+
+- **Hypothesis:** applying the Burrows-Wheeler Transform (BWT) to the value-code stream before T4's order-1 per-code Huffman coding reduces H(X_t|X_{t-1}) on structured inputs (text, log-like) by grouping identical symbols into runs — building its own locality INDEPENDENTLY of phi-coordinates (not phi-sort, per Gotcha #3). The modelled aggregate across the 7-file corpus is predicted to be ≤ 0.575495 (−2% GO threshold).
+- **Maps to:** hypothesis CUBR-0028 / orthogonal-axis-BWT-reorder.
+- **v1 starting choice:** full BWT on the L-element value-code stream, with primary index serialized as ceil(log2(L+2)/8) bytes per file; T4's existing order-1 Huffman applied to the BWT output.
+- **Resolution criterion:** Python probe with correct size model (bwt_cost = T4_actual + (H1_bwt − H1_orig)×L/8 + primary_index_bytes + selector) modelled aggregate ≤ 0.575495; then confirmed by Rust implementation with round-trip + run_bench.py.
+- **Status:** `GO — Python probe 2026-06-20; Rust confirmed 2026-06-20 (H-16). Real aggregate 0.504412.`
+- **Prior art it reduces to:** BWT (Burrows-Wheeler, 1994) followed by entropy coding — this is the core of bzip2. Applied here to the VALUE-CODE stream (not raw bytes), it builds run structure that order-1 Huffman can exploit without changing the cube/phi/gap framework.
+- **Замер CUBR-0028 (2026-06-20, Python probe):** GO. Modelled aggregate 0.464088 (−20.971% vs T4 0.587240). Entropy pre-gate PASS (max H1 reduction: 91.42% on log_like). Gotcha #6 check: 3 branches + 2 extra_terms = 5 cost_terms PASS. Key finding: BWT on text (H1: 2.1257→0.7289) and log_like (H1: 1.8348→0.1575) creates near-zero conditional entropy — the value-code stream becomes nearly deterministic given the previous symbol. BWT on sparse/random files (sparse_clustered, binary_mixed, random_high) does NOT help. Size model conservative and correct: n_distinct preserved by BWT → T4 table overhead unchanged → only bitstream size changes. primary_index = 2 bytes per cube-mode file (negligible). Full BWT H1 values verified by independent correct BWT implementation. Rust implementation required (plan Step 5).
+
+---
+
+### H-14 — Byte-level pre-processing (delta/MTF/stride-2 transforms, CUBR-0028)
+
+- **Hypothesis:** invertible byte-level transforms applied before T4's Huffman coding reduce n_distinct (the symbol alphabet), lowering both table overhead and bitstream size.
+- **Maps to:** hypothesis CUBR-0028 / orthogonal-axis-preproc.
+- **Status:** `measured — NO-GO (CUBR-0028, 2026-06-20).`
+- **Замер CUBR-0028 (2026-06-20, Python probe):** NO-GO. Modelled aggregate 0.586365 (−0.149% vs T4, all three transforms). Root cause: delta and MTF INCREASE n_distinct on cube-mode files (text: 27→95, log_like: 53→82), inflating T4 per-code Huffman table overhead by 11× for text (814B→9314B), completely erasing any bitstream savings. Stride-2 preserves n_distinct but increases H1 on all cube-mode files. No transform reduces the aggregate below 0.575495. The −0.149% improvement comes from raw-mode files where raw_bytes < T4_actual (T4 raw-store adds 13B overhead; the preproc selector byte costs 1B so raw+1 < T4+1 for those files).
+
+---
+
+### H-15 — Distance-map enhancement on canonical corpus (CUBR-0028)
+
+- **Hypothesis:** an enhanced distance-map encoding (beyond RLE of gap=1) can improve compression on the canonical 7-file corpus.
+- **Maps to:** hypothesis CUBR-0028 / orthogonal-axis-distmap.
+- **Status:** `measured — NO-GO (CUBR-0028, 2026-06-20). Gotcha #1 confirmed.`
+- **Замер CUBR-0028 (2026-06-20, Python probe):** NO-GO. Total distance-map RLE bytes = 26 (0.09% of 30217 T4 bytes). With positional i-order phi, phi(i) = (i%256, i//256), every cube cell [0..L-1] is occupied by construction → all gaps = 1 → RLE encodes trivially (≈4 bytes per axis per file). The distance-map mechanism carries ~0% on this corpus. Any enhancement branch adds mode-selector overhead with zero benefit. Gotcha #1 confirmed: the distance-map lever requires ρ<0.3 sparse inputs, which would require new corpus inputs and invalidate the 0.587240 T4 baseline comparison.
+
+---
+
+### H-16 — BWT Rust implementation (CUBR-0028, follow-up to H-13)
+
+- **Hypothesis:** implementing `ValueScheme::BwtEntropy` (scheme byte 6) in Rust and measuring against the 7-file corpus will confirm H-13's Python GO and produce a real aggregate ≤ 0.575495.
+- **Maps to:** hypothesis CUBR-0028 / plan Step 5 (Rust implementation on Python GO).
+- **Status:** `measured — GO (CUBR-0028, 2026-06-20, Rust). Real aggregate 0.504412 beats threshold 0.575495.`
+- **Замер CUBR-0028 (2026-06-20, Rust, code_sha 15b0ba6):** GO. Real aggregate 0.504412 (25955 bytes, −8.28% vs T4 0.587240 / 30217 bytes). GO threshold 0.575495 beaten by 7.1 percentage points. All 7 corpus files: round-trip lossless (172 tests pass). Per-file: text −2122B, log_like −2140B; sparse_clustered falls back to T4 (BWT worse on clustered sparse data); raw-mode files unchanged. Competitive selection implemented: encoder builds both BWT+T4 and plain T4 value streams, emits the smaller one with the correct scheme byte in the header. Gap vs Python model (0.464088 predicted, 0.504412 measured): real T4 context Huffman code lengths exceed H1 entropy lower bound — model gap was expected and well within the −2% GO margin. Implementation: `bwt_encode_codes`, `bwt_decode_codes`, `bwt_entropy_encode`, `bwt_entropy_decode`, `bwt_entropy_size` in `codec.rs`; wire format: `primary_index(u16) + T4_context_huffman_stream`. BWT: O(n log n) stable sort on rotation indices (sufficient for n ≤ 65536). Full JSON: `docs/ephemeral/research/CUBR-0028-bench.json`.

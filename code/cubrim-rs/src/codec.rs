@@ -85,6 +85,10 @@ fn estimate_cube_size(
             let min_ctx = config_min_ctx_count.unwrap_or(ORDER2_DEFAULT_MIN_CTX);
             order2_context_huffman_size(seq_codes, state.inverse_dict.len(), min_ctx)
         }
+        ValueScheme::BwtEntropy => {
+            // Wire: primary_index(2) + T4 context_huffman stream of BWT output
+            bwt_entropy_size(seq_codes, state.inverse_dict.len())
+        }
     };
 
     hdr_size + gap_total + value_total
@@ -327,6 +331,46 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             // Order-2 context-adaptive canonical Huffman on the value-code stream.
             let min_ctx = config.min_ctx_count.unwrap_or(ORDER2_DEFAULT_MIN_CTX);
             order2_context_huffman_encode(&seq_codes, inverse_dict.len(), min_ctx)
+        }
+        ValueScheme::BwtEntropy => {
+            // Competitive selection: BWT+T4 vs plain T4 (EntropyContext).
+            // Pick whichever produces the smaller value-stream bytes.
+            // The decoder dispatches on value_scheme in the header — the chosen
+            // winner is signalled by writing the appropriate scheme byte.
+            // IMPORTANT: we therefore return here early, overriding value_scheme
+            // so the correct scheme byte reaches the header.
+            let n_distinct = inverse_dict.len();
+            let bwt_bytes = bwt_entropy_encode(&seq_codes, n_distinct);
+            let t4_bytes_val = context_huffman_encode(&seq_codes, n_distinct);
+
+            // Which value stream wins?  Pick the smaller.
+            // We have already estimated cube_size with BwtEntropy; we re-emit
+            // the header with the actual winner's scheme byte.
+            let (winner_scheme, encoded_values) = if bwt_bytes.len() <= t4_bytes_val.len() {
+                (ValueScheme::BwtEntropy, bwt_bytes)
+            } else {
+                (ValueScheme::EntropyContext, t4_bytes_val)
+            };
+
+            // Re-build the cube header with the winner's scheme byte (may differ from
+            // what was used in estimate_cube_size, but the header is self-describing).
+            let winner_cube_state = CubeHeaderState {
+                n, b, l,
+                count: cube.count,
+                b_k,
+                map_scheme: gap_scheme.scheme_byte(),
+                value_scheme: winner_scheme.scheme_byte(),
+                w,
+                inverse_dict: &inverse_dict,
+                axis_gap_counts: &axis_gap_counts,
+            };
+            let hdr = serialize_cube_header(&winner_cube_state);
+            let mut out = hdr;
+            for stream in &gap_streams {
+                out.extend_from_slice(stream);
+            }
+            out.extend_from_slice(&encoded_values);
+            return out;
         }
     };
 
@@ -591,6 +635,34 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 if code >= n_distinct {
                     return Err(CubrimError::Decode(format!(
                         "EntropyContext2 code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::BwtEntropy => {
+            // BWT inverse + T4 context-adaptive Huffman decode.
+            let n_distinct = inverse_dict.len();
+            let (seq_codes, _consumed) =
+                bwt_entropy_decode(blob, offset, count, n_distinct)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "BwtEntropy decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(), count
+                )));
+            }
+
+            // Reconstruct: result[i] = inverse_dict[seq_codes[i]] as u8.
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "BwtEntropy code {} at position {} >= n_distinct {}",
                         code, i, n_distinct
                     )));
                 }
@@ -1494,6 +1566,169 @@ pub(crate) fn order2_context_huffman_size(
     header_bytes + total_bits.div_ceil(8)
 }
 
+// ─── BWT (Burrows-Wheeler Transform) + T4 Context Huffman ────────────────────
+//
+// BWT reorders the value-code sequence by sorting all cyclic rotations of the
+// sequence, then taking the last column of the sorted rotation table.  This
+// groups identical symbols into runs, dramatically reducing H(X_t|X_{t-1}) on
+// structured data.  The primary index (position of the original sequence's
+// first element in the sorted rotation list) is stored for exact inverse.
+//
+// Wire format (after cube header + gap streams):
+//   [primary_index : u16 BE]   — 2 bytes; exact inverse requires this
+//   followed by the T4 context-Huffman-encoded BWT output
+//   (same wire as EntropyContext / scheme 4)
+//
+// BWT preserves n_distinct → cube header, gap map, and Huffman table overhead
+// are unchanged.  The encoder selects BwtEntropy only when its real encoded
+// size is smaller than EntropyContext.
+
+/// Compute the BWT of `seq` (elements in [0, n_distinct)).
+/// Returns (bwt_out, primary_index).
+///
+/// The primary index is the row in the sorted-rotation matrix that corresponds
+/// to the original sequence (i.e., the rotation starting at position 0).
+/// For exact inversion, every caller stores this value on the wire (2 bytes).
+///
+/// Algorithm: O(n log n × k) via Rust's stable sort on index slices.
+/// For codec-side n ≤ 65536 and small n_distinct this is fast enough.
+pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
+    let n = seq.len();
+    if n == 0 {
+        return (vec![], 0);
+    }
+    // Build sorted rotation indices.
+    let mut indices: Vec<usize> = (0..n).collect();
+    indices.sort_by(|&a, &b| {
+        // Compare rotation starting at a vs rotation starting at b
+        for k in 0..n {
+            let ca = seq[(a + k) % n];
+            let cb = seq[(b + k) % n];
+            if ca != cb {
+                return ca.cmp(&cb);
+            }
+        }
+        std::cmp::Ordering::Equal
+    });
+    // Last column = element just before the start of each rotation.
+    let bwt_out: Vec<usize> = indices.iter().map(|&i| seq[(i + n - 1) % n]).collect();
+    // Primary index = row where the rotation starting at 0 appears.
+    let primary = indices.iter().position(|&i| i == 0).unwrap_or(0);
+    (bwt_out, primary as u16)
+}
+
+/// Inverse BWT: reconstruct the original sequence from (bwt_out, primary_index).
+///
+/// Uses the standard LF-mapping inversion:
+///   1. Build first_col by sorting bwt_out.
+///   2. Build the LF map: for each rank r in bwt_out, LF(r) = position of the
+///      r-th occurrence of symbol bwt_out[r] in first_col.
+///   3. Walk back n steps starting from primary_index to recover the sequence.
+pub(crate) fn bwt_decode_codes(
+    bwt_out: &[usize],
+    primary: u16,
+    n_distinct: usize,
+) -> Result<Vec<usize>, CubrimError> {
+    let n = bwt_out.len();
+    if n == 0 {
+        return Ok(vec![]);
+    }
+    let primary = primary as usize;
+    if primary >= n {
+        return Err(CubrimError::Decode(format!(
+            "BWT primary_index {primary} out of range [0, {n})"
+        )));
+    }
+
+    // Validate all codes are in range.
+    for (i, &c) in bwt_out.iter().enumerate() {
+        if c >= n_distinct {
+            return Err(CubrimError::Decode(format!(
+                "BWT: code {c} at position {i} >= n_distinct {n_distinct}"
+            )));
+        }
+    }
+
+    // Count symbol frequencies (for building first_col and LF map).
+    let mut freq = vec![0usize; n_distinct];
+    for &c in bwt_out {
+        freq[c] += 1;
+    }
+
+    // Cumulative sum: C[s] = number of symbols strictly less than s in bwt_out.
+    let mut cum = vec![0usize; n_distinct + 1];
+    for s in 0..n_distinct {
+        cum[s + 1] = cum[s] + freq[s];
+    }
+
+    // Build LF map: LF[r] = cum[bwt_out[r]] + rank_of_r_among_same_symbol
+    // Rank of r: number of occurrences of bwt_out[r] in bwt_out[0..r].
+    let mut rank_so_far = vec![0usize; n_distinct];
+    let mut lf = vec![0usize; n];
+    for r in 0..n {
+        let sym = bwt_out[r];
+        lf[r] = cum[sym] + rank_so_far[sym];
+        rank_so_far[sym] += 1;
+    }
+
+    // Walk back: start at primary, follow LF n times, collect reversed sequence.
+    let mut result = vec![0usize; n];
+    let mut cur = primary;
+    for i in (0..n).rev() {
+        result[i] = bwt_out[cur];
+        cur = lf[cur];
+    }
+    Ok(result)
+}
+
+/// Encode the value-code stream with BWT + T4 (order-1 context Huffman).
+/// Wire: [primary_index: u16 BE] + T4 context-Huffman stream of BWT output.
+pub(crate) fn bwt_entropy_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (bwt_out, primary) = bwt_encode_codes(seq_codes);
+    let ctx_bytes = context_huffman_encode(&bwt_out, n_distinct);
+    let mut out = Vec::with_capacity(2 + ctx_bytes.len());
+    out.extend_from_slice(&primary.to_be_bytes());
+    out.extend_from_slice(&ctx_bytes);
+    out
+}
+
+/// Decode the BWT+T4 stream from blob at offset.
+/// Returns (decoded seq_codes, bytes consumed from offset).
+pub(crate) fn bwt_entropy_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if offset + 2 > blob.len() {
+        return Err(CubrimError::Decode(
+            "BwtEntropy: blob too short for primary_index (need 2 bytes)".into()
+        ));
+    }
+    let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
+    let ctx_offset = offset + 2;
+
+    let (bwt_out, ctx_consumed) = context_huffman_decode(blob, ctx_offset, count, n_distinct)?;
+
+    let seq_codes = bwt_decode_codes(&bwt_out, primary, n_distinct)?;
+
+    if seq_codes.len() != count {
+        return Err(CubrimError::Decode(format!(
+            "BwtEntropy: decoded {} codes but expected {} (count from header)",
+            seq_codes.len(), count
+        )));
+    }
+
+    Ok((seq_codes, 2 + ctx_consumed))
+}
+
+/// Estimate byte size of BWT+T4 encoded stream without allocating the full output.
+/// Wire = 2 (primary_index) + T4 context_huffman_size(bwt_out).
+pub(crate) fn bwt_entropy_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    let (bwt_out, _) = bwt_encode_codes(seq_codes);
+    2 + context_huffman_size(&bwt_out, n_distinct)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2259,7 +2494,10 @@ mod tests {
     fn test_entropy_context2_scheme_byte_is_5() {
         assert_eq!(ValueScheme::EntropyContext2.scheme_byte(), 5u8);
         assert_eq!(ValueScheme::from_byte(5u8), Some(ValueScheme::EntropyContext2));
-        assert_eq!(ValueScheme::from_byte(6u8), None);
+        // scheme byte 6 = BwtEntropy (added after EntropyContext2)
+        assert_eq!(ValueScheme::BwtEntropy.scheme_byte(), 6u8);
+        assert_eq!(ValueScheme::from_byte(6u8), Some(ValueScheme::BwtEntropy));
+        assert_eq!(ValueScheme::from_byte(7u8), None);
     }
 
     // ── Step 5.2: Context-key derivation + sentinels ──────────────────────────
