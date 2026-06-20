@@ -231,3 +231,16 @@ created: 2026-06-17
 - **Prior art it reduces to:** контекстное моделирование энтропийных кодеров (LZMA range coder,
   zstd FSE с общим контекстом); кросс-столбцовое кодирование в колоночных форматах (Parquet/ORC).
 - **Замер CUBR-0004 (2026-06-17):** `not_measured — H-11 is a challenger hypothesis (interleaved layout not v1-default). Baseline N-streams measured (see H-04). Interleaved vs N-streams comparison open for CUBR-0007.`
+
+---
+
+### H-12 — Order-2 context-key Huffman (R6 scheme hypothesis)
+
+- **Hypothesis:** using `(prev2_code, prev_code)` as the context key for per-context Huffman tables (order-2) will outperform the order-1 key `prev_code` (T4) because it captures two-symbol conditional dependencies; best aggregate ~0.547730 (−6.73% vs T4) predicted by Python twin with MIN_CTX_COUNT=128.
+- **Maps to:** R6 scheme hypothesis / rulebook R5 (value-stream entropy coding) / consilium CUBR-0026 GO verdict.
+- **v1 starting choice:** order-2 key with 3-level fallback (order-2 → order-1 → order-0); MIN_CTX_COUNT threshold gates table creation; wire format serializes all three levels.
+- **Resolution criterion:** real Rust aggregate on 7-file corpus vs T4 0.587240 baseline; GO if aggregate < T4, NO-GO otherwise. Sweep MIN_CTX_COUNT ∈ {64,96,128,...,1024}.
+- **Status:** `measured — NO-GO in implementation (CUBR-0027, best 0.592215 at MIN_CTX_COUNT=256 = +0.004975 above T4 0.587240).`
+- **Prior art it reduces to:** order-N Markov context models (PPM, LZMA range coder); double-symbol conditioning common in arithmetic coders.
+- **Замер CUBR-0026 (2026-06-20, Python twin):** GO in model. Best aggregate 0.547730 at MIN_CTX_COUNT=128 (−6.728% vs T4). Python twin charged no cost for order-1 fallback table serialization — only order-2 and order-0 tables counted in the size model.
+- **Замер CUBR-0027 (2026-06-20, Rust codec):** NO-GO in implementation. Best aggregate 0.592215 at MIN_CTX_COUNT=256 = +0.004975 above T4 (NOT beating baseline). Round-trip 7/7 byte-exact. Root cause of GO→NO-GO gap: the Python size-model did not charge for order-1 fallback table serialization; the real Rust encoder must serialize all three levels (order-2 + order-1 + order-0) to support correct fallback decoding — this additional header cost erases the gains predicted by the twin. Option B (2-level wire, no order-1 tables) was also measured and performed worse (~0.626 aggregate at MIN_CTX_COUNT=128) because mid-frequency context keys fall back to order-0 global rather than order-1. Conclusion: R4 (RLE pre-pass), R5 (grouped context), and R6 (order-2) are all NO-GO at implementation. The value-stream optimum for this corpus is T4 (order-1 per-code). Future hypotheses should target a different axis (distance-map encoding, BWT-style reordering of the value stream, or corpus-specific pre-processing).
