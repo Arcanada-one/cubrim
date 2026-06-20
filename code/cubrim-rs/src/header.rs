@@ -193,24 +193,35 @@ pub fn parse_header(data: &[u8]) -> Result<(Header, usize), CubrimError> {
 
     // count (4B)
     if offset + 4 > data.len() {
-        return Err(CubrimError::Decode("Header truncated at count field".to_string()));
+        return Err(CubrimError::Decode(
+            "Header truncated at count field".to_string(),
+        ));
     }
-    hdr.count = u32::from_be_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+    hdr.count = u32::from_be_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ]) as usize;
     offset += 4;
 
     // b_k (N * 2B, uint16)
     if offset + n * 2 > data.len() {
-        return Err(CubrimError::Decode("Header truncated at b_k field".to_string()));
+        return Err(CubrimError::Decode(
+            "Header truncated at b_k field".to_string(),
+        ));
     }
     for _ in 0..n {
-        let bk = u16::from_be_bytes([data[offset], data[offset+1]]) as usize;
+        let bk = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
         hdr.b_k.push(bk);
         offset += 2;
     }
 
     // map_scheme(1) + value_scheme(1) + W(1)
     if offset + 3 > data.len() {
-        return Err(CubrimError::Decode("Header truncated at scheme fields".to_string()));
+        return Err(CubrimError::Decode(
+            "Header truncated at scheme fields".to_string(),
+        ));
     }
     hdr.map_scheme = data[offset];
     hdr.value_scheme = data[offset + 1];
@@ -219,14 +230,18 @@ pub fn parse_header(data: &[u8]) -> Result<(Header, usize), CubrimError> {
 
     // n_distinct (2B)
     if offset + 2 > data.len() {
-        return Err(CubrimError::Decode("Header truncated at n_distinct".to_string()));
+        return Err(CubrimError::Decode(
+            "Header truncated at n_distinct".to_string(),
+        ));
     }
-    hdr.n_distinct = u16::from_be_bytes([data[offset], data[offset+1]]) as usize;
+    hdr.n_distinct = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
     offset += 2;
 
     // inverse_dict (n_distinct * 1B)
     if offset + hdr.n_distinct > data.len() {
-        return Err(CubrimError::Decode("Header truncated at inverse_dict".to_string()));
+        return Err(CubrimError::Decode(
+            "Header truncated at inverse_dict".to_string(),
+        ));
     }
     for i in 0..hdr.n_distinct {
         hdr.inverse_dict.push(data[offset + i] as usize);
@@ -235,7 +250,9 @@ pub fn parse_header(data: &[u8]) -> Result<(Header, usize), CubrimError> {
 
     // traversal(1) + phi_id(1)
     if offset + 2 > data.len() {
-        return Err(CubrimError::Decode("Header truncated at traversal/phi fields".to_string()));
+        return Err(CubrimError::Decode(
+            "Header truncated at traversal/phi fields".to_string(),
+        ));
     }
     hdr.traversal = data[offset];
     hdr.phi_id = data[offset + 1];
@@ -243,10 +260,12 @@ pub fn parse_header(data: &[u8]) -> Result<(Header, usize), CubrimError> {
 
     // axis_gap_counts (N * 2B, uint16)
     if offset + n * 2 > data.len() {
-        return Err(CubrimError::Decode("Header truncated at axis_gap_counts".to_string()));
+        return Err(CubrimError::Decode(
+            "Header truncated at axis_gap_counts".to_string(),
+        ));
     }
     for _ in 0..n {
-        let gc = u16::from_be_bytes([data[offset], data[offset+1]]) as usize;
+        let gc = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize;
         hdr.axis_gap_counts.push(gc);
         offset += 2;
     }
@@ -282,7 +301,10 @@ mod tests {
         assert_eq!(bytes[5], MODE_RAW);
         assert_eq!(bytes[6], 2); // N
         assert_eq!(u16::from_be_bytes([bytes[7], bytes[8]]), 256); // B
-        assert_eq!(u32::from_be_bytes([bytes[9], bytes[10], bytes[11], bytes[12]]), 1000); // L
+        assert_eq!(
+            u32::from_be_bytes([bytes[9], bytes[10], bytes[11], bytes[12]]),
+            1000
+        ); // L
 
         let (hdr, offset) = parse_header(&bytes).unwrap();
         assert_eq!(offset, FIXED_HEADER_SIZE);
@@ -299,9 +321,16 @@ mod tests {
         let axis_gap_counts = vec![10usize, 8];
 
         let bytes = serialize_cube_header(&CubeHeaderState {
-            n: 2, b: 256, l: 500, count: 42,
-            b_k: &b_k, map_scheme: MAP_SCHEME_RLE, value_scheme: VALUE_SCHEME_FIXED,
-            w: 2, inverse_dict: &inverse_dict, axis_gap_counts: &axis_gap_counts,
+            n: 2,
+            b: 256,
+            l: 500,
+            count: 42,
+            b_k: &b_k,
+            map_scheme: MAP_SCHEME_RLE,
+            value_scheme: VALUE_SCHEME_FIXED,
+            w: 2,
+            inverse_dict: &inverse_dict,
+            axis_gap_counts: &axis_gap_counts,
         });
 
         let (hdr, _offset) = parse_header(&bytes).unwrap();
@@ -327,12 +356,22 @@ mod tests {
         let b_k = vec![256usize, 256]; // B=256 exactly
         let full_dict: Vec<usize> = (0..256).collect();
         let bytes = serialize_cube_header(&CubeHeaderState {
-            n: 2, b: 256, l: 100, count: 10,
-            b_k: &b_k, map_scheme: MAP_SCHEME_RLE, value_scheme: VALUE_SCHEME_FIXED,
-            w: 8, inverse_dict: &full_dict, axis_gap_counts: &[10, 8],
+            n: 2,
+            b: 256,
+            l: 100,
+            count: 10,
+            b_k: &b_k,
+            map_scheme: MAP_SCHEME_RLE,
+            value_scheme: VALUE_SCHEME_FIXED,
+            w: 8,
+            inverse_dict: &full_dict,
+            axis_gap_counts: &[10, 8],
         });
         let (hdr, _) = parse_header(&bytes).unwrap();
-        assert_eq!(hdr.b_k[0], 256, "b_k=256 must survive round-trip through u16");
+        assert_eq!(
+            hdr.b_k[0], 256,
+            "b_k=256 must survive round-trip through u16"
+        );
         assert_eq!(hdr.b_k[1], 256);
     }
 
@@ -341,9 +380,16 @@ mod tests {
         // PRD §2.4 item 4: inverse_dict entries are u8 (0..255)
         let inverse_dict: Vec<usize> = (0..256).collect();
         let bytes = serialize_cube_header(&CubeHeaderState {
-            n: 2, b: 256, l: 100, count: 10,
-            b_k: &[256, 256], map_scheme: MAP_SCHEME_RLE, value_scheme: VALUE_SCHEME_FIXED,
-            w: 8, inverse_dict: &inverse_dict, axis_gap_counts: &[10, 8],
+            n: 2,
+            b: 256,
+            l: 100,
+            count: 10,
+            b_k: &[256, 256],
+            map_scheme: MAP_SCHEME_RLE,
+            value_scheme: VALUE_SCHEME_FIXED,
+            w: 8,
+            inverse_dict: &inverse_dict,
+            axis_gap_counts: &[10, 8],
         });
         let (hdr, _) = parse_header(&bytes).unwrap();
         assert_eq!(hdr.inverse_dict, inverse_dict);
@@ -372,13 +418,22 @@ mod tests {
         let inverse_dict = vec![1usize, 2];
         let axis_gap_counts = vec![5usize, 3];
         let bytes = serialize_cube_header(&CubeHeaderState {
-            n: 2, b: 256, l: 400, count: 10,
-            b_k: &b_k, map_scheme: MAP_SCHEME_PACKED_NIBBLE, value_scheme: VALUE_SCHEME_FIXED,
-            w: 2, inverse_dict: &inverse_dict, axis_gap_counts: &axis_gap_counts,
+            n: 2,
+            b: 256,
+            l: 400,
+            count: 10,
+            b_k: &b_k,
+            map_scheme: MAP_SCHEME_PACKED_NIBBLE,
+            value_scheme: VALUE_SCHEME_FIXED,
+            w: 2,
+            inverse_dict: &inverse_dict,
+            axis_gap_counts: &axis_gap_counts,
         });
         let (hdr, _) = parse_header(&bytes).unwrap();
-        assert_eq!(hdr.map_scheme, MAP_SCHEME_PACKED_NIBBLE,
-            "PackedNibble scheme byte must survive header round-trip");
+        assert_eq!(
+            hdr.map_scheme, MAP_SCHEME_PACKED_NIBBLE,
+            "PackedNibble scheme byte must survive header round-trip"
+        );
     }
 
     #[test]
@@ -387,13 +442,22 @@ mod tests {
         let inverse_dict = vec![1usize, 2];
         let axis_gap_counts = vec![5usize, 3];
         let bytes = serialize_cube_header(&CubeHeaderState {
-            n: 2, b: 256, l: 400, count: 10,
-            b_k: &b_k, map_scheme: MAP_SCHEME_RLE, value_scheme: VALUE_SCHEME_RLE_CODES,
-            w: 2, inverse_dict: &inverse_dict, axis_gap_counts: &axis_gap_counts,
+            n: 2,
+            b: 256,
+            l: 400,
+            count: 10,
+            b_k: &b_k,
+            map_scheme: MAP_SCHEME_RLE,
+            value_scheme: VALUE_SCHEME_RLE_CODES,
+            w: 2,
+            inverse_dict: &inverse_dict,
+            axis_gap_counts: &axis_gap_counts,
         });
         let (hdr, _) = parse_header(&bytes).unwrap();
-        assert_eq!(hdr.value_scheme, VALUE_SCHEME_RLE_CODES,
-            "RleCodes value_scheme byte must survive header round-trip");
+        assert_eq!(
+            hdr.value_scheme, VALUE_SCHEME_RLE_CODES,
+            "RleCodes value_scheme byte must survive header round-trip"
+        );
     }
 
     #[test]

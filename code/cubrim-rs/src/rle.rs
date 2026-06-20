@@ -140,7 +140,9 @@ fn decode_varint(data: &[u8], pos: usize) -> Result<(usize, usize), CubrimError>
             break;
         }
         if shift >= 64 {
-            return Err(CubrimError::Decode("PackedNibble varint overflow".to_string()));
+            return Err(CubrimError::Decode(
+                "PackedNibble varint overflow".to_string(),
+            ));
         }
     }
     Ok((value, i - pos))
@@ -158,7 +160,11 @@ pub fn packed_nibble_encode(gaps: &[usize]) -> Vec<u8> {
 
 /// Decode exactly `n_gaps` varints from `data` starting at `offset`.
 /// Returns (decoded_gaps, bytes_consumed).
-pub fn packed_nibble_decode(data: &[u8], offset: usize, n_gaps: usize) -> Result<(Vec<usize>, usize), CubrimError> {
+pub fn packed_nibble_decode(
+    data: &[u8],
+    offset: usize,
+    n_gaps: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
     let mut gaps = Vec::with_capacity(n_gaps);
     let mut pos = offset;
     for _ in 0..n_gaps {
@@ -171,12 +177,19 @@ pub fn packed_nibble_decode(data: &[u8], offset: usize, n_gaps: usize) -> Result
 
 /// Compute encoded byte size for PackedNibble without allocating.
 pub fn packed_nibble_size(gaps: &[usize]) -> usize {
-    gaps.iter().map(|&g| {
-        if g < 0x80 { 1 }
-        else if g < 0x4000 { 2 }
-        else if g < 0x200000 { 3 }
-        else { 4 }
-    }).sum()
+    gaps.iter()
+        .map(|&g| {
+            if g < 0x80 {
+                1
+            } else if g < 0x4000 {
+                2
+            } else if g < 0x200000 {
+                3
+            } else {
+                4
+            }
+        })
+        .sum()
 }
 
 #[cfg(test)]
@@ -315,7 +328,8 @@ mod tests {
             assert_eq!(
                 packed_nibble_size(&gaps),
                 packed_nibble_encode(&gaps).len(),
-                "size mismatch for {:?}", gaps
+                "size mismatch for {:?}",
+                gaps
             );
         }
     }
@@ -339,7 +353,7 @@ mod tests {
         // PackedNibble (1 byte per gap < 128) wins over RleU16 (4 bytes per gap).
         // This models an axis where coordinates are all distinct — no runs.
         let gaps: Vec<usize> = (1..=20).collect(); // 20 distinct gaps in [1,20]
-        let rle_bytes = rle_encode(&gaps).len();    // 20 * 4 = 80 bytes
+        let rle_bytes = rle_encode(&gaps).len(); // 20 * 4 = 80 bytes
         let pn_bytes = packed_nibble_encode(&gaps).len(); // 20 * 1 = 20 bytes
         assert!(
             pn_bytes < rle_bytes,

@@ -149,7 +149,10 @@ mod tests {
         for (coords, b_k) in test_cases {
             let gaps = encode_axis_gaps(&coords, b_k).unwrap();
             let recovered = decode_axis_gaps(&gaps);
-            assert_eq!(recovered, coords, "round-trip failed for coords={coords:?}, b_k={b_k}");
+            assert_eq!(
+                recovered, coords,
+                "round-trip failed for coords={coords:?}, b_k={b_k}"
+            );
         }
     }
 

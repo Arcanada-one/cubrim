@@ -5,19 +5,19 @@
 //   encode(data: &[u8]) -> Vec<u8>       — compress; returns Cubrim v1 blob
 //   decode(blob: &[u8]) -> Result<...>   — decompress; fail-closed on corrupt input
 
-pub mod error;
-pub mod phi;
-pub mod domainize;
-pub mod distance_map;
-pub mod rle;
 pub mod bitpack;
-pub mod cube;
-pub mod header;
-pub mod config;
 pub mod codec;
+pub mod config;
+pub mod cube;
+pub mod distance_map;
+pub mod domainize;
+pub mod error;
+pub mod header;
 pub(crate) mod huffman;
+pub mod phi;
+pub mod rle;
 
-pub use codec::{encode, decode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
+pub use codec::{decode, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
 pub use config::{EncodeConfig, GapScheme, ValueScheme};
 pub use error::CubrimError;
 

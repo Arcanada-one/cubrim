@@ -98,8 +98,11 @@ mod tests {
     fn test_phi_lex_order() {
         // Key insight from PRD §2.4 item 8: phi(256) = (0,1) sorts BEFORE phi(1) = (1,0) in lex order
         let p256 = phi(256, 2, 256); // (0, 1)
-        let p1 = phi(1, 2, 256);     // (1, 0)
-        assert!(p256 < p1, "phi(256)={p256:?} must be lex-before phi(1)={p1:?}");
+        let p1 = phi(1, 2, 256); // (1, 0)
+        assert!(
+            p256 < p1,
+            "phi(256)={p256:?} must be lex-before phi(1)={p1:?}"
+        );
     }
 
     #[test]

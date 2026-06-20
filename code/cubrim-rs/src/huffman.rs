@@ -15,8 +15,8 @@
 // Bitstream format: MSB-first, byte-aligned, zero-padded final byte.
 
 use crate::error::CubrimError;
-use std::collections::BinaryHeap;
 use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 // ─── Internal tree node ────────────────────────────────────────────────────
 
@@ -35,8 +35,7 @@ impl Ord for Node {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // We wrap in Reverse for BinaryHeap, so this ordering makes a min-heap.
         // Primary: freq ASC, Secondary: insertion ASC, Tertiary: symbol ASC (leaves only).
-        (self.freq, self.insertion, self.symbol)
-            .cmp(&(other.freq, other.insertion, other.symbol))
+        (self.freq, self.insertion, self.symbol).cmp(&(other.freq, other.insertion, other.symbol))
     }
 }
 
@@ -193,8 +192,8 @@ pub(crate) fn huffman_encode(seq_codes: &[usize], code_len: &[u8]) -> Vec<u8> {
 
     let codes = assign_canonical_codes(code_len);
     let mut out: Vec<u8> = Vec::new();
-    let mut buf: u32 = 0;   // bit accumulator
-    let mut bits: u32 = 0;  // bits in buf
+    let mut buf: u32 = 0; // bit accumulator
+    let mut bits: u32 = 0; // bits in buf
 
     for &sym in seq_codes {
         let (cw, len) = codes[sym];
@@ -332,10 +331,7 @@ pub(crate) fn kraft_ok(code_len: &[u8]) -> bool {
         return false;
     }
     let total_capacity: u64 = 1u64 << max_len;
-    let kraft_sum: u64 = present
-        .iter()
-        .map(|&l| 1u64 << (max_len - l as u32))
-        .sum();
+    let kraft_sum: u64 = present.iter().map(|&l| 1u64 << (max_len - l as u32)).sum();
     kraft_sum == total_capacity
 }
 
@@ -382,7 +378,10 @@ mod tests {
         let seq_codes: Vec<usize> = (0..8).flat_map(|s| std::iter::repeat(s).take(32)).collect();
         let n_distinct = 8;
         let lengths = canonical_code_lengths(&seq_codes, n_distinct);
-        assert!(lengths.iter().all(|&l| l == 3), "uniform 8-symbol alphabet must have uniform lengths of 3");
+        assert!(
+            lengths.iter().all(|&l| l == 3),
+            "uniform 8-symbol alphabet must have uniform lengths of 3"
+        );
         let encoded = huffman_encode(&seq_codes, &lengths);
         let (decoded, _) = huffman_decode(&encoded, 0, seq_codes.len(), &lengths).unwrap();
         assert_eq!(decoded, seq_codes, "uniform alphabet round-trip failed");
@@ -405,7 +404,10 @@ mod tests {
         let seq_codes: Vec<usize> = vec![0, 1, 0, 1, 1, 0, 0, 1];
         let n_distinct = 2;
         let lengths = canonical_code_lengths(&seq_codes, n_distinct);
-        assert!(lengths.iter().all(|&l| l == 1), "two equal-freq symbols must have length 1 each");
+        assert!(
+            lengths.iter().all(|&l| l == 1),
+            "two equal-freq symbols must have length 1 each"
+        );
         let encoded = huffman_encode(&seq_codes, &lengths);
         let (decoded, _) = huffman_decode(&encoded, 0, seq_codes.len(), &lengths).unwrap();
         assert_eq!(decoded, seq_codes, "two-symbol round-trip failed");
@@ -428,11 +430,20 @@ mod tests {
         let seq_codes: Vec<usize> = vec![];
         let n_distinct = 4;
         let lengths = canonical_code_lengths(&seq_codes, n_distinct);
-        assert!(lengths.iter().all(|&l| l == 0), "empty seq_codes must produce all-zero lengths");
+        assert!(
+            lengths.iter().all(|&l| l == 0),
+            "empty seq_codes must produce all-zero lengths"
+        );
         let encoded = huffman_encode(&seq_codes, &lengths);
-        assert!(encoded.is_empty(), "empty seq_codes must produce empty bitstream");
+        assert!(
+            encoded.is_empty(),
+            "empty seq_codes must produce empty bitstream"
+        );
         let (decoded, _) = huffman_decode(&encoded, 0, 0, &lengths).unwrap();
-        assert!(decoded.is_empty(), "empty decode must succeed with empty output");
+        assert!(
+            decoded.is_empty(),
+            "empty decode must succeed with empty output"
+        );
     }
 
     // ── Length determinism under input permutation ─────────────────────
@@ -446,7 +457,10 @@ mod tests {
         let seq_b: Vec<usize> = vec![1, 1, 1, 0, 0, 0]; // 1 first
         let lengths_a = canonical_code_lengths(&seq_a, n_distinct);
         let lengths_b = canonical_code_lengths(&seq_b, n_distinct);
-        assert_eq!(lengths_a, lengths_b, "lengths must be identical under permutation of equal-freq input");
+        assert_eq!(
+            lengths_a, lengths_b,
+            "lengths must be identical under permutation of equal-freq input"
+        );
     }
 
     #[test]
@@ -454,11 +468,16 @@ mod tests {
         // Three symbols each appearing 10 times
         let n_distinct = 3;
         let seq_a: Vec<usize> = (0..3).flat_map(|s| std::iter::repeat(s).take(10)).collect();
-        let seq_b: Vec<usize> = vec![2usize, 1, 0].into_iter()
-            .flat_map(|s| std::iter::repeat(s).take(10)).collect();
+        let seq_b: Vec<usize> = vec![2usize, 1, 0]
+            .into_iter()
+            .flat_map(|s| std::iter::repeat(s).take(10))
+            .collect();
         let lengths_a = canonical_code_lengths(&seq_a, n_distinct);
         let lengths_b = canonical_code_lengths(&seq_b, n_distinct);
-        assert_eq!(lengths_a, lengths_b, "three equal-freq symbols: lengths must be deterministic");
+        assert_eq!(
+            lengths_a, lengths_b,
+            "three equal-freq symbols: lengths must be deterministic"
+        );
     }
 
     // ── Kraft validation ────────────────────────────────────────────────
@@ -504,7 +523,10 @@ mod tests {
             v
         };
         let lengths = canonical_code_lengths(&seq_codes, 4);
-        assert!(kraft_ok(&lengths), "Huffman-generated lengths must satisfy Kraft");
+        assert!(
+            kraft_ok(&lengths),
+            "Huffman-generated lengths must satisfy Kraft"
+        );
     }
 
     // ── Bitstream size assertion ────────────────────────────────────────
@@ -553,7 +575,10 @@ mod tests {
         let encoded = huffman_encode(&seq_codes, &lengths);
         assert_eq!(encoded.len(), 1, "8 bits = 1 byte");
         // [0,1,0,1,0,1,0,1] → 0b01010101 = 0x55
-        assert_eq!(encoded[0], 0x55u8, "MSB-first: bits [0,1,0,1,0,1,0,1] = 0x55");
+        assert_eq!(
+            encoded[0], 0x55u8,
+            "MSB-first: bits [0,1,0,1,0,1,0,1] = 0x55"
+        );
     }
 
     #[test]
@@ -566,7 +591,10 @@ mod tests {
         let encoded = huffman_encode(&seq_codes, &lengths);
         assert_eq!(encoded.len(), 1, "7 bits → 1 byte with zero-padding");
         // bits: 0,1,0,1,0,1,0 → 0b0101010_0 = 0x54
-        assert_eq!(encoded[0], 0x54u8, "zero-padded: 7 bits 0,1,0,1,0,1,0 + pad 0 = 0x54");
+        assert_eq!(
+            encoded[0], 0x54u8,
+            "zero-padded: 7 bits 0,1,0,1,0,1,0 + pad 0 = 0x54"
+        );
     }
 
     // ── Negative / fail-closed decode tests ─────────────────────────────
@@ -611,7 +639,10 @@ mod tests {
         // Demand 20 symbols from a 1-byte blob — will truncate
         let blob = vec![0b11111111u8];
         let result = huffman_decode(&blob, 0, 20, &lengths);
-        assert!(result.is_err(), "no-match/truncation must return Err, not panic");
+        assert!(
+            result.is_err(),
+            "no-match/truncation must return Err, not panic"
+        );
     }
 
     #[test]
@@ -623,7 +654,10 @@ mod tests {
         // kraft_ok returns true for all-zeros (empty alphabet), but we can't decode
         // count=5 symbols from it — decode_table is empty → no-match immediately.
         let result = huffman_decode(&blob, 0, 5, &lengths);
-        assert!(result.is_err(), "all-zero lengths with count>0 must return Err, not panic");
+        assert!(
+            result.is_err(),
+            "all-zero lengths with count>0 must return Err, not panic"
+        );
     }
 
     // ── assign_canonical_codes direct tests ─────────────────────────────

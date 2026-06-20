@@ -49,15 +49,15 @@ fn parse_flag_str<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     None
 }
 
-fn cmd_compress(input: &str, output: &str, config: &EncodeConfig) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_compress(
+    input: &str,
+    output: &str,
+    config: &EncodeConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(input)?;
     let blob = encode_with_config(&data, config);
     fs::write(output, &blob)?;
-    eprintln!(
-        "compressed: {} bytes -> {} bytes",
-        data.len(),
-        blob.len()
-    );
+    eprintln!("compressed: {} bytes -> {} bytes", data.len(), blob.len());
     Ok(())
 }
 
@@ -65,11 +65,7 @@ fn cmd_decompress(input: &str, output: &str) -> Result<(), Box<dyn std::error::E
     let blob = fs::read(input)?;
     let data = decode(&blob)?;
     fs::write(output, &data)?;
-    eprintln!(
-        "decompressed: {} bytes -> {} bytes",
-        blob.len(),
-        data.len()
-    );
+    eprintln!("decompressed: {} bytes -> {} bytes", blob.len(), data.len());
     Ok(())
 }
 
@@ -87,13 +83,17 @@ fn main() {
     let result = match subcmd.as_str() {
         "compress" => {
             let mut config = EncodeConfig::v1_default();
-            config.raw_store_bound = parse_flag_usize(extra_args, "--raw-store-bound", config.raw_store_bound);
+            config.raw_store_bound =
+                parse_flag_usize(extra_args, "--raw-store-bound", config.raw_store_bound);
             config.b = parse_flag_usize(extra_args, "--b", config.b);
             // --n: optional N override
             if let Some(n_str) = parse_flag_str(extra_args, "--n") {
                 match n_str.parse::<usize>() {
                     Ok(n) => config.n_override = Some(n),
-                    Err(_) => { eprintln!("Invalid --n value: {n_str}"); process::exit(1); }
+                    Err(_) => {
+                        eprintln!("Invalid --n value: {n_str}");
+                        process::exit(1);
+                    }
                 }
             }
             // --gap-scheme: rle (default) or packed_nibble

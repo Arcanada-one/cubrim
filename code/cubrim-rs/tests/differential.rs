@@ -12,7 +12,10 @@ use std::path::Path;
 
 fn fixture_path(name: &str) -> std::path::PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    Path::new(manifest_dir).join("tests").join("fixtures").join(name)
+    Path::new(manifest_dir)
+        .join("tests")
+        .join("fixtures")
+        .join(name)
 }
 
 /// Differential fixture: (name, input_bytes, python_blob_bytes)
@@ -71,7 +74,7 @@ differential_test!(random_1kb);
 ///         blob =ad5ec425ba0080f9ed85c5e27bc8ba1150397b56345ba7c9fb697ddde183123e
 #[test]
 fn text_entropy() {
-    use cubrim::{EncodeConfig, GapScheme, ValueScheme, encode_with_config, decode};
+    use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
     let fixture_name = "text_entropy";
     let (input, python_blob) = load_fixture(fixture_name);
@@ -96,16 +99,18 @@ fn text_entropy() {
     );
 
     // Test 2: rust_decode(python_entropy_blob) == original input (cross-decode)
-    let recovered_from_python = decode(&python_blob)
-        .unwrap_or_else(|e| panic!("Entropy parity FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}"));
+    let recovered_from_python = decode(&python_blob).unwrap_or_else(|e| {
+        panic!("Entropy parity FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}")
+    });
     assert_eq!(
         recovered_from_python, input,
         "Entropy parity FAIL [{fixture_name}]: rust_decode(python_blob) != original input"
     );
 
     // Test 3: Rust round-trip on its own blob (redundant but explicit)
-    let recovered_from_rust = decode(&rust_blob)
-        .unwrap_or_else(|e| panic!("Entropy parity FAIL [{fixture_name}]: rust_decode(rust_blob) error: {e}"));
+    let recovered_from_rust = decode(&rust_blob).unwrap_or_else(|e| {
+        panic!("Entropy parity FAIL [{fixture_name}]: rust_decode(rust_blob) error: {e}")
+    });
     assert_eq!(
         recovered_from_rust, input,
         "Entropy parity FAIL [{fixture_name}]: rust_decode(rust_blob) != original input"
@@ -124,7 +129,7 @@ fn text_entropy() {
 ///         blob =29f5de04681c4a8ec07bf2646113badf4b179d96c8401254951937d1fd69dfdd
 #[test]
 fn text_entropy_context() {
-    use cubrim::{EncodeConfig, GapScheme, ValueScheme, encode_with_config, decode};
+    use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
     let fixture_name = "text_entropy_context";
     let (input, python_blob) = load_fixture(fixture_name);
@@ -149,16 +154,18 @@ fn text_entropy_context() {
     );
 
     // Test 2: rust_decode(python_entropy_context_blob) == original input (cross-decode)
-    let recovered_from_python = decode(&python_blob)
-        .unwrap_or_else(|e| panic!("EntropyContext parity FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}"));
+    let recovered_from_python = decode(&python_blob).unwrap_or_else(|e| {
+        panic!("EntropyContext parity FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}")
+    });
     assert_eq!(
         recovered_from_python, input,
         "EntropyContext parity FAIL [{fixture_name}]: rust_decode(python_blob) != original input"
     );
 
     // Test 3: Rust round-trip on its own blob (redundant but explicit)
-    let recovered_from_rust = decode(&rust_blob)
-        .unwrap_or_else(|e| panic!("EntropyContext parity FAIL [{fixture_name}]: rust_decode(rust_blob) error: {e}"));
+    let recovered_from_rust = decode(&rust_blob).unwrap_or_else(|e| {
+        panic!("EntropyContext parity FAIL [{fixture_name}]: rust_decode(rust_blob) error: {e}")
+    });
     assert_eq!(
         recovered_from_rust, input,
         "EntropyContext parity FAIL [{fixture_name}]: rust_decode(rust_blob) != original input"
@@ -179,7 +186,7 @@ fn text_entropy_context() {
 /// fixtures can be committed.
 #[test]
 fn sparse_clustered_rlecodes() {
-    use cubrim::{EncodeConfig, GapScheme, ValueScheme, encode_with_config, decode};
+    use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
     let fixture_name = "sparse_clustered_rlecodes";
     let (input, python_blob) = load_fixture(fixture_name);
@@ -204,16 +211,18 @@ fn sparse_clustered_rlecodes() {
     );
 
     // Test 2: rust_decode(python_rlecodes_blob) == original input (cross-decode)
-    let recovered_from_python = decode(&python_blob)
-        .unwrap_or_else(|e| panic!("RleCodes parity FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}"));
+    let recovered_from_python = decode(&python_blob).unwrap_or_else(|e| {
+        panic!("RleCodes parity FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}")
+    });
     assert_eq!(
         recovered_from_python, input,
         "RleCodes parity FAIL [{fixture_name}]: rust_decode(python_blob) != original input"
     );
 
     // Test 3: Rust round-trip on its own blob (redundant but explicit)
-    let recovered_from_rust = decode(&rust_blob)
-        .unwrap_or_else(|e| panic!("RleCodes parity FAIL [{fixture_name}]: rust_decode(rust_blob) error: {e}"));
+    let recovered_from_rust = decode(&rust_blob).unwrap_or_else(|e| {
+        panic!("RleCodes parity FAIL [{fixture_name}]: rust_decode(rust_blob) error: {e}")
+    });
     assert_eq!(
         recovered_from_rust, input,
         "RleCodes parity FAIL [{fixture_name}]: rust_decode(rust_blob) != original input"

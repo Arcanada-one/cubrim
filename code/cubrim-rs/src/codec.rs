@@ -18,19 +18,22 @@
 // Matches prototype: max cube header ~286 bytes, bound = 320 with margin.
 // For inputs <= 320 bytes, raw-store always fires.
 
+use crate::bitpack::{bitpack_decode, bitpack_encode, build_value_dict, compute_width};
 use crate::config::{EncodeConfig, GapScheme, ValueScheme};
-use crate::error::CubrimError;
-use crate::phi::{phi as phi_fn, phi_inv as phi_inv_fn, compute_n_and_b};
 use crate::cube::build_cube_with_params;
-use crate::distance_map::{encode_axis_gaps, decode_axis_gaps};
-use crate::rle::{rle_encode, rle_decode, rle_size, packed_nibble_encode, packed_nibble_decode, packed_nibble_size};
-use crate::bitpack::{build_value_dict, compute_width, bitpack_encode, bitpack_decode};
+use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
+use crate::error::CubrimError;
 use crate::header::{
-    serialize_raw_header, serialize_cube_header, parse_header,
-    CubeHeaderState,
-    MODE_CUBE, MODE_RAW,
+    parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MODE_CUBE, MODE_RAW,
 };
-use crate::huffman::{canonical_code_lengths, huffman_encode, huffman_decode, huffman_bitstream_size};
+use crate::huffman::{
+    canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
+};
+use crate::phi::{compute_n_and_b, phi as phi_fn, phi_inv as phi_inv_fn};
+use crate::rle::{
+    packed_nibble_decode, packed_nibble_encode, packed_nibble_size, rle_decode, rle_encode,
+    rle_size,
+};
 
 /// R7: Header overhead bound constant. Calibrated for v1-defaults.
 /// fixed(13) + count(4) + b_k(4) + schemes(3) + n_distinct(2) +
@@ -65,11 +68,13 @@ fn estimate_cube_size(
 
     let value_total = match value_scheme {
         ValueScheme::BitpackFixed => {
-            if state.count > 0 { (state.count * state.w).div_ceil(8) } else { 0 }
+            if state.count > 0 {
+                (state.count * state.w).div_ceil(8)
+            } else {
+                0
+            }
         }
-        ValueScheme::RleCodes => {
-            rle_codes_size(seq_codes)
-        }
+        ValueScheme::RleCodes => rle_codes_size(seq_codes),
         ValueScheme::Entropy => {
             // n_distinct code-length bytes + MSB-first bitstream
             let n_distinct = state.inverse_dict.len();
@@ -134,12 +139,16 @@ fn rle_codes_size(seq_codes: &[usize]) -> usize {
     for_each_rle_run(seq_codes, |_, _| {
         triplets += 1;
     });
-    triplets * 3  // 1 byte code + 2 bytes run_length
+    triplets * 3 // 1 byte code + 2 bytes run_length
 }
 
 /// Decode `count` value codes from a RLE-codes stream starting at `offset`.
 /// Returns (decoded_codes, bytes_consumed).
-fn rle_codes_decode(blob: &[u8], offset: usize, count: usize) -> Result<(Vec<usize>, usize), CubrimError> {
+fn rle_codes_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
     let mut codes = Vec::with_capacity(count);
     let mut pos = offset;
     while codes.len() < count {
@@ -153,9 +162,10 @@ fn rle_codes_decode(blob: &[u8], offset: usize, count: usize) -> Result<(Vec<usi
         let run = u16::from_be_bytes([blob[pos + 1], blob[pos + 2]]) as usize;
         pos += 3;
         if run == 0 {
-            return Err(CubrimError::Decode(
-                format!("RLE-codes run_length=0 at offset {}: invalid (stream corrupt)", pos - 3)
-            ));
+            return Err(CubrimError::Decode(format!(
+                "RLE-codes run_length=0 at offset {}: invalid (stream corrupt)",
+                pos - 3
+            )));
         }
         let remaining = count - codes.len();
         if run > remaining {
@@ -204,14 +214,20 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     // If the override would make phi non-injective, fall back to raw-store.
     let n_requested = config.n_override.unwrap_or(n_min);
     // Clamp up to at least n_min (cannot have fewer dimensions than required)
-    let n_effective = if n_requested < n_min { n_min } else { n_requested };
+    let n_effective = if n_requested < n_min {
+        n_min
+    } else {
+        n_requested
+    };
 
     // Injectivity guard: B^n_effective >= L must hold. For n_effective = n_min this
     // is always true by construction. For larger N it is trivially true (more capacity).
     // The guard is against a caller supplying n_override < n_min via the field directly,
     // which we've clamped above; this debug assert verifies invariant.
-    debug_assert!(b.checked_pow(n_effective as u32).unwrap_or(usize::MAX) >= l,
-        "n_effective={n_effective} B^N < L={l}: injectivity violated after clamp");
+    debug_assert!(
+        b.checked_pow(n_effective as u32).unwrap_or(usize::MAX) >= l,
+        "n_effective={n_effective} B^N < L={l}: injectivity violated after clamp"
+    );
 
     // R7 fast-path: L > cube_size_limit; cube mode always expands beyond this point
     if l > config.cube_size_limit() {
@@ -248,7 +264,8 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         coords_k.sort_unstable();
         coords_k.dedup();
         // encode_axis_gaps is fail-closed; can only fail on encode bugs, not data
-        let gaps = encode_axis_gaps(&coords_k, b_k[k]).expect("gap encode cannot fail on valid cube data");
+        let gaps =
+            encode_axis_gaps(&coords_k, b_k[k]).expect("gap encode cannot fail on valid cube data");
         axis_gaps.push(gaps);
     }
 
@@ -275,7 +292,9 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     // Step 5: R7 decision — compare cube encoded size vs raw-store output size
     let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
     let cube_state = CubeHeaderState {
-        n, b, l,
+        n,
+        b,
+        l,
         count: cube.count,
         b_k,
         map_scheme: gap_scheme.scheme_byte(),
@@ -284,7 +303,14 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         inverse_dict: &inverse_dict,
         axis_gap_counts: &axis_gap_counts,
     };
-    let cube_size = estimate_cube_size(&cube_state, &axis_gaps, gap_scheme, value_scheme, &seq_codes, config.min_ctx_count);
+    let cube_size = estimate_cube_size(
+        &cube_state,
+        &axis_gaps,
+        gap_scheme,
+        value_scheme,
+        &seq_codes,
+        config.min_ctx_count,
+    );
     let raw_output_size = serialize_raw_header(n, b, l).len() + l;
 
     if cube_size >= raw_output_size {
@@ -316,7 +342,8 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             // Wire: [code_len[0..n_distinct]: u8 × n_distinct] + [MSB-first bitstream]
             let n_distinct = inverse_dict.len();
             let code_len = canonical_code_lengths(&seq_codes, n_distinct);
-            let mut out = Vec::with_capacity(n_distinct + huffman_bitstream_size(&seq_codes, &code_len));
+            let mut out =
+                Vec::with_capacity(n_distinct + huffman_bitstream_size(&seq_codes, &code_len));
             // Emit code-length table
             out.extend_from_slice(&code_len);
             // Emit MSB-first bitstream
@@ -355,7 +382,9 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             // Re-build the cube header with the winner's scheme byte (may differ from
             // what was used in estimate_cube_size, but the header is self-describing).
             let winner_cube_state = CubeHeaderState {
-                n, b, l,
+                n,
+                b,
+                l,
                 count: cube.count,
                 b_k,
                 map_scheme: gap_scheme.scheme_byte(),
@@ -409,7 +438,10 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 
     // mode == MODE_CUBE
     if hdr.mode != MODE_CUBE {
-        return Err(CubrimError::Decode(format!("Unknown mode in header: {}", hdr.mode)));
+        return Err(CubrimError::Decode(format!(
+            "Unknown mode in header: {}",
+            hdr.mode
+        )));
     }
 
     // Empty input special case
@@ -426,15 +458,25 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let axis_gap_counts = &hdr.axis_gap_counts;
 
     if b_k.len() != n {
-        return Err(CubrimError::Decode(format!("b_k length {} != N={}", b_k.len(), n)));
+        return Err(CubrimError::Decode(format!(
+            "b_k length {} != N={}",
+            b_k.len(),
+            n
+        )));
     }
     if axis_gap_counts.len() != n {
-        return Err(CubrimError::Decode(format!("axis_gap_counts length != N={}", n)));
+        return Err(CubrimError::Decode(format!(
+            "axis_gap_counts length != N={}",
+            n
+        )));
     }
 
     // Decode gap scheme from header
     let gap_scheme = GapScheme::from_byte(hdr.map_scheme).ok_or_else(|| {
-        CubrimError::Decode(format!("Unknown map_scheme byte: {} in header", hdr.map_scheme))
+        CubrimError::Decode(format!(
+            "Unknown map_scheme byte: {} in header",
+            hdr.map_scheme
+        ))
     })?;
 
     // Read gap streams for each axis (scheme-dispatched)
@@ -449,14 +491,13 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 let gaps = rle_decode(stream_bytes)?;
                 if gaps.len() != n_gaps {
                     return Err(CubrimError::Decode(format!(
-                        "Axis {k}: decoded {} gaps, expected {n_gaps}", gaps.len()
+                        "Axis {k}: decoded {} gaps, expected {n_gaps}",
+                        gaps.len()
                     )));
                 }
                 (gaps, consumed)
             }
-            GapScheme::PackedNibble => {
-                packed_nibble_decode(blob, offset, n_gaps)?
-            }
+            GapScheme::PackedNibble => packed_nibble_decode(blob, offset, n_gaps)?,
         };
 
         // Validate gap invariant on decode (R3.1 fail-closed)
@@ -468,7 +509,8 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             }
             if g > b_k[k] {
                 return Err(CubrimError::GapInvariant(format!(
-                    "Axis {k} gap[{i}]={g} > b_k[{k}]={} — corrupt stream", b_k[k]
+                    "Axis {k} gap[{i}]={g} > b_k[{k}]={} — corrupt stream",
+                    b_k[k]
                 )));
             }
         }
@@ -479,18 +521,27 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 
     // Determine value scheme from header
     let value_scheme = ValueScheme::from_byte(hdr.value_scheme).ok_or_else(|| {
-        CubrimError::Decode(format!("Unknown value_scheme byte: {} in header", hdr.value_scheme))
+        CubrimError::Decode(format!(
+            "Unknown value_scheme byte: {} in header",
+            hdr.value_scheme
+        ))
     })?;
 
     // Decode value stream (scheme-dispatched)
     let result = match value_scheme {
         ValueScheme::BitpackFixed => {
             // Read bitpacked values (lex order)
-            let bitpack_bytes_count = if count > 0 { (count * w).div_ceil(8) } else { 0 };
+            let bitpack_bytes_count = if count > 0 {
+                (count * w).div_ceil(8)
+            } else {
+                0
+            };
             if offset + bitpack_bytes_count > blob.len() {
                 return Err(CubrimError::Decode(format!(
                     "Bitpack data truncated: need {} bytes at offset {}, have {} bytes total",
-                    bitpack_bytes_count, offset, blob.len()
+                    bitpack_bytes_count,
+                    offset,
+                    blob.len()
                 )));
             }
             let packed_values_bytes = &blob[offset..offset + bitpack_bytes_count];
@@ -511,9 +562,7 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             //
             // This is deterministic from (L, N, B) alone — no out-of-band state (R6).
 
-            let mut lex_sorted_coords: Vec<Vec<usize>> = (0..l)
-                .map(|i| phi_fn(i, n, b))
-                .collect();
+            let mut lex_sorted_coords: Vec<Vec<usize>> = (0..l).map(|i| phi_fn(i, n, b)).collect();
             lex_sorted_coords.sort();
 
             let mut result = vec![0u8; l];
@@ -535,7 +584,8 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             if seq_codes.len() != count {
                 return Err(CubrimError::Decode(format!(
                     "RLE-codes decoded {} codes but expected {} (count from header)",
-                    seq_codes.len(), count
+                    seq_codes.len(),
+                    count
                 )));
             }
             let mut result = vec![0u8; l];
@@ -543,7 +593,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 if code >= inverse_dict.len() {
                     return Err(CubrimError::Decode(format!(
                         "RLE-codes code {} at position {} >= n_distinct {}",
-                        code, i, inverse_dict.len()
+                        code,
+                        i,
+                        inverse_dict.len()
                     )));
                 }
                 if i < l {
@@ -569,7 +621,8 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             if seq_codes.len() != count {
                 return Err(CubrimError::Decode(format!(
                     "Entropy decoded {} codes but expected {} (count from header)",
-                    seq_codes.len(), count
+                    seq_codes.len(),
+                    count
                 )));
             }
 
@@ -596,7 +649,8 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             if seq_codes.len() != count {
                 return Err(CubrimError::Decode(format!(
                     "EntropyContext decoded {} codes but expected {} (count from header)",
-                    seq_codes.len(), count
+                    seq_codes.len(),
+                    count
                 )));
             }
 
@@ -624,7 +678,8 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             if seq_codes.len() != count {
                 return Err(CubrimError::Decode(format!(
                     "EntropyContext2 decoded {} codes but expected {} (count from header)",
-                    seq_codes.len(), count
+                    seq_codes.len(),
+                    count
                 )));
             }
 
@@ -647,13 +702,13 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         ValueScheme::BwtEntropy => {
             // BWT inverse + T4 context-adaptive Huffman decode.
             let n_distinct = inverse_dict.len();
-            let (seq_codes, _consumed) =
-                bwt_entropy_decode(blob, offset, count, n_distinct)?;
+            let (seq_codes, _consumed) = bwt_entropy_decode(blob, offset, count, n_distinct)?;
 
             if seq_codes.len() != count {
                 return Err(CubrimError::Decode(format!(
                     "BwtEntropy decoded {} codes but expected {} (count from header)",
-                    seq_codes.len(), count
+                    seq_codes.len(),
+                    count
                 )));
             }
 
@@ -679,7 +734,11 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 
 /// Read enough RLE pairs from blob starting at offset to decode n_gaps gaps.
 /// Returns (&[u8] slice of pairs consumed, bytes consumed).
-fn read_rle_stream(blob: &[u8], offset: usize, n_gaps: usize) -> Result<(&[u8], usize), CubrimError> {
+fn read_rle_stream(
+    blob: &[u8],
+    offset: usize,
+    n_gaps: usize,
+) -> Result<(&[u8], usize), CubrimError> {
     if n_gaps == 0 {
         return Ok((&blob[offset..offset], 0));
     }
@@ -753,7 +812,9 @@ fn build_context_tables(seq_codes: &[usize], n_distinct: usize) -> Vec<(u16, Vec
     let mut prev_ctx: u16 = 0; // sentinel for position 0
     for &code in seq_codes.iter() {
         // Track for current context
-        let entry = ctx_freq.entry(prev_ctx).or_insert_with(|| vec![0usize; n_distinct]);
+        let entry = ctx_freq
+            .entry(prev_ctx)
+            .or_insert_with(|| vec![0usize; n_distinct]);
         if code < n_distinct {
             entry[code] += 1;
         }
@@ -795,7 +856,9 @@ fn build_context_tables(seq_codes: &[usize], n_distinct: usize) -> Vec<(u16, Vec
             continue; // use fallback for this context
         }
         // Build seq_codes for this context only
-        let ctx_seq: Vec<usize> = freq.iter().enumerate()
+        let ctx_seq: Vec<usize> = freq
+            .iter()
+            .enumerate()
             .flat_map(|(sym, &cnt)| std::iter::repeat(sym).take(cnt))
             .collect();
         let ctx_len = canonical_code_lengths(&ctx_seq, n_distinct);
@@ -830,7 +893,8 @@ pub(crate) fn context_huffman_encode(seq_codes: &[usize], n_distinct: usize) -> 
     // 1. Encode bitstream: use per-context table or fallback.
     //    We need all codewords for the encode pass.
     //    Pre-build assign_canonical_codes for each context table.
-    let canonical_codes: Vec<Vec<(u32, u8)>> = ctx_tables.iter()
+    let canonical_codes: Vec<Vec<(u32, u8)>> = ctx_tables
+        .iter()
         .map(|(_, code_len)| crate::huffman::assign_canonical_codes(code_len))
         .collect();
 
@@ -878,7 +942,9 @@ pub(crate) fn context_huffman_decode(
     if count == 0 {
         // Edge case: nothing to decode; consume n_contexts header only.
         if offset + 2 > blob.len() {
-            return Err(CubrimError::Decode("EntropyContext: blob too short for n_contexts".into()));
+            return Err(CubrimError::Decode(
+                "EntropyContext: blob too short for n_contexts".into(),
+            ));
         }
         let n_ctx = u16::from_be_bytes([blob[offset], blob[offset + 1]]) as usize;
         // Skip context table entries.
@@ -888,7 +954,9 @@ pub(crate) fn context_huffman_decode(
 
     // 1. Read n_contexts.
     if offset + 2 > blob.len() {
-        return Err(CubrimError::Decode("EntropyContext: blob too short for n_contexts".into()));
+        return Err(CubrimError::Decode(
+            "EntropyContext: blob too short for n_contexts".into(),
+        ));
     }
     let n_ctx = u16::from_be_bytes([blob[offset], blob[offset + 1]]) as usize;
     let mut pos = offset + 2;
@@ -953,7 +1021,8 @@ pub(crate) fn context_huffman_decode(
             if byte_off >= blob.len() {
                 return Err(CubrimError::Decode(format!(
                     "EntropyContext: bitstream exhausted at bit {bit_pos} decoding symbol {}/{}",
-                    decoded.len(), count
+                    decoded.len(),
+                    count
                 )));
             }
             let bit = (blob[byte_off] >> bit_off) & 1;
@@ -970,7 +1039,8 @@ pub(crate) fn context_huffman_decode(
         if !found {
             return Err(CubrimError::Decode(format!(
                 "EntropyContext: no codeword match after 32 bits at symbol {}/{}",
-                decoded.len(), count
+                decoded.len(),
+                count
             )));
         }
     }
@@ -1000,7 +1070,8 @@ pub(crate) fn context_huffman_size(seq_codes: &[usize], n_distinct: usize) -> us
     }
     let fallback_idx = *ctx_idx.get(&FALLBACK_CTX).unwrap_or(&0);
 
-    let canonical_codes: Vec<Vec<(u32, u8)>> = ctx_tables.iter()
+    let canonical_codes: Vec<Vec<(u32, u8)>> = ctx_tables
+        .iter()
         .map(|(_, code_len)| crate::huffman::assign_canonical_codes(code_len))
         .collect();
 
@@ -1053,7 +1124,6 @@ pub const ORDER2_DEFAULT_MIN_CTX: u16 = 128;
 // To re-derive Option B: drop the Order1 arm in order2_build_context_tables and the
 // order1_map lookup in the encoder/size functions below.
 
-
 /// Compute the order-2 context key at position i in seq_codes.
 /// Position 0 → (0,0), position 1 → (0, seq_codes[0]), i≥2 → (seq_codes[i-2], seq_codes[i-1]).
 ///
@@ -1078,7 +1148,11 @@ enum CtxEntry {
     /// Order-1 fallback table (tag=1).  Key = prev_code.
     Order1 { prev_code: u16, code_len: Vec<u8> },
     /// Order-2 primary table (tag=2).  Key = (prev2_code, prev_code).
-    Order2 { prev2_code: u16, prev_code: u16, code_len: Vec<u8> },
+    Order2 {
+        prev2_code: u16,
+        prev_code: u16,
+        code_len: Vec<u8>,
+    },
 }
 
 impl CtxEntry {
@@ -1091,9 +1165,9 @@ impl CtxEntry {
     }
     fn wire_bytes(&self, n_distinct: usize) -> usize {
         match self {
-            CtxEntry::Order0 { .. } => 1 + n_distinct,           // tag(1)
-            CtxEntry::Order1 { .. } => 1 + 2 + n_distinct,       // tag(1)+prev(2)
-            CtxEntry::Order2 { .. } => 1 + 2 + 2 + n_distinct,   // tag(1)+prev2(2)+prev(2)
+            CtxEntry::Order0 { .. } => 1 + n_distinct,     // tag(1)
+            CtxEntry::Order1 { .. } => 1 + 2 + n_distinct, // tag(1)+prev(2)
+            CtxEntry::Order2 { .. } => 1 + 2 + 2 + n_distinct, // tag(1)+prev2(2)+prev(2)
         }
     }
 }
@@ -1126,20 +1200,30 @@ fn order2_build_context_tables(
             continue;
         }
         let (p2, p1) = order2_ctx_at(seq_codes, i);
-        ctx2_freq.entry((p2, p1)).or_insert_with(|| vec![0usize; n_distinct])[code] += 1;
-        ctx1_freq.entry(p1).or_insert_with(|| vec![0usize; n_distinct])[code] += 1;
+        ctx2_freq
+            .entry((p2, p1))
+            .or_insert_with(|| vec![0usize; n_distinct])[code] += 1;
+        ctx1_freq
+            .entry(p1)
+            .or_insert_with(|| vec![0usize; n_distinct])[code] += 1;
         fallback_freq[code] += 1;
     }
 
     // ── Observation totals ────────────────────────────────────────────────────
-    let ctx2_total: BTreeMap<(u16, u16), usize> =
-        ctx2_freq.iter().map(|(k, v)| (*k, v.iter().sum())).collect();
-    let ctx1_total: BTreeMap<u16, usize> =
-        ctx1_freq.iter().map(|(k, v)| (*k, v.iter().sum())).collect();
+    let ctx2_total: BTreeMap<(u16, u16), usize> = ctx2_freq
+        .iter()
+        .map(|(k, v)| (*k, v.iter().sum()))
+        .collect();
+    let ctx1_total: BTreeMap<u16, usize> = ctx1_freq
+        .iter()
+        .map(|(k, v)| (*k, v.iter().sum()))
+        .collect();
 
     // ── Global (order-0) fallback ─────────────────────────────────────────────
     let fallback_code_len = {
-        let seq: Vec<usize> = fallback_freq.iter().enumerate()
+        let seq: Vec<usize> = fallback_freq
+            .iter()
+            .enumerate()
             .flat_map(|(sym, &cnt)| std::iter::repeat(sym).take(cnt))
             .collect();
         canonical_code_lengths(&seq, n_distinct)
@@ -1152,11 +1236,16 @@ fn order2_build_context_tables(
         if obs < min {
             continue;
         }
-        let seq: Vec<usize> = freq.iter().enumerate()
+        let seq: Vec<usize> = freq
+            .iter()
+            .enumerate()
             .flat_map(|(sym, &cnt)| std::iter::repeat(sym).take(cnt))
             .collect();
         let code_len = canonical_code_lengths(&seq, n_distinct);
-        order1_entries.push(CtxEntry::Order1 { prev_code: prev, code_len });
+        order1_entries.push(CtxEntry::Order1 {
+            prev_code: prev,
+            code_len,
+        });
     }
     // BTreeMap iteration is already ascending, so order1_entries is ascending by prev_code.
 
@@ -1167,17 +1256,25 @@ fn order2_build_context_tables(
         if obs < min {
             continue;
         }
-        let seq: Vec<usize> = freq.iter().enumerate()
+        let seq: Vec<usize> = freq
+            .iter()
+            .enumerate()
             .flat_map(|(sym, &cnt)| std::iter::repeat(sym).take(cnt))
             .collect();
         let code_len = canonical_code_lengths(&seq, n_distinct);
-        order2_entries.push(CtxEntry::Order2 { prev2_code: p2, prev_code: p1, code_len });
+        order2_entries.push(CtxEntry::Order2 {
+            prev2_code: p2,
+            prev_code: p1,
+            code_len,
+        });
     }
     // Already in ascending BTreeMap order.
 
     // ── Combine: [fallback] [order1] [order2] ────────────────────────────────
     let mut result = Vec::with_capacity(1 + order1_entries.len() + order2_entries.len());
-    result.push(CtxEntry::Order0 { code_len: fallback_code_len });
+    result.push(CtxEntry::Order0 {
+        code_len: fallback_code_len,
+    });
     result.extend(order1_entries);
     result.extend(order2_entries);
     result
@@ -1185,18 +1282,17 @@ fn order2_build_context_tables(
 
 /// Select the appropriate table index from the entries for a given position.
 /// Returns the index into `entries` that should be used to encode/decode position i.
-fn order2_select_table(
-    entries: &[CtxEntry],
-    prev2: u16,
-    prev1: u16,
-) -> usize {
+fn order2_select_table(entries: &[CtxEntry], prev2: u16, prev1: u16) -> usize {
     // Walk fallback chain: order-2 → order-1 → order-0
     // Entries are [Order0 at 0] [Order1 entries] [Order2 entries].
     // Check order-2 first (last block), then order-1, then fallback at 0.
     for (idx, entry) in entries.iter().enumerate().rev() {
         match entry {
-            CtxEntry::Order2 { prev2_code, prev_code, .. }
-                if *prev2_code == prev2 && *prev_code == prev1 => return idx,
+            CtxEntry::Order2 {
+                prev2_code,
+                prev_code,
+                ..
+            } if *prev2_code == prev2 && *prev_code == prev1 => return idx,
             _ => {}
         }
     }
@@ -1230,7 +1326,8 @@ pub(crate) fn order2_context_huffman_encode(
     let entries = order2_build_context_tables(seq_codes, n_distinct, min_ctx_count);
 
     // Pre-build canonical codes for each entry.
-    let canonical_codes: Vec<Vec<(u32, u8)>> = entries.iter()
+    let canonical_codes: Vec<Vec<(u32, u8)>> = entries
+        .iter()
         .map(|e| crate::huffman::assign_canonical_codes(e.code_len()))
         .collect();
 
@@ -1265,12 +1362,19 @@ pub(crate) fn order2_context_huffman_encode(
                 out.push(0u8);
                 out.extend_from_slice(code_len);
             }
-            CtxEntry::Order1 { prev_code, code_len } => {
+            CtxEntry::Order1 {
+                prev_code,
+                code_len,
+            } => {
                 out.push(1u8);
                 out.extend_from_slice(&prev_code.to_be_bytes());
                 out.extend_from_slice(code_len);
             }
-            CtxEntry::Order2 { prev2_code, prev_code, code_len } => {
+            CtxEntry::Order2 {
+                prev2_code,
+                prev_code,
+                code_len,
+            } => {
                 out.push(2u8);
                 out.extend_from_slice(&prev2_code.to_be_bytes());
                 out.extend_from_slice(&prev_code.to_be_bytes());
@@ -1293,7 +1397,7 @@ pub(crate) fn order2_context_huffman_decode(
     // ── Read min_ctx_count ────────────────────────────────────────────────────
     if offset + 4 > blob.len() {
         return Err(CubrimError::Decode(
-            "EntropyContext2: blob too short for min_ctx_count+n_contexts header".into()
+            "EntropyContext2: blob too short for min_ctx_count+n_contexts header".into(),
         ));
     }
     let _min_ctx_count = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
@@ -1317,9 +1421,18 @@ pub(crate) fn order2_context_huffman_decode(
     // Parsed entries: (tag, optional prev2, prev1, decode_table)
     #[derive(Debug)]
     enum ParsedEntry {
-        Order0 { table_idx: usize },
-        Order1 { prev_code: u16, table_idx: usize },
-        Order2 { prev2_code: u16, prev_code: u16, table_idx: usize },
+        Order0 {
+            table_idx: usize,
+        },
+        Order1 {
+            prev_code: u16,
+            table_idx: usize,
+        },
+        Order2 {
+            prev2_code: u16,
+            prev_code: u16,
+            table_idx: usize,
+        },
     }
 
     let mut decode_tables: Vec<DecodeTable> = Vec::with_capacity(n_ctx);
@@ -1328,7 +1441,7 @@ pub(crate) fn order2_context_huffman_decode(
     for _ in 0..n_ctx {
         if pos >= blob.len() {
             return Err(CubrimError::Decode(
-                "EntropyContext2: truncated context entry header".into()
+                "EntropyContext2: truncated context entry header".into(),
             ));
         }
         let tag = blob[pos];
@@ -1343,7 +1456,7 @@ pub(crate) fn order2_context_huffman_decode(
                 // Order-1: prev_code (2 bytes) + code_len
                 if pos + 2 > blob.len() {
                     return Err(CubrimError::Decode(
-                        "EntropyContext2: truncated order-1 prev_code field".into()
+                        "EntropyContext2: truncated order-1 prev_code field".into(),
                     ));
                 }
                 let prev = u16::from_be_bytes([blob[pos], blob[pos + 1]]);
@@ -1354,7 +1467,7 @@ pub(crate) fn order2_context_huffman_decode(
                 // Order-2: prev2 (2 bytes) + prev (2 bytes) + code_len
                 if pos + 4 > blob.len() {
                     return Err(CubrimError::Decode(
-                        "EntropyContext2: truncated order-2 key fields".into()
+                        "EntropyContext2: truncated order-2 key fields".into(),
                     ));
                 }
                 let p2 = u16::from_be_bytes([blob[pos], blob[pos + 1]]);
@@ -1394,8 +1507,15 @@ pub(crate) fn order2_context_huffman_decode(
 
         let parsed = match tag {
             0 => ParsedEntry::Order0 { table_idx },
-            1 => ParsedEntry::Order1 { prev_code: prev1, table_idx },
-            _ => ParsedEntry::Order2 { prev2_code: prev2, prev_code: prev1, table_idx },
+            1 => ParsedEntry::Order1 {
+                prev_code: prev1,
+                table_idx,
+            },
+            _ => ParsedEntry::Order2 {
+                prev2_code: prev2,
+                prev_code: prev1,
+                table_idx,
+            },
         };
         parsed_entries.push(parsed);
     }
@@ -1407,11 +1527,20 @@ pub(crate) fn order2_context_huffman_decode(
 
     for entry in &parsed_entries {
         match entry {
-            ParsedEntry::Order0 { table_idx } => { order0_idx = *table_idx; }
-            ParsedEntry::Order1 { prev_code, table_idx } => {
+            ParsedEntry::Order0 { table_idx } => {
+                order0_idx = *table_idx;
+            }
+            ParsedEntry::Order1 {
+                prev_code,
+                table_idx,
+            } => {
                 order1_map.insert(*prev_code, *table_idx);
             }
-            ParsedEntry::Order2 { prev2_code, prev_code, table_idx } => {
+            ParsedEntry::Order2 {
+                prev2_code,
+                prev_code,
+                table_idx,
+            } => {
                 order2_map.insert((*prev2_code, *prev_code), *table_idx);
             }
         }
@@ -1440,7 +1569,8 @@ pub(crate) fn order2_context_huffman_decode(
         };
 
         // Select table: order-2 → order-1 → order-0.
-        let table_idx = order2_map.get(&(ctx_p2, ctx_p1))
+        let table_idx = order2_map
+            .get(&(ctx_p2, ctx_p1))
             .copied()
             .or_else(|| order1_map.get(&ctx_p1).copied())
             .unwrap_or(order0_idx);
@@ -1493,7 +1623,7 @@ fn order2_skip_entries(
     for _ in 0..n_ctx {
         if pos >= blob.len() {
             return Err(CubrimError::Decode(
-                "EntropyContext2: truncated entry while skipping".into()
+                "EntropyContext2: truncated entry while skipping".into(),
             ));
         }
         let tag = blob[pos];
@@ -1502,14 +1632,16 @@ fn order2_skip_entries(
             0 => 0usize,
             1 => 2usize,
             2 => 4usize,
-            other => return Err(CubrimError::Decode(format!(
-                "EntropyContext2: unknown tag {other} while skipping entries"
-            ))),
+            other => {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: unknown tag {other} while skipping entries"
+                )))
+            }
         };
         pos += key_bytes;
         if pos + n_distinct > blob.len() {
             return Err(CubrimError::Decode(
-                "EntropyContext2: code_len table truncated while skipping".into()
+                "EntropyContext2: code_len table truncated while skipping".into(),
             ));
         }
         pos += n_distinct;
@@ -1529,10 +1661,14 @@ pub(crate) fn order2_context_huffman_size(
     }
     let entries = order2_build_context_tables(seq_codes, n_distinct, min_ctx_count);
     // Header: min_ctx(2) + n_ctx(2) + per-entry sizes
-    let header_bytes = 4 + entries.iter().map(|e| e.wire_bytes(n_distinct)).sum::<usize>();
+    let header_bytes = 4 + entries
+        .iter()
+        .map(|e| e.wire_bytes(n_distinct))
+        .sum::<usize>();
 
     // Build canonical code lookup for size estimation.
-    let canonical_codes: Vec<Vec<(u32, u8)>> = entries.iter()
+    let canonical_codes: Vec<Vec<(u32, u8)>> = entries
+        .iter()
         .map(|e| crate::huffman::assign_canonical_codes(e.code_len()))
         .collect();
 
@@ -1544,9 +1680,17 @@ pub(crate) fn order2_context_huffman_size(
 
     for (i, entry) in entries.iter().enumerate() {
         match entry {
-            CtxEntry::Order0 { .. } => { order0_idx = i; }
-            CtxEntry::Order1 { prev_code, .. } => { order1_map.insert(*prev_code, i); }
-            CtxEntry::Order2 { prev2_code, prev_code, .. } => {
+            CtxEntry::Order0 { .. } => {
+                order0_idx = i;
+            }
+            CtxEntry::Order1 { prev_code, .. } => {
+                order1_map.insert(*prev_code, i);
+            }
+            CtxEntry::Order2 {
+                prev2_code,
+                prev_code,
+                ..
+            } => {
                 order2_map.insert((*prev2_code, *prev_code), i);
             }
         }
@@ -1555,7 +1699,8 @@ pub(crate) fn order2_context_huffman_size(
     let mut total_bits: usize = 0;
     for (i, &code) in seq_codes.iter().enumerate() {
         let (p2, p1) = order2_ctx_at(seq_codes, i);
-        let table_idx = order2_map.get(&(p2, p1))
+        let table_idx = order2_map
+            .get(&(p2, p1))
             .copied()
             .or_else(|| order1_map.get(&p1).copied())
             .unwrap_or(order0_idx);
@@ -1709,7 +1854,7 @@ pub(crate) fn bwt_entropy_decode(
 ) -> Result<(Vec<usize>, usize), CubrimError> {
     if offset + 2 > blob.len() {
         return Err(CubrimError::Decode(
-            "BwtEntropy: blob too short for primary_index (need 2 bytes)".into()
+            "BwtEntropy: blob too short for primary_index (need 2 bytes)".into(),
         ));
     }
     let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
@@ -1722,7 +1867,8 @@ pub(crate) fn bwt_entropy_decode(
     if seq_codes.len() != count {
         return Err(CubrimError::Decode(format!(
             "BwtEntropy: decoded {} codes but expected {} (count from header)",
-            seq_codes.len(), count
+            seq_codes.len(),
+            count
         )));
     }
 
@@ -1782,7 +1928,9 @@ mod tests {
     #[test]
     fn test_round_trip_random_bytes() {
         // Pseudo-random bytes (not crypto — just a deterministic sequence)
-        let data: Vec<u8> = (0usize..1024).map(|i| ((i % 256) as u8).wrapping_mul(71).wrapping_add(13)).collect();
+        let data: Vec<u8> = (0usize..1024)
+            .map(|i| ((i % 256) as u8).wrapping_mul(71).wrapping_add(13))
+            .collect();
         assert_eq!(decode(&encode(&data)).unwrap(), data);
     }
 
@@ -1795,7 +1943,11 @@ mod tests {
         use crate::header::MAGIC;
         let data = b"hello world";
         let blob = encode(data);
-        assert_eq!(&blob[0..4], &MAGIC, "blob must start with magic cb 52 49 4d");
+        assert_eq!(
+            &blob[0..4],
+            &MAGIC,
+            "blob must start with magic cb 52 49 4d"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1809,8 +1961,21 @@ mod tests {
             ("1byte", vec![0x42]),
             ("uniform_256", vec![0xAA; 256]),
             ("all_distinct_256", (0u8..=255).collect()),
-            ("text_1kb", b"the quick brown fox jumps over the lazy dog ".iter().copied().cycle().take(1024).collect()),
-            ("random_1kb", (0usize..1024).map(|i| (i as u8).wrapping_mul(113).wrapping_add(7)).collect()),
+            (
+                "text_1kb",
+                b"the quick brown fox jumps over the lazy dog "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(1024)
+                    .collect(),
+            ),
+            (
+                "random_1kb",
+                (0usize..1024)
+                    .map(|i| (i as u8).wrapping_mul(113).wrapping_add(7))
+                    .collect(),
+            ),
         ];
 
         for (name, data) in &cases {
@@ -1826,7 +1991,7 @@ mod tests {
 
     #[test]
     fn test_r3_1_worked_example_via_distance_map() {
-        use crate::distance_map::{encode_axis_gaps, decode_axis_gaps};
+        use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
         // {0, 3, 7} with b_k=8 -> gaps (1, 3, 4) -> decode -> {0, 3, 7}
         let gaps = encode_axis_gaps(&[0, 3, 7], 8).unwrap();
         assert_eq!(gaps, vec![1, 3, 4]);
@@ -1850,7 +2015,11 @@ mod tests {
             overhead <= HEADER_OVERHEAD_BOUND,
             "raw-store overhead {overhead} > HEADER_OVERHEAD_BOUND {HEADER_OVERHEAD_BOUND}"
         );
-        assert_eq!(decode(&blob).unwrap(), data, "large raw-store round-trip failed");
+        assert_eq!(
+            decode(&blob).unwrap(),
+            data,
+            "large raw-store round-trip failed"
+        );
     }
 
     #[test]
@@ -1860,7 +2029,10 @@ mod tests {
         let data: Vec<u8> = vec![42u8; 100];
         let blob = encode(&data);
         let (hdr, _) = parse_header(&blob).unwrap();
-        assert_eq!(hdr.mode, MODE_RAW, "small input <= {HEADER_OVERHEAD_BOUND} must trigger raw-store");
+        assert_eq!(
+            hdr.mode, MODE_RAW,
+            "small input <= {HEADER_OVERHEAD_BOUND} must trigger raw-store"
+        );
         assert_eq!(decode(&blob).unwrap(), data);
     }
 
@@ -1886,7 +2058,10 @@ mod tests {
         // This specific pattern should trigger cube mode (2 distinct values, W=1 bit)
         // If it doesn't, we still need to verify round-trip
         let recovered = decode(&blob).unwrap();
-        assert_eq!(recovered, data, "clustered input cube-path round-trip failed");
+        assert_eq!(
+            recovered, data,
+            "clustered input cube-path round-trip failed"
+        );
 
         // Log which mode was chosen for diagnostic purposes
         if hdr.mode == MODE_CUBE {
@@ -1912,9 +2087,15 @@ mod tests {
         // bitpacked: ceil(400*1/8) = 50 bytes
         // Header for N=2, n_distinct=1: ~44 bytes
         // Total cube: ~94 bytes vs raw: 13+400=413 bytes -> cube wins
-        assert_eq!(hdr.mode, MODE_CUBE, "all-same 400-byte input must trigger cube mode (94 < 413)");
+        assert_eq!(
+            hdr.mode, MODE_CUBE,
+            "all-same 400-byte input must trigger cube mode (94 < 413)"
+        );
         let recovered = decode(&blob).unwrap();
-        assert_eq!(recovered, data, "cube-mode round-trip failed for all-same-400");
+        assert_eq!(
+            recovered, data,
+            "cube-mode round-trip failed for all-same-400"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1971,8 +2152,10 @@ mod tests {
             ..EncodeConfig::v1_default()
         };
         let cfg_blob = encode_with_config(&data, &cfg_none);
-        assert_eq!(default_blob, cfg_blob,
-            "n_override=None must produce byte-identical output to v1_default");
+        assert_eq!(
+            default_blob, cfg_blob,
+            "n_override=None must produce byte-identical output to v1_default"
+        );
     }
 
     #[test]
@@ -1999,13 +2182,20 @@ mod tests {
         // This is already verified by the differential fixtures, but test explicitly.
         let inputs: Vec<Vec<u8>> = vec![
             vec![0xABu8; 400],
-            b"the quick brown fox jumps ".iter().copied().cycle().take(1024).collect(),
+            b"the quick brown fox jumps "
+                .iter()
+                .copied()
+                .cycle()
+                .take(1024)
+                .collect(),
         ];
         for input in &inputs {
             let v1_blob = encode(input);
             let default_scheme_blob = encode_with_config(input, &EncodeConfig::v1_default());
-            assert_eq!(v1_blob, default_scheme_blob,
-                "default config must produce byte-identical output to encode()");
+            assert_eq!(
+                v1_blob, default_scheme_blob,
+                "default config must produce byte-identical output to encode()"
+            );
         }
     }
 
@@ -2014,13 +2204,18 @@ mod tests {
         // PackedNibble blob must differ from RleU16 blob for any cube-mode input.
         // Use a 400-byte all-same-byte input known to trigger cube mode.
         let data: Vec<u8> = vec![0xABu8; 400];
-        let rle_blob = encode(&data);   // RleU16 default
-        let pn_blob = encode_with_config(&data, &EncodeConfig {
-            gap_scheme: crate::config::GapScheme::PackedNibble,
-            ..EncodeConfig::v1_default()
-        });
-        assert_ne!(rle_blob, pn_blob,
-            "PackedNibble blob must differ from RleU16 blob (different wire encoding)");
+        let rle_blob = encode(&data); // RleU16 default
+        let pn_blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                gap_scheme: crate::config::GapScheme::PackedNibble,
+                ..EncodeConfig::v1_default()
+            },
+        );
+        assert_ne!(
+            rle_blob, pn_blob,
+            "PackedNibble blob must differ from RleU16 blob (different wire encoding)"
+        );
     }
 
     #[test]
@@ -2048,8 +2243,10 @@ mod tests {
         let blob = encode_with_config(&data, &cfg);
         let (hdr, _) = parse_header(&blob).unwrap();
         if hdr.mode == MODE_CUBE {
-            assert_eq!(hdr.map_scheme, MAP_SCHEME_PACKED_NIBBLE,
-                "PackedNibble config must write map_scheme=2 to header");
+            assert_eq!(
+                hdr.map_scheme, MAP_SCHEME_PACKED_NIBBLE,
+                "PackedNibble config must write map_scheme=2 to header"
+            );
         }
     }
 
@@ -2064,13 +2261,29 @@ mod tests {
             ("empty", vec![]),
             ("1byte", vec![0x42]),
             ("uniform_400", vec![0xAA; 400]),
-            ("text_1kb", b"the quick brown fox jumps over the lazy dog ".iter().copied().cycle().take(1024).collect()),
-            ("random_1kb", (0usize..1024).map(|i| (i as u8).wrapping_mul(113).wrapping_add(7)).collect()),
+            (
+                "text_1kb",
+                b"the quick brown fox jumps over the lazy dog "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(1024)
+                    .collect(),
+            ),
+            (
+                "random_1kb",
+                (0usize..1024)
+                    .map(|i| (i as u8).wrapping_mul(113).wrapping_add(7))
+                    .collect(),
+            ),
         ];
         for (name, data) in &cases {
             let blob = encode_with_config(data, &cfg);
             let recovered = decode(&blob).unwrap();
-            assert_eq!(&recovered, data, "PackedNibble round-trip failed for '{name}'");
+            assert_eq!(
+                &recovered, data,
+                "PackedNibble round-trip failed for '{name}'"
+            );
         }
     }
 
@@ -2084,17 +2297,28 @@ mod tests {
         // to encode() (which uses v1_default = BitpackFixed).
         let inputs: Vec<Vec<u8>> = vec![
             vec![0xABu8; 400],
-            b"the quick brown fox jumps ".iter().copied().cycle().take(1024).collect(),
+            b"the quick brown fox jumps "
+                .iter()
+                .copied()
+                .cycle()
+                .take(1024)
+                .collect(),
         ];
         for input in &inputs {
             let v1_blob = encode(input);
-            let fixed_blob = encode_with_config(input, &EncodeConfig {
-                value_scheme: crate::config::ValueScheme::BitpackFixed,
-                ..EncodeConfig::v1_default()
-            });
-            assert_eq!(v1_blob, fixed_blob,
+            let fixed_blob = encode_with_config(
+                input,
+                &EncodeConfig {
+                    value_scheme: crate::config::ValueScheme::BitpackFixed,
+                    ..EncodeConfig::v1_default()
+                },
+            );
+            assert_eq!(
+                v1_blob,
+                fixed_blob,
                 "BitpackFixed must produce byte-identical output to encode() for {} bytes",
-                input.len());
+                input.len()
+            );
         }
     }
 
@@ -2118,7 +2342,10 @@ mod tests {
         };
         let blob = encode_with_config(&data, &cfg);
         let recovered = decode(&blob).unwrap();
-        assert_eq!(recovered, data, "RleCodes round-trip failed for run-heavy input");
+        assert_eq!(
+            recovered, data,
+            "RleCodes round-trip failed for run-heavy input"
+        );
     }
 
     #[test]
@@ -2133,8 +2360,21 @@ mod tests {
             ("1byte", vec![0x42]),
             ("uniform_400", vec![0xAA; 400]),
             ("all_distinct_256", (0u8..=255).collect()),
-            ("text_1kb", b"the quick brown fox jumps over the lazy dog ".iter().copied().cycle().take(1024).collect()),
-            ("random_1kb", (0usize..1024).map(|i| (i as u8).wrapping_mul(113).wrapping_add(7)).collect()),
+            (
+                "text_1kb",
+                b"the quick brown fox jumps over the lazy dog "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(1024)
+                    .collect(),
+            ),
+            (
+                "random_1kb",
+                (0usize..1024)
+                    .map(|i| (i as u8).wrapping_mul(113).wrapping_add(7))
+                    .collect(),
+            ),
         ];
         for (name, data) in &cases {
             let blob = encode_with_config(data, &cfg);
@@ -2155,17 +2395,27 @@ mod tests {
         // RleCodes: 2 triplets × 3B = 6 bytes — dramatically smaller
         assert_eq!(data.len(), 400);
 
-        let fixed_blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: crate::config::ValueScheme::BitpackFixed,
-            ..EncodeConfig::v1_default()
-        });
-        let rle_blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: crate::config::ValueScheme::RleCodes,
-            ..EncodeConfig::v1_default()
-        });
+        let fixed_blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: crate::config::ValueScheme::BitpackFixed,
+                ..EncodeConfig::v1_default()
+            },
+        );
+        let rle_blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: crate::config::ValueScheme::RleCodes,
+                ..EncodeConfig::v1_default()
+            },
+        );
 
         // Both must round-trip correctly
-        assert_eq!(decode(&fixed_blob).unwrap(), data, "BitpackFixed round-trip");
+        assert_eq!(
+            decode(&fixed_blob).unwrap(),
+            data,
+            "BitpackFixed round-trip"
+        );
         assert_eq!(decode(&rle_blob).unwrap(), data, "RleCodes round-trip");
 
         assert!(
@@ -2187,8 +2437,10 @@ mod tests {
         let blob = encode_with_config(&data, &cfg);
         let (hdr, _) = parse_header(&blob).unwrap();
         if hdr.mode == MODE_CUBE {
-            assert_eq!(hdr.value_scheme, VALUE_SCHEME_RLE_CODES,
-                "RleCodes config must write value_scheme=2 to header");
+            assert_eq!(
+                hdr.value_scheme, VALUE_SCHEME_RLE_CODES,
+                "RleCodes config must write value_scheme=2 to header"
+            );
         }
     }
 
@@ -2197,12 +2449,17 @@ mod tests {
         // RleCodes blob must differ from BitpackFixed blob for any cube-mode input.
         let data: Vec<u8> = vec![0xABu8; 400];
         let fixed_blob = encode(&data);
-        let rle_blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: crate::config::ValueScheme::RleCodes,
-            ..EncodeConfig::v1_default()
-        });
-        assert_ne!(fixed_blob, rle_blob,
-            "RleCodes blob must differ from BitpackFixed blob");
+        let rle_blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: crate::config::ValueScheme::RleCodes,
+                ..EncodeConfig::v1_default()
+            },
+        );
+        assert_ne!(
+            fixed_blob, rle_blob,
+            "RleCodes blob must differ from BitpackFixed blob"
+        );
     }
 
     // Inline RLE-codes primitive tests (white-box, no public API needed)
@@ -2211,8 +2468,8 @@ mod tests {
         // Hand-check encode/decode internals: 3 codes with runs 5,3,2
         let seq_codes = {
             let mut v = vec![0usize; 5]; // code 0, run 5
-            v.extend(vec![1usize; 3]);  // code 1, run 3
-            v.extend(vec![2usize; 2]);  // code 2, run 2
+            v.extend(vec![1usize; 3]); // code 1, run 3
+            v.extend(vec![2usize; 2]); // code 2, run 2
             v
         };
         let encoded = rle_codes_encode(&seq_codes);
@@ -2255,8 +2512,21 @@ mod tests {
             ("1byte", vec![0x42]),
             ("uniform_400", vec![0xAA; 400]),
             ("all_distinct_256", (0u8..=255).collect()),
-            ("text_1kb", b"the quick brown fox jumps over the lazy dog ".iter().copied().cycle().take(1024).collect()),
-            ("random_1kb", (0usize..1024).map(|i| (i as u8).wrapping_mul(113).wrapping_add(7)).collect()),
+            (
+                "text_1kb",
+                b"the quick brown fox jumps over the lazy dog "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(1024)
+                    .collect(),
+            ),
+            (
+                "random_1kb",
+                (0usize..1024)
+                    .map(|i| (i as u8).wrapping_mul(113).wrapping_add(7))
+                    .collect(),
+            ),
         ];
         for (name, data) in &cases {
             let blob = encode_with_config(data, &cfg);
@@ -2276,8 +2546,10 @@ mod tests {
         let blob = encode_with_config(&data, &cfg);
         let (hdr, _) = parse_header(&blob).unwrap();
         if hdr.mode == MODE_CUBE {
-            assert_eq!(hdr.value_scheme, 3u8,
-                "Entropy config must write value_scheme=3 to header");
+            assert_eq!(
+                hdr.value_scheme, 3u8,
+                "Entropy config must write value_scheme=3 to header"
+            );
         }
     }
 
@@ -2286,12 +2558,17 @@ mod tests {
         // Entropy blob must differ from BitpackFixed blob for any cube-mode input.
         let data: Vec<u8> = vec![0xABu8; 400];
         let fixed_blob = encode(&data); // BitpackFixed default
-        let entropy_blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: ValueScheme::Entropy,
-            ..EncodeConfig::v1_default()
-        });
-        assert_ne!(fixed_blob, entropy_blob,
-            "Entropy blob must differ from BitpackFixed blob");
+        let entropy_blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: ValueScheme::Entropy,
+                ..EncodeConfig::v1_default()
+            },
+        );
+        assert_ne!(
+            fixed_blob, entropy_blob,
+            "Entropy blob must differ from BitpackFixed blob"
+        );
     }
 
     #[test]
@@ -2303,31 +2580,46 @@ mod tests {
         // + 4 code-len overhead = 69 bytes value stream → smaller.
         let data: Vec<u8> = {
             let mut d = Vec::with_capacity(400);
-            d.extend(std::iter::repeat(0x01u8).take(320));  // 80%
-            d.extend(std::iter::repeat(0x02u8).take(40));   // 10%
-            d.extend(std::iter::repeat(0x03u8).take(20));   // 5%
-            d.extend(std::iter::repeat(0x04u8).take(20));   // 5%
+            d.extend(std::iter::repeat(0x01u8).take(320)); // 80%
+            d.extend(std::iter::repeat(0x02u8).take(40)); // 10%
+            d.extend(std::iter::repeat(0x03u8).take(20)); // 5%
+            d.extend(std::iter::repeat(0x04u8).take(20)); // 5%
             d
         };
         assert_eq!(data.len(), 400);
 
-        let fixed_blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: ValueScheme::BitpackFixed,
-            ..EncodeConfig::v1_default()
-        });
-        let entropy_blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: ValueScheme::Entropy,
-            ..EncodeConfig::v1_default()
-        });
+        let fixed_blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: ValueScheme::BitpackFixed,
+                ..EncodeConfig::v1_default()
+            },
+        );
+        let entropy_blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: ValueScheme::Entropy,
+                ..EncodeConfig::v1_default()
+            },
+        );
 
         // Both must round-trip
-        assert_eq!(decode(&fixed_blob).unwrap(), data, "BitpackFixed round-trip on skewed");
-        assert_eq!(decode(&entropy_blob).unwrap(), data, "Entropy round-trip on skewed");
+        assert_eq!(
+            decode(&fixed_blob).unwrap(),
+            data,
+            "BitpackFixed round-trip on skewed"
+        );
+        assert_eq!(
+            decode(&entropy_blob).unwrap(),
+            data,
+            "Entropy round-trip on skewed"
+        );
 
         assert!(
             entropy_blob.len() < fixed_blob.len(),
             "Entropy ({} bytes) must be < BitpackFixed ({} bytes) for 4-symbol skewed input",
-            entropy_blob.len(), fixed_blob.len()
+            entropy_blob.len(),
+            fixed_blob.len()
         );
     }
 
@@ -2337,10 +2629,13 @@ mod tests {
         // Use a valid cube-mode blob, then corrupt the code-length bytes.
         use crate::header::{parse_header, MODE_CUBE, VALUE_SCHEME_ENTROPY};
         let data: Vec<u8> = vec![0xABu8; 400];
-        let mut blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: ValueScheme::Entropy,
-            ..EncodeConfig::v1_default()
-        });
+        let mut blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: ValueScheme::Entropy,
+                ..EncodeConfig::v1_default()
+            },
+        );
         // Parse header to find where code_len table starts (after gap streams)
         let (hdr, hdr_end) = parse_header(&blob).unwrap();
         if hdr.mode != MODE_CUBE || hdr.value_scheme != VALUE_SCHEME_ENTROPY {
@@ -2376,7 +2671,10 @@ mod tests {
             // For n_distinct > 2, this is Kraft-violating (n_distinct × 1/2 > 1)
             if n_distinct > 2 {
                 let result = decode(&blob);
-                assert!(result.is_err(), "Kraft-violating code-length table must return Err");
+                assert!(
+                    result.is_err(),
+                    "Kraft-violating code-length table must return Err"
+                );
             }
         }
     }
@@ -2389,10 +2687,13 @@ mod tests {
             d.extend(vec![0x02u8; 200]);
             d
         };
-        let blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: ValueScheme::Entropy,
-            ..EncodeConfig::v1_default()
-        });
+        let blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: ValueScheme::Entropy,
+                ..EncodeConfig::v1_default()
+            },
+        );
         let (hdr, _) = parse_header(&blob).unwrap();
         if hdr.mode != MODE_CUBE || hdr.value_scheme != VALUE_SCHEME_ENTROPY {
             return; // raw-store, skip
@@ -2409,7 +2710,11 @@ mod tests {
     fn test_entropy_context_round_trip_text() {
         // Text-like input: T4 should compress well and round-trip byte-exact.
         let data: Vec<u8> = b"the quick brown fox jumps over the lazy dog "
-            .iter().copied().cycle().take(4096).collect();
+            .iter()
+            .copied()
+            .cycle()
+            .take(4096)
+            .collect();
         let config = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext,
             ..EncodeConfig::v1_default()
@@ -2418,22 +2723,46 @@ mod tests {
         let recovered = decode(&blob).unwrap();
         assert_eq!(recovered, data, "T4 EntropyContext text round-trip failed");
         // Should compress (be < input size) since this input has strong context correlation
-        assert!(blob.len() < data.len(),
+        assert!(
+            blob.len() < data.len(),
             "T4 EntropyContext should compress text-like 4KB input: got {}B for {}B input",
-            blob.len(), data.len());
+            blob.len(),
+            data.len()
+        );
     }
 
     #[test]
     fn test_entropy_context_round_trip_all_classes() {
         // V-AC-5a: round-trip must hold for all input classes with T4.
         let cases: Vec<(&str, Vec<u8>)> = vec![
-            ("empty",          vec![]),
-            ("single_byte",    vec![0x42]),
-            ("uniform_256",    vec![0xAAu8; 400]),
-            ("all_distinct",   (0u8..=255).collect()),
-            ("text_1kb",       b"the quick brown fox ".iter().copied().cycle().take(1024).collect()),
-            ("text_4kb",       b"the quick brown fox ".iter().copied().cycle().take(4096).collect()),
-            ("random_1kb",     (0usize..1024).map(|i| (i as u8).wrapping_mul(71).wrapping_add(13)).collect()),
+            ("empty", vec![]),
+            ("single_byte", vec![0x42]),
+            ("uniform_256", vec![0xAAu8; 400]),
+            ("all_distinct", (0u8..=255).collect()),
+            (
+                "text_1kb",
+                b"the quick brown fox "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(1024)
+                    .collect(),
+            ),
+            (
+                "text_4kb",
+                b"the quick brown fox "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(4096)
+                    .collect(),
+            ),
+            (
+                "random_1kb",
+                (0usize..1024)
+                    .map(|i| (i as u8).wrapping_mul(71).wrapping_add(13))
+                    .collect(),
+            ),
         ];
         let config = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext,
@@ -2442,7 +2771,10 @@ mod tests {
         for (name, data) in &cases {
             let blob = encode_with_config(data, &config);
             let recovered = decode(&blob).unwrap();
-            assert_eq!(&recovered, data, "T4 EntropyContext round-trip failed for '{name}'");
+            assert_eq!(
+                &recovered, data,
+                "T4 EntropyContext round-trip failed for '{name}'"
+            );
         }
     }
 
@@ -2452,9 +2784,16 @@ mod tests {
         // We check that T4 output size <= raw-store output size on every input.
         // The encoder's R7 decision ensures this: if T4 cube > raw, it falls back to raw.
         let cases: Vec<Vec<u8>> = vec![
-            vec![0xFFu8; 1024],   // binary uniform
-            (0usize..1024).map(|i| (i as u8).wrapping_mul(71).wrapping_add(13)).collect(),
-            b"the quick brown fox ".iter().copied().cycle().take(4096).collect(),
+            vec![0xFFu8; 1024], // binary uniform
+            (0usize..1024)
+                .map(|i| (i as u8).wrapping_mul(71).wrapping_add(13))
+                .collect(),
+            b"the quick brown fox "
+                .iter()
+                .copied()
+                .cycle()
+                .take(4096)
+                .collect(),
         ];
         let config_t4 = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext,
@@ -2463,11 +2802,19 @@ mod tests {
         for data in &cases {
             let raw_bound = data.len() + HEADER_OVERHEAD_BOUND;
             let blob = encode_with_config(data, &config_t4);
-            assert!(blob.len() <= raw_bound,
+            assert!(
+                blob.len() <= raw_bound,
                 "T4 output {} > raw-store bound {} for {}-byte input — non-regression violated",
-                blob.len(), raw_bound, data.len());
+                blob.len(),
+                raw_bound,
+                data.len()
+            );
             // Must round-trip
-            assert_eq!(decode(&blob).unwrap(), *data, "T4 non-regression round-trip failed");
+            assert_eq!(
+                decode(&blob).unwrap(),
+                *data,
+                "T4 non-regression round-trip failed"
+            );
         }
     }
 
@@ -2478,16 +2825,26 @@ mod tests {
         // V-AC-4: default encode() (BitpackFixed) must be byte-for-byte unchanged.
         let inputs: Vec<Vec<u8>> = vec![
             vec![0xABu8; 400],
-            b"the quick brown fox ".iter().copied().cycle().take(1024).collect(),
+            b"the quick brown fox "
+                .iter()
+                .copied()
+                .cycle()
+                .take(1024)
+                .collect(),
         ];
         for input in &inputs {
             let v1_blob = encode(input);
-            let explicit_fixed_blob = encode_with_config(input, &EncodeConfig {
-                value_scheme: ValueScheme::BitpackFixed,
-                ..EncodeConfig::v1_default()
-            });
-            assert_eq!(v1_blob, explicit_fixed_blob,
-                "Adding Entropy variant must not change BitpackFixed output");
+            let explicit_fixed_blob = encode_with_config(
+                input,
+                &EncodeConfig {
+                    value_scheme: ValueScheme::BitpackFixed,
+                    ..EncodeConfig::v1_default()
+                },
+            );
+            assert_eq!(
+                v1_blob, explicit_fixed_blob,
+                "Adding Entropy variant must not change BitpackFixed output"
+            );
         }
     }
 
@@ -2500,7 +2857,10 @@ mod tests {
     #[test]
     fn test_entropy_context2_scheme_byte_is_5() {
         assert_eq!(ValueScheme::EntropyContext2.scheme_byte(), 5u8);
-        assert_eq!(ValueScheme::from_byte(5u8), Some(ValueScheme::EntropyContext2));
+        assert_eq!(
+            ValueScheme::from_byte(5u8),
+            Some(ValueScheme::EntropyContext2)
+        );
         // scheme byte 6 = BwtEntropy (added after EntropyContext2)
         assert_eq!(ValueScheme::BwtEntropy.scheme_byte(), 6u8);
         assert_eq!(ValueScheme::from_byte(6u8), Some(ValueScheme::BwtEntropy));
@@ -2546,7 +2906,9 @@ mod tests {
         // Rare pairs at boundary: pos 0 → (0,0) sentinel once, pos 1 → (0,0) once
         let mut seq: Vec<usize> = Vec::new();
         for _ in 0..133 {
-            seq.push(0); seq.push(1); seq.push(2);
+            seq.push(0);
+            seq.push(1);
+            seq.push(2);
         }
         seq.push(0); // 400 total
         let n_distinct = 3;
@@ -2556,19 +2918,32 @@ mod tests {
 
         // Must have the fallback (Order0) entry always present.
         let has_fallback = entries.iter().any(|e| matches!(e, CtxEntry::Order0 { .. }));
-        assert!(has_fallback, "Order0 fallback must always be present in the table set");
+        assert!(
+            has_fallback,
+            "Order0 fallback must always be present in the table set"
+        );
 
         // The qualifying (0,1), (1,2), (2,0) order-2 pairs should each appear >=128 times.
         // → those 3 order-2 tables should be present.
-        let order2_count = entries.iter().filter(|e| matches!(e, CtxEntry::Order2 { .. })).count();
-        assert!(order2_count >= 2,
-            "At least 2 order-2 qualifying tables expected (frequent pairs), got {order2_count}");
+        let order2_count = entries
+            .iter()
+            .filter(|e| matches!(e, CtxEntry::Order2 { .. }))
+            .count();
+        assert!(
+            order2_count >= 2,
+            "At least 2 order-2 qualifying tables expected (frequent pairs), got {order2_count}"
+        );
 
         // Order-1 tables may also be present for prev_code ∈ {0,1,2}.
-        let order1_count = entries.iter().filter(|e| matches!(e, CtxEntry::Order1 { .. })).count();
+        let order1_count = entries
+            .iter()
+            .filter(|e| matches!(e, CtxEntry::Order1 { .. }))
+            .count();
         // With min_ctx=128 on 400 elements, each prev appears ~133 times → should qualify.
-        assert!(order1_count >= 2,
-            "At least 2 order-1 qualifying tables expected, got {order1_count}");
+        assert!(
+            order1_count >= 2,
+            "At least 2 order-1 qualifying tables expected, got {order1_count}"
+        );
     }
 
     // ── Step 5.4: Fallback chain selection ───────────────────────────────────
@@ -2596,13 +2971,26 @@ mod tests {
         let entries = order2_build_context_tables(&seq, n_distinct, min_ctx);
 
         // Fallback table always present.
-        assert!(entries.iter().any(|e| matches!(e, CtxEntry::Order0 { .. })),
-            "Order0 fallback must be present");
+        assert!(
+            entries.iter().any(|e| matches!(e, CtxEntry::Order0 { .. })),
+            "Order0 fallback must be present"
+        );
 
         // (0,0) order-2 pair: appears ~198 times (positions 2..200 - sentinel skipped) → should qualify.
-        let has_order2_00 = entries.iter().any(|e| matches!(e, CtxEntry::Order2 { prev2_code: 0, prev_code: 0, .. }));
-        assert!(has_order2_00,
-            "(0,0) order-2 table missing — expected >=128 observations from 200-elem run");
+        let has_order2_00 = entries.iter().any(|e| {
+            matches!(
+                e,
+                CtxEntry::Order2 {
+                    prev2_code: 0,
+                    prev_code: 0,
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_order2_00,
+            "(0,0) order-2 table missing — expected >=128 observations from 200-elem run"
+        );
     }
 
     // ── Step 5.5: Header serialization round-trip + robustness ───────────────
@@ -2619,15 +3007,25 @@ mod tests {
 
         // Verify min_ctx is first 2 bytes.
         let decoded_min_ctx = u16::from_be_bytes([encoded[0], encoded[1]]);
-        assert_eq!(decoded_min_ctx, min_ctx, "min_ctx_count must be the first u16 in the wire");
+        assert_eq!(
+            decoded_min_ctx, min_ctx,
+            "min_ctx_count must be the first u16 in the wire"
+        );
 
         // Verify n_contexts is next 2 bytes and plausible.
         let n_ctx = u16::from_be_bytes([encoded[2], encoded[3]]) as usize;
-        assert!(n_ctx >= 1, "n_contexts must be >= 1 (at least the fallback)");
+        assert!(
+            n_ctx >= 1,
+            "n_contexts must be >= 1 (at least the fallback)"
+        );
 
         // Decode and verify round-trip.
-        let (decoded_seq, consumed) = order2_context_huffman_decode(&encoded, 0, seq.len(), n_distinct).unwrap();
-        assert_eq!(decoded_seq, seq, "order-2 header round-trip: decoded seq must match original");
+        let (decoded_seq, consumed) =
+            order2_context_huffman_decode(&encoded, 0, seq.len(), n_distinct).unwrap();
+        assert_eq!(
+            decoded_seq, seq,
+            "order-2 header round-trip: decoded seq must match original"
+        );
         assert!(consumed <= encoded.len(), "consumed <= encoded.len()");
     }
 
@@ -2637,13 +3035,16 @@ mod tests {
         let mut fake: Vec<u8> = Vec::new();
         fake.extend_from_slice(&128u16.to_be_bytes()); // min_ctx
         fake.extend_from_slice(&100u16.to_be_bytes()); // n_contexts = 100 (way more than blob has)
-        // Only 1 entry worth of bytes follow (tag=0 + 4 bytes code_len).
+                                                       // Only 1 entry worth of bytes follow (tag=0 + 4 bytes code_len).
         fake.push(0u8); // tag = Order0
         fake.extend_from_slice(&[0u8; 4]); // n_distinct=4 code_len (just 4 bytes)
-        // No bitstream.
+                                           // No bitstream.
 
         let result = order2_context_huffman_decode(&fake, 0, 10, 4);
-        assert!(result.is_err(), "Truncated context header must return Err, not panic");
+        assert!(
+            result.is_err(),
+            "Truncated context header must return Err, not panic"
+        );
     }
 
     #[test]
@@ -2651,12 +3052,15 @@ mod tests {
         // A blob with an unknown tag byte → Err.
         let mut fake: Vec<u8> = Vec::new();
         fake.extend_from_slice(&128u16.to_be_bytes()); // min_ctx
-        fake.extend_from_slice(&1u16.to_be_bytes());   // n_contexts = 1
-        fake.push(99u8);  // tag = 99 (unknown)
+        fake.extend_from_slice(&1u16.to_be_bytes()); // n_contexts = 1
+        fake.push(99u8); // tag = 99 (unknown)
         fake.extend_from_slice(&[0u8; 4]); // code_len
 
         let result = order2_context_huffman_decode(&fake, 0, 1, 4);
-        assert!(result.is_err(), "Unknown tag byte must return Err, not panic");
+        assert!(
+            result.is_err(),
+            "Unknown tag byte must return Err, not panic"
+        );
     }
 
     #[test]
@@ -2664,7 +3068,10 @@ mod tests {
         // A blob that is only 3 bytes — too short for even the min_ctx+n_ctx fields.
         let fake = vec![0u8, 128u8, 0u8]; // only 3 bytes, need at least 4
         let result = order2_context_huffman_decode(&fake, 0, 1, 4);
-        assert!(result.is_err(), "Short blob (3 bytes) must return Err for count>0");
+        assert!(
+            result.is_err(),
+            "Short blob (3 bytes) must return Err for count>0"
+        );
     }
 
     // ── Step 5.5b: T4 header size measurement for V7 grounding ───────────────
@@ -2677,7 +3084,11 @@ mod tests {
         // text-like: 16384 bytes cycling, ~69 distinct bytes (per corpus: n_distinct varies)
         // We use a known synthetic text-like sequence to measure T4 header bytes.
         let text_like: Vec<u8> = b"2026-06-17T12:00:00Z INFO cubrim compression text sample log"
-            .iter().copied().cycle().take(16384).collect();
+            .iter()
+            .copied()
+            .cycle()
+            .take(16384)
+            .collect();
 
         let cfg_t4 = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext,
@@ -2686,11 +3097,16 @@ mod tests {
         let blob_t4 = encode_with_config(&text_like, &cfg_t4);
         // Just verify it compresses and round-trips — the real corpus measurement
         // happens in the bench harness (V7 output).
-        assert_eq!(decode(&blob_t4).unwrap(), text_like,
-            "T4 text-like round-trip must succeed for V7 header measurement");
+        assert_eq!(
+            decode(&blob_t4).unwrap(),
+            text_like,
+            "T4 text-like round-trip must succeed for V7 header measurement"
+        );
         // T4 must compress text-like content (not raw-store).
-        assert!(blob_t4.len() < text_like.len(),
-            "T4 must compress text-like 16KB input");
+        assert!(
+            blob_t4.len() < text_like.len(),
+            "T4 must compress text-like 16KB input"
+        );
     }
 
     // ── Step 5.6: Full encode→decode byte-exact, unit + corpus ───────────────
@@ -2703,20 +3119,34 @@ mod tests {
             ..EncodeConfig::v1_default()
         };
         let cases: Vec<(&str, Vec<u8>)> = vec![
-            ("empty",           vec![]),
-            ("single_byte",     vec![0x42]),
-            ("all_same_100",    vec![0x58u8; 100]),
-            ("all_distinct_256",(0u8..=255).collect()),
-            ("hello_world",     b"hello, world!\n\n".to_vec()),
-            ("text_1kb",        b"the quick brown fox jumps over the lazy dog "
-                .iter().copied().cycle().take(1024).collect()),
-            ("random_1kb",      (0usize..1024).map(|i| (i as u8).wrapping_mul(71).wrapping_add(13)).collect()),
+            ("empty", vec![]),
+            ("single_byte", vec![0x42]),
+            ("all_same_100", vec![0x58u8; 100]),
+            ("all_distinct_256", (0u8..=255).collect()),
+            ("hello_world", b"hello, world!\n\n".to_vec()),
+            (
+                "text_1kb",
+                b"the quick brown fox jumps over the lazy dog "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(1024)
+                    .collect(),
+            ),
+            (
+                "random_1kb",
+                (0usize..1024)
+                    .map(|i| (i as u8).wrapping_mul(71).wrapping_add(13))
+                    .collect(),
+            ),
         ];
         for (name, data) in &cases {
             let blob = encode_with_config(data, &cfg);
             let recovered = decode(&blob).unwrap();
-            assert_eq!(&recovered, data,
-                "EntropyContext2 round-trip failed for '{name}'");
+            assert_eq!(
+                &recovered, data,
+                "EntropyContext2 round-trip failed for '{name}'"
+            );
         }
     }
 
@@ -2725,7 +3155,11 @@ mod tests {
         use crate::header::{parse_header, MODE_CUBE};
         // Use a larger input likely to go to cube mode.
         let data: Vec<u8> = b"the quick brown fox jumps over the lazy dog "
-            .iter().copied().cycle().take(4096).collect();
+            .iter()
+            .copied()
+            .cycle()
+            .take(4096)
+            .collect();
         let cfg = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext2,
             ..EncodeConfig::v1_default()
@@ -2733,8 +3167,10 @@ mod tests {
         let blob = encode_with_config(&data, &cfg);
         let (hdr, _) = parse_header(&blob).unwrap();
         if hdr.mode == MODE_CUBE {
-            assert_eq!(hdr.value_scheme, 5u8,
-                "EntropyContext2 config must write value_scheme=5 to header");
+            assert_eq!(
+                hdr.value_scheme, 5u8,
+                "EntropyContext2 config must write value_scheme=5 to header"
+            );
         }
         assert_eq!(decode(&blob).unwrap(), data, "T5 round-trip on text_4kb");
     }
@@ -2743,7 +3179,11 @@ mod tests {
     fn test_entropy_context2_diverges_from_t4() {
         // T5 wire output must differ from T4 for any cube-mode input with enough context.
         let data: Vec<u8> = b"the quick brown fox jumps over the lazy dog "
-            .iter().copied().cycle().take(4096).collect();
+            .iter()
+            .copied()
+            .cycle()
+            .take(4096)
+            .collect();
         let cfg_t4 = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext,
             ..EncodeConfig::v1_default()
@@ -2758,8 +3198,10 @@ mod tests {
         assert_eq!(decode(&blob_t4).unwrap(), data, "T4 text_4kb round-trip");
         assert_eq!(decode(&blob_t5).unwrap(), data, "T5 text_4kb round-trip");
         // They should produce different byte streams.
-        assert_ne!(blob_t4, blob_t5,
-            "T5 (order-2) blob must differ from T4 (order-1) blob for text input");
+        assert_ne!(
+            blob_t4, blob_t5,
+            "T5 (order-2) blob must differ from T4 (order-1) blob for text input"
+        );
     }
 
     #[test]
@@ -2768,7 +3210,11 @@ mod tests {
         // The comparison at a specific min_ctx is done in the bench harness (V4/V5).
         // This test only validates correctness, not relative size.
         let data: Vec<u8> = b"the quick brown fox jumps over the lazy dog "
-            .iter().copied().cycle().take(16384).collect();
+            .iter()
+            .copied()
+            .cycle()
+            .take(16384)
+            .collect();
         let cfg_t4 = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext,
             ..EncodeConfig::v1_default()
@@ -2783,21 +3229,36 @@ mod tests {
         assert_eq!(decode(&blob_t4).unwrap(), data, "T4 text_16kb round-trip");
         assert_eq!(decode(&blob_t5).unwrap(), data, "T5 text_16kb round-trip");
         // Both must compress vs raw (note: encoder's R7 clamp ensures this).
-        assert!(blob_t4.len() < data.len(),
-            "T4 must compress text_16kb; got {}B for {}B input", blob_t4.len(), data.len());
-        assert!(blob_t5.len() < data.len(),
-            "T5 must compress text_16kb; got {}B for {}B input", blob_t5.len(), data.len());
+        assert!(
+            blob_t4.len() < data.len(),
+            "T4 must compress text_16kb; got {}B for {}B input",
+            blob_t4.len(),
+            data.len()
+        );
+        assert!(
+            blob_t5.len() < data.len(),
+            "T5 must compress text_16kb; got {}B for {}B input",
+            blob_t5.len(),
+            data.len()
+        );
         // Report sizes (informational).
-        eprintln!("text_16kb: T4={} bytes, T5={} bytes (delta {})",
-            blob_t4.len(), blob_t5.len(),
-            blob_t5.len() as i64 - blob_t4.len() as i64);
+        eprintln!(
+            "text_16kb: T4={} bytes, T5={} bytes (delta {})",
+            blob_t4.len(),
+            blob_t5.len(),
+            blob_t5.len() as i64 - blob_t4.len() as i64
+        );
     }
 
     #[test]
     fn test_entropy_context2_min_ctx_count_config() {
         // Verify that a lower min_ctx_count produces a valid round-trip (more tables, smaller bitstream).
         let data: Vec<u8> = b"the quick brown fox jumps over the lazy dog "
-            .iter().copied().cycle().take(4096).collect();
+            .iter()
+            .copied()
+            .cycle()
+            .take(4096)
+            .collect();
         for min_ctx in &[16u16, 64, 128, 256] {
             let cfg = EncodeConfig {
                 value_scheme: ValueScheme::EntropyContext2,
@@ -2806,8 +3267,10 @@ mod tests {
             };
             let blob = encode_with_config(&data, &cfg);
             let recovered = decode(&blob).unwrap();
-            assert_eq!(recovered, data,
-                "T5 round-trip failed with min_ctx_count={min_ctx}");
+            assert_eq!(
+                recovered, data,
+                "T5 round-trip failed with min_ctx_count={min_ctx}"
+            );
         }
     }
 
@@ -2815,11 +3278,18 @@ mod tests {
     fn test_entropy_context2_non_regression_149_tests() {
         // Ensure T1-T4 outputs are byte-identical before and after adding T5.
         // The v1_default() (T1) must be unchanged.
-        let data: Vec<u8> = b"the quick brown fox ".iter().copied().cycle().take(1024).collect();
+        let data: Vec<u8> = b"the quick brown fox "
+            .iter()
+            .copied()
+            .cycle()
+            .take(1024)
+            .collect();
         let v1_before = encode(&data);
         let v1_explicit = encode_with_config(&data, &EncodeConfig::v1_default());
-        assert_eq!(v1_before, v1_explicit,
-            "V-AC-8: v1_default output must not change after adding EntropyContext2");
+        assert_eq!(
+            v1_before, v1_explicit,
+            "V-AC-8: v1_default output must not change after adding EntropyContext2"
+        );
     }
 
     #[test]
@@ -2830,14 +3300,43 @@ mod tests {
             ..EncodeConfig::v1_default()
         };
         let cases: Vec<(&str, Vec<u8>)> = vec![
-            ("empty",          vec![]),
-            ("single_byte",    vec![0x42]),
-            ("uniform_256",    vec![0xAAu8; 400]),
-            ("all_distinct",   (0u8..=255).collect()),
-            ("text_1kb",       b"the quick brown fox ".iter().copied().cycle().take(1024).collect()),
-            ("text_4kb",       b"the quick brown fox ".iter().copied().cycle().take(4096).collect()),
-            ("text_16kb",      b"the quick brown fox ".iter().copied().cycle().take(16384).collect()),
-            ("random_1kb",     (0usize..1024).map(|i| (i as u8).wrapping_mul(71).wrapping_add(13)).collect()),
+            ("empty", vec![]),
+            ("single_byte", vec![0x42]),
+            ("uniform_256", vec![0xAAu8; 400]),
+            ("all_distinct", (0u8..=255).collect()),
+            (
+                "text_1kb",
+                b"the quick brown fox "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(1024)
+                    .collect(),
+            ),
+            (
+                "text_4kb",
+                b"the quick brown fox "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(4096)
+                    .collect(),
+            ),
+            (
+                "text_16kb",
+                b"the quick brown fox "
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(16384)
+                    .collect(),
+            ),
+            (
+                "random_1kb",
+                (0usize..1024)
+                    .map(|i| (i as u8).wrapping_mul(71).wrapping_add(13))
+                    .collect(),
+            ),
         ];
         for (name, data) in &cases {
             let blob = encode_with_config(data, &cfg);
@@ -2849,7 +3348,12 @@ mod tests {
     #[test]
     fn test_entropy_context2_size_matches_encode_len() {
         // Verify that the T5 encode/decode round-trip works with non-default min_ctx.
-        let data: Vec<u8> = b"the quick brown fox ".iter().copied().cycle().take(2048).collect();
+        let data: Vec<u8> = b"the quick brown fox "
+            .iter()
+            .copied()
+            .cycle()
+            .take(2048)
+            .collect();
         let cfg = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext2,
             min_ctx_count: Some(32),
@@ -2883,11 +3387,12 @@ mod tests {
             match fs::read(path) {
                 Ok(data) => {
                     let blob = encode_with_config(&data, &cfg);
-                    let recovered = decode(&blob).expect(&format!(
-                        "T5 corpus decode failed for '{name}'"
-                    ));
-                    assert_eq!(recovered, data,
-                        "T5 corpus round-trip FAILED for '{name}': byte mismatch");
+                    let recovered =
+                        decode(&blob).expect(&format!("T5 corpus decode failed for '{name}'"));
+                    assert_eq!(
+                        recovered, data,
+                        "T5 corpus round-trip FAILED for '{name}': byte mismatch"
+                    );
                     ok_count += 1;
                 }
                 Err(e) => {
@@ -2903,11 +3408,19 @@ mod tests {
     #[test]
     fn test_entropy_context2_decode_malformed_blob() {
         // Corrupt the value_scheme byte to 5 but provide no valid tables → Err.
-        let data: Vec<u8> = b"the quick brown fox ".iter().copied().cycle().take(4096).collect();
-        let mut blob = encode_with_config(&data, &EncodeConfig {
-            value_scheme: ValueScheme::EntropyContext2,
-            ..EncodeConfig::v1_default()
-        });
+        let data: Vec<u8> = b"the quick brown fox "
+            .iter()
+            .copied()
+            .cycle()
+            .take(4096)
+            .collect();
+        let mut blob = encode_with_config(
+            &data,
+            &EncodeConfig {
+                value_scheme: ValueScheme::EntropyContext2,
+                ..EncodeConfig::v1_default()
+            },
+        );
         // Corrupt the bitstream area: zero out everything after header.
         use crate::header::parse_header;
         if let Ok((hdr, hdr_end)) = parse_header(&blob) {
@@ -2918,11 +3431,11 @@ mod tests {
                 let truncate_at = hdr_end + 10; // cut mid-gap-stream
                 blob.truncate(truncate_at);
                 let result = decode(&blob);
-                assert!(result.is_err(),
-                    "Corrupted/truncated T5 blob must return Err, not panic");
+                assert!(
+                    result.is_err(),
+                    "Corrupted/truncated T5 blob must return Err, not panic"
+                );
             }
         }
     }
-
 }
-

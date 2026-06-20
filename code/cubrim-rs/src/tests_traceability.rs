@@ -9,14 +9,14 @@ use std::path::Path;
 /// List of (module file, expected rule annotation fragment).
 /// Each module must contain at least one `// R{n}` comment.
 const MODULES_AND_RULES: &[(&str, &str)] = &[
-    ("phi.rs",          "// R1"),
-    ("domainize.rs",    "// R8"),
+    ("phi.rs", "// R1"),
+    ("domainize.rs", "// R8"),
     ("distance_map.rs", "// R3"),
-    ("rle.rs",          "// R4"),
-    ("bitpack.rs",      "// R5"),
-    ("cube.rs",         "// R1"),
-    ("header.rs",       "// R6"),
-    ("codec.rs",        "// R6"),
+    ("rle.rs", "// R4"),
+    ("bitpack.rs", "// R5"),
+    ("cube.rs", "// R1"),
+    ("header.rs", "// R6"),
+    ("codec.rs", "// R6"),
 ];
 
 #[test]

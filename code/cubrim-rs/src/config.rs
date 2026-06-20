@@ -9,8 +9,8 @@
 // decisions and are compatible with decode as long as the header is written
 // correctly (which encode_with_config guarantees).
 
-use crate::phi::B_DEFAULT;
 use crate::codec::HEADER_OVERHEAD_BOUND;
+use crate::phi::B_DEFAULT;
 
 /// Gap encoding scheme for the per-axis distance map streams.
 ///
@@ -234,21 +234,59 @@ mod tests {
         assert!(cfg.use_square_limit);
         assert_eq!(cfg.cube_size_limit(), 65536);
         assert_eq!(cfg.n_override, None, "v1-default: n_override must be None");
-        assert_eq!(cfg.gap_scheme, GapScheme::RleU16, "v1-default: gap_scheme must be RleU16");
-        assert_eq!(cfg.value_scheme, ValueScheme::BitpackFixed, "v1-default: value_scheme must be BitpackFixed");
+        assert_eq!(
+            cfg.gap_scheme,
+            GapScheme::RleU16,
+            "v1-default: gap_scheme must be RleU16"
+        );
+        assert_eq!(
+            cfg.value_scheme,
+            ValueScheme::BitpackFixed,
+            "v1-default: value_scheme must be BitpackFixed"
+        );
     }
 
     #[test]
     fn test_value_scheme_byte_roundtrip() {
-        assert_eq!(ValueScheme::from_byte(ValueScheme::BitpackFixed.scheme_byte()), Some(ValueScheme::BitpackFixed));
-        assert_eq!(ValueScheme::from_byte(ValueScheme::RleCodes.scheme_byte()), Some(ValueScheme::RleCodes));
-        assert_eq!(ValueScheme::from_byte(ValueScheme::Entropy.scheme_byte()), Some(ValueScheme::Entropy));
-        assert_eq!(ValueScheme::from_byte(ValueScheme::EntropyContext.scheme_byte()), Some(ValueScheme::EntropyContext));
-        assert_eq!(ValueScheme::from_byte(ValueScheme::EntropyContext2.scheme_byte()), Some(ValueScheme::EntropyContext2));
-        assert_eq!(ValueScheme::from_byte(ValueScheme::BwtEntropy.scheme_byte()), Some(ValueScheme::BwtEntropy));
-        assert_eq!(ValueScheme::from_byte(0), None, "0 is not a valid value_scheme byte");
-        assert_eq!(ValueScheme::from_byte(7), None, "7 is not a valid value_scheme byte");
-        assert_eq!(ValueScheme::from_byte(99), None, "unknown byte returns None");
+        assert_eq!(
+            ValueScheme::from_byte(ValueScheme::BitpackFixed.scheme_byte()),
+            Some(ValueScheme::BitpackFixed)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(ValueScheme::RleCodes.scheme_byte()),
+            Some(ValueScheme::RleCodes)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(ValueScheme::Entropy.scheme_byte()),
+            Some(ValueScheme::Entropy)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(ValueScheme::EntropyContext.scheme_byte()),
+            Some(ValueScheme::EntropyContext)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(ValueScheme::EntropyContext2.scheme_byte()),
+            Some(ValueScheme::EntropyContext2)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(ValueScheme::BwtEntropy.scheme_byte()),
+            Some(ValueScheme::BwtEntropy)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(0),
+            None,
+            "0 is not a valid value_scheme byte"
+        );
+        assert_eq!(
+            ValueScheme::from_byte(7),
+            None,
+            "7 is not a valid value_scheme byte"
+        );
+        assert_eq!(
+            ValueScheme::from_byte(99),
+            None,
+            "unknown byte returns None"
+        );
     }
 
     #[test]
@@ -264,9 +302,19 @@ mod tests {
 
     #[test]
     fn test_gap_scheme_byte_roundtrip() {
-        assert_eq!(GapScheme::from_byte(GapScheme::RleU16.scheme_byte()), Some(GapScheme::RleU16));
-        assert_eq!(GapScheme::from_byte(GapScheme::PackedNibble.scheme_byte()), Some(GapScheme::PackedNibble));
-        assert_eq!(GapScheme::from_byte(0), None, "0 is not a valid scheme byte");
+        assert_eq!(
+            GapScheme::from_byte(GapScheme::RleU16.scheme_byte()),
+            Some(GapScheme::RleU16)
+        );
+        assert_eq!(
+            GapScheme::from_byte(GapScheme::PackedNibble.scheme_byte()),
+            Some(GapScheme::PackedNibble)
+        );
+        assert_eq!(
+            GapScheme::from_byte(0),
+            None,
+            "0 is not a valid scheme byte"
+        );
         assert_eq!(GapScheme::from_byte(99), None, "unknown byte returns None");
     }
 
@@ -282,21 +330,28 @@ mod tests {
         use crate::codec::{encode, encode_with_config};
 
         let fixture_inputs: Vec<Vec<u8>> = vec![
-            vec![],                                       // empty
-            vec![0x42],                                   // single_byte
-            vec![0x58u8; 100],                            // all_same_100
-            (0u8..=255).collect(),                        // all_distinct_256
-            b"hello, world!\n\n".to_vec(),                // hello_world_test (16 bytes)
+            vec![],                        // empty
+            vec![0x42],                    // single_byte
+            vec![0x58u8; 100],             // all_same_100
+            (0u8..=255).collect(),         // all_distinct_256
+            b"hello, world!\n\n".to_vec(), // hello_world_test (16 bytes)
             b"the quick brown fox jumps over the lazy dog "
-                .iter().copied().cycle().take(1024).collect(),  // text_1kb
-            (0usize..1024).map(|i| (i as u8).wrapping_mul(71).wrapping_add(13)).collect(), // random_1kb
+                .iter()
+                .copied()
+                .cycle()
+                .take(1024)
+                .collect(), // text_1kb
+            (0usize..1024)
+                .map(|i| (i as u8).wrapping_mul(71).wrapping_add(13))
+                .collect(), // random_1kb
         ];
 
         for input in &fixture_inputs {
             let default_blob = encode(input);
             let config_blob = encode_with_config(input, &EncodeConfig::v1_default());
             assert_eq!(
-                default_blob, config_blob,
+                default_blob,
+                config_blob,
                 "encode(x) != encode_with_config(x, v1_default()) for {} bytes",
                 input.len()
             );
@@ -305,12 +360,12 @@ mod tests {
 
     #[test]
     fn test_non_default_config_round_trips() {
-        use crate::codec::{encode_with_config, decode};
+        use crate::codec::{decode, encode_with_config};
         // A tuned config (lower raw_store_bound) — byte stream differs from v1 default,
         // but must still round-trip byte-exact.
         let tuned = EncodeConfig {
             b: 256,
-            raw_store_bound: 200,  // smaller threshold: let more inputs try cube mode
+            raw_store_bound: 200, // smaller threshold: let more inputs try cube mode
             use_square_limit: true,
             n_override: None,
             gap_scheme: GapScheme::RleU16,
@@ -319,13 +374,23 @@ mod tests {
         };
 
         let inputs: Vec<Vec<u8>> = vec![
-            vec![0xAAu8; 250],     // would be raw at default (250 <= 320), cube-eligible at tuned
-            b"the quick brown fox ".iter().copied().cycle().take(800).collect(),
+            vec![0xAAu8; 250], // would be raw at default (250 <= 320), cube-eligible at tuned
+            b"the quick brown fox "
+                .iter()
+                .copied()
+                .cycle()
+                .take(800)
+                .collect(),
         ];
         for input in &inputs {
             let blob = encode_with_config(input, &tuned);
             let recovered = decode(&blob).expect("decode must succeed");
-            assert_eq!(&recovered, input, "non-default config round-trip failed for {} bytes", input.len());
+            assert_eq!(
+                &recovered,
+                input,
+                "non-default config round-trip failed for {} bytes",
+                input.len()
+            );
         }
     }
 }

@@ -10,7 +10,7 @@
 //   - Traversal: lexicographic order of coordinates (x_0, x_1, ...)
 //   - b_k = B (all edges at maximum)
 
-use crate::phi::{phi, phi_inv, compute_n_and_b, B_DEFAULT};
+use crate::phi::{compute_n_and_b, phi, phi_inv, B_DEFAULT};
 
 /// Sparse cube data produced by build_cube.
 pub struct CubeData {
@@ -60,9 +60,21 @@ pub fn build_cube_with_params(data: &[u8], b: usize, n: usize) -> CubeData {
     points.sort_by(|a, bv| a.0.cmp(&bv.0));
 
     let cube_volume = b.checked_pow(n as u32).unwrap_or(usize::MAX);
-    let density = if cube_volume > 0 { l as f64 / cube_volume as f64 } else { 0.0 };
+    let density = if cube_volume > 0 {
+        l as f64 / cube_volume as f64
+    } else {
+        0.0
+    };
 
-    CubeData { n, b, b_k, l, populated: points, count: l, density }
+    CubeData {
+        n,
+        b,
+        b_k,
+        l,
+        populated: points,
+        count: l,
+        density,
+    }
 }
 
 /// R1/R2: Build sparse cube from input bytes.
@@ -149,7 +161,7 @@ mod tests {
         assert_eq!(cube.count, 1);
         assert_eq!(cube.n, 2); // N_DEFAULT
         assert_eq!(cube.b, 256); // B_DEFAULT
-        // phi(0, 2, 256) = (0, 0)
+                                 // phi(0, 2, 256) = (0, 0)
         assert_eq!(cube.populated[0].0, vec![0, 0]);
         assert_eq!(cube.populated[0].1, 0x42);
     }
@@ -160,24 +172,54 @@ mod tests {
         // phi(0) = (0, 0), phi(1) = (1, 0), phi(256) = (0, 1)
         // Lex order: (0,0) < (0,1) < (1,0) -- so phi(0) < phi(256) < phi(1)
         let _data: Vec<u8> = vec![10, 20, 30]; // indices 0, 1, 2 with N=2, B=256
-        // Add enough data to have interesting ordering: use index 256 which maps to (0,1)
+                                               // Add enough data to have interesting ordering: use index 256 which maps to (0,1)
         let mut big_data = vec![0u8; 257];
-        big_data[0] = 0xAA;    // phi(0) = (0, 0)
-        big_data[1] = 0xBB;    // phi(1) = (1, 0)
-        big_data[256] = 0xCC;  // phi(256) = (0, 1) -- should sort BEFORE phi(1) in lex
+        big_data[0] = 0xAA; // phi(0) = (0, 0)
+        big_data[1] = 0xBB; // phi(1) = (1, 0)
+        big_data[256] = 0xCC; // phi(256) = (0, 1) -- should sort BEFORE phi(1) in lex
 
         let cube = build_cube(&big_data);
         // Find entries for indices 0, 1, 256
-        let entry_0 = cube.populated.iter().find(|(c, _)| c == &vec![0, 0]).unwrap();
-        let entry_256 = cube.populated.iter().find(|(c, _)| c == &vec![0, 1]).unwrap();
-        let entry_1 = cube.populated.iter().find(|(c, _)| c == &vec![1, 0]).unwrap();
+        let entry_0 = cube
+            .populated
+            .iter()
+            .find(|(c, _)| c == &vec![0, 0])
+            .unwrap();
+        let entry_256 = cube
+            .populated
+            .iter()
+            .find(|(c, _)| c == &vec![0, 1])
+            .unwrap();
+        let entry_1 = cube
+            .populated
+            .iter()
+            .find(|(c, _)| c == &vec![1, 0])
+            .unwrap();
 
         // Lex order: (0,0) < (0,1) < (1,0)
-        let pos_0 = cube.populated.iter().position(|(c, _)| c == &entry_0.0).unwrap();
-        let pos_256 = cube.populated.iter().position(|(c, _)| c == &entry_256.0).unwrap();
-        let pos_1 = cube.populated.iter().position(|(c, _)| c == &entry_1.0).unwrap();
-        assert!(pos_0 < pos_256, "phi(0)=(0,0) must precede phi(256)=(0,1) in lex order");
-        assert!(pos_256 < pos_1, "phi(256)=(0,1) must precede phi(1)=(1,0) in lex order");
+        let pos_0 = cube
+            .populated
+            .iter()
+            .position(|(c, _)| c == &entry_0.0)
+            .unwrap();
+        let pos_256 = cube
+            .populated
+            .iter()
+            .position(|(c, _)| c == &entry_256.0)
+            .unwrap();
+        let pos_1 = cube
+            .populated
+            .iter()
+            .position(|(c, _)| c == &entry_1.0)
+            .unwrap();
+        assert!(
+            pos_0 < pos_256,
+            "phi(0)=(0,0) must precede phi(256)=(0,1) in lex order"
+        );
+        assert!(
+            pos_256 < pos_1,
+            "phi(256)=(0,1) must precede phi(1)=(1,0) in lex order"
+        );
     }
 
     #[test]
@@ -219,7 +261,11 @@ mod tests {
         }
         // Round-trip via rebuild_from_cube
         let recovered = rebuild_from_cube(&cube.populated, cube.l, cube.b);
-        assert_eq!(recovered, data.to_vec(), "non-minimal N=3 round-trip failed");
+        assert_eq!(
+            recovered,
+            data.to_vec(),
+            "non-minimal N=3 round-trip failed"
+        );
     }
 
     #[test]
@@ -231,7 +277,9 @@ mod tests {
         let cube_param = build_cube_with_params(&data, B_DEFAULT, n_min);
         let cube_default = build_cube(&data);
         assert_eq!(cube_param.n, cube_default.n);
-        assert_eq!(cube_param.populated, cube_default.populated,
-            "build_cube_with_params with min N must produce same result as build_cube");
+        assert_eq!(
+            cube_param.populated, cube_default.populated,
+            "build_cube_with_params with min N must produce same result as build_cube"
+        );
     }
 }

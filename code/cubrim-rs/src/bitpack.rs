@@ -221,7 +221,10 @@ mod tests {
     fn test_bitpack_empty() {
         let (v2c, inv) = build_value_dict(&[]);
         assert!(bitpack_encode(&[], &v2c, 1).is_empty());
-        assert_eq!(bitpack_decode(&[], 1, 0, &inv).unwrap(), Vec::<usize>::new());
+        assert_eq!(
+            bitpack_decode(&[], 1, 0, &inv).unwrap(),
+            Vec::<usize>::new()
+        );
     }
 
     #[test]
@@ -238,7 +241,11 @@ mod tests {
         let encoded = bitpack_encode(&values, &v2c, w);
         // 10 -> code 1 -> bit '1', 5 -> code 0 -> bit '0'
         // packed MSB-first: bits = 10, padded to byte: 1000_0000 = 0x80
-        assert_eq!(encoded, vec![0x80], "MSB-first layout mismatch: {encoded:?}");
+        assert_eq!(
+            encoded,
+            vec![0x80],
+            "MSB-first layout mismatch: {encoded:?}"
+        );
         let decoded = bitpack_decode(&encoded, w, values.len(), &inv).unwrap();
         assert_eq!(decoded, values);
     }
