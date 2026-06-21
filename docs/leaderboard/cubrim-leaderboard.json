@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "win_target": {
+    "gzip_aggregate": 0.159674,
+    "xz_aggregate": 0.162998,
+    "note": "Measured on the frozen 10-file corpus (117032 raw bytes). gzip -9: 18687 bytes. xz -9: 19076 bytes. Current Cubrim BWT: 35032 bytes (0.299337) at e476294. Target: beat gzip on aggregate."
+  },
+  "current_best": {
+    "scheme": "BwtEntropy",
+    "aggregate": 0.299337,
+    "code_sha": "e476294879f8bfc97b6e03958508c2649cff69e3",
+    "corpus_manifest_sha256": "8e6cf6a743d0ff58f7666484006392029cd04c0fb7f86ec99cdc0a66a186f2b3",
+    "run_log_ref": "CUBR-0028-bench",
+    "note": "Aggregate re-seeded to the full 10-file corpus (117032 raw bytes, 35032 BWT bytes, aggregate 0.299337) measured from binary at e476294 (src identical to 60ae94c). Historical 7-file aggregate was 0.504412 (51456 raw bytes, 7-file subset); the 3 large additional files — especially block_bound_runs (65536 bytes, BWT 9011 bytes, ratio 0.137) — pull the full-corpus aggregate down significantly. Gate-ratio and gate-competitive now read this baseline from the git object store (main branch) making it tamper-resistant.",
+    "per_file": [
+      {"file": "sparse_clustered", "size_bytes": 2048,  "t4_bytes": 502,   "bwt_bytes": 502,  "bytes": 502,  "delta": 0,    "mode": "cube"},
+      {"file": "dense",            "size_bytes": 4096,  "t4_bytes": 4109,  "bwt_bytes": 4109, "bytes": 4109, "delta": 0,    "mode": "raw"},
+      {"file": "text",             "size_bytes": 16384, "t4_bytes": 5705,  "bwt_bytes": 3583, "bytes": 3583, "delta": -2122,"mode": "cube"},
+      {"file": "log_like",         "size_bytes": 16384, "t4_bytes": 7318,  "bwt_bytes": 5178, "bytes": 5178, "delta": -2140,"mode": "cube"},
+      {"file": "binary_mixed",     "size_bytes": 8192,  "t4_bytes": 8205,  "bwt_bytes": 8205, "bytes": 8205, "delta": 0,    "mode": "raw"},
+      {"file": "random_high",      "size_bytes": 4096,  "t4_bytes": 4109,  "bwt_bytes": 4109, "bytes": 4109, "delta": 0,    "mode": "raw"},
+      {"file": "sparse_small",     "size_bytes": 256,   "t4_bytes": 269,   "bwt_bytes": 269,  "bytes": 269,  "delta": 0,    "mode": "raw"},
+      {"file": "both_sparse_16",   "size_bytes": 16,    "t4_bytes": 29,    "bwt_bytes": 29,   "bytes": 29,   "delta": 0,    "mode": "raw"},
+      {"file": "both_sparse_24",   "size_bytes": 24,    "t4_bytes": 37,    "bwt_bytes": 37,   "bytes": 37,   "delta": 0,    "mode": "raw"},
+      {"file": "block_bound_runs", "size_bytes": 65536, "t4_bytes": 9011,  "bwt_bytes": 9011, "bytes": 9011, "delta": 0,    "mode": "cube"}
+    ]
+  },
+  "runs": [
+    {
+      "run_id": "CUBR-0028-bench",
+      "date": "2026-06-18",
+      "candidate": "BwtEntropy",
+      "code_sha": "60ae94c802fa5bd36de067ee00e28ffbe2c301ec",
+      "corpus_manifest_sha256": "8e6cf6a743d0ff58f7666484006392029cd04c0fb7f86ec99cdc0a66a186f2b3",
+      "aggregate": 0.504412,
+      "vs_t4": -0.082828,
+      "vs_bwt": 0.0,
+      "vs_gzip": 0.344738,
+      "vs_xz": 0.341414,
+      "roundtrip_ok": true,
+      "verdict": "GO",
+      "merged": true,
+      "run_log_ref": "CUBR-0028-bench",
+      "per_file": [
+        {"file": "sparse_clustered", "size_bytes": 2048, "t4_bytes": 502,  "bwt_bytes": 502,  "bytes": 502,  "delta": 0,    "mode": "cube"},
+        {"file": "dense",            "size_bytes": 4096, "t4_bytes": 4109, "bwt_bytes": 4109, "bytes": 4109, "delta": 0,    "mode": "raw"},
+        {"file": "text",             "size_bytes": 16384,"t4_bytes": 5705, "bwt_bytes": 3583, "bytes": 3583, "delta": -2122,"mode": "cube"},
+        {"file": "log_like",         "size_bytes": 16384,"t4_bytes": 7318, "bwt_bytes": 5178, "bytes": 5178, "delta": -2140,"mode": "cube"},
+        {"file": "binary_mixed",     "size_bytes": 8192, "t4_bytes": 8205, "bwt_bytes": 8205, "bytes": 8205, "delta": 0,    "mode": "raw"},
+        {"file": "random_high",      "size_bytes": 4096, "t4_bytes": 4109, "bwt_bytes": 4109, "bytes": 4109, "delta": 0,    "mode": "raw"},
+        {"file": "sparse_small",     "size_bytes": 256,  "t4_bytes": 269,  "bwt_bytes": 269,  "bytes": 269,  "delta": 0,    "mode": "raw"}
+      ]
+    }
+  ]
+}

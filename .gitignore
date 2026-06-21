@@ -20,6 +20,16 @@ docs/ephemeral/research/corpus/
 *.bin
 *.cube
 
+# Cluster secrets (never commit)
+code/cluster/*.env
+code/cluster/.env*
+*.env
+.env*
+cluster.env
+
+# Consilium runtime drafts (gitignored — voice-bearing, not reviewed)
+datarim/pub-consilium/
+
 # OS / editor
 .DS_Store
 *.swp
