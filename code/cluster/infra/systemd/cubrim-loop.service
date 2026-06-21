@@ -1,0 +1,56 @@
+# cubrim-loop.service — Cubrim Autonomous Research Loop (one-shot per timer tick)
+#
+# Triggered by cubrim-loop.timer (default: every 60 minutes).
+# Runs one full iteration of the research loop via cubrim-loop.sh.
+# On completion the service exits; the timer fires the next iteration.
+#
+# Install:
+#   sudo cp cubrim-loop.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable cubrim-loop.timer  # enable the timer, not the service directly
+#
+# Kill switch (two commands — see docs/how-to/stop-the-cubrim-cluster.md):
+#   sudo systemctl stop cubrim-loop.timer cubrim-loop.service
+#   docker stop cubrim-orchestrator cubrim-worker-a cubrim-worker-b cubrim-worker-c
+
+[Unit]
+Description=Cubrim Autonomous Research Loop (one iteration)
+After=docker.service network-online.target
+Requires=docker.service
+# Prevent simultaneous runs if a previous iteration overruns the timer period
+# (oneshot + timer = safe by default; this adds an explicit guard)
+
+[Service]
+Type=oneshot
+User=root
+
+# ── PAX PATH lesson (BINDING) ─────────────────────────────────────────────────
+# systemd non-login PATH does NOT include ~/.local/bin where 'claude' is installed,
+# nor /usr/local/cargo/bin where 'cargo' lives.
+# This gap caused a PAX watchdog to be unable to respawn its brain.
+# Every PATH segment the cluster tools need MUST be explicit here.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin:/usr/local/cargo/bin
+
+# ── cluster environment ───────────────────────────────────────────────────────
+# The operator drops real values into /etc/cubrim/cluster.env before enabling.
+EnvironmentFile=/etc/cubrim/cluster.env
+
+# ── loop driver ───────────────────────────────────────────────────────────────
+# Runs cubrim-loop.sh from the repo working tree.
+# CUBRIM_REPO_ROOT is set in /etc/cubrim/cluster.env.
+ExecStart=/bin/bash -c 'exec "${CUBRIM_REPO_ROOT}/code/cluster/infra/cubrim-loop.sh"'
+
+# Allow up to 90 minutes per iteration (gate + cargo bench can take a while)
+TimeoutStartSec=5400
+
+# Do not restart automatically — the timer handles re-invocation.
+# A failed iteration is logged; the next timer tick will retry.
+Restart=no
+
+# Capture full output to the journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cubrim-loop
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,136 @@
+# docker-compose.yml — Cubrim Autonomous Research Cluster
+#
+# Four services: cubrim-orchestrator + cubrim-worker-{a,b,c}.
+# All use the same image (Dockerfile.cubrim-worker); role is set by env-file.
+#
+# Resource budget on an AX41 (6-core Intel, 64 GB):
+#   orchestrator : 1.0 CPU / 2 GB
+#   worker-a     : 1.5 CPU / 4 GB
+#   worker-b     : 1.5 CPU / 4 GB
+#   worker-c     : 1.5 CPU / 4 GB
+#   reserved free: ≥ 4 cores (ecosystem convention)
+#   total claimed : 5.5 / 14 GB  (fits on 6-core AX41, leaves headroom)
+#
+# Law 5 identity: every container carries cubrim-role + cubrim-host labels.
+# Kill switch: see docs/how-to/stop-the-cubrim-cluster.md
+#
+# Bring up:   docker compose up -d
+# Bring down: docker compose down
+
+services:
+
+  # ── Orchestrator ────────────────────────────────────────────────────────────
+  # Runs the loop driver (cubrim-loop.sh), gates, consilium judge,
+  # deterministic arbiter, and the AC-5 merge rail.
+  # Only the orchestrator mounts the git working tree and the pinned gate copy.
+  cubrim-orchestrator:
+    build:
+      context: ../..
+      dockerfile: code/cluster/infra/Dockerfile.cubrim-worker
+    image: cubrim-worker:latest
+    container_name: cubrim-orchestrator
+    labels:
+      cubrim-role: orchestrator
+      cubrim-host: "${CUBRIM_HOST_ID:-unknown}"
+    env_file:
+      - env/orchestrator.env
+    volumes:
+      # Git working tree (read-write — orchestrator merges branches)
+      - type: bind
+        source: "${CUBRIM_REPO_ROOT:-./../..}"
+        target: /workspace/repo
+      # Pinned gate copy (read-only — workers cannot modify gates)
+      - type: bind
+        source: "${CUBRIM_REPO_ROOT:-./../..}/code/cluster/gate"
+        target: /workspace/gate
+        read_only: true
+    working_dir: /workspace/repo
+    command: ["/bin/bash", "-c", "echo 'orchestrator ready — loop started by systemd'; sleep infinity"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "2g"
+        reservations:
+          cpus: "0.25"
+          memory: "512m"
+    restart: unless-stopped
+    network_mode: host
+
+  # ── Worker A: OpenRouter qwen/qwen3-coder:free ───────────────────────────
+  # Primary code-generation worker (1M context, strong code-gen).
+  cubrim-worker-a:
+    build:
+      context: ../..
+      dockerfile: code/cluster/infra/Dockerfile.cubrim-worker
+    image: cubrim-worker:latest
+    container_name: cubrim-worker-a
+    labels:
+      cubrim-role: worker-a
+      cubrim-host: "${CUBRIM_HOST_ID:-unknown}"
+    env_file:
+      - env/worker-a.env
+    # Workers do NOT mount the git tree or gate copy (cannot self-modify gates)
+    working_dir: /workspace
+    command: ["/bin/bash", "-c", "echo 'worker-a ready'; sleep infinity"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: "4g"
+        reservations:
+          cpus: "0.25"
+          memory: "512m"
+    restart: unless-stopped
+    network_mode: host
+
+  # ── Worker B: DeepSeek-free (bake-off winner / fallback) ─────────────────
+  # Independent code-gen voice (distinct weights from Worker A).
+  cubrim-worker-b:
+    build:
+      context: ../..
+      dockerfile: code/cluster/infra/Dockerfile.cubrim-worker
+    image: cubrim-worker:latest
+    container_name: cubrim-worker-b
+    labels:
+      cubrim-role: worker-b
+      cubrim-host: "${CUBRIM_HOST_ID:-unknown}"
+    env_file:
+      - env/worker-b.env
+    working_dir: /workspace
+    command: ["/bin/bash", "-c", "echo 'worker-b ready'; sleep infinity"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: "4g"
+        reservations:
+          cpus: "0.25"
+          memory: "512m"
+    restart: unless-stopped
+    network_mode: host
+
+  # ── Worker C: Groq llama (fast, high-TPM — summaries, probe scripts) ─────
+  cubrim-worker-c:
+    build:
+      context: ../..
+      dockerfile: code/cluster/infra/Dockerfile.cubrim-worker
+    image: cubrim-worker:latest
+    container_name: cubrim-worker-c
+    labels:
+      cubrim-role: worker-c
+      cubrim-host: "${CUBRIM_HOST_ID:-unknown}"
+    env_file:
+      - env/worker-c.env
+    working_dir: /workspace
+    command: ["/bin/bash", "-c", "echo 'worker-c ready'; sleep infinity"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: "4g"
+        reservations:
+          cpus: "0.25"
+          memory: "512m"
+    restart: unless-stopped
+    network_mode: host

@@ -1,0 +1,23 @@
+{
+  "comment": "claude-code-router config for Worker B (DeepSeek-free, distinct weights from A)",
+  "providers": [
+    {
+      "name": "deepseek-free",
+      "base_url": "${ANTHROPIC_BASE_URL}",
+      "auth_token": "${ANTHROPIC_AUTH_TOKEN}"
+    }
+  ],
+  "default_model": "${ANTHROPIC_MODEL}",
+  "routes": [
+    {
+      "pattern": ".*",
+      "provider": "deepseek-free",
+      "model": "${ANTHROPIC_MODEL}"
+    }
+  ],
+  "rate_limit": {
+    "requests_per_minute": 10,
+    "retry_on_429": true,
+    "backoff_seconds": 300
+  }
+}

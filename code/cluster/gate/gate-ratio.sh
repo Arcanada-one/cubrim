@@ -63,6 +63,31 @@ if [ "$BASELINE_AGG" = "null" ] || [ -z "$BASELINE_AGG" ]; then
     die "leaderboard missing current_best.aggregate"
 fi
 
+# ── corpus-version assertion (same-corpus comparison guard) ───────────────────
+# The baseline aggregate is only comparable to the candidate aggregate when both
+# are measured on the SAME frozen corpus. Assert the baseline's recorded
+# corpus_manifest_sha256 matches the frozen manifest this gate will benchmark
+# against (the hash gate-corpus-hash.sh anchors). A mismatch means the baseline
+# was measured on a different corpus — comparing the two would be apples-to-pears
+# and could falsely pass a candidate. Fail closed and self-document the cause.
+BASELINE_CORPUS_SHA="$(echo "$MAIN_LEADERBOARD_JSON" | jq -r '.current_best.corpus_manifest_sha256 // ""')"
+FROZEN_CORPUS_SHA="$(awk '{print $1}' "$GATE_DIR/corpus-baseline.sha256" 2>/dev/null || echo "")"
+
+if [ -z "$FROZEN_CORPUS_SHA" ]; then
+    die "frozen corpus manifest hash not found at $GATE_DIR/corpus-baseline.sha256"
+fi
+if [ -z "$BASELINE_CORPUS_SHA" ]; then
+    die "baseline is missing current_best.corpus_manifest_sha256 — cannot prove same-corpus comparison"
+fi
+if [ "$BASELINE_CORPUS_SHA" != "$FROZEN_CORPUS_SHA" ]; then
+    echo "gate-ratio: FAIL — baseline measured on a different corpus" >&2
+    echo "  baseline corpus_manifest_sha256: $BASELINE_CORPUS_SHA" >&2
+    echo "  frozen   corpus manifest sha256: $FROZEN_CORPUS_SHA" >&2
+    echo "  the baseline aggregate is not comparable to a candidate benched on the frozen corpus" >&2
+    exit 1
+fi
+echo "gate-ratio: corpus-version OK (baseline + candidate on the same frozen corpus $FROZEN_CORPUS_SHA)"
+
 echo "gate-ratio: baseline = $BASELINE_SCHEME @ $BASELINE_AGG"
 
 # ── run bench (or use pre-computed result) ────────────────────────────────────

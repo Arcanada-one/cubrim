@@ -1,0 +1,20 @@
+# cubrim-watchdog.timer — Fires cubrim-watchdog.service every 5 minutes.
+#
+# Fires more frequently than the loop timer so dead containers are
+# restarted well before the next iteration attempt.
+#
+# Install:
+#   sudo cp cubrim-watchdog.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cubrim-watchdog.timer
+
+[Unit]
+Description=Cubrim Cluster Container Watchdog Timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

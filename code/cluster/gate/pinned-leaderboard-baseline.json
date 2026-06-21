@@ -4,6 +4,7 @@
     "scheme": "BwtEntropy",
     "aggregate": 0.299337,
     "code_sha": "e476294879f8bfc97b6e03958508c2649cff69e3",
+    "corpus_manifest_sha256": "8e6cf6a743d0ff58f7666484006392029cd04c0fb7f86ec99cdc0a66a186f2b3",
     "per_file": [
       {"file": "sparse_clustered", "bytes": 502},
       {"file": "dense",            "bytes": 4109},

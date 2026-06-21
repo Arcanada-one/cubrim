@@ -1,0 +1,23 @@
+{
+  "comment": "claude-code-router config for Worker C (Groq llama, fast/high-TPM)",
+  "providers": [
+    {
+      "name": "groq-free",
+      "base_url": "${ANTHROPIC_BASE_URL}",
+      "auth_token": "${ANTHROPIC_AUTH_TOKEN}"
+    }
+  ],
+  "default_model": "${ANTHROPIC_MODEL}",
+  "routes": [
+    {
+      "pattern": ".*",
+      "provider": "groq-free",
+      "model": "${ANTHROPIC_MODEL}"
+    }
+  ],
+  "rate_limit": {
+    "requests_per_minute": 30,
+    "retry_on_429": true,
+    "backoff_seconds": 120
+  }
+}

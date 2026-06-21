@@ -577,3 +577,62 @@ print(f'10-file aggregate baseline OK: {baseline:.6f}')
 "
     [ "$?" -eq 0 ]
 }
+
+# ── CUBR-0034: corpus-version assertion in gate-ratio ────────────────────────
+@test "gate-ratio: FAIL when baseline corpus_manifest_sha256 mismatches the frozen corpus" {
+    # The baseline is only comparable to a candidate when both are on the same
+    # frozen corpus. Drive the gate down its pinned-bootstrap path with a pinned
+    # baseline whose corpus_manifest_sha256 is wrong; the gate must fail-closed.
+    # Copy the WORKING-TREE repo (not a git clone of HEAD) so the test exercises
+    # the current gate scripts, then point the clone's main away from the leaderboard.
+    SCRATCH="$TMPDIR_TEST/scratch"
+    mkdir -p "$SCRATCH/code/cluster/gate" "$SCRATCH/code/bench" "$SCRATCH/docs/ephemeral/research/corpus"
+    cp "$GATE_DIR"/*.sh "$GATE_DIR"/*.sha256 "$SCRATCH/code/cluster/gate/"
+    cp "$REPO_ROOT/code/bench/run_bench.py" "$SCRATCH/code/bench/" 2>/dev/null || true
+    cp "$MANIFEST" "$SCRATCH/docs/ephemeral/research/corpus/"
+    # Make it a git repo with NO leaderboard on main → gate falls back to pinned baseline
+    git -C "$SCRATCH" init -q
+    git -C "$SCRATCH" -c user.email=t@t -c user.name=t add -A
+    git -C "$SCRATCH" -c user.email=t@t -c user.name=t commit -q -m init
+    # Pinned baseline with a WRONG corpus sha
+    python3 -c "
+import json
+p = '$SCRATCH/code/cluster/gate/pinned-leaderboard-baseline.json'
+json.dump({'current_best': {'scheme':'BwtEntropy','aggregate':0.299337,
+          'corpus_manifest_sha256':'0000000000000000000000000000000000000000000000000000000000000000'}},
+          open(p,'w'), indent=2)
+"
+    python3 -c "import json; json.dump({'scheme':'X','bwt_aggregate':0.28,'aggregate':0.28}, open('$TMPDIR_TEST/c.json','w'))"
+    run bash "$SCRATCH/code/cluster/gate/gate-ratio.sh" --bench-json "$TMPDIR_TEST/c.json"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"different corpus"* ]] || [[ "$output" == *"corpus_manifest_sha256"* ]]
+}
+
+@test "gate-ratio: PASS corpus-version check when baseline corpus matches frozen corpus" {
+    python3 -c "import json; json.dump({'scheme':'X','bwt_aggregate':0.28,'aggregate':0.28}, open('$TMPDIR_TEST/c.json','w'))"
+    run bash "$GATE_DIR/gate-ratio.sh" --bench-json "$TMPDIR_TEST/c.json"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"corpus-version OK"* ]]
+}
+
+# ── CUBR-0035: arbiter numpy bootstrap-check ─────────────────────────────────
+@test "probe-entropy.sh: actionable error when numpy is not importable" {
+    # Simulate a host without numpy via a python3 stub that fails 'import numpy'
+    # but succeeds otherwise (so the command -v python3 check still passes).
+    STUB_BIN="$TMPDIR_TEST/bin"
+    mkdir -p "$STUB_BIN"
+    cat > "$STUB_BIN/python3" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    "import numpy") exit 1;;
+  esac
+done
+exit 0
+STUB
+    chmod +x "$STUB_BIN/python3"
+    run env PATH="$STUB_BIN:$PATH" bash "$REPO_ROOT/consilium/arbiter/probe-entropy.sh" --value-stream-bytes "$MANIFEST"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"numpy is required"* ]]
+    [[ "$output" == *"requirements.txt"* ]] || [[ "$output" == *"pip install"* ]]
+}

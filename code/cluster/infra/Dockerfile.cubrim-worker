@@ -1,0 +1,71 @@
+# Dockerfile.cubrim-worker — Single image for all Cubrim cluster roles.
+#
+# Bundles: Claude Code CLI, claude-code-router, Rust/cargo,
+#          python3 + numpy, jq, git.
+#
+# All four containers (orchestrator + workers a/b/c) use this same image.
+# The role is determined at runtime by the --env-file passed to docker compose,
+# which sets ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, and ANTHROPIC_MODEL
+# per slot — nothing in this image is role-specific.
+#
+# Base: ubuntu:24.04 (LTS, amd64)
+# Identity (Law 5): containers carry 'cubrim-role' label set in compose file.
+
+FROM ubuntu:24.04
+
+# Prevent interactive prompts during package install
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# ── system packages ──────────────────────────────────────────────────────────
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        git \
+        jq \
+        curl \
+        ca-certificates \
+        gnupg \
+        lsb-release \
+        build-essential \
+        python3 \
+        python3-pip \
+        python3-dev \
+        && \
+    rm -rf /var/lib/apt/lists/*
+
+# ── Node.js LTS (for Claude Code CLI) ───────────────────────────────────────
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# ── Python dependencies ──────────────────────────────────────────────────────
+RUN pip3 install --no-cache-dir numpy
+
+# ── Rust toolchain ───────────────────────────────────────────────────────────
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:${PATH}
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --no-modify-path --default-toolchain stable && \
+    rustup component add rustfmt clippy
+
+# ── Claude Code CLI ───────────────────────────────────────────────────────────
+RUN npm install -g @anthropic-ai/claude-code
+
+# ── claude-code-router ────────────────────────────────────────────────────────
+# Operator: verify the SHA-256 before building in production.
+# Version pin lives in bootstrap-host.sh CLAUDE_CODE_ROUTER_VERSION.
+ARG CLAUDE_CODE_ROUTER_VERSION=1.7.4
+RUN curl -fsSL -o /usr/local/bin/claude-code-router \
+        "https://github.com/musistudio/claude-code-router/releases/download/v${CLAUDE_CODE_ROUTER_VERSION}/claude-code-router-linux-amd64" && \
+    chmod +x /usr/local/bin/claude-code-router
+
+# ── PATH must include ~/.local/bin (PAX lesson — systemd non-login PATH gap) ─
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin:/usr/local/cargo/bin
+
+# ── workspace ────────────────────────────────────────────────────────────────
+WORKDIR /workspace
+
+# Default entry: bash (overridden by compose command per container role)
+CMD ["/bin/bash"]

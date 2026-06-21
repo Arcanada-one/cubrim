@@ -1,0 +1,23 @@
+{
+  "comment": "claude-code-router config for Worker A (OpenRouter qwen/qwen3-coder:free)",
+  "providers": [
+    {
+      "name": "openrouter-free",
+      "base_url": "${ANTHROPIC_BASE_URL}",
+      "auth_token": "${ANTHROPIC_AUTH_TOKEN}"
+    }
+  ],
+  "default_model": "${ANTHROPIC_MODEL}",
+  "routes": [
+    {
+      "pattern": ".*",
+      "provider": "openrouter-free",
+      "model": "${ANTHROPIC_MODEL}"
+    }
+  ],
+  "rate_limit": {
+    "requests_per_minute": 20,
+    "retry_on_429": true,
+    "backoff_seconds": 300
+  }
+}

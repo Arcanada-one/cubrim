@@ -23,6 +23,11 @@ docs/ephemeral/research/corpus/
 # Cluster secrets (never commit)
 code/cluster/*.env
 code/cluster/.env*
+code/cluster/infra/.env
+code/cluster/infra/env/orchestrator.env
+code/cluster/infra/env/worker-a.env
+code/cluster/infra/env/worker-b.env
+code/cluster/infra/env/worker-c.env
 *.env
 .env*
 cluster.env

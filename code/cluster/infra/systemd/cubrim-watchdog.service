@@ -1,0 +1,51 @@
+# cubrim-watchdog.service — Watchdog that restarts dead cluster containers.
+#
+# Fired by cubrim-watchdog.timer every 5 minutes.
+# Checks that each named container is running; if not, starts it.
+#
+# This is a lightweight health probe, not a replacement for Docker's own
+# restart:unless-stopped policy. It handles the case where a container
+# exits with status 0 (the restart policy may not re-trigger in some modes).
+#
+# Install alongside cubrim-loop.service:
+#   sudo cp cubrim-watchdog.service cubrim-watchdog.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cubrim-watchdog.timer
+#
+# Kill switch: systemctl stop cubrim-watchdog.timer stops the watchdog;
+# systemctl stop cubrim-loop.timer stops iterations.
+# See docs/how-to/stop-the-cubrim-cluster.md for the full two-command procedure.
+
+[Unit]
+Description=Cubrim Cluster Container Watchdog
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+
+# ── PAX PATH lesson (BINDING) ─────────────────────────────────────────────────
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin:/usr/local/cargo/bin
+
+EnvironmentFile=/etc/cubrim/cluster.env
+
+ExecStart=/bin/bash -c '\
+    CONTAINERS="cubrim-orchestrator cubrim-worker-a cubrim-worker-b cubrim-worker-c"; \
+    for C in $CONTAINERS; do \
+        if ! docker inspect --format "{{.State.Running}}" "$C" 2>/dev/null | grep -q "^true$"; then \
+            echo "cubrim-watchdog: $C not running — attempting start"; \
+            docker start "$C" 2>&1 || echo "cubrim-watchdog: WARNING: could not start $C"; \
+        else \
+            echo "cubrim-watchdog: $C OK"; \
+        fi; \
+    done'
+
+TimeoutStartSec=60
+Restart=no
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cubrim-watchdog
+
+[Install]
+WantedBy=multi-user.target

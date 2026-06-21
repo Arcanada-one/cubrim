@@ -47,6 +47,12 @@ die() { echo "probe-entropy: ERROR: $*" >&2; exit 2; }
 [ -f "$PROBE_PY" ] || die "probe script not found: $PROBE_PY"
 command -v python3 >/dev/null 2>&1 || die "python3 required"
 
+# Arbiter bootstrap-check: the probe imports numpy. Fail with an actionable
+# message instead of an opaque ModuleNotFoundError deep in the Python run.
+if ! python3 -c "import numpy" >/dev/null 2>&1; then
+    die "numpy is required for the arbiter probe but is not importable. Install it: 'pip install -r $SCRIPT_DIR/requirements.txt' (or 'pip install numpy')."
+fi
+
 if [ -n "$VALUE_STREAM_BYTES" ]; then
     # Direct mode: probe a pre-generated value stream
     [ -f "$VALUE_STREAM_BYTES" ] || die "value stream file not found: $VALUE_STREAM_BYTES"

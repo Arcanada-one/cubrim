@@ -1,0 +1,28 @@
+# cubrim-loop.timer — Fires cubrim-loop.service on a regular cadence.
+#
+# Default: every 60 minutes, randomised ±2 minutes to avoid thundering-herd
+# on shared provider rate limits if multiple clusters run simultaneously.
+#
+# Persistent=true: if the host was off at the scheduled time, the timer fires
+# immediately on next boot rather than waiting for the next period.
+#
+# Install:
+#   sudo cp cubrim-loop.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cubrim-loop.timer
+#
+# Stop the cluster:
+#   sudo systemctl stop cubrim-loop.timer cubrim-loop.service
+# (See docs/how-to/stop-the-cubrim-cluster.md for full kill-switch procedure)
+
+[Unit]
+Description=Cubrim Autonomous Research Loop Timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=60min
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target
