@@ -1,0 +1,111 @@
+{
+  "task": "CUBR-0032",
+  "probe": "content-derived-phi (OIVR steel-man)",
+  "go_threshold": 0.575495,
+  "t4_aggregate": 0.58724,
+  "t4_total_bytes": 30217,
+  "corpus_total": 51456,
+  "oivr_pure_aggregate": 1.981771,
+  "oivr_pure_total_bytes": 101974,
+  "competitive_aggregate": 0.58724,
+  "competitive_total_bytes": 30217,
+  "verdict": "NO-GO",
+  "gotcha_6_compliance": {
+    "decoder_branches": 4,
+    "cost_terms_charged": 4,
+    "assertion": "PASS"
+  },
+  "per_file": [
+    {
+      "name": "sparse_clustered",
+      "L": 2048,
+      "rho": 0.028915,
+      "n_cells": 1895,
+      "spill": 153,
+      "distmap_bytes": 272,
+      "phi_spill_bytes": 612,
+      "oivr_total": 1387,
+      "t4_bytes": 502,
+      "competitive": 502,
+      "pick": "T4"
+    },
+    {
+      "name": "dense",
+      "L": 4096,
+      "rho": 0.0625,
+      "n_cells": 4096,
+      "spill": 0,
+      "distmap_bytes": 292,
+      "phi_spill_bytes": 0,
+      "oivr_total": 4402,
+      "t4_bytes": 4109,
+      "competitive": 4109,
+      "pick": "T4"
+    },
+    {
+      "name": "text",
+      "L": 16384,
+      "rho": 0.105469,
+      "n_cells": 6912,
+      "spill": 9472,
+      "distmap_bytes": 287,
+      "phi_spill_bytes": 37888,
+      "oivr_total": 43881,
+      "t4_bytes": 5705,
+      "competitive": 5705,
+      "pick": "T4"
+    },
+    {
+      "name": "log_like",
+      "L": 16384,
+      "rho": 0.130783,
+      "n_cells": 8571,
+      "spill": 7813,
+      "distmap_bytes": 313,
+      "phi_spill_bytes": 31252,
+      "oivr_total": 38884,
+      "t4_bytes": 7318,
+      "competitive": 7318,
+      "pick": "T4"
+    },
+    {
+      "name": "binary_mixed",
+      "L": 8192,
+      "rho": 0.125,
+      "n_cells": 8192,
+      "spill": 0,
+      "distmap_bytes": 447,
+      "phi_spill_bytes": 0,
+      "oivr_total": 8653,
+      "t4_bytes": 8205,
+      "competitive": 8205,
+      "pick": "T4"
+    },
+    {
+      "name": "random_high",
+      "L": 4096,
+      "rho": 0.0625,
+      "n_cells": 4096,
+      "spill": 0,
+      "distmap_bytes": 288,
+      "phi_spill_bytes": 0,
+      "oivr_total": 4398,
+      "t4_bytes": 4109,
+      "competitive": 4109,
+      "pick": "T4"
+    },
+    {
+      "name": "sparse_small",
+      "L": 256,
+      "rho": 0.003906,
+      "n_cells": 256,
+      "spill": 0,
+      "distmap_bytes": 99,
+      "phi_spill_bytes": 0,
+      "oivr_total": 369,
+      "t4_bytes": 269,
+      "competitive": 269,
+      "pick": "T4"
+    }
+  ]
+}
