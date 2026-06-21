@@ -1,0 +1,247 @@
+{
+  "task": "CUBR-0025",
+  "hypothesis": "R5_prime_grouped_context",
+  "verdict": "NO-GO",
+  "best_scheme": "G1_ascii5",
+  "best_aggregate_ratio": 0.650264,
+  "t4_baseline_aggregate": 0.58724,
+  "schemes": [
+    {
+      "scheme": "G1_ascii5",
+      "description": "ASCII semantic classes {lower,upper,digit,space,other}",
+      "n_groups": 5,
+      "aggregate_ratio": 0.650264,
+      "delta_vs_t4_pct": 10.7324,
+      "per_file": [
+        {
+          "name": "sparse_clustered",
+          "size": 2048,
+          "mode": "cube",
+          "n_distinct": 12,
+          "actual_t4_bytes": 502,
+          "grouped_clamped_bytes": 748,
+          "delta_pct": 49.004
+        },
+        {
+          "name": "dense",
+          "size": 4096,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 4109,
+          "grouped_clamped_bytes": 4109,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "text",
+          "size": 16384,
+          "mode": "cube",
+          "n_distinct": 27,
+          "actual_t4_bytes": 5705,
+          "grouped_clamped_bytes": 8126,
+          "delta_pct": 42.4365
+        },
+        {
+          "name": "log_like",
+          "size": 16384,
+          "mode": "cube",
+          "n_distinct": 53,
+          "actual_t4_bytes": 7318,
+          "grouped_clamped_bytes": 7894,
+          "delta_pct": 7.871
+        },
+        {
+          "name": "binary_mixed",
+          "size": 8192,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 8205,
+          "grouped_clamped_bytes": 8205,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "random_high",
+          "size": 4096,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 4109,
+          "grouped_clamped_bytes": 4109,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "sparse_small",
+          "size": 256,
+          "mode": "raw",
+          "n_distinct": 4,
+          "actual_t4_bytes": 269,
+          "grouped_clamped_bytes": 269,
+          "delta_pct": 0.0
+        }
+      ],
+      "environment": {
+        "code_sha": "94fd12a46ac7ec77c49945406b886ddacf4b0d64",
+        "manifest_sha": "cdd613090c7a8b908a6850902554e06d23b8578c7b136bb24ff7fb9fb8fcea94",
+        "t4_baseline_aggregate": 0.58724,
+        "corpus_total_bytes": 51456,
+        "t4_total_bytes": 30217
+      }
+    },
+    {
+      "scheme": "G2_top3bits",
+      "description": "Top-3 bits of raw byte (byte>>5) \u2192 8 groups",
+      "n_groups": 8,
+      "aggregate_ratio": 0.657455,
+      "delta_vs_t4_pct": 11.9568,
+      "per_file": [
+        {
+          "name": "sparse_clustered",
+          "size": 2048,
+          "mode": "cube",
+          "n_distinct": 12,
+          "actual_t4_bytes": 502,
+          "grouped_clamped_bytes": 502,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "dense",
+          "size": 4096,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 4109,
+          "grouped_clamped_bytes": 4109,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "text",
+          "size": 16384,
+          "mode": "cube",
+          "n_distinct": 27,
+          "actual_t4_bytes": 5705,
+          "grouped_clamped_bytes": 8126,
+          "delta_pct": 42.4365
+        },
+        {
+          "name": "log_like",
+          "size": 16384,
+          "mode": "cube",
+          "n_distinct": 53,
+          "actual_t4_bytes": 7318,
+          "grouped_clamped_bytes": 8510,
+          "delta_pct": 16.2886
+        },
+        {
+          "name": "binary_mixed",
+          "size": 8192,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 8205,
+          "grouped_clamped_bytes": 8205,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "random_high",
+          "size": 4096,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 4109,
+          "grouped_clamped_bytes": 4109,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "sparse_small",
+          "size": 256,
+          "mode": "raw",
+          "n_distinct": 4,
+          "actual_t4_bytes": 269,
+          "grouped_clamped_bytes": 269,
+          "delta_pct": 0.0
+        }
+      ],
+      "environment": {
+        "code_sha": "94fd12a46ac7ec77c49945406b886ddacf4b0d64",
+        "manifest_sha": "cdd613090c7a8b908a6850902554e06d23b8578c7b136bb24ff7fb9fb8fcea94",
+        "t4_baseline_aggregate": 0.58724,
+        "corpus_total_bytes": 51456,
+        "t4_total_bytes": 30217
+      }
+    },
+    {
+      "scheme": "G3_top2bits",
+      "description": "Top-2 bits of raw byte (byte>>6) \u2192 4 groups",
+      "n_groups": 4,
+      "aggregate_ratio": 0.668396,
+      "delta_vs_t4_pct": 13.82,
+      "per_file": [
+        {
+          "name": "sparse_clustered",
+          "size": 2048,
+          "mode": "cube",
+          "n_distinct": 12,
+          "actual_t4_bytes": 502,
+          "grouped_clamped_bytes": 552,
+          "delta_pct": 9.9602
+        },
+        {
+          "name": "dense",
+          "size": 4096,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 4109,
+          "grouped_clamped_bytes": 4109,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "text",
+          "size": 16384,
+          "mode": "cube",
+          "n_distinct": 27,
+          "actual_t4_bytes": 5705,
+          "grouped_clamped_bytes": 8126,
+          "delta_pct": 42.4365
+        },
+        {
+          "name": "log_like",
+          "size": 16384,
+          "mode": "cube",
+          "n_distinct": 53,
+          "actual_t4_bytes": 7318,
+          "grouped_clamped_bytes": 9023,
+          "delta_pct": 23.2987
+        },
+        {
+          "name": "binary_mixed",
+          "size": 8192,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 8205,
+          "grouped_clamped_bytes": 8205,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "random_high",
+          "size": 4096,
+          "mode": "raw",
+          "n_distinct": 256,
+          "actual_t4_bytes": 4109,
+          "grouped_clamped_bytes": 4109,
+          "delta_pct": 0.0
+        },
+        {
+          "name": "sparse_small",
+          "size": 256,
+          "mode": "raw",
+          "n_distinct": 4,
+          "actual_t4_bytes": 269,
+          "grouped_clamped_bytes": 269,
+          "delta_pct": 0.0
+        }
+      ],
+      "environment": {
+        "code_sha": "94fd12a46ac7ec77c49945406b886ddacf4b0d64",
+        "manifest_sha": "cdd613090c7a8b908a6850902554e06d23b8578c7b136bb24ff7fb9fb8fcea94",
+        "t4_baseline_aggregate": 0.58724,
+        "corpus_total_bytes": 51456,
+        "t4_total_bytes": 30217
+      }
+    }
+  ]
+}
