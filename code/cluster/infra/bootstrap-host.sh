@@ -20,10 +20,6 @@
 set -euo pipefail
 
 # ── constants ────────────────────────────────────────────────────────────────
-CLAUDE_CODE_ROUTER_VERSION="1.7.4"
-CLAUDE_CODE_ROUTER_URL="https://github.com/musistudio/claude-code-router/releases/download/v${CLAUDE_CODE_ROUTER_VERSION}/claude-code-router-linux-amd64"
-CLAUDE_CODE_ROUTER_SHA256="PLACEHOLDER_SHA256_OPERATOR_MUST_VERIFY"
-
 REQUIRED_CORES=4  # reserve this many cores free (ecosystem convention)
 
 # ── argument parsing ─────────────────────────────────────────────────────────
@@ -159,19 +155,13 @@ main() {
         fi
     fi
 
-    # ── 7. claude-code-router ────────────────────────────────────────────────
-    if command -v claude-code-router >/dev/null 2>&1 \
-       || [ -x /usr/local/bin/claude-code-router ]; then
+    # ── 7. claude-code-router (npm — the canonical distribution; provides `ccr`) ─
+    if command -v ccr >/dev/null 2>&1 \
+       || command -v claude-code-router >/dev/null 2>&1; then
         skip "claude-code-router"
     else
-        run_or_plan "install claude-code-router v${CLAUDE_CODE_ROUTER_VERSION}" \
-            bash -c "
-                curl -fsSL -o /tmp/claude-code-router '${CLAUDE_CODE_ROUTER_URL}'
-                # OPERATOR: verify SHA-256 before enabling in production:
-                # echo '${CLAUDE_CODE_ROUTER_SHA256}  /tmp/claude-code-router' | sha256sum -c
-                chmod +x /tmp/claude-code-router
-                mv /tmp/claude-code-router /usr/local/bin/claude-code-router
-            "
+        run_or_plan "install claude-code-router (npm: @musistudio/claude-code-router)" \
+            npm install -g @musistudio/claude-code-router
     fi
 
     # ── 8. systemd environment file for PATH ─────────────────────────────────

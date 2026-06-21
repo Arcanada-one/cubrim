@@ -25,7 +25,7 @@ services:
   # Only the orchestrator mounts the git working tree and the pinned gate copy.
   cubrim-orchestrator:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: code/cluster/infra/Dockerfile.cubrim-worker
     image: cubrim-worker:latest
     container_name: cubrim-orchestrator
@@ -37,11 +37,11 @@ services:
     volumes:
       # Git working tree (read-write — orchestrator merges branches)
       - type: bind
-        source: "${CUBRIM_REPO_ROOT:-./../..}"
+        source: "${CUBRIM_REPO_ROOT:-./../../..}"
         target: /workspace/repo
       # Pinned gate copy (read-only — workers cannot modify gates)
       - type: bind
-        source: "${CUBRIM_REPO_ROOT:-./../..}/code/cluster/gate"
+        source: "${CUBRIM_REPO_ROOT:-./../../..}/code/cluster/gate"
         target: /workspace/gate
         read_only: true
     working_dir: /workspace/repo
@@ -61,7 +61,7 @@ services:
   # Primary code-generation worker (1M context, strong code-gen).
   cubrim-worker-a:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: code/cluster/infra/Dockerfile.cubrim-worker
     image: cubrim-worker:latest
     container_name: cubrim-worker-a
@@ -88,7 +88,7 @@ services:
   # Independent code-gen voice (distinct weights from Worker A).
   cubrim-worker-b:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: code/cluster/infra/Dockerfile.cubrim-worker
     image: cubrim-worker:latest
     container_name: cubrim-worker-b
@@ -113,7 +113,7 @@ services:
   # ── Worker C: Groq llama (fast, high-TPM — summaries, probe scripts) ─────
   cubrim-worker-c:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: code/cluster/infra/Dockerfile.cubrim-worker
     image: cubrim-worker:latest
     container_name: cubrim-worker-c

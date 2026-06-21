@@ -39,7 +39,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     rm -rf /var/lib/apt/lists/*
 
 # ── Python dependencies ──────────────────────────────────────────────────────
-RUN pip3 install --no-cache-dir numpy
+# ubuntu:24.04 ships an externally-managed Python (PEP 668); inside this
+# dedicated image a global install is safe, so allow it explicitly.
+RUN pip3 install --no-cache-dir --break-system-packages numpy
 
 # ── Rust toolchain ───────────────────────────────────────────────────────────
 ENV RUSTUP_HOME=/usr/local/rustup
@@ -54,12 +56,9 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
 RUN npm install -g @anthropic-ai/claude-code
 
 # ── claude-code-router ────────────────────────────────────────────────────────
-# Operator: verify the SHA-256 before building in production.
-# Version pin lives in bootstrap-host.sh CLAUDE_CODE_ROUTER_VERSION.
-ARG CLAUDE_CODE_ROUTER_VERSION=1.7.4
-RUN curl -fsSL -o /usr/local/bin/claude-code-router \
-        "https://github.com/musistudio/claude-code-router/releases/download/v${CLAUDE_CODE_ROUTER_VERSION}/claude-code-router-linux-amd64" && \
-    chmod +x /usr/local/bin/claude-code-router
+# Installed from npm (the canonical distribution — there is no GitHub release
+# binary). Provides the `ccr` command used for per-worker model routing.
+RUN npm install -g @musistudio/claude-code-router
 
 # ── PATH must include ~/.local/bin (PAX lesson — systemd non-login PATH gap) ─
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin:/usr/local/cargo/bin
