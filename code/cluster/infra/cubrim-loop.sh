@@ -1,34 +1,41 @@
 #!/usr/bin/env bash
-# cubrim-loop.sh — Autonomous research loop driver.
+# cubrim-loop.sh — Autonomous research loop driver (docker-native consilium).
 #
 # Runs one full iteration of the Cubrim compression-research cycle:
 #
 #   Phase 1  read STATE doc → determine resume point
-#   Phase 2  consilium fanout  (reuses dr-orchestrate content_consilium_fanout.sh)
-#   Phase 3  consilium judge   (reuses dr-orchestrate content_consilium_judge.sh)
-#   Phase 4  deterministic arbiter gate (consilium/arbiter/)
-#   Phase 5  implementation by workers (stub: signal workers via shared file)
-#   Phase 6  AC-5 merge rail  (runs EXISTING code/cluster/gate/run-merge-rail.sh)
+#   Phase 2  consilium fanout  — brief every live docker worker via its
+#            OpenAI-compatible free-model API; collect structured proposals
+#   Phase 3  consilium judge   — deterministic scoring + closed-branch reject;
+#            select one proposal
+#   Phase 4  deterministic arbiter gate (consilium/arbiter/) — best-effort
+#   Phase 5  implementation     — a capable worker emits a concrete edit for
+#            the selected candidate; the orchestrator applies it on a feature
+#            branch and builds it (cargo build --release, one repair round)
+#   Phase 6  AC-5 merge rail    — EXISTING code/cluster/gate/run-merge-rail.sh
 #   Phase 7  write updated STATE doc
 #
+# Topology:
+#   The driver runs on the HOST (arcana-db) as root. The research workers run
+#   in docker containers labelled `cubrim-role` and are reached via `docker exec`.
+#   Each worker container carries ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN /
+#   ANTHROPIC_MODEL pointing at a free OpenAI-compatible model. The workers do
+#   NOT have repo write access — the orchestrator (this script) is the only
+#   process that writes branches and commits. Workers only emit text (proposals
+#   and edits) over their model API.
+#
 # Reuse map:
-#   Loop skeleton   — mirrors dr-fleet-evolution/evolution-loop.sh phases 1-4
-#                     (vendored pattern; does NOT call evolution-loop.sh directly
-#                     because fleet-evolution never auto-merges — the merge step
-#                     in Phase 6 is new, conservative, behind the AC-5 rail)
-#   Consilium       — /Users/ug/arcanada/Projects/Datarim/code/datarim/plugins/
-#                     dr-orchestrate/scripts/content_consilium_{fanout,judge}.sh
-#                     (called by absolute path; these are not installed as commands)
-#   Arbiter         — consilium/arbiter/probe-entropy.sh + size-model.sh (local)
-#   Merge rail      — code/cluster/gate/run-merge-rail.sh (EXISTING, pinned, DO NOT duplicate)
-#   JSONL writer    — code/cluster/vendor/jsonl-write.sh (local vendor copy)
+#   Loop skeleton  — mirrors dr-fleet-evolution/evolution-loop.sh phases 1-4;
+#                    the auto-merge step (Phase 6) is new, behind the AC-5 rail.
+#   Merge rail     — code/cluster/gate/run-merge-rail.sh (EXISTING, pinned).
+#   Arbiter        — consilium/arbiter/probe-entropy.sh + size-model.sh (local).
 #
 # STATE doc: CUBR-AUTONOMOUS-STATE.md at repo root (git-tracked, not under datarim/).
 # Run log:   datarim/cubrim-run-log.jsonl (append-only, Law 5 audit trail).
 #
 # Usage:
 #   cubrim-loop.sh                  # one full iteration
-#   cubrim-loop.sh --dry-run        # trace phases without side-effects
+#   cubrim-loop.sh --dry-run        # trace phases without side-effects / model calls
 #   CUBRIM_LOOP_DRYRUN=1 cubrim-loop.sh
 
 set -euo pipefail
@@ -41,20 +48,28 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 STATE_DOC="$REPO_ROOT/CUBR-AUTONOMOUS-STATE.md"
 RUNLOG="$REPO_ROOT/datarim/cubrim-run-log.jsonl"
 GATE_SCRIPT="$REPO_ROOT/code/cluster/gate/run-merge-rail.sh"
-JSONL_WRITER="$REPO_ROOT/code/cluster/vendor/jsonl-write.sh"
 
-# Datarim framework paths (absolute — not installed as commands)
-DATARIM_SCRIPTS="/Users/ug/arcanada/Projects/Datarim/code/datarim/plugins/dr-orchestrate/scripts"
-FANOUT_SCRIPT="$DATARIM_SCRIPTS/content_consilium_fanout.sh"
-JUDGE_SCRIPT="$DATARIM_SCRIPTS/content_consilium_judge.sh"
-
-# Arbiter (local)
+# Arbiter (local). The order-1 entropy probe needs a candidate Python script,
+# which free-model text proposals do not supply, so Phase 4 uses the size-model
+# (Gotcha #6/#7) as the cheap pre-filter; the merge rail is the absolute gate.
 ARBITER_DIR="$REPO_ROOT/consilium/arbiter"
-ENTROPY_PROBE="$ARBITER_DIR/probe-entropy.sh"
 SIZE_MODEL="$ARBITER_DIR/size-model.sh"
 
 ITER_BRIEF_TEMPLATE="$REPO_ROOT/consilium/iteration-brief.template.md"
 LEADERBOARD="$REPO_ROOT/docs/leaderboard/cubrim-leaderboard.json"
+CLOSED_LEDGER="$REPO_ROOT/consilium/closed-branches.md"
+DEFAULT_TARGET_FILE="code/cubrim-rs/src/codec.rs"
+
+# Docker worker discovery + model-call tuning.
+WORKER_LABEL="${CUBRIM_WORKER_LABEL:-cubrim-role}"
+WORKER_MIN="${CUBRIM_WORKER_MIN:-2}"          # consilium minimum responders
+CALL_TIMEOUT="${CUBRIM_CALL_TIMEOUT:-120}"    # per model-call wall-clock seconds
+MAX_REPAIR_ROUNDS="${CUBRIM_MAX_REPAIR_ROUNDS:-1}"
+
+# Cargo lives under /root/.cargo/bin on the host; the EnvironmentFile already
+# adds it to PATH, but make the loop robust when invoked directly.
+case ":$PATH:" in *":/root/.cargo/bin:"*) ;; *) PATH="$PATH:/root/.cargo/bin" ;; esac
+export PATH
 
 # ── argument parsing ─────────────────────────────────────────────────────────
 DRY_RUN="${CUBRIM_LOOP_DRYRUN:-0}"
@@ -70,8 +85,7 @@ done
 log()  { echo "[cubrim-loop] $(date -u '+%H:%M:%SZ') $*"; }
 die()  { echo "[cubrim-loop] ERROR: $*" >&2; exit 1; }
 
-# Emit a structured run-log entry via the vendored JSONL writer.
-# Usage: emit_event <event> [<key=value>...]
+# Emit a structured run-log entry. Usage: emit_event <event> [<key=value>...]
 emit_event() {
     local event="$1"; shift
     local run_id="${RUN_ID:-unknown}"
@@ -96,8 +110,7 @@ emit_event() {
     fi
 }
 
-# Read a field from the STATE doc YAML frontmatter.
-# Usage: state_get <field>
+# Read a field from the STATE doc YAML frontmatter. Usage: state_get <field>
 state_get() {
     local field="$1"
     grep "^${field}:" "$STATE_DOC" 2>/dev/null \
@@ -106,13 +119,10 @@ state_get() {
         | tr -d '"'
 }
 
-# Write a single field in the STATE doc YAML frontmatter.
-# Uses sed in-place; creates STATE_DOC if absent.
-# Usage: state_set <field> <value>
+# Write a single field in the STATE doc YAML frontmatter. Usage: state_set <field> <value>
 state_set() {
     local field="$1" value="$2"
     if grep -q "^${field}:" "$STATE_DOC" 2>/dev/null; then
-        # shellcheck disable=SC2016  # literal $ in sed replacement is intentional
         sed -i.bak "s|^${field}:.*|${field}: \"${value}\"|" "$STATE_DOC"
         rm -f "${STATE_DOC}.bak"
     else
@@ -120,26 +130,7 @@ state_set() {
     fi
 }
 
-# Check leaderboard for defend-mode trigger.
-# Returns 0 (defend) or 1 (attack).
-is_defend_mode() {
-    if [ ! -f "$LEADERBOARD" ] || ! command -v python3 >/dev/null 2>&1; then
-        return 1  # no leaderboard = attack mode
-    fi
-    python3 - <<'PYEOF'
-import json, sys
-try:
-    lb = json.load(open("$LEADERBOARD"))
-    best = lb.get("current_best", {}).get("aggregate", 1.0)
-    target = lb.get("win_target", {}).get("gzip_aggregate", 0.159674)
-    sys.exit(0 if best <= target else 1)
-except Exception:
-    sys.exit(1)
-PYEOF
-}
-
-# Replace the leaderboard literal path in the python here-doc.
-# (The here-doc above uses $LEADERBOARD in the outer shell scope.)
+# Check leaderboard for defend-mode trigger. Returns 0 (defend) or 1 (attack).
 is_defend_mode() {
     if [ ! -f "$LEADERBOARD" ] || ! command -v python3 >/dev/null 2>&1; then
         return 1
@@ -153,6 +144,131 @@ try:
     sys.exit(0 if best <= target else 1)
 except Exception:
     sys.exit(1)
+PYEOF
+}
+
+# ── docker-native consilium primitives ───────────────────────────────────────
+
+# Discover UP worker container names (one per line).
+discover_workers() {
+    docker ps --filter "label=$WORKER_LABEL" --format '{{.Names}}' 2>/dev/null \
+        | grep -v -- '-orchestrator$' || true
+}
+
+# Read a single env var from inside a worker container. NEVER logged for tokens.
+worker_env() {
+    local container="$1" var="$2"
+    docker exec "$container" printenv "$var" 2>/dev/null || true
+}
+
+# Call a worker's OpenAI-compatible chat/completions endpoint.
+# Args: <container> <system_prompt_file> <user_prompt_file> <out_file> [max_tokens]
+# Returns 0 + writes the model's text content to <out_file> on success.
+# Returns 1 on transport / rate-limit (429) / parse failure (caller skips worker).
+# The auth token is read into a var and passed via docker exec env — never via
+# the host process table and never echoed (no `set -x` in this function).
+worker_chat() {
+    local container="$1" sys_file="$2" usr_file="$3" out_file="$4"
+    local max_tokens="${5:-2048}"
+    local base model token
+    base="$(worker_env "$container" ANTHROPIC_BASE_URL)"
+    model="$(worker_env "$container" ANTHROPIC_MODEL)"
+    token="$(worker_env "$container" ANTHROPIC_AUTH_TOKEN)"
+    if [ -z "$base" ] || [ -z "$model" ] || [ -z "$token" ]; then
+        log "  [$container] missing API env (base/model/token) — skipping"
+        return 1
+    fi
+
+    # Build the request body on the host with jq (safe JSON escaping), then
+    # stream it into the container's curl over stdin so the token and payload
+    # never appear in the host or container process table.
+    local req_file resp_file http_code
+    req_file="$(mktemp)"; resp_file="$(mktemp)"
+    jq -n \
+        --arg model "$model" \
+        --argjson maxtok "$max_tokens" \
+        --rawfile sys "$sys_file" \
+        --rawfile usr "$usr_file" \
+        '{model:$model, max_tokens:$maxtok, temperature:0.4,
+          messages:[{role:"system",content:$sys},{role:"user",content:$usr}]}' \
+        > "$req_file"
+
+    # `--data-binary @-` reads the body from stdin; token is exported into the
+    # container env via `sh -c` reading $TOKEN (passed with `-e`), so it is not
+    # an argv element. http code is captured separately from the body.
+    set +e
+    http_code="$(
+        docker exec -i -e "CB_TOKEN=$token" "$container" sh -c \
+            "curl -s -o /tmp/cb_resp.json -w '%{http_code}' --max-time $CALL_TIMEOUT \
+                 -X POST '$base/chat/completions' \
+                 -H \"Authorization: Bearer \$CB_TOKEN\" \
+                 -H 'Content-Type: application/json' \
+                 --data-binary @-" < "$req_file"
+    )"
+    local rc=$?
+    set -e
+
+    if [ "$rc" -ne 0 ]; then
+        log "  [$container] curl transport error (rc=$rc) — skipping"
+        rm -f "$req_file" "$resp_file"
+        return 1
+    fi
+    if [ "$http_code" = "429" ]; then
+        log "  [$container] HTTP 429 rate-limited — backing off, skipping this round"
+        rm -f "$req_file" "$resp_file"
+        return 1
+    fi
+    if [ "$http_code" != "200" ]; then
+        log "  [$container] HTTP $http_code (non-200) — skipping"
+        rm -f "$req_file" "$resp_file"
+        return 1
+    fi
+
+    docker exec "$container" cat /tmp/cb_resp.json > "$resp_file" 2>/dev/null || true
+    local content
+    content="$(jq -r '.choices[0].message.content // empty' "$resp_file" 2>/dev/null || true)"
+    rm -f "$req_file" "$resp_file"
+    if [ -z "$content" ]; then
+        log "  [$container] empty / unparseable model response — skipping"
+        return 1
+    fi
+    printf '%s' "$content" > "$out_file"
+    return 0
+}
+
+# Extract the first JSON object found in arbitrary model text (handles fenced
+# ```json blocks and prose-wrapped objects). Writes JSON to stdout, exits 1 if none.
+extract_json() {
+    local in_file="$1"
+    python3 - "$in_file" <<'PYEOF'
+import sys, json, re
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+# 1. fenced ```json ... ``` block
+m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+candidates = []
+if m:
+    candidates.append(m.group(1))
+# 2. greedy brace scan: every balanced {...} region
+depth = 0; start = None
+for i, ch in enumerate(text):
+    if ch == '{':
+        if depth == 0:
+            start = i
+        depth += 1
+    elif ch == '}':
+        if depth > 0:
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidates.append(text[start:i+1])
+for c in candidates:
+    try:
+        obj = json.loads(c)
+        if isinstance(obj, dict):
+            print(json.dumps(obj))
+            sys.exit(0)
+    except Exception:
+        continue
+sys.exit(1)
 PYEOF
 }
 
@@ -172,7 +288,6 @@ main() {
     log "RUN_ID=$RUN_ID  prev_iter=$PREV_ITER  loop_phase=${LOOP_PHASE:-idle}  baseline=${MAIN_BASELINE:-unknown}"
     emit_event "iteration_start" "iteration=$ITER_NUM" "resumed_from=${LOOP_PHASE:-idle}"
 
-    # Update STATE: mark as running
     if [ "$DRY_RUN" -eq 0 ]; then
         state_set "iteration" "$ITER_NUM"
         state_set "loop_phase" "consilium"
@@ -183,7 +298,6 @@ main() {
     if is_defend_mode; then
         log "DEFEND MODE: current_best.aggregate <= win_target — running validation only"
         emit_event "defend_mode_active" "iteration=$ITER_NUM"
-        # In defend mode: run gates only on main, do not generate new candidates
         if [ "$DRY_RUN" -eq 0 ]; then
             "$GATE_SCRIPT" --branch main --run-id "${RUN_ID}-defend" --dry-run || true
             state_set "loop_phase" "sleeping"
@@ -192,159 +306,459 @@ main() {
         return 0
     fi
 
-    # ── Phase 2: consilium fanout ────────────────────────────────────────────
-    log "Phase 2: consilium fanout (briefs workers)"
-
     WORK_DIR="$(mktemp -d)"
     trap 'rm -rf "$WORK_DIR"' EXIT
 
+    # Build the iteration brief from template (best-effort substitution).
     ITER_BRIEF="$WORK_DIR/iter-brief.md"
-
-    # Build the iteration brief from template (substitute current baseline)
+    CODE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+    CLOSED_SUMMARY="$(grep -A0 '^### ' "$CLOSED_LEDGER" 2>/dev/null | sed 's/^### /- CLOSED: /' || true)"
     if [ -f "$ITER_BRIEF_TEMPLATE" ]; then
-        sed "s/__BASELINE__/${MAIN_BASELINE:-unknown}/g;s/__ITER__/${ITER_NUM}/g" \
-            "$ITER_BRIEF_TEMPLATE" > "$ITER_BRIEF"
+        python3 - "$ITER_BRIEF_TEMPLATE" "$ITER_BRIEF" \
+            "$ITER_NUM" "$(date -u '+%Y-%m-%d')" "${MAIN_BASELINE:-unknown}" \
+            "$CODE_SHA" "$CLOSED_SUMMARY" <<'PYEOF'
+import sys
+tmpl, out, iter_num, date, baseline, code_sha, closed = sys.argv[1:8]
+t = open(tmpl, encoding="utf-8").read()
+repl = {
+    "{{ITERATION_ID}}": f"iter-{int(iter_num):04d}",
+    "{{DATE}}": date,
+    "{{VENDOR_SLOT}}": "your assigned vendor slot",
+    "{{CURRENT_SCHEME}}": "BwtEntropy",
+    "{{CURRENT_AGGREGATE}}": "0.299337 (full 10-file corpus)",
+    "{{DELTA_VS_T4}}": "-14.1% rel on the 7-file subset",
+    "{{VS_GZIP}}": "behind gzip (target: beat it)",
+    "{{VS_XZ}}": "behind xz",
+    "{{WIN_TARGET_GZIP}}": "0.159674",
+    "{{CODE_SHA}}": code_sha,
+    "{{CORPUS_MANIFEST_SHA256}}": "8e6cf6a743d0ff58f7666484006392029cd04c0fb7f86ec99cdc0a66a186f2b3",
+    "{{CLOSED_BRANCHES_SUMMARY}}": closed or "(see consilium/closed-branches.md)",
+}
+for k, v in repl.items():
+    t = t.replace(k, v)
+open(out, "w", encoding="utf-8").write(t)
+PYEOF
     else
-        # Minimal fallback brief
         cat > "$ITER_BRIEF" <<BRIEF
 # Cubrim Research Iteration ${ITER_NUM}
-
 Current baseline: ${MAIN_BASELINE:-unknown}
-Goal: propose a compression improvement to code/cubrim-rs/src/codec.rs
-that passes the AC-5 gate chain (corpus-hash, cargo-test, roundtrip, ratio, competitive).
+Propose ONE compression improvement to $DEFAULT_TARGET_FILE that beats
+the BWT leader and passes the AC-5 gate chain.
 BRIEF
     fi
 
-    FANOUT_OUTPUT="$WORK_DIR/fanout-responses.jsonl"
+    # Strong machine-readable output contract appended to the brief so workers
+    # return a parseable JSON proposal (in addition to the prose PROPOSAL block).
+    cat >> "$ITER_BRIEF" <<'CONTRACT'
+
+---
+
+## MACHINE OUTPUT (REQUIRED)
+
+CLOSED branches (auto-rejected): distance-map / content-derived phi, N-sweep on
+the T4 stream, order-2 (and higher) context fallback chains, and dedicated RLE
+pre-pass. Do NOT propose any of these. LIVE directions worth proposing: block
+BWT with separate sub-block Huffman tables, arithmetic / range coding replacing
+Huffman (fractional-bit savings), PPM on the value-code stream, or order-1
+context-mixing of order-1 and order-0 predictions with learned weights.
+
+After your prose, emit EXACTLY ONE fenced JSON block (```json ... ```) with
+this schema and nothing else inside it:
+
+{
+  "candidate_name": "<short-id>",
+  "target_file": "code/cubrim-rs/src/codec.rs",
+  "mechanism": "<one paragraph: what it does and why H(compressed) drops>",
+  "decoder_branches": ["<branch1+cost>", "<branch2+cost>"],
+  "gotcha_self_checks": {"g3":"yes|no","g6":"yes|no","g7":"yes|no"},
+  "closed_branch_check": "<does this match any CLOSED branch? quote it or 'none'>",
+  "predicted_verdict": "GO|NO-GO + one sentence"
+}
+CONTRACT
+
+    # ── Phase 2: docker-native consilium fanout ──────────────────────────────
+    log "Phase 2: consilium fanout to live docker workers"
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        log "[DRY-RUN] would call: $FANOUT_SCRIPT --brief $ITER_BRIEF"
-    elif [ -x "$FANOUT_SCRIPT" ]; then
-        "$FANOUT_SCRIPT" \
-            --brief "$ITER_BRIEF" \
-            --output "$FANOUT_OUTPUT" \
-            2>&1 | sed 's/^/  [fanout] /' || {
-                log "WARNING: fanout failed — continuing with empty responses"
-                touch "$FANOUT_OUTPUT"
-            }
-    else
-        log "WARNING: fanout script not found at $FANOUT_SCRIPT — skipping consilium fanout"
-        touch "$FANOUT_OUTPUT"
+        log "[DRY-RUN] would discover workers (label=$WORKER_LABEL) and brief them"
+        log "[DRY-RUN] workers currently UP: $(discover_workers | tr '\n' ' ')"
+        emit_event "consilium_fanout_dry_run"
     fi
 
-    emit_event "consilium_fanout_complete" "output=$FANOUT_OUTPUT"
+    PROPOSALS_JSONL="$WORK_DIR/proposals.jsonl"
+    : > "$PROPOSALS_JSONL"
 
-    # ── Phase 3: consilium judge ─────────────────────────────────────────────
-    log "Phase 3: consilium judge (selects best proposal)"
+    SYS_PROMPT="$WORK_DIR/sys.txt"
+    cat > "$SYS_PROMPT" <<'SYS'
+You are a compression-research vendor on a multi-vendor consilium. You propose
+ONE novel, round-trip-correct improvement to the Cubrim lossless archiver.
+Honour the Gotcha checklist and the closed-branch ledger in the brief: a
+proposal matching a CLOSED branch is auto-rejected. Be concise. End with the
+required fenced JSON block exactly as specified.
+SYS
 
-    JUDGE_OUTPUT="$WORK_DIR/judge-verdict.json"
+    RESPONDERS=0
+    if [ "$DRY_RUN" -eq 0 ]; then
+        WORKERS="$(discover_workers)"
+        [ -n "$WORKERS" ] || { log "no workers discovered — aborting iteration"; emit_event "iteration_abort" "reason=no_workers"; state_set "loop_phase" "sleeping"; return 0; }
+        log "discovered workers: $(echo "$WORKERS" | tr '\n' ' ')"
+
+        while IFS= read -r w; do
+            [ -n "$w" ] || continue
+            log "  briefing $w ..."
+            RESP="$WORK_DIR/resp-$w.txt"
+            if worker_chat "$w" "$SYS_PROMPT" "$ITER_BRIEF" "$RESP"; then
+                PJSON="$WORK_DIR/prop-$w.json"
+                if extract_json "$RESP" > "$PJSON" 2>/dev/null && [ -s "$PJSON" ]; then
+                    MODEL="$(worker_env "$w" ANTHROPIC_MODEL)"
+                    jq -cn --arg slot "$w" --arg model "$MODEL" \
+                        --slurpfile p "$PJSON" \
+                        '{slot:$slot, model:$model, proposal_json:$p[0]}' \
+                        >> "$PROPOSALS_JSONL"
+                    RESPONDERS=$(( RESPONDERS + 1 ))
+                    local_name="$(jq -r '.candidate_name // "?"' "$PJSON")"
+                    log "  [$w] proposal accepted: $local_name"
+                else
+                    log "  [$w] response had no parseable JSON proposal — dropped"
+                fi
+            fi
+        done <<< "$WORKERS"
+    fi
+
+    log "fanout complete: $RESPONDERS responding worker(s)"
+    emit_event "consilium_fanout_complete" "responders=$RESPONDERS"
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        log "[DRY-RUN] would call: $JUDGE_SCRIPT --responses $FANOUT_OUTPUT"
-        echo '{"verdict":"dry-run","selected_proposal":"none"}' > "$JUDGE_OUTPUT"
-    elif [ -x "$JUDGE_SCRIPT" ] && [ -s "$FANOUT_OUTPUT" ]; then
-        "$JUDGE_SCRIPT" \
-            --responses "$FANOUT_OUTPUT" \
-            --output "$JUDGE_OUTPUT" \
-            2>&1 | sed 's/^/  [judge] /' || {
-                log "WARNING: judge failed — skipping this iteration"
-                emit_event "iteration_abort" "reason=judge_failed"
-                state_set "loop_phase" "sleeping"
-                return 0
-            }
-    else
-        log "WARNING: judge not available or no responses — skipping iteration"
-        emit_event "iteration_abort" "reason=no_responses"
+        log "[DRY-RUN] skipping judge / arbiter / implementation / rail"
+        state_set "loop_phase" "sleeping"
+        log "Dry-run iteration complete. No model calls, no branches."
+        return 0
+    fi
+
+    if [ "$RESPONDERS" -lt "$WORKER_MIN" ]; then
+        log "fewer than $WORKER_MIN responders ($RESPONDERS) — below consilium minimum, aborting cleanly"
+        emit_event "iteration_abort" "reason=insufficient_responders" "responders=$RESPONDERS"
+        state_set "loop_phase" "sleeping"
+        return 0
+    fi
+    if [ "$RESPONDERS" -lt 3 ]; then
+        log "DEGRADED: only $RESPONDERS/3 workers responded (proceeding — likely a worker rate-limited)"
+        emit_event "consilium_degraded" "responders=$RESPONDERS"
+    fi
+
+    # ── Phase 3: deterministic judge ─────────────────────────────────────────
+    log "Phase 3: judge (closed-branch reject + deterministic scoring)"
+    state_set "loop_phase" "arbiter"
+
+    SELECTED_JSON="$WORK_DIR/selected.json"
+    set +e
+    python3 - "$PROPOSALS_JSONL" "$CLOSED_LEDGER" "$SELECTED_JSON" <<'PYEOF'
+import sys, json, re
+proposals_path, ledger_path, out_path = sys.argv[1:4]
+
+props = []
+for line in open(proposals_path, encoding="utf-8"):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        props.append(json.loads(line))
+    except Exception:
+        continue
+
+# Closed-branch phrases drawn from the ledger CLOSED auto-reject triggers.
+# Multi-word phrases (not single tokens) so incidental prose mentions of a term
+# that ALSO appears in a LIVE direction (e.g. "context" is LIVE context-mixing)
+# do not over-reject. These match the ledger's "Auto-reject trigger" wording.
+ledger = open(ledger_path, encoding="utf-8").read().lower()
+closed_phrases = [
+    "distance-map", "content-derived phi", "content-derived φ",
+    "coordinate-storing", "transmit a permutation", "transmitted permutation",
+    "sorted-value placement", "stored mapping", "phi-map", "φ-map",
+    "sweep n", "n-sweep", "vary n", "varying n",
+    "order-2 context", "order-3", "order-k", "higher-order context fallback",
+    "rle pre-pass", "rle prepass", "dedicated rle pass",
+]
+
+def is_closed(p):
+    cbc = str(p.get("closed_branch_check", "")).lower().strip()
+    # 1. Trust the worker's self-declaration first.
+    if cbc and cbc not in ("none", "no", "n/a", "no.", ""):
+        if "closed" in cbc or "yes" in cbc[:6] or any(k in cbc for k in closed_phrases):
+            return True, f"self-declared: {cbc[:80]}"
+    # 2. Otherwise match closed PHRASES in name + mechanism.
+    hay = (str(p.get("candidate_name", "")) + " " + str(p.get("mechanism", ""))).lower()
+    for k in closed_phrases:
+        if k in hay:
+            return True, f"matches closed phrase '{k}'"
+    return False, ""
+
+def score(p):
+    s = 0.0
+    pv = str(p.get("predicted_verdict", "")).upper()
+    if pv.startswith("GO"):
+        s += 3.0
+    g = p.get("gotcha_self_checks", {}) or {}
+    # g3/g7 "yes" means it sorts-by-phi / transmits a map → auto-NO-GO traps.
+    if str(g.get("g3", "")).lower().startswith("n"):
+        s += 1.0
+    if str(g.get("g7", "")).lower().startswith("n"):
+        s += 1.0
+    if str(g.get("g6", "")).lower().startswith("n") or str(g.get("g6","")).lower().startswith("y"):
+        s += 0.5  # has an answer
+    tf = str(p.get("target_file", ""))
+    if tf.endswith("codec.rs"):
+        s += 1.0
+    br = p.get("decoder_branches", [])
+    if isinstance(br, list) and len(br) >= 1:
+        s += 0.5
+    if p.get("candidate_name"):
+        s += 0.5
+    return s
+
+eligible = []
+for entry in props:
+    p = entry.get("proposal_json", entry)
+    closed, why = is_closed(p)
+    if closed:
+        print(f"judge: REJECT {entry.get('slot','?')} ({p.get('candidate_name','?')}): {why}", file=sys.stderr)
+        continue
+    eligible.append((score(p), entry))
+
+if not eligible:
+    print("judge: no eligible proposals after closed-branch filtering", file=sys.stderr)
+    sys.exit(3)
+
+eligible.sort(key=lambda t: t[0], reverse=True)
+best_score, best = eligible[0]
+sel = best.get("proposal_json", best)
+sel["_selected_from_slot"] = best.get("slot")
+sel["_selected_model"] = best.get("model")
+sel["_judge_score"] = best_score
+json.dump(sel, open(out_path, "w"))
+print(f"judge: selected '{sel.get('candidate_name','?')}' from {best.get('slot')} (score {best_score})", file=sys.stderr)
+sys.exit(0)
+PYEOF
+    JUDGE_RC=$?
+    set -e
+
+    if [ "$JUDGE_RC" -ne 0 ] || [ ! -s "$SELECTED_JSON" ]; then
+        log "judge: no eligible proposal (all closed-branch or empty) — clean NO-GO, no branch created"
+        emit_event "iteration_abort" "reason=no_eligible_proposal"
         state_set "loop_phase" "sleeping"
         return 0
     fi
 
-    SELECTED_PROPOSAL="$(jq -r '.selected_proposal // empty' "$JUDGE_OUTPUT" 2>/dev/null || true)"
-    emit_event "consilium_judge_complete" "selected=${SELECTED_PROPOSAL:-none}"
+    SELECTED_NAME="$(jq -r '.candidate_name // "candidate"' "$SELECTED_JSON")"
+    SELECTED_SLOT="$(jq -r '._selected_from_slot // "?"' "$SELECTED_JSON")"
+    TARGET_FILE="$(jq -r '.target_file // empty' "$SELECTED_JSON")"
+    [ -n "$TARGET_FILE" ] || TARGET_FILE="$DEFAULT_TARGET_FILE"
+    log "judge selected: $SELECTED_NAME (from $SELECTED_SLOT), target=$TARGET_FILE"
+    emit_event "consilium_judge_complete" "selected=$SELECTED_NAME" "slot=$SELECTED_SLOT"
 
-    # ── Phase 4: deterministic arbiter ───────────────────────────────────────
-    log "Phase 4: deterministic arbiter (entropy probe + size model)"
+    # ── Phase 4: deterministic arbiter (best-effort pre-filter) ──────────────
+    # The arbiter is the cheap pre-filter; the merge rail is the absolute gate.
+    # The free-model proposal rarely carries a full size-model JSON, so a missing
+    # model is logged and the iteration continues to the rail (which is the real
+    # safety gate). Arbiter only HARD-stops on an explicit NO-GO it can compute.
+    log "Phase 4: deterministic arbiter (best-effort)"
 
-    if [ "$DRY_RUN" -eq 0 ] && [ -x "$ENTROPY_PROBE" ]; then
-        "$ENTROPY_PROBE" \
-            --corpus "$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json" \
-            2>&1 | sed 's/^/  [arbiter-entropy] /' || {
-                log "Arbiter entropy probe FAIL — discarding iteration"
-                emit_event "arbiter_fail" "stage=entropy_probe"
+    SIZE_MODEL_JSON="$WORK_DIR/size-model.json"
+    if jq -e '.decoder_branches and .cost_terms' "$SELECTED_JSON" >/dev/null 2>&1; then
+        cp "$SELECTED_JSON" "$SIZE_MODEL_JSON"
+        if [ -x "$SIZE_MODEL" ]; then
+            set +e
+            "$SIZE_MODEL" --model-json "$SIZE_MODEL_JSON" 2>&1 | sed 's/^/  [arbiter-size] /'
+            ARB_RC=${PIPESTATUS[0]}
+            set -e
+            if [ "$ARB_RC" -eq 1 ]; then
+                log "arbiter size-model NO-GO — discarding before implementation (cheap reject)"
+                emit_event "arbiter_fail" "stage=size_model" "candidate=$SELECTED_NAME"
                 state_set "loop_phase" "sleeping"
                 return 0
-            }
-        log "Arbiter entropy probe PASS"
+            fi
+            log "arbiter size-model PASS"
+        fi
     else
-        log "[DRY-RUN or no probe] skipping entropy probe"
+        log "selected proposal lacks a full size-model JSON — skipping arbiter (rail is the real gate)"
+        emit_event "arbiter_skipped" "reason=no_size_model_json"
     fi
 
-    if [ "$DRY_RUN" -eq 0 ] && [ -x "$SIZE_MODEL" ]; then
-        "$SIZE_MODEL" \
-            --proposal "$JUDGE_OUTPUT" \
-            2>&1 | sed 's/^/  [arbiter-size] /' || {
-                log "Arbiter size model FAIL — discarding iteration"
-                emit_event "arbiter_fail" "stage=size_model"
-                state_set "loop_phase" "sleeping"
-                return 0
-            }
-        log "Arbiter size model PASS"
-    fi
-
-    emit_event "arbiter_pass" "iteration=$ITER_NUM"
-
-    # ── Phase 5: worker implementation ───────────────────────────────────────
-    # In the full cluster, the orchestrator signals workers via a shared
-    # brief file; workers implement changes on feature branches.
-    # This stub writes the brief and waits for the implementation branch.
-    log "Phase 5: signalling workers for implementation"
+    # ── Phase 5: implementation by a capable worker ──────────────────────────
+    log "Phase 5: implementation (worker emits edit; orchestrator applies + builds)"
+    state_set "loop_phase" "impl"
 
     IMPL_BRANCH="feat/iter-${ITER_NUM}-$(date -u '+%Y%m%d')"
-    IMPL_SIGNAL="$WORK_DIR/impl-signal.json"
 
-    jq -cn \
-        --arg run_id "$RUN_ID" \
-        --arg branch "$IMPL_BRANCH" \
-        --arg proposal "${SELECTED_PROPOSAL:-none}" \
-        '{run_id:$run_id, branch:$branch, proposal:$proposal, status:"pending"}' \
-        > "$IMPL_SIGNAL"
+    # Choose the implementation worker: prefer a reliably-up DeepSeek/coder slot,
+    # else the slot whose proposal was selected, else the first responder.
+    IMPL_WORKER="$(discover_workers | grep -E 'worker-b' | head -1 || true)"
+    [ -n "$IMPL_WORKER" ] || IMPL_WORKER="$SELECTED_SLOT"
+    if ! discover_workers | grep -qx "$IMPL_WORKER"; then
+        IMPL_WORKER="$(discover_workers | head -1)"
+    fi
+    log "implementation worker: $IMPL_WORKER"
 
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log "[DRY-RUN] would signal workers: branch=$IMPL_BRANCH"
-        emit_event "impl_signal_dry_run" "branch=$IMPL_BRANCH"
+    # Create the feature branch from current main.
+    git -C "$REPO_ROOT" checkout -q main 2>/dev/null || git -C "$REPO_ROOT" checkout main
+    git -C "$REPO_ROOT" branch -D "$IMPL_BRANCH" 2>/dev/null || true
+    git -C "$REPO_ROOT" checkout -q -b "$IMPL_BRANCH"
+    log "created branch $IMPL_BRANCH"
+    emit_event "impl_branch_created" "branch=$IMPL_BRANCH"
+
+    # The target file is large (codec.rs ~3400 lines). A free model cannot
+    # reproduce it whole within its output budget, so the implementation contract
+    # is ANCHORED SEARCH/REPLACE edit blocks, which the orchestrator applies. This
+    # is the realistic docker-native edit mechanism — small, verifiable, bounded.
+    IMPL_SYS="$WORK_DIR/impl-sys.txt"
+    cat > "$IMPL_SYS" <<'ISYS'
+You are a Rust implementation engineer for the Cubrim lossless archiver. You are
+given a selected compression proposal and the current target source file (with
+line numbers for reference). Implement the proposal as a SMALL set of anchored
+edits. Keep round-trip correctness (decode(encode(x)) == x) and keep every
+existing public function signature and ValueScheme variant intact.
+
+Output ONLY edit blocks in EXACTLY this format, nothing else (no prose):
+
+<<<<<<< SEARCH
+<exact contiguous lines copied verbatim from the file, no line numbers>
+=======
+<the replacement lines>
+>>>>>>> REPLACE
+
+Rules: the SEARCH text must match the current file byte-for-byte (do not include
+the leading "N\t" line-number prefix shown for reference). Emit one or more such
+blocks. If the proposal cannot be implemented safely as a bounded edit, output
+the single token NO-EDIT and nothing else.
+ISYS
+
+    apply_round() {
+        # $1 = user prompt file ; applies SEARCH/REPLACE edit blocks to the
+        # target file. Returns 0 if >=1 block applied cleanly, 1 otherwise.
+        local prompt_file="$1" resp="$WORK_DIR/impl-resp.txt"
+        if ! worker_chat "$IMPL_WORKER" "$IMPL_SYS" "$prompt_file" "$resp" 4096; then
+            return 1
+        fi
+        python3 - "$resp" "$REPO_ROOT/$TARGET_FILE" <<'PYEOF'
+import sys, re
+resp_path, target_path = sys.argv[1:3]
+text = open(resp_path, encoding="utf-8", errors="replace").read()
+if re.search(r'(?m)^\s*NO-EDIT\s*$', text) and "SEARCH" not in text:
+    sys.exit(1)  # worker declined — no usable edit
+blocks = re.findall(
+    r"<<<<<<<\s*SEARCH\s*\n(.*?)\n=======\s*\n(.*?)\n>>>>>>>\s*REPLACE",
+    text, re.DOTALL)
+if not blocks:
+    sys.exit(1)
+src = open(target_path, encoding="utf-8").read()
+applied = 0
+for search, replace in blocks:
+    if not search.strip():
+        continue
+    if search in src:
+        src = src.replace(search, replace, 1)
+        applied += 1
+if applied == 0:
+    sys.exit(1)  # no block anchored against the real file
+open(target_path, "w", encoding="utf-8").write(src)
+print(f"applied {applied} edit block(s)", file=sys.stderr)
+sys.exit(0)
+PYEOF
+    }
+
+    # Provide the file WITH line numbers for reference (cat -n style) so the
+    # model can locate anchors; the applier strips numbers from SEARCH text.
+    IMPL_PROMPT="$WORK_DIR/impl-prompt.txt"
+    {
+        echo "## Selected proposal"
+        cat "$SELECTED_JSON"
+        echo
+        echo "## Target file: $TARGET_FILE (line-numbered for reference)"
+        echo '```rust'
+        cat -n "$REPO_ROOT/$TARGET_FILE"
+        echo '```'
+    } > "$IMPL_PROMPT"
+
+    BUILD_OK=0
+    if apply_round "$IMPL_PROMPT"; then
+        log "applied worker edit to $TARGET_FILE; building (cargo build --release)"
+        BUILD_LOG="$WORK_DIR/build.log"
+        set +e
+        ( cd "$REPO_ROOT/code/cubrim-rs" && cargo build --release ) > "$BUILD_LOG" 2>&1
+        BUILD_RC=$?
+        set -e
+        if [ "$BUILD_RC" -eq 0 ]; then
+            BUILD_OK=1
+        else
+            log "build FAILED — attempting up to $MAX_REPAIR_ROUNDS repair round(s)"
+            ROUND=0
+            while [ "$ROUND" -lt "$MAX_REPAIR_ROUNDS" ] && [ "$BUILD_OK" -eq 0 ]; do
+                ROUND=$(( ROUND + 1 ))
+                REPAIR_PROMPT="$WORK_DIR/repair-$ROUND.txt"
+                {
+                    echo "Your previous edit to $TARGET_FILE does not compile."
+                    echo "Fix it using the SAME anchored SEARCH/REPLACE edit-block"
+                    echo "format from the system prompt (no prose, no full file)."
+                    echo
+                    echo "## Compiler errors"
+                    echo '```'
+                    tail -n 60 "$BUILD_LOG"
+                    echo '```'
+                    echo "## Current (broken) file (line-numbered for reference)"
+                    echo '```rust'
+                    cat -n "$REPO_ROOT/$TARGET_FILE"
+                    echo '```'
+                } > "$REPAIR_PROMPT"
+                log "repair round $ROUND ..."
+                if apply_round "$REPAIR_PROMPT"; then
+                    set +e
+                    ( cd "$REPO_ROOT/code/cubrim-rs" && cargo build --release ) > "$BUILD_LOG" 2>&1
+                    BUILD_RC=$?
+                    set -e
+                    [ "$BUILD_RC" -eq 0 ] && BUILD_OK=1
+                fi
+            done
+        fi
+    else
+        log "worker did not return a usable edit"
+    fi
+
+    if [ "$BUILD_OK" -ne 1 ]; then
+        log "implementation did not produce a buildable branch — discarding, clean NO-GO"
+        emit_event "iteration_complete" "verdict=NO-GO" "reason=build_failed" "branch=$IMPL_BRANCH"
+        git -C "$REPO_ROOT" checkout -q -- . 2>/dev/null || true
+        git -C "$REPO_ROOT" checkout -q main
+        git -C "$REPO_ROOT" branch -D "$IMPL_BRANCH" 2>/dev/null || true
+        state_set "loop_phase" "discarded"
         state_set "loop_phase" "sleeping"
-        log "Dry-run iteration complete. No changes made."
         return 0
     fi
 
-    # Workers implement on IMPL_BRANCH. In production the orchestrator
-    # polls until the branch exists or HANG_IDLE_SECS is exceeded.
-    # For this loop driver stub we assert the branch exists before calling the rail.
-    HANG_IDLE_SECS="${CUBRIM_HANG_IDLE_SECS:-7200}"  # 2h max wait
-    POLL_INTERVAL=60
-    ELAPSED=0
-
-    log "Waiting for implementation branch $IMPL_BRANCH (max ${HANG_IDLE_SECS}s)"
-    while ! git -C "$REPO_ROOT" branch --list "$IMPL_BRANCH" | grep -q "$IMPL_BRANCH"; do
-        sleep "$POLL_INTERVAL"
-        ELAPSED=$(( ELAPSED + POLL_INTERVAL ))
-        if [ "$ELAPSED" -ge "$HANG_IDLE_SECS" ]; then
-            log "Hang timeout ($HANG_IDLE_SECS s): branch $IMPL_BRANCH never appeared — aborting"
-            emit_event "impl_timeout" "branch=$IMPL_BRANCH" "elapsed=$ELAPSED"
-            state_set "loop_phase" "sleeping"
-            return 0
-        fi
-        log "Waiting for $IMPL_BRANCH ... ${ELAPSED}/${HANG_IDLE_SECS}s"
-    done
-
-    log "Branch $IMPL_BRANCH ready"
-    emit_event "impl_branch_ready" "branch=$IMPL_BRANCH"
+    # Commit ONLY the candidate source edit on the branch. Scope the add to the
+    # target file so transient bench/STATE artefacts do not ride along; the rail
+    # checks out + tests this branch.
+    git -C "$REPO_ROOT" add -- "$TARGET_FILE"
+    git -C "$REPO_ROOT" commit -q -m "candidate: $SELECTED_NAME ($RUN_ID)" 2>&1 | tail -1 || true
+    CAND_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+    log "branch $IMPL_BRANCH built + committed at $CAND_SHA"
+    emit_event "impl_branch_ready" "branch=$IMPL_BRANCH" "candidate_sha=$CAND_SHA"
+    git -C "$REPO_ROOT" checkout -q main
     state_set "loop_phase" "gate"
 
-    # ── Phase 6: AC-5 merge rail ─────────────────────────────────────────────
-    # CALLS THE EXISTING gate/run-merge-rail.sh — do NOT duplicate the gate chain here.
-    log "Phase 6: AC-5 merge rail"
+    # The rail does `git checkout $BRANCH`, which fails if main's working tree is
+    # dirty with conflicting TRACKED changes. The STATE doc (tracked) is mutated
+    # by state_set every phase — commit it to main so the tree is clean before the
+    # rail switches branches. Untracked/ignored transient files do not block it.
+    git -C "$REPO_ROOT" add -- "$(basename "$STATE_DOC")" 2>/dev/null || true
+    if ! git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+        git -C "$REPO_ROOT" commit -q -m "loop: STATE checkpoint before rail ($RUN_ID)" 2>&1 | tail -1 || true
+    fi
+    # Belt-and-braces: discard any other stray tracked changes on main so the
+    # rail's checkout cannot be blocked (never touches the candidate branch).
+    git -C "$REPO_ROOT" checkout -q -- . 2>/dev/null || true
 
+    # ── Phase 6: AC-5 merge rail ─────────────────────────────────────────────
+    log "Phase 6: AC-5 merge rail"
     [ -x "$GATE_SCRIPT" ] || die "merge rail not found: $GATE_SCRIPT"
 
     set +e
@@ -360,10 +774,19 @@ BRIEF
         state_set "loop_phase" "merged"
         state_set "main_baseline" "$MERGED_SHA"
     else
-        log "MERGE RAIL: NO-GO — branch $IMPL_BRANCH discarded (exit $RAIL_EXIT)"
+        log "MERGE RAIL: NO-GO — branch $IMPL_BRANCH discarded by rail (exit $RAIL_EXIT)"
         emit_event "iteration_complete" "verdict=NO-GO" "branch=$IMPL_BRANCH"
         state_set "loop_phase" "discarded"
     fi
+
+    # Always return to main and clean up. On a gate failure the rail checks out
+    # the candidate branch then tries to delete it — deleting the *current* branch
+    # fails, leaving HEAD on the discarded branch. Force back to main and drop any
+    # leftover candidate branch + stray tracked edits so the next iteration starts
+    # from a clean main.
+    git -C "$REPO_ROOT" checkout -q -f main 2>/dev/null || true
+    git -C "$REPO_ROOT" branch -D "$IMPL_BRANCH" 2>/dev/null || true
+    git -C "$REPO_ROOT" checkout -q -- . 2>/dev/null || true
 
     # ── Phase 7: update STATE doc ────────────────────────────────────────────
     log "Phase 7: updating STATE doc"

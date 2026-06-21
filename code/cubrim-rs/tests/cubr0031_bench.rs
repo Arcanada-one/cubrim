@@ -25,8 +25,12 @@
 use cubrim::{decode, encode_with_config, EncodeConfig, ValueScheme};
 use std::fs;
 
-const CORPUS_DIR: &str =
-    "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus";
+// Corpus dir resolves portably relative to the crate (override: CUBRIM_CORPUS_DIR).
+fn corpus_dir() -> String {
+    std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+        format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+    })
+}
 
 // Original CUBR-0028 corpus (7 files, 51456 bytes)
 const ORIGINAL_CORPUS_TOTAL: usize = 51456;
@@ -146,7 +150,7 @@ fn bench_cubr0031_large_block() {
 
     // ── Step 2: Lossless round-trip on new fixture ────────────────────────────
     println!("Step 2: Lossless round-trip — {NEW_FILE}.bin");
-    let new_path = format!("{CORPUS_DIR}/{NEW_FILE}.bin");
+    let new_path = format!("{}/{NEW_FILE}.bin", corpus_dir());
     let new_data = fs::read(&new_path)
         .unwrap_or_else(|e| panic!("Cannot read {new_path}: {e}"));
     assert_eq!(
@@ -209,7 +213,7 @@ fn bench_cubr0031_large_block() {
     let mut orig_t4_total = 0usize;
 
     for f in ORIGINAL_FILES {
-        let path = format!("{CORPUS_DIR}/{}.bin", f.name);
+        let path = format!("{}/{}.bin", corpus_dir(), f.name);
         let data = fs::read(&path)
             .unwrap_or_else(|e| panic!("Cannot read {path}: {e}"));
 
@@ -361,7 +365,7 @@ fn bench_cubr0031_large_block() {
     let mut per_file_entries: Vec<String> = Vec::new();
 
     for f in ORIGINAL_FILES {
-        let path = format!("{CORPUS_DIR}/{}.bin", f.name);
+        let path = format!("{}/{}.bin", corpus_dir(), f.name);
         let data = fs::read(&path).unwrap();
         let bwt_blob = encode_bwt(&data);
         let delta = bwt_blob.len() as i64 - f.t4_bytes as i64;

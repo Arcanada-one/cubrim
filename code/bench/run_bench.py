@@ -183,7 +183,13 @@ def run_cubrim_roundtrip(
 
 
 def run_zstd(input_path: Path) -> int:
-    """Run zstd -19 on input, return compressed size."""
+    """Run zstd -19 on input, return compressed size.
+
+    zstd is a reference comparison only (not part of any gate). Fail-soft to 0
+    when the binary is absent so the bench still produces Cubrim numbers.
+    """
+    if shutil.which("zstd") is None:
+        return 0
     with tempfile.NamedTemporaryFile(suffix=".zst", delete=False) as tmp:
         out_path = tmp.name
     try:
@@ -192,7 +198,7 @@ def run_zstd(input_path: Path) -> int:
             capture_output=True,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"zstd failed: {result.stderr.decode()}")
+            return 0
         return Path(out_path).stat().st_size
     finally:
         try:
@@ -202,7 +208,14 @@ def run_zstd(input_path: Path) -> int:
 
 
 def run_brotli(input_path: Path) -> int:
-    """Run brotli -q 11 on input, return compressed size."""
+    """Run brotli -q 11 on input, return compressed size.
+
+    brotli is a reference comparison only (not part of any gate). When the binary
+    is absent (e.g. a minimal cluster host), return 0 rather than crashing the
+    whole bench — the Cubrim ratio the gate cares about is unaffected.
+    """
+    if shutil.which("brotli") is None:
+        return 0
     with tempfile.NamedTemporaryFile(suffix=".br", delete=False) as tmp:
         out_path = tmp.name
     try:
@@ -211,7 +224,7 @@ def run_brotli(input_path: Path) -> int:
             capture_output=True,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"brotli failed: {result.stderr.decode()}")
+            return 0
         return Path(out_path).stat().st_size
     finally:
         try:
@@ -277,6 +290,13 @@ def benchmark(
         name = entry["name"]
         size = entry["size_bytes"]
         corpus_path = Path(entry["path"])
+
+        # The manifest records an absolute path from the machine that froze the
+        # corpus. Resolve portably: if that path is absent, fall back to the
+        # corpus dir next to this checkout's manifest (override: CUBRIM_CORPUS_DIR).
+        if not corpus_path.exists():
+            corpus_dir = Path(os.environ.get("CUBRIM_CORPUS_DIR", CORPUS_MANIFEST.parent))
+            corpus_path = corpus_dir / corpus_path.name
 
         if not corpus_path.exists():
             print(f"  SKIP {name}: corpus file missing at {corpus_path}")

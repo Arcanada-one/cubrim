@@ -6,7 +6,12 @@
 use cubrim::{decode, encode_with_config, EncodeConfig, ValueScheme};
 use std::fs;
 
-const CORPUS_DIR: &str = "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus";
+// Corpus dir resolves portably relative to the crate (override: CUBRIM_CORPUS_DIR).
+fn corpus_dir() -> String {
+    std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+        format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+    })
+}
 const CORPUS_TOTAL: usize = 51456;
 const T4_TOTAL_BYTES: usize = 30217;
 const T4_BASELINE_AGG: f64 = 0.587240;
@@ -98,7 +103,7 @@ fn bench_cubr0028_bwt_aggregate() {
     println!("Step 1: BWT round-trip (7/7 required)");
     let mut round_trip_ok = 0usize;
     for f in FILES {
-        let path = format!("{}/{}.bin", CORPUS_DIR, f.name);
+        let path = format!("{}/{}.bin", corpus_dir(), f.name);
         let data = match fs::read(&path) {
             Ok(d) => d,
             Err(e) => panic!("Cannot read corpus file {path}: {e}"),
@@ -137,7 +142,7 @@ fn bench_cubr0028_bwt_aggregate() {
     let mut bwt_total = 0usize;
 
     for f in FILES {
-        let path = format!("{}/{}.bin", CORPUS_DIR, f.name);
+        let path = format!("{}/{}.bin", corpus_dir(), f.name);
         let data = fs::read(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
 
         let t4_blob = encode_t4(&data);
@@ -225,7 +230,7 @@ fn bench_cubr0028_bwt_aggregate() {
     };
 
     let per_file_json: Vec<String> = FILES.iter().map(|f| {
-        let path = format!("{}/{}.bin", CORPUS_DIR, f.name);
+        let path = format!("{}/{}.bin", corpus_dir(), f.name);
         let data = fs::read(&path).unwrap();
         let bwt_blob = encode_bwt(&data);
         let delta = bwt_blob.len() as i64 - f.t4_bytes as i64;

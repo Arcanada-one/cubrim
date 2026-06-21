@@ -30,6 +30,55 @@ done
 
 die() { echo "gate-ratio: ERROR: $*" >&2; exit 2; }
 
+# Parse the candidate aggregate ratio from a bench JSON. Supports two schemas:
+#   1. flat object with a precomputed `.bwt_aggregate` / `.aggregate` field;
+#   2. run_bench.py's array-of-runs schema (no aggregate field) — compute it as
+#      sum(cubrim_bytes)/sum(size_bytes) over the last run's per-file results.
+# This only DERIVES the aggregate; it does not change the strict-improvement
+# comparison, so the gate's bar is unchanged.
+parse_candidate_aggregate() {
+    local json="$1"
+    python3 - "$json" <<'PYEOF'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+
+def flat(d):
+    for k in ("bwt_aggregate", "aggregate"):
+        v = d.get(k)
+        if isinstance(v, (int, float)):
+            return float(v)
+    return None
+
+agg = None
+if isinstance(data, dict):
+    agg = flat(data)
+    if agg is None and isinstance(data.get("current_best"), dict):
+        agg = flat(data["current_best"])
+    runs = data.get("runs")
+    if agg is None and isinstance(runs, list) and runs:
+        results = runs[-1].get("results", [])
+    else:
+        results = data.get("results", []) if agg is None else []
+elif isinstance(data, list) and data:
+    # run_bench.py schema: list of run dicts, each with per-file `results`.
+    results = data[-1].get("results", [])
+else:
+    results = []
+
+if agg is None and results:
+    c = sum(r.get("cubrim_bytes", 0) for r in results)
+    s = sum(r.get("size_bytes", 0) for r in results)
+    if s > 0:
+        agg = c / s
+
+if agg is not None:
+    print(f"{agg:.6f}")
+PYEOF
+}
+
 [ -f "$BENCH_PY" ] || die "bench harness not found: $BENCH_PY"
 command -v python3 >/dev/null 2>&1 || die "python3 required"
 command -v jq >/dev/null 2>&1 || die "jq required"
@@ -93,11 +142,7 @@ echo "gate-ratio: baseline = $BASELINE_SCHEME @ $BASELINE_AGG"
 # ── run bench (or use pre-computed result) ────────────────────────────────────
 if [ -n "$BENCH_JSON" ] && [ -f "$BENCH_JSON" ]; then
     echo "gate-ratio: using pre-computed bench JSON: $BENCH_JSON"
-    CANDIDATE_AGG="$(jq -r '.bwt_aggregate // .aggregate // .current_best.aggregate' "$BENCH_JSON" 2>/dev/null || echo "")"
-    # Try multiple field names matching both old and new schema
-    if [ -z "$CANDIDATE_AGG" ] || [ "$CANDIDATE_AGG" = "null" ]; then
-        CANDIDATE_AGG="$(jq -r 'if .runs then (.runs | last | .aggregate) else .bwt_aggregate end' "$BENCH_JSON" 2>/dev/null || echo "")"
-    fi
+    CANDIDATE_AGG="$(parse_candidate_aggregate "$BENCH_JSON")"
 else
     echo "gate-ratio: running bench harness..."
     TMPDIR="$(mktemp -d)"
@@ -117,7 +162,7 @@ else
     # Locate the output (bench writes to docs/ephemeral/research/)
     BENCH_OUT="$REPO_ROOT/docs/ephemeral/research/gate-ratio-candidate-bench.json"
     [ -f "$BENCH_OUT" ] || die "bench output not found: $BENCH_OUT"
-    CANDIDATE_AGG="$(jq -r '.bwt_aggregate // .aggregate' "$BENCH_OUT" 2>/dev/null || echo "")"
+    CANDIDATE_AGG="$(parse_candidate_aggregate "$BENCH_OUT")"
 fi
 
 if [ -z "$CANDIDATE_AGG" ] || [ "$CANDIDATE_AGG" = "null" ]; then

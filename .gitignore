@@ -20,6 +20,12 @@ docs/ephemeral/research/corpus/
 *.bin
 *.cube
 
+# Transient bench outputs written by the gates / loop (regenerated each run)
+docs/ephemeral/research/gate-ratio-candidate-bench.json
+docs/ephemeral/research/gate-ratio-candidate-report.md
+docs/ephemeral/research/probe-*-bench.json
+docs/ephemeral/research/probe-*-report.md
+
 # Cluster secrets (never commit)
 code/cluster/*.env
 code/cluster/.env*

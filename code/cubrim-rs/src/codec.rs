@@ -3367,17 +3367,24 @@ mod tests {
     #[test]
     fn test_entropy_context2_corpus_round_trip_7_files() {
         // V1: Byte-exact round-trip on all 7 corpus files.
-        // Files must exist at the manifest paths.
+        // Corpus dir resolves portably relative to the crate (CARGO_MANIFEST_DIR
+        // = .../code/cubrim-rs), so the test runs on any checkout — not just the
+        // author's machine. Override with CUBRIM_CORPUS_DIR if needed.
         use std::fs;
-        let corpus_files: Vec<(&str, &str)> = vec![
-            ("sparse_clustered", "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/sparse_clustered.bin"),
-            ("dense",            "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/dense.bin"),
-            ("text",             "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/text.bin"),
-            ("log_like",         "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/log_like.bin"),
-            ("binary_mixed",     "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/binary_mixed.bin"),
-            ("random_high",      "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/random_high.bin"),
-            ("sparse_small",     "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/sparse_small.bin"),
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!(
+                "{}/../../docs/ephemeral/research/corpus",
+                env!("CARGO_MANIFEST_DIR")
+            )
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
         ];
+        let corpus_files: Vec<(&str, String)> = names
+            .iter()
+            .map(|n| (*n, format!("{corpus_dir}/{n}.bin")))
+            .collect();
         let cfg = EncodeConfig {
             value_scheme: ValueScheme::EntropyContext2,
             ..EncodeConfig::v1_default()

@@ -6,7 +6,12 @@
 use cubrim::{decode, encode_with_config, EncodeConfig, ValueScheme};
 use std::fs;
 
-const CORPUS_DIR: &str = "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus";
+// Corpus dir resolves portably relative to the crate (override: CUBRIM_CORPUS_DIR).
+fn corpus_dir() -> String {
+    std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+        format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+    })
+}
 const CORPUS_TOTAL: usize = 51456;
 const T4_TOTAL_BYTES: usize = 30217;
 const T4_BASELINE_AGG: f64 = 0.587240;
@@ -97,7 +102,7 @@ fn bench_cubr0027_aggregate() {
     // Verify 7/7 round-trip for T5 at default min_ctx=128.
     let mut round_trip_ok = 0usize;
     for f in FILES {
-        let path = format!("{}/{}.bin", CORPUS_DIR, f.name);
+        let path = format!("{}/{}.bin", corpus_dir(), f.name);
         let data = match fs::read(&path) {
             Ok(d) => d,
             Err(e) => panic!("Cannot read corpus file {}: {}", path, e),
@@ -120,7 +125,7 @@ fn bench_cubr0027_aggregate() {
     let mut t4_total = 0usize;
     let mut t5_128_total = 0usize;
     for f in FILES {
-        let path = format!("{}/{}.bin", CORPUS_DIR, f.name);
+        let path = format!("{}/{}.bin", corpus_dir(), f.name);
         let data = fs::read(&path).unwrap();
         let t4_blob = encode_t4(&data);
         let t5_blob = encode_t5_option_a(&data, 128);
@@ -159,7 +164,7 @@ fn bench_cubr0027_aggregate() {
     for &min_ctx in min_ctx_values {
         let mut total = 0usize;
         for f in FILES {
-            let path = format!("{}/{}.bin", CORPUS_DIR, f.name);
+            let path = format!("{}/{}.bin", corpus_dir(), f.name);
             let data = fs::read(&path).unwrap();
             let blob = encode_t5_option_a(&data, min_ctx);
             total += blob.len();
