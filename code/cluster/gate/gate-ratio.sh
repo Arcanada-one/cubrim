@@ -139,6 +139,22 @@ echo "gate-ratio: corpus-version OK (baseline + candidate on the same frozen cor
 
 echo "gate-ratio: baseline = $BASELINE_SCHEME @ $BASELINE_AGG"
 
+# ── same-scheme guard: bench the candidate with the SAME value-scheme the
+#    baseline was measured with, else we compare the candidate's default
+#    (bitpack-fixed ~0.56) against the BWT baseline (~0.30) and every candidate
+#    falsely NO-GOs. Map the leaderboard scheme name → the run_bench.py flag.
+case "$BASELINE_SCHEME" in
+    BwtEntropy|bwt-entropy)             BASELINE_VALUE_SCHEME="bwt-entropy" ;;
+    EntropyContext2|entropy-context-2)  BASELINE_VALUE_SCHEME="entropy-context-2" ;;
+    EntropyContext|entropy-context)     BASELINE_VALUE_SCHEME="entropy-context" ;;
+    Entropy|entropy)                    BASELINE_VALUE_SCHEME="entropy" ;;
+    RleCodes|rle-codes)                 BASELINE_VALUE_SCHEME="rle-codes" ;;
+    BitpackFixed|bitpack-fixed|unknown) BASELINE_VALUE_SCHEME="" ;;
+    *)                                  BASELINE_VALUE_SCHEME="" ;;
+esac
+[ -n "$BASELINE_VALUE_SCHEME" ] \
+    && echo "gate-ratio: benching candidate with --value-scheme $BASELINE_VALUE_SCHEME (matches baseline)"
+
 # ── run bench (or use pre-computed result) ────────────────────────────────────
 if [ -n "$BENCH_JSON" ] && [ -f "$BENCH_JSON" ]; then
     echo "gate-ratio: using pre-computed bench JSON: $BENCH_JSON"
@@ -150,8 +166,10 @@ else
     BENCH_OUT="$TMPDIR/candidate-bench.json"
 
     cd "$REPO_ROOT"
+    BENCH_SCHEME_ARGS=()
+    [ -n "$BASELINE_VALUE_SCHEME" ] && BENCH_SCHEME_ARGS=(--value-scheme "$BASELINE_VALUE_SCHEME")
     set +e
-    python3 "$BENCH_PY" --report-id "gate-ratio-candidate" 2>&1
+    python3 "$BENCH_PY" --report-id "gate-ratio-candidate" "${BENCH_SCHEME_ARGS[@]}" 2>&1
     BENCH_RC=$?
     set -e
 
