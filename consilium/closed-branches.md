@@ -168,27 +168,41 @@ BWT itself is not closed — it is the baseline all candidates must beat.
 - Context mixing (combining order-1 and order-0 predictions with learned
   weights).
 - Block BWT with separate sub-block Huffman tables.
-- Arithmetic coding replacing Huffman (fractional-bit savings).
+- **ANS / tANS / arithmetic coding replacing Huffman (fractional-bit savings)
+  — MEASURED GO (narrow), H-19, 2026-06-23.** Charged Huffman→entropy gap probe
+  (`docs/ephemeral/research/probe_h19_ans_charged.py`): order-0 pure advantage
+  0.73%; order-1 bitstream gap is real on structured files (text/log_like/
+  block_bound_runs, where BWT made the stream near-deterministic and Huffman
+  pays the 1-bit floor), neutral on high-entropy files (selector already falls
+  back there). Tables charged for BOTH coders (Gotcha #6 discipline) → not a
+  false GO. Next step: arbiter size-model → ValueScheme byte 7 in codec.rs
+  behind the competitive min(scheme) rail. Realistic gain: single-digit %.
 - PPM (Prediction by Partial Matching) on the value-code stream.
 
 **Constraint:** Any new scheme must pass both arbiter probes (entropy probe
-+ full-branch size model) BEFORE Rust implementation.
++ full-branch size model) BEFORE Rust implementation. ANS (H-19) has passed the
+entropy/gap probe; the size-model + Rust impl is the remaining gate.
 
 ---
 
 ### corpus-local deduplication against a charged shared dictionary
 
-**Status:** CLOSED *on the frozen corpus* — cross-file dedup probe NO-GO
-(2026-06-22). Corpus-bound, not algorithm-bound: re-open if the corpus gains
-genuinely redundant multi-file structure. (The mechanism itself is sound; it
-just has nothing to harvest here.)
+**Status:** CLOSED (final, 2026-06-23) — closed on TWO independent grounds:
+(1) ~0 cross-file redundancy on the frozen corpus (nothing to harvest), and
+(2) even on an *ideally* redundant corpus (versioned snapshots + shared
+boilerplate, 74.84% raw cross-file redundancy) a bespoke shared-dictionary CDC
+scheme LOSES to plain gzip-on-concatenation: 1102 B vs 755 B (+347 B worse).
+The dedup intuition is real but already realised — better — by a general
+compressor on the concatenated stream (no explicit dict, no reference ids, no
+chunk-length table). H-18 / H-18b / H-18c.
 
-**Probe evidence (do FIRST, no Rust):** `docs/ephemeral/research/probe_h18_crossfile_dedup.py`
-— FastCDC content-defined chunking over all 10 files; cross-file redundant-byte
-ratio = 0.0137% (avg-chunk 64 B) / 0.000% (avg ≥128 B), missing the 5% floor by
-~3 orders of magnitude. The 10 corpus files come from 10 distinct generators
-with no shared content by construction → nothing inter-file to deduplicate.
-Intra-file run redundancy (18.9% dup_any) is already captured by BWT/Huffman.
+**Probe evidence (do FIRST, no Rust):**
+- `docs/ephemeral/research/probe_h18_crossfile_dedup.py` — frozen corpus:
+  cross-file redundant ratio 0.0137% (avg 64 B) / 0.000% (avg ≥128 B).
+- `docs/ephemeral/research/probe_h18_on_dedup_corpus.py` — redundant corpus:
+  74.84% (validates the probe — same logic, opposite corpus).
+- `docs/ephemeral/research/probe_h18_sizemodel.py` — corpus-total size model on
+  the redundant corpus: gzip-on-concat 755 B beats CDC shared-dict 1102 B.
 
 **Provenance:** Operator dialogue 2026-06-22 (`_temp/addressator.txt`). The
 naive "external snapshot library" form is CLOSED above; this is its legitimate
@@ -229,15 +243,18 @@ the dictionary MUST be a single decoder branch charged once.
 - Chunk size vs reference overhead: small chunks find more duplicates but each
   reference costs more; the break-even is corpus-dependent and must be measured.
 
-**Kill condition:** cross-file duplicate-chunk probe returns ≈0 on the frozen
-corpus → NO-GO for this corpus (re-open only if the corpus gains genuinely
-redundant multi-file structure). A corpus-total ratio that beats BWT
-corpus-total AND round-trips AND charges the dictionary once → GO.
+**Kill condition (final):** None for a single-archive compressor. The only
+scenario where a bespoke dedup beats gzip-on-concat is one where chunks must be
+RANDOM-ACCESSED individually so concatenation is impossible (a deduplicating
+block/backup store) — that is a storage-system design, out of scope for the
+Cubrim archiver. For any archive that can concatenate-then-compress, dedup is
+dominated.
 
 **Auto-reject trigger:** Proposal for inter-file / shared-dictionary
 deduplication, content-defined chunking across the corpus, or chunk-reference
-encoding — on the CURRENT frozen corpus (cross-file redundancy measured ≈0).
-Re-runs of the probe are fine; a new Rust impl on this corpus is not.
+encoding as a Cubrim ValueScheme. Closed on two grounds (frozen corpus has no
+redundancy; gzip-on-concat dominates even where it does). Probe re-runs are
+fine; a Rust impl is not.
 
 ---
 
