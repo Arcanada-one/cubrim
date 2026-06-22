@@ -72,7 +72,7 @@ MAX_REPAIR_ROUNDS="${CUBRIM_MAX_REPAIR_ROUNDS:-1}"
 # (every candidate failed `cargo build`). Budget guard: this is the paid sub,
 # so exactly ONE claude attempt per iteration with a wall-clock timeout.
 CLAUDE_BIN="${CUBRIM_CLAUDE_BIN:-claude}"
-CLAUDE_TIMEOUT="${CUBRIM_CLAUDE_TIMEOUT:-600}"  # wall-clock seconds for the impl call
+CLAUDE_TIMEOUT="${CUBRIM_CLAUDE_TIMEOUT:-1200}"  # wall-clock seconds for the impl call (complex schemes need headroom)
 
 # Cargo lives under /root/.cargo/bin on the host; the EnvironmentFile already
 # adds it to PATH, but make the loop robust when invoked directly.
@@ -693,14 +693,26 @@ CPROMPT
         --allowedTools "Bash Edit Write Read Grep Glob MultiEdit" ) > "$CLAUDE_OUT" 2>&1
     CLAUDE_RC=$?
     set -e
-    if [ "$CLAUDE_RC" -eq 124 ]; then
-        log "claude hit the ${CLAUDE_TIMEOUT}s wall-clock timeout"
-    fi
     # Log the tail of claude's own report (no secrets — it is just its prose).
     log "claude returned (rc=$CLAUDE_RC); tail of its report:"
     tail -n 8 "$CLAUDE_OUT" 2>/dev/null | sed 's/^/  [claude] /' || true
     CLAUDE_VERDICT="$(grep -Eo 'IMPL_RESULT:[[:space:]]*(BUILT|NO-EDIT)' "$CLAUDE_OUT" 2>/dev/null | tail -1 | awk '{print $2}')"
     emit_event "impl_claude_done" "rc=$CLAUDE_RC" "self_verdict=${CLAUDE_VERDICT:-none}"
+
+    # A wall-clock timeout (rc=124) means claude was killed mid-edit: the tree may
+    # hold a half-written, non-compiling change. Do NOT attempt to build a torn
+    # edit — treat it as a clean NO-GO immediately (revert + discard + continue),
+    # never a loop failure. This is a normal outcome for an over-ambitious
+    # candidate, not an error.
+    if [ "$CLAUDE_RC" -eq 124 ]; then
+        log "claude hit the ${CLAUDE_TIMEOUT}s wall-clock timeout — discarding torn edit, clean NO-GO"
+        emit_event "iteration_complete" "verdict=NO-GO" "reason=impl_timeout" "branch=$IMPL_BRANCH"
+        git -C "$REPO_ROOT" checkout -q -- . 2>/dev/null || true
+        git -C "$REPO_ROOT" checkout -q main 2>/dev/null || true
+        git -C "$REPO_ROOT" branch -D "$IMPL_BRANCH" 2>/dev/null || true
+        state_set "loop_phase" "discarded"
+        return 0
+    fi
 
     # The orchestrator is the source of truth for build status — never claude's
     # self-report. Verify with a real build regardless of what claude said.
