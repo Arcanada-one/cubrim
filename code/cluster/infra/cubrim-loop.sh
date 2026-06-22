@@ -374,11 +374,18 @@ BRIEF
 ## MACHINE OUTPUT (REQUIRED)
 
 CLOSED branches (auto-rejected): distance-map / content-derived phi, N-sweep on
-the T4 stream, order-2 (and higher) context fallback chains, and dedicated RLE
-pre-pass. Do NOT propose any of these. LIVE directions worth proposing: block
-BWT with separate sub-block Huffman tables, arithmetic / range coding replacing
-Huffman (fractional-bit savings), PPM on the value-code stream, or order-1
-context-mixing of order-1 and order-0 predictions with learned weights.
+the T4 stream, order-2 (and higher) context fallback chains, dedicated RLE
+pre-pass, AND external-address / global-snapshot lookup (any universal
+fixed-width reference into an external store — refuted by information
+conservation / pigeonhole; an uncharged dictionary or external server is an
+auto-reject). Do NOT propose any of these. LIVE directions worth proposing:
+block BWT with separate sub-block Huffman tables, arithmetic / range coding
+replacing Huffman (fractional-bit savings), PPM on the value-code stream,
+order-1 context-mixing of order-1 and order-0 predictions with learned weights.
+NOTE: corpus-local / shared-dictionary deduplication (content-defined chunking
+across the corpus) was probed on the frozen corpus and is NO-GO here —
+cross-file redundancy measured ~0% (the 10 files share no content); do NOT
+propose inter-file dedup on this corpus.
 
 After your prose, emit EXACTLY ONE fenced JSON block (```json ... ```) with
 this schema and nothing else inside it:
@@ -496,6 +503,16 @@ closed_phrases = [
     "sweep n", "n-sweep", "vary n", "varying n",
     "order-2 context", "order-3", "order-k", "higher-order context fallback",
     "rle pre-pass", "rle prepass", "dedicated rle pass",
+    # naive external-address / global-snapshot lookup (info-conservation CLOSED).
+    # Phrases are specific to the universal-reference form so the LIVE
+    # "charged shared dictionary" dedup branch is NOT over-rejected.
+    "external server", "external store", "external library", "global snapshot",
+    "snapshot library", "universal reference", "16-byte reference",
+    "fixed-width reference", "global address", "server id", "fetch the snapshot",
+    "uncharged dictionary", "dictionary not charged",
+    # inter-file dedup CLOSED on the frozen corpus (cross-file redundancy ~0).
+    "inter-file dedup", "cross-file dedup", "shared dictionary",
+    "content-defined chunking", "chunk reference", "deduplication across",
 ]
 
 def is_closed(p):
