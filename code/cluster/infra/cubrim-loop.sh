@@ -66,6 +66,14 @@ WORKER_MIN="${CUBRIM_WORKER_MIN:-2}"          # consilium minimum responders
 CALL_TIMEOUT="${CUBRIM_CALL_TIMEOUT:-120}"    # per model-call wall-clock seconds
 MAX_REPAIR_ROUNDS="${CUBRIM_MAX_REPAIR_ROUNDS:-1}"
 
+# Phase 5 now implements the selected proposal with the HOST's authenticated
+# `claude` CLI (operator's personal subscription) rather than a free worker —
+# free models reliably PROPOSE but cannot implement the 3400-line Rust codec
+# (every candidate failed `cargo build`). Budget guard: this is the paid sub,
+# so exactly ONE claude attempt per iteration with a wall-clock timeout.
+CLAUDE_BIN="${CUBRIM_CLAUDE_BIN:-claude}"
+CLAUDE_TIMEOUT="${CUBRIM_CLAUDE_TIMEOUT:-600}"  # wall-clock seconds for the impl call
+
 # Cargo lives under /root/.cargo/bin on the host; the EnvironmentFile already
 # adds it to PATH, but make the loop robust when invoked directly.
 case ":$PATH:" in *":/root/.cargo/bin:"*) ;; *) PATH="$PATH:/root/.cargo/bin" ;; esac
@@ -292,6 +300,16 @@ main() {
         state_set "iteration" "$ITER_NUM"
         state_set "loop_phase" "consilium"
         state_set "last_run_id" "$RUN_ID"
+        # Persist the iteration increment immediately. Later NO-GO paths run
+        # `git checkout -- .` to clean the tree before the rail switches branches;
+        # that reverts any UNCOMMITTED STATE write (the iteration field is tracked).
+        # Without this commit the next run re-reads the previously-committed
+        # iteration and the branch name never advances (the "always feat/iter-7"
+        # bug). Commit the increment now so it survives a build-fail discard.
+        git -C "$REPO_ROOT" add -- "$(basename "$STATE_DOC")" 2>/dev/null || true
+        if ! git -C "$REPO_ROOT" diff --cached --quiet 2>/dev/null; then
+            git -C "$REPO_ROOT" commit -q -m "loop: iteration $ITER_NUM start ($RUN_ID)" 2>&1 | tail -1 || true
+        fi
     fi
 
     # ── Defend-mode check ────────────────────────────────────────────────────
@@ -584,20 +602,17 @@ PYEOF
         emit_event "arbiter_skipped" "reason=no_size_model_json"
     fi
 
-    # ── Phase 5: implementation by a capable worker ──────────────────────────
-    log "Phase 5: implementation (worker emits edit; orchestrator applies + builds)"
+    # ── Phase 5: implementation by the orchestrator's authenticated claude ────
+    # The selected proposal comes from a FREE worker (Phase 2/3), but the actual
+    # code-writing is delegated to the HOST's authenticated `claude` CLI — the
+    # operator's personal Claude subscription, logged in on arcana-db. Free models
+    # reliably propose ideas yet cannot implement a compilable change in the
+    # 3400-line Rust codec; the strong model can. claude edits the files in place
+    # with its own Edit/Write/Bash tools.
+    log "Phase 5: implementation (orchestrator claude writes the codec edit)"
     state_set "loop_phase" "impl"
 
     IMPL_BRANCH="feat/iter-${ITER_NUM}-$(date -u '+%Y%m%d')"
-
-    # Choose the implementation worker: prefer a reliably-up DeepSeek/coder slot,
-    # else the slot whose proposal was selected, else the first responder.
-    IMPL_WORKER="$(discover_workers | grep -E 'worker-b' | head -1 || true)"
-    [ -n "$IMPL_WORKER" ] || IMPL_WORKER="$SELECTED_SLOT"
-    if ! discover_workers | grep -qx "$IMPL_WORKER"; then
-        IMPL_WORKER="$(discover_workers | head -1)"
-    fi
-    log "implementation worker: $IMPL_WORKER"
 
     # Create the feature branch from current main.
     git -C "$REPO_ROOT" checkout -q main 2>/dev/null || git -C "$REPO_ROOT" checkout main
@@ -606,82 +621,95 @@ PYEOF
     log "created branch $IMPL_BRANCH"
     emit_event "impl_branch_created" "branch=$IMPL_BRANCH"
 
-    # The target file is large (codec.rs ~3400 lines). A free model cannot
-    # reproduce it whole within its output budget, so the implementation contract
-    # is ANCHORED SEARCH/REPLACE edit blocks, which the orchestrator applies. This
-    # is the realistic docker-native edit mechanism — small, verifiable, bounded.
-    IMPL_SYS="$WORK_DIR/impl-sys.txt"
-    cat > "$IMPL_SYS" <<'ISYS'
-You are a Rust implementation engineer for the Cubrim lossless archiver. You are
-given a selected compression proposal and the current target source file (with
-line numbers for reference). Implement the proposal as a SMALL set of anchored
-edits. Keep round-trip correctness (decode(encode(x)) == x) and keep every
-existing public function signature and ValueScheme variant intact.
+    # Confirm the host claude CLI is present (the loop runs on the HOST, where
+    # claude is authenticated as root). If it is missing, fail this iteration as a
+    # clean NO-GO rather than silently falling back to a free worker.
+    if ! command -v "$CLAUDE_BIN" >/dev/null 2>&1; then
+        log "host '$CLAUDE_BIN' CLI not found — cannot implement; clean NO-GO"
+        emit_event "iteration_complete" "verdict=NO-GO" "reason=claude_cli_missing" "branch=$IMPL_BRANCH"
+        git -C "$REPO_ROOT" checkout -q -- . 2>/dev/null || true
+        git -C "$REPO_ROOT" checkout -q main
+        git -C "$REPO_ROOT" branch -D "$IMPL_BRANCH" 2>/dev/null || true
+        state_set "loop_phase" "sleeping"
+        return 0
+    fi
 
-Output ONLY edit blocks in EXACTLY this format, nothing else (no prose):
+    # Build the implementation prompt. Hand claude the selected proposal verbatim
+    # plus the architectural constraints; let it read the codec itself (cwd =
+    # repo root, so its Read/Grep tools see code/cubrim-rs/src/*). The prompt is
+    # explicit that the change MUST compile and stay round-trip-correct, and that
+    # the competitive selector means a new scheme need only win on SOME files.
+    SELECTED_PRETTY="$(jq . "$SELECTED_JSON" 2>/dev/null || cat "$SELECTED_JSON")"
+    CLAUDE_PROMPT="$WORK_DIR/claude-impl-prompt.txt"
+    cat > "$CLAUDE_PROMPT" <<CPROMPT
+You are implementing a single compression-research candidate in the Cubrim
+lossless archiver (a Rust workspace; the codec lives at code/cubrim-rs/src/).
+Your cwd is the repo root. Use your Read/Grep/Edit/Write/Bash tools directly on
+the files. Do NOT ask questions — implement autonomously.
 
-<<<<<<< SEARCH
-<exact contiguous lines copied verbatim from the file, no line numbers>
-=======
-<the replacement lines>
->>>>>>> REPLACE
+## Selected proposal (chosen by the consilium judge)
+${SELECTED_PRETTY}
 
-Rules: the SEARCH text must match the current file byte-for-byte (do not include
-the leading "N\t" line-number prefix shown for reference). Emit one or more such
-blocks. If the proposal cannot be implemented safely as a bounded edit, output
-the single token NO-EDIT and nothing else.
-ISYS
+## Target
+Primary file: ${TARGET_FILE}
+You MAY also touch code/cubrim-rs/src/config.rs and other code/cubrim-rs/src/*.rs
+files as needed, but keep the change SMALL and self-contained. The mechanism
+should be expressed as a new or modified ValueScheme variant where that fits the
+proposal.
 
-    apply_round() {
-        # $1 = user prompt file ; applies SEARCH/REPLACE edit blocks to the
-        # target file. Returns 0 if >=1 block applied cleanly, 1 otherwise.
-        local prompt_file="$1" resp="$WORK_DIR/impl-resp.txt"
-        if ! worker_chat "$IMPL_WORKER" "$IMPL_SYS" "$prompt_file" "$resp" 4096; then
-            return 1
-        fi
-        python3 - "$resp" "$REPO_ROOT/$TARGET_FILE" <<'PYEOF'
-import sys, re
-resp_path, target_path = sys.argv[1:3]
-text = open(resp_path, encoding="utf-8", errors="replace").read()
-if re.search(r'(?m)^\s*NO-EDIT\s*$', text) and "SEARCH" not in text:
-    sys.exit(1)  # worker declined — no usable edit
-blocks = re.findall(
-    r"<<<<<<<\s*SEARCH\s*\n(.*?)\n=======\s*\n(.*?)\n>>>>>>>\s*REPLACE",
-    text, re.DOTALL)
-if not blocks:
-    sys.exit(1)
-src = open(target_path, encoding="utf-8").read()
-applied = 0
-for search, replace in blocks:
-    if not search.strip():
-        continue
-    if search in src:
-        src = src.replace(search, replace, 1)
-        applied += 1
-if applied == 0:
-    sys.exit(1)  # no block anchored against the real file
-open(target_path, "w", encoding="utf-8").write(src)
-print(f"applied {applied} edit block(s)", file=sys.stderr)
-sys.exit(0)
-PYEOF
-    }
+## Hard requirements
+1. The change MUST compile: \`cargo build --release\` from code/cubrim-rs must be
+   clean (no errors) before you finish. Run it yourself to verify.
+2. Round-trip correctness is enforced downstream by a byte-exact decode(encode(x))
+   == x gate. A lossy change will be rejected as NO-GO, so keep decode able to
+   exactly reconstruct the input. Preserve existing public function signatures and
+   existing ValueScheme variants.
+3. The encoder uses COMPETITIVE per-file scheme selection (it writes
+   min(new_scheme, T4) plus a scheme byte in the header). A new scheme is
+   regression-proof: it only needs to WIN on some files, never on all — so favour
+   a clean, correct implementation over chasing every file.
+4. Make exactly ONE focused attempt. If you determine the proposal cannot be
+   implemented as a small COMPILING, round-trip-correct change, REVERT every edit
+   you made (leave the tree exactly as you found it) and end your reply with the
+   single line: IMPL_RESULT: NO-EDIT
+   Otherwise, after \`cargo build --release\` is clean, end your reply with:
+   IMPL_RESULT: BUILT
+CPROMPT
 
-    # Provide the file WITH line numbers for reference (cat -n style) so the
-    # model can locate anchors; the applier strips numbers from SEARCH text.
-    IMPL_PROMPT="$WORK_DIR/impl-prompt.txt"
-    {
-        echo "## Selected proposal"
-        cat "$SELECTED_JSON"
-        echo
-        echo "## Target file: $TARGET_FILE (line-numbered for reference)"
-        echo '```rust'
-        cat -n "$REPO_ROOT/$TARGET_FILE"
-        echo '```'
-    } > "$IMPL_PROMPT"
+    # Invoke the host's authenticated claude NON-interactively, cwd = repo root,
+    # ONE attempt, bounded wall-clock. -p prints the final result; claude uses its
+    # own tools to edit the files. Output is captured for the run log/journal.
+    CLAUDE_OUT="$WORK_DIR/claude-impl-out.txt"
+    log "invoking host claude (timeout ${CLAUDE_TIMEOUT}s, one attempt) ..."
+    emit_event "impl_claude_start" "branch=$IMPL_BRANCH" "candidate=$SELECTED_NAME" "timeout=$CLAUDE_TIMEOUT"
+    # The loop runs as root; `--dangerously-skip-permissions` and
+    # `--permission-mode bypassPermissions` are both refused under root for
+    # security. `acceptEdits` + an explicit --allowedTools allow-list grants the
+    # tools claude needs (read codec, edit files, run cargo) without the bypass
+    # guard, and stays non-interactive.
+    set +e
+    ( cd "$REPO_ROOT" && timeout "$CLAUDE_TIMEOUT" "$CLAUDE_BIN" -p "$(cat "$CLAUDE_PROMPT")" \
+        --permission-mode acceptEdits \
+        --allowedTools "Bash Edit Write Read Grep Glob MultiEdit" ) > "$CLAUDE_OUT" 2>&1
+    CLAUDE_RC=$?
+    set -e
+    if [ "$CLAUDE_RC" -eq 124 ]; then
+        log "claude hit the ${CLAUDE_TIMEOUT}s wall-clock timeout"
+    fi
+    # Log the tail of claude's own report (no secrets — it is just its prose).
+    log "claude returned (rc=$CLAUDE_RC); tail of its report:"
+    tail -n 8 "$CLAUDE_OUT" 2>/dev/null | sed 's/^/  [claude] /' || true
+    CLAUDE_VERDICT="$(grep -Eo 'IMPL_RESULT:[[:space:]]*(BUILT|NO-EDIT)' "$CLAUDE_OUT" 2>/dev/null | tail -1 | awk '{print $2}')"
+    emit_event "impl_claude_done" "rc=$CLAUDE_RC" "self_verdict=${CLAUDE_VERDICT:-none}"
 
+    # The orchestrator is the source of truth for build status — never claude's
+    # self-report. Verify with a real build regardless of what claude said.
     BUILD_OK=0
-    if apply_round "$IMPL_PROMPT"; then
-        log "applied worker edit to $TARGET_FILE; building (cargo build --release)"
+    if git -C "$REPO_ROOT" diff --quiet -- "$REPO_ROOT/code/cubrim-rs" 2>/dev/null \
+       && git -C "$REPO_ROOT" diff --cached --quiet -- "$REPO_ROOT/code/cubrim-rs" 2>/dev/null; then
+        log "claude made no change under code/cubrim-rs (self-verdict=${CLAUDE_VERDICT:-none}) — clean NO-GO"
+    else
+        log "claude edited the codec; verifying with cargo build --release"
         BUILD_LOG="$WORK_DIR/build.log"
         set +e
         ( cd "$REPO_ROOT/code/cubrim-rs" && cargo build --release ) > "$BUILD_LOG" 2>&1
@@ -689,38 +717,12 @@ PYEOF
         set -e
         if [ "$BUILD_RC" -eq 0 ]; then
             BUILD_OK=1
+            log "cargo build --release: clean"
         else
-            log "build FAILED — attempting up to $MAX_REPAIR_ROUNDS repair round(s)"
-            ROUND=0
-            while [ "$ROUND" -lt "$MAX_REPAIR_ROUNDS" ] && [ "$BUILD_OK" -eq 0 ]; do
-                ROUND=$(( ROUND + 1 ))
-                REPAIR_PROMPT="$WORK_DIR/repair-$ROUND.txt"
-                {
-                    echo "Your previous edit to $TARGET_FILE does not compile."
-                    echo "Fix it using the SAME anchored SEARCH/REPLACE edit-block"
-                    echo "format from the system prompt (no prose, no full file)."
-                    echo
-                    echo "## Compiler errors"
-                    echo '```'
-                    tail -n 60 "$BUILD_LOG"
-                    echo '```'
-                    echo "## Current (broken) file (line-numbered for reference)"
-                    echo '```rust'
-                    cat -n "$REPO_ROOT/$TARGET_FILE"
-                    echo '```'
-                } > "$REPAIR_PROMPT"
-                log "repair round $ROUND ..."
-                if apply_round "$REPAIR_PROMPT"; then
-                    set +e
-                    ( cd "$REPO_ROOT/code/cubrim-rs" && cargo build --release ) > "$BUILD_LOG" 2>&1
-                    BUILD_RC=$?
-                    set -e
-                    [ "$BUILD_RC" -eq 0 ] && BUILD_OK=1
-                fi
-            done
+            log "cargo build --release: FAILED — single-attempt budget spent, clean NO-GO"
+            log "build error tail:"
+            tail -n 20 "$BUILD_LOG" 2>/dev/null | sed 's/^/  [build] /' || true
         fi
-    else
-        log "worker did not return a usable edit"
     fi
 
     if [ "$BUILD_OK" -ne 1 ]; then
@@ -734,10 +736,11 @@ PYEOF
         return 0
     fi
 
-    # Commit ONLY the candidate source edit on the branch. Scope the add to the
-    # target file so transient bench/STATE artefacts do not ride along; the rail
-    # checks out + tests this branch.
-    git -C "$REPO_ROOT" add -- "$TARGET_FILE"
+    # Commit the candidate source edit on the branch. claude may have touched more
+    # than the primary target (e.g. config.rs), so scope the add to the Rust crate
+    # source tree (code/cubrim-rs) — this captures every code change while keeping
+    # transient bench/STATE artefacts out; the rail checks out + tests this branch.
+    git -C "$REPO_ROOT" add -- "$REPO_ROOT/code/cubrim-rs"
     git -C "$REPO_ROOT" commit -q -m "candidate: $SELECTED_NAME ($RUN_ID)" 2>&1 | tail -1 || true
     CAND_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
     log "branch $IMPL_BRANCH built + committed at $CAND_SHA"
