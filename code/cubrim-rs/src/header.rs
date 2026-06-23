@@ -45,6 +45,16 @@ pub const MODE_RAW: u8 = 1;
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_CHUNKED 1B][n_blocks 4B BE]
 ///       then n_blocks × ( [sub_len 4B BE][sub_blob sub_len bytes] ).
 pub const MODE_CHUNKED: u8 = 2;
+/// Whole-file LZ container (H-25d). The entire input is LZ77-tokenized over a
+/// full-file window BEFORE chunking, so long-range repeats that cross the 64KB
+/// block boundary become reachable. The literal residue is encoded through the
+/// normal pipeline (a nested self-describing blob, itself possibly MODE_CHUNKED);
+/// the match length/distance streams (with the repeat-offset cache) are coded at
+/// file level. Emitted only when strictly smaller than the non-LZ encoding
+/// (competitive size pick), so it is structurally regression-proof.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_LZ 1B][orig_len 4B][n_tokens 4B][n_matches 4B]
+///       [lit_blob_len 4B][lit_blob …][token streams …].
+pub const MODE_LZ: u8 = 3;
 
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;

@@ -25,7 +25,7 @@ use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_CHUNKED,
-    MODE_CUBE, MODE_RAW, VERSION,
+    MODE_CUBE, MODE_LZ, MODE_RAW, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -219,7 +219,28 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// - If mode=0 (cube): header + RLE gap streams + bitpacked values
 ///
 /// The header is self-describing; decode is config-independent (R6).
+///
+/// H-25d: for multi-block inputs (l > cube_size_limit) this also tries a whole-file
+/// LZ pre-pass (MODE_LZ) and returns whichever encoding is smaller — a competitive
+/// size pick, so an input that does not benefit falls back byte-identically to the
+/// base encoding (zero regression). Single-block inputs skip the pre-pass entirely.
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    let base = encode_base(data, config);
+    // Whole-file LZ only helps when long-range repeats can cross a chunk boundary,
+    // i.e. when the input would otherwise be split into ≥2 blocks. Smaller inputs
+    // already get within-block LZ via the LzRans value-scheme, so skip the pre-pass.
+    if data.len() > config.cube_size_limit() {
+        let lz = encode_lz_prepass(data, config);
+        if lz.len() < base.len() {
+            return lz;
+        }
+    }
+    base
+}
+
+/// Base encoder (single-block cube/raw, or MODE_CHUNKED for large inputs). This is
+/// the non-LZ path; `encode_with_config` wraps it with the optional MODE_LZ pre-pass.
+fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let l = data.len();
     let b = config.b;
     let gap_scheme = config.gap_scheme;
@@ -552,11 +573,112 @@ fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     out.extend_from_slice(&(n_blocks as u32).to_be_bytes());
 
     for block in data.chunks(block_size) {
-        let sub_blob = encode_with_config(block, config);
+        // Blocks are ≤ block_size ≤ cube_size_limit, so they never need the LZ
+        // pre-pass — call the base encoder directly (no nested MODE_LZ attempt).
+        let sub_blob = encode_base(block, config);
         out.extend_from_slice(&(sub_blob.len() as u32).to_be_bytes());
         out.extend_from_slice(&sub_blob);
     }
     out
+}
+
+/// Encode `data` as a whole-file LZ container (MODE_LZ, H-25d). The entire input is
+/// LZ77-tokenized over a full-file window FIRST; the literal residue is encoded
+/// through the normal pipeline (`encode_base`, itself possibly MODE_CHUNKED) and the
+/// match length/distance streams (with the repeat-offset cache) are coded at file
+/// level. This makes cross-block long-range repeats reachable. Caller gates on a
+/// competitive size pick, so this is never returned when it does not help.
+fn encode_lz_prepass(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    let seq: Vec<usize> = data.iter().map(|&b| b as usize).collect();
+    let (flags, literals, lengths, distances) = lz77_parse(&seq);
+    let n_tokens = flags.len();
+    let n_matches = lengths.len();
+    let lit_bytes: Vec<u8> = literals.iter().map(|&c| c as u8).collect();
+
+    let lit_blob = encode_base(&lit_bytes, config);
+    let token_streams = lz_encode_token_streams(&flags, &lengths, &distances);
+
+    let mut out = Vec::with_capacity(24 + lit_blob.len() + token_streams.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_LZ);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(&(n_tokens as u32).to_be_bytes());
+    out.extend_from_slice(&(n_matches as u32).to_be_bytes());
+    out.extend_from_slice(&(lit_blob.len() as u32).to_be_bytes());
+    out.extend_from_slice(&lit_blob);
+    out.extend_from_slice(&token_streams);
+    out
+}
+
+/// Decode a MODE_LZ container (`encode_lz_prepass`). Fail-closed.
+fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    // Header: MAGIC(4)+VERSION(1)+MODE_LZ(1)+orig_len(4)+n_tokens(4)+n_matches(4)+lit_len(4) = 22.
+    const LZ_HEADER_SIZE: usize = 22;
+    if blob.len() < LZ_HEADER_SIZE {
+        return Err(CubrimError::Decode(format!(
+            "MODE_LZ container too short: {} < {LZ_HEADER_SIZE}",
+            blob.len()
+        )));
+    }
+    let rd = |p: usize| u32::from_be_bytes([blob[p], blob[p + 1], blob[p + 2], blob[p + 3]]) as usize;
+    let orig_len = rd(6);
+    let n_tokens = rd(10);
+    let n_matches = rd(14);
+    let lit_len = rd(18);
+    let mut pos = LZ_HEADER_SIZE;
+    if pos + lit_len > blob.len() {
+        return Err(CubrimError::Decode("MODE_LZ: literal blob truncated".into()));
+    }
+    let literals = decode(&blob[pos..pos + lit_len])?;
+    pos += lit_len;
+
+    let (flags, lengths, distances, consumed) =
+        lz_decode_token_streams(blob, pos, n_tokens, n_matches)?;
+    pos += consumed;
+    let _ = pos;
+
+    let mut out: Vec<u8> = Vec::with_capacity(orig_len);
+    let mut li = 0usize;
+    let mut mi = 0usize;
+    for &flag in &flags {
+        if flag == 0 {
+            if li >= literals.len() {
+                return Err(CubrimError::Decode("MODE_LZ: literal underflow".into()));
+            }
+            out.push(literals[li]);
+            li += 1;
+        } else {
+            if mi >= n_matches {
+                return Err(CubrimError::Decode("MODE_LZ: match underflow".into()));
+            }
+            let length = lengths[mi];
+            let distance = distances[mi];
+            mi += 1;
+            if distance == 0 || distance > out.len() {
+                return Err(CubrimError::Decode(format!(
+                    "MODE_LZ: invalid distance {distance} (output len {})",
+                    out.len()
+                )));
+            }
+            if length == 0 || out.len() + length > orig_len {
+                return Err(CubrimError::Decode(
+                    "MODE_LZ: match length 0 or overflows orig_len".into(),
+                ));
+            }
+            let start = out.len() - distance;
+            for k in 0..length {
+                out.push(out[start + k]);
+            }
+        }
+    }
+    if out.len() != orig_len {
+        return Err(CubrimError::Decode(format!(
+            "MODE_LZ: decoded {} bytes but expected {orig_len}",
+            out.len()
+        )));
+    }
+    Ok(out)
 }
 
 /// Decode a MODE_CHUNKED container produced by `encode_chunked`.
@@ -603,10 +725,16 @@ fn decode_chunked(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 /// Deterministic decode from header alone — no out-of-band state.
 /// Corrupt input raises CubrimError (never silent garbage).
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
-    // Big-file path: a MODE_CHUNKED container wraps independent sub-blobs. Detect it
-    // before parse_header (which only knows the single-block modes 0/1) and dispatch.
-    if blob.len() >= 6 && blob[0..4] == MAGIC && blob[4] == VERSION && blob[5] == MODE_CHUNKED {
-        return decode_chunked(blob);
+    // Container modes are detected before parse_header (which only knows the
+    // single-block modes 0/1): MODE_CHUNKED wraps independent sub-blobs; MODE_LZ
+    // wraps a whole-file LZ pre-pass (H-25d).
+    if blob.len() >= 6 && blob[0..4] == MAGIC && blob[4] == VERSION {
+        if blob[5] == MODE_CHUNKED {
+            return decode_chunked(blob);
+        }
+        if blob[5] == MODE_LZ {
+            return decode_lz_prepass(blob);
+        }
     }
 
     // Parse header (R6)
@@ -4685,19 +4813,20 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
     (flags, literals, lengths, distances)
 }
 
-/// Encode the value-code stream with LzRans (LZ77 + rANS, H-25c). See module comment.
-pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
-    let (flags, literals, lengths, distances) = lz77_parse(seq_codes);
-    let n_tokens = flags.len();
-    let n_lits = literals.len();
-    let n_matches = lengths.len();
-
-    // Repeat-offset cache: code each distance as a reuse of one of the last 3 distinct
-    // offsets (mode 0/1/2, move-to-front) or a new distance (mode 3, byte-split).
+/// Encode the LZ token streams (everything EXCEPT the literals): flags, the
+/// repeat-offset distance modes, the new-distance byte-split, and the length
+/// byte-split. Shared by the LzRans value-scheme (within-block) and the MODE_LZ
+/// whole-file container (H-25d). The caller writes n_tokens / n_matches.
+///
+/// Wire: flags(order-1 rANS, alpha 2) + dmodes(order-1 rANS, alpha 4)
+///       + new_lo/new_hi(order-0 rANS, 256) + len_lo/len_hi(order-0 rANS, 256).
+fn lz_encode_token_streams(flags: &[usize], lengths: &[usize], distances: &[usize]) -> Vec<u8> {
+    // Repeat-offset cache: reuse one of the last 3 distinct offsets (mode 0/1/2,
+    // move-to-front) or emit a new distance (mode 3, byte-split).
     let mut rep = LZ_REP_INIT;
-    let mut dist_modes: Vec<usize> = Vec::with_capacity(n_matches);
+    let mut dist_modes: Vec<usize> = Vec::with_capacity(distances.len());
     let mut new_dists: Vec<usize> = Vec::new();
-    for &d in &distances {
+    for &d in distances {
         if d == rep[0] {
             dist_modes.push(0);
         } else if d == rep[1] {
@@ -4717,14 +4846,95 @@ pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> 
             rep[0] = d;
         }
     }
-
-    // Full-value byte-split of length (≤ u16) and the NEW distances only.
+    // Length is capped at LZ_MAX_MATCH (u16) → 2 bytes. Distance can be up to the
+    // whole-file size in the MODE_LZ container (cross-block!) → 4 bytes (u32). The
+    // high distance bytes are almost always zero (cheap order-0 tables).
     let len_lo: Vec<usize> = lengths.iter().map(|&v| v & 0xFF).collect();
-    let len_hi: Vec<usize> = lengths.iter().map(|&v| v >> 8).collect();
-    let new_lo: Vec<usize> = new_dists.iter().map(|&v| v & 0xFF).collect();
-    let new_hi: Vec<usize> = new_dists.iter().map(|&v| v >> 8).collect();
+    let len_hi: Vec<usize> = lengths.iter().map(|&v| (v >> 8) & 0xFF).collect();
+    let new_b0: Vec<usize> = new_dists.iter().map(|&v| v & 0xFF).collect();
+    let new_b1: Vec<usize> = new_dists.iter().map(|&v| (v >> 8) & 0xFF).collect();
+    let new_b2: Vec<usize> = new_dists.iter().map(|&v| (v >> 16) & 0xFF).collect();
+    let new_b3: Vec<usize> = new_dists.iter().map(|&v| (v >> 24) & 0xFF).collect();
 
-    let flags_block = rans_order1_encode(&flags, 2);
+    let mut out = Vec::new();
+    out.extend_from_slice(&rans_order1_encode(flags, 2));
+    out.extend_from_slice(&rans_order1_encode(&dist_modes, 4));
+    out.extend_from_slice(&rans_order0_encode(&new_b0, 256));
+    out.extend_from_slice(&rans_order0_encode(&new_b1, 256));
+    out.extend_from_slice(&rans_order0_encode(&new_b2, 256));
+    out.extend_from_slice(&rans_order0_encode(&new_b3, 256));
+    out.extend_from_slice(&rans_order0_encode(&len_lo, 256));
+    out.extend_from_slice(&rans_order0_encode(&len_hi, 256));
+    out
+}
+
+/// Decode the LZ token streams (mirror of `lz_encode_token_streams`).
+/// Returns (flags, lengths, distances, bytes consumed).
+#[allow(clippy::type_complexity)]
+fn lz_decode_token_streams(
+    blob: &[u8],
+    offset: usize,
+    n_tokens: usize,
+    n_matches: usize,
+) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>, usize), CubrimError> {
+    let mut pos = offset;
+    let (flags, c) = rans_order1_decode(blob, pos, n_tokens, 2)?;
+    pos += c;
+    let (dist_modes, c) = rans_order1_decode(blob, pos, n_matches, 4)?;
+    pos += c;
+    let n_new = dist_modes.iter().filter(|&&m| m == 3).count();
+    let (new_b0, c) = rans_order0_decode(blob, pos, n_new, 256)?;
+    pos += c;
+    let (new_b1, c) = rans_order0_decode(blob, pos, n_new, 256)?;
+    pos += c;
+    let (new_b2, c) = rans_order0_decode(blob, pos, n_new, 256)?;
+    pos += c;
+    let (new_b3, c) = rans_order0_decode(blob, pos, n_new, 256)?;
+    pos += c;
+    let (len_lo, c) = rans_order0_decode(blob, pos, n_matches, 256)?;
+    pos += c;
+    let (len_hi, c) = rans_order0_decode(blob, pos, n_matches, 256)?;
+    pos += c;
+
+    let mut rep = LZ_REP_INIT;
+    let mut ni = 0usize;
+    let mut distances: Vec<usize> = Vec::with_capacity(n_matches);
+    for &m in &dist_modes {
+        let d = match m {
+            0 => rep[0],
+            1 => {
+                rep.swap(0, 1);
+                rep[0]
+            }
+            2 => {
+                let r2 = rep[2];
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = r2;
+                rep[0]
+            }
+            _ => {
+                let d = new_b0[ni] | (new_b1[ni] << 8) | (new_b2[ni] << 16) | (new_b3[ni] << 24);
+                ni += 1;
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = d;
+                d
+            }
+        };
+        distances.push(d);
+    }
+    let lengths: Vec<usize> = (0..n_matches).map(|i| (len_hi[i] << 8) | len_lo[i]).collect();
+    Ok((flags, lengths, distances, pos - offset))
+}
+
+/// Encode the value-code stream with LzRans (LZ77 + rANS, H-25c). See module comment.
+pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (flags, literals, lengths, distances) = lz77_parse(seq_codes);
+    let n_tokens = flags.len();
+    let n_lits = literals.len();
+    let n_matches = lengths.len();
+
     // Literals: pick the lighter of order-0 / order-1 (fallback-table) coders.
     let lit0 = rans_order0_encode(&literals, n_distinct.max(1));
     let lit1 = rans_order1_encode(&literals, n_distinct.max(1));
@@ -4733,32 +4943,15 @@ pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> 
     } else {
         (0u8, lit0)
     };
-    let dmode_block = rans_order1_encode(&dist_modes, 4);
-    let new_lo_block = rans_order0_encode(&new_lo, 256);
-    let new_hi_block = rans_order0_encode(&new_hi, 256);
-    let len_lo_block = rans_order0_encode(&len_lo, 256);
-    let len_hi_block = rans_order0_encode(&len_hi, 256);
+    let token_streams = lz_encode_token_streams(&flags, &lengths, &distances);
 
-    let mut out = Vec::with_capacity(
-        13 + flags_block.len()
-            + lits_block.len()
-            + dmode_block.len()
-            + new_lo_block.len()
-            + new_hi_block.len()
-            + len_lo_block.len()
-            + len_hi_block.len(),
-    );
+    let mut out = Vec::with_capacity(13 + lits_block.len() + token_streams.len());
     out.extend_from_slice(&(n_tokens as u32).to_be_bytes());
     out.extend_from_slice(&(n_lits as u32).to_be_bytes());
     out.extend_from_slice(&(n_matches as u32).to_be_bytes());
-    out.extend_from_slice(&flags_block);
     out.push(lit_mode);
     out.extend_from_slice(&lits_block);
-    out.extend_from_slice(&dmode_block);
-    out.extend_from_slice(&new_lo_block);
-    out.extend_from_slice(&new_hi_block);
-    out.extend_from_slice(&len_lo_block);
-    out.extend_from_slice(&len_hi_block);
+    out.extend_from_slice(&token_streams);
     out
 }
 
@@ -4781,8 +4974,6 @@ pub(crate) fn lz_rans_decode(
     let n_matches = read_u32(blob, pos + 8)?;
     pos += 12;
 
-    let (flags, consumed) = rans_order1_decode(blob, pos, n_tokens, 2)?;
-    pos += consumed;
     if pos >= blob.len() {
         return Err(CubrimError::Decode("LzRans: missing lit_mode byte".into()));
     }
@@ -4796,47 +4987,10 @@ pub(crate) fn lz_rans_decode(
         }
     };
     pos += consumed;
-    let (dist_modes, consumed) = rans_order1_decode(blob, pos, n_matches, 4)?;
-    pos += consumed;
-    let n_new = dist_modes.iter().filter(|&&m| m == 3).count();
-    let (new_lo, consumed) = rans_order0_decode(blob, pos, n_new, 256)?;
-    pos += consumed;
-    let (new_hi, consumed) = rans_order0_decode(blob, pos, n_new, 256)?;
-    pos += consumed;
-    let (len_lo, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
-    pos += consumed;
-    let (len_hi, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
-    pos += consumed;
 
-    // Reconstruct distances from the repeat-offset modes (mirror of the encoder).
-    let mut rep = LZ_REP_INIT;
-    let mut ni = 0usize;
-    let mut distances: Vec<usize> = Vec::with_capacity(n_matches);
-    for &m in &dist_modes {
-        let d = match m {
-            0 => rep[0],
-            1 => {
-                rep.swap(0, 1);
-                rep[0]
-            }
-            2 => {
-                let r2 = rep[2];
-                rep[2] = rep[1];
-                rep[1] = rep[0];
-                rep[0] = r2;
-                rep[0]
-            }
-            _ => {
-                let d = (new_hi[ni] << 8) | new_lo[ni];
-                ni += 1;
-                rep[2] = rep[1];
-                rep[1] = rep[0];
-                rep[0] = d;
-                d
-            }
-        };
-        distances.push(d);
-    }
+    let (flags, lengths, distances, consumed) =
+        lz_decode_token_streams(blob, pos, n_tokens, n_matches)?;
+    pos += consumed;
 
     let mut out: Vec<usize> = Vec::with_capacity(count);
     let mut li = 0usize;
@@ -4852,7 +5006,7 @@ pub(crate) fn lz_rans_decode(
             if mi >= n_matches {
                 return Err(CubrimError::Decode("LzRans: match stream underflow".into()));
             }
-            let length = (len_hi[mi] << 8) | len_lo[mi];
+            let length = lengths[mi];
             let distance = distances[mi];
             mi += 1;
             if distance == 0 || distance > out.len() {
@@ -5082,6 +5236,72 @@ mod tests {
     }
 
     #[test]
+    fn test_mode_lz_cross_block_long_range_wins_and_round_trips() {
+        use crate::header::{MODE_CHUNKED, MODE_LZ};
+        // 120 KB = a 10 KB structured unit × 12 → repeats at distance 10 KB that
+        // CROSS the 64 KB chunk boundary. The whole-file LZ pre-pass (MODE_LZ) must
+        // capture them and beat the plain MODE_CHUNKED encoding by a wide margin.
+        let mut state: u64 = 0x51ED270B1A2B3C4D;
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+        let table = b"abcdefghij  ,.0123";
+        let unit: Vec<u8> = (0..10000).map(|_| table[nxt(table.len())]).collect();
+        let mut data = Vec::new();
+        for _ in 0..12 {
+            data.extend_from_slice(&unit);
+        }
+        let lz = encode_with_config(&data, &EncodeConfig::v1_default());
+        assert_eq!(decode(&lz).unwrap(), data, "MODE_LZ round-trip must be exact");
+        assert_eq!(lz[5], MODE_LZ, "cross-block long-range must select MODE_LZ");
+
+        // It must be far smaller than the chunked (no whole-file LZ) encoding.
+        let chunked = encode_chunked(&data, &EncodeConfig::v1_default());
+        assert_eq!(decode(&chunked).unwrap(), data);
+        assert_eq!(chunked[5], MODE_CHUNKED);
+        assert!(
+            lz.len() * 3 < chunked.len() * 2,
+            "MODE_LZ {} not decisively smaller than chunked {}",
+            lz.len(),
+            chunked.len()
+        );
+    }
+
+    #[test]
+    fn test_mode_lz_no_regression_on_incompressible() {
+        use crate::header::MODE_LZ;
+        // A >64KB high-entropy input has no cross-block repeats: the pre-pass must
+        // NOT be selected (falls back byte-identically to the base encoding).
+        let mut state: u64 = 0xC0FFEE1234567890;
+        let data: Vec<u8> = (0..80_000)
+            .map(|_| {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                (state >> 33) as u8
+            })
+            .collect();
+        let blob = encode_with_config(&data, &EncodeConfig::v1_default());
+        assert_ne!(blob[5], MODE_LZ, "incompressible input must not select MODE_LZ");
+        assert_eq!(decode(&blob).unwrap(), data, "fallback round-trip must be exact");
+    }
+
+    #[test]
+    fn test_mode_lz_round_trip_sizes() {
+        // Round-trip a range of >64KB sizes through the public API (some will pick
+        // MODE_LZ, some MODE_CHUNKED — both must be byte-exact).
+        for &n in &[70000usize, 131072, 200001] {
+            let unit = b"the quick brown fox 0123456789 ";
+            let mut data = Vec::new();
+            while data.len() < n {
+                data.extend_from_slice(unit);
+            }
+            data.truncate(n);
+            let blob = encode_with_config(&data, &EncodeConfig::v1_default());
+            assert_eq!(decode(&blob).unwrap(), data, "round-trip failed for n={n}");
+        }
+    }
+
+    #[test]
     fn test_lz_rans_truncated_blob_errors_no_panic() {
         let data: Vec<u8> = (0..4000u32).map(|i| (i % 7) as u8).collect();
         let blob = lz_rans_encode(
@@ -5211,18 +5431,20 @@ mod tests {
 
     #[test]
     fn test_chunked_container_for_large_input() {
-        use crate::header::MODE_CHUNKED;
-        // >65536 bytes -> MODE_CHUNKED container (no longer a flat raw-store).
+        use crate::header::{MODE_CHUNKED, MODE_LZ};
+        // >65536 bytes -> a container mode (MODE_CHUNKED, or MODE_LZ when the
+        // whole-file LZ pre-pass wins), never a flat raw-store.
         let data: Vec<u8> = (0usize..66000).map(|i| (i % 256) as u8).collect();
         let blob = encode(&data);
-        assert_eq!(
-            blob[5], MODE_CHUNKED,
-            "large input (>cube ceiling) must produce a chunked container"
+        assert!(
+            blob[5] == MODE_CHUNKED || blob[5] == MODE_LZ,
+            "large input (>cube ceiling) must produce a container (got mode {})",
+            blob[5]
         );
         assert_eq!(
             decode(&blob).unwrap(),
             data,
-            "large chunked round-trip failed"
+            "large container round-trip failed"
         );
     }
 
@@ -5238,11 +5460,15 @@ mod tests {
             data.extend_from_slice(unit);
         }
         let blob = encode(&data);
-        assert_eq!(blob[5], MODE_CHUNKED, "big input must be chunked");
+        assert!(
+            blob[5] == MODE_CHUNKED || blob[5] == crate::header::MODE_LZ,
+            "big input must use a container (got mode {})",
+            blob[5]
+        );
         assert_eq!(decode(&blob).unwrap(), data, "big round-trip must be exact");
         assert!(
             blob.len() < data.len(),
-            "chunked compressible input must shrink: {} >= {}",
+            "compressible input must shrink: {} >= {}",
             blob.len(),
             data.len()
         );
@@ -5267,9 +5493,10 @@ mod tests {
             data.extend_from_slice(unit);
         }
         let blob = encode_with_config(&data, &cfg);
-        assert_eq!(
-            blob[5], MODE_CHUNKED,
-            "input past cube_size_limit must be chunked"
+        assert!(
+            blob[5] == MODE_CHUNKED || blob[5] == crate::header::MODE_LZ,
+            "input past cube_size_limit must use a container (got mode {})",
+            blob[5]
         );
         assert_eq!(
             decode(&blob).unwrap(),
