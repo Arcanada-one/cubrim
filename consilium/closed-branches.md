@@ -135,15 +135,21 @@ content-addressed lookup whose store is not counted in the ratio.
 
 ### BWT-class reorders (implicit permutation via LF-mapping)
 
-**Status:** LIVE — current best lever. Confirmed GO in CUBR-0028.
+**Status:** LIVE — the reorder under the current champion. The entropy stage
+on top of BWT advanced from Huffman (BwtEntropy) to rANS (BwtRans, H-19).
 
 **Mechanism:** BWT sorts the value-code sequence by context (producing
 runs), but encodes the permutation implicitly via LF-mapping + one
 primary_index integer. No transmitted coordinate map — escapes the
 Gotcha #7 information-conservation trap.
 
-**Current best:** aggregate 0.504412 (BwtEntropy scheme, 7-file corpus
-subset, code_sha e476294879f8bfc97b6e03958508c2649cff69e3).
+**Current best (SHIPPED):** aggregate **0.221726** — **BwtRans** (BWT + order-1
+rANS, ValueScheme byte 7), code_sha 0fd208bd7dada9d50a0670c7743ae10784d19715,
+10-file frozen corpus. Supersedes BwtEntropy 0.299337 (−25.9% rel). Merged to
+main 2026-06-23. Per-file wins: block_bound_runs 9011→4169, log_like 5178→1402,
+text 3583→3177, sparse_clustered 502→443; raw-mode files byte-identical (zero
+regression, competitive min(scheme) rail). Prior milestone: BwtEntropy 0.504412
+on the 7-file subset (CUBR-0028).
 
 **Open sub-directions:**
 - Larger BWT blocks (pending: widening primary_index u16→u32 costs +14 B,
@@ -168,20 +174,22 @@ BWT itself is not closed — it is the baseline all candidates must beat.
 - Context mixing (combining order-1 and order-0 predictions with learned
   weights).
 - Block BWT with separate sub-block Huffman tables.
-- **ANS / tANS / arithmetic coding replacing Huffman (fractional-bit savings)
-  — MEASURED GO (narrow), H-19, 2026-06-23.** Charged Huffman→entropy gap probe
-  (`docs/ephemeral/research/probe_h19_ans_charged.py`): order-0 pure advantage
-  0.73%; order-1 bitstream gap is real on structured files (text/log_like/
-  block_bound_runs, where BWT made the stream near-deterministic and Huffman
-  pays the 1-bit floor), neutral on high-entropy files (selector already falls
-  back there). Tables charged for BOTH coders (Gotcha #6 discipline) → not a
-  false GO. Next step: arbiter size-model → ValueScheme byte 7 in codec.rs
-  behind the competitive min(scheme) rail. Realistic gain: single-digit %.
+- **ANS / tANS replacing Huffman — SHIPPED as the champion (H-19, merged to
+  main 2026-06-23, code_sha 0fd208b).** BWT + order-1 rANS (ValueScheme byte 7)
+  measured aggregate **0.221726**, beating BwtEntropy 0.299337 by −25.9% rel;
+  round-trip clean, tables charged for both coders (Gotcha #6), independently
+  re-verified on a second machine. The fractional-bit win turned out far larger
+  than the order-0 0.73% probe suggested — on BWT-near-deterministic streams
+  Huffman's 1-bit floor wasted up to 73% (log_like). A latent T4 ctx_id=0
+  fallback-shadow (freq=0 → x_max=0 → infinite rANS renorm) was found and fixed
+  with a dedicated wire slot. Remaining open sub-direction: order-2 rANS context
+  (charge ALL tables — order-2 was CLOSED for Huffman on table cost, but rANS's
+  cheaper fractional coding may change the trade-off; must re-probe, not assume).
 - PPM (Prediction by Partial Matching) on the value-code stream.
 
 **Constraint:** Any new scheme must pass both arbiter probes (entropy probe
-+ full-branch size model) BEFORE Rust implementation. ANS (H-19) has passed the
-entropy/gap probe; the size-model + Rust impl is the remaining gate.
++ full-branch size model) BEFORE Rust implementation, and beat the SHIPPED
+champion BwtRans 0.221726 (not the old 0.299337) on the competitive rail.
 
 ---
 
