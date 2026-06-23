@@ -2873,6 +2873,167 @@ pub(crate) fn rans_order1_decode(
     Ok((result, pos - offset))
 }
 
+/// Encode a symbol stream with a single order-0 rANS table (no contexts). This is
+/// the "lighter" coder used for LzRans sub-streams: it pays one global freq table
+/// (sparse, `[n_syms u16][(sym u8, freq u16)]*`) instead of the per-context tables
+/// the order-1 coder would build — which dominate on short streams (H-25b fix #2).
+///
+/// Wire: scale_bits(1) + table + rans_len(4) + rANS payload (LE state prefix).
+pub(crate) fn rans_order0_encode(symbols: &[usize], alphabet: usize) -> Vec<u8> {
+    let scale_bits = RANS_SCALE_BITS;
+    let mut out: Vec<u8> = Vec::new();
+    out.push(scale_bits as u8);
+
+    if symbols.is_empty() || alphabet == 0 {
+        out.extend_from_slice(&0u16.to_be_bytes()); // n_syms = 0
+        out.extend_from_slice(&0u32.to_be_bytes()); // rans_len = 0
+        return out;
+    }
+
+    let mut counts = vec![0usize; alphabet];
+    for &s in symbols {
+        counts[s] += 1;
+    }
+    let freq = rans_normalize(&counts, scale_bits);
+    let table = rans_table_from_freq(freq.clone());
+    rans_serialize_ctx_table(&mut out, &freq);
+
+    let n = symbols.len();
+    let mut buf = vec![0u8; 16 + 4 * n];
+    let mut p = buf.len();
+    let mut x: u32 = RANS_L;
+    for i in (0..n).rev() {
+        let s = symbols[i];
+        let f = table.freq[s];
+        let c = table.cum[s];
+        debug_assert!(f > 0, "rans0 encode: zero freq for symbol {s}");
+        let x_max = ((RANS_L >> scale_bits) << 8) * f;
+        while x >= x_max {
+            p -= 1;
+            buf[p] = (x & 0xff) as u8;
+            x >>= 8;
+        }
+        x = ((x / f) << scale_bits) + (x % f) + c;
+    }
+    p -= 4;
+    buf[p] = (x & 0xff) as u8;
+    buf[p + 1] = ((x >> 8) & 0xff) as u8;
+    buf[p + 2] = ((x >> 16) & 0xff) as u8;
+    buf[p + 3] = ((x >> 24) & 0xff) as u8;
+    let rans_bytes = &buf[p..];
+    out.extend_from_slice(&(rans_bytes.len() as u32).to_be_bytes());
+    out.extend_from_slice(rans_bytes);
+    out
+}
+
+/// Decode an order-0 rANS stream (see `rans_order0_encode`) of `count` symbols.
+/// Returns (symbols, bytes consumed).
+pub(crate) fn rans_order0_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    alphabet: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    let mut pos = offset;
+    if pos + 1 > blob.len() {
+        return Err(CubrimError::Decode("rANS0: blob too short for scale_bits".into()));
+    }
+    let scale_bits = blob[pos] as u32;
+    pos += 1;
+    if scale_bits == 0 || scale_bits > 16 {
+        return Err(CubrimError::Decode(format!(
+            "rANS0: invalid scale_bits {scale_bits}"
+        )));
+    }
+    let m: u32 = 1 << scale_bits;
+    let mask: u32 = m - 1;
+
+    if pos + 2 > blob.len() {
+        return Err(CubrimError::Decode("rANS0: table n_syms truncated".into()));
+    }
+    let n_syms = u16::from_be_bytes([blob[pos], blob[pos + 1]]) as usize;
+    pos += 2;
+    let mut freq = vec![0u32; alphabet.max(1)];
+    let mut sum: u32 = 0;
+    for _ in 0..n_syms {
+        if pos + 3 > blob.len() {
+            return Err(CubrimError::Decode("rANS0: table entry truncated".into()));
+        }
+        let sym = blob[pos] as usize;
+        let f = u16::from_be_bytes([blob[pos + 1], blob[pos + 2]]) as u32;
+        pos += 3;
+        if sym >= alphabet {
+            return Err(CubrimError::Decode(format!(
+                "rANS0: table symbol {sym} >= alphabet {alphabet}"
+            )));
+        }
+        if f == 0 {
+            return Err(CubrimError::Decode("rANS0: table freq 0".into()));
+        }
+        freq[sym] = f;
+        sum += f;
+    }
+    let mut cum = vec![0u32; alphabet.max(1)];
+    let mut slot_to_sym = vec![0u16; m as usize];
+    let mut acc: u32 = 0;
+    for s in 0..alphabet {
+        cum[s] = acc;
+        let end = acc + freq[s];
+        for slot in acc..end {
+            slot_to_sym[slot as usize] = s as u16;
+        }
+        acc = end;
+    }
+    if n_syms > 0 && sum != m {
+        return Err(CubrimError::Decode(format!(
+            "rANS0: freq sum {sum} != M {m}"
+        )));
+    }
+
+    if pos + 4 > blob.len() {
+        return Err(CubrimError::Decode("rANS0: blob too short for rans_len".into()));
+    }
+    let rans_len =
+        u32::from_be_bytes([blob[pos], blob[pos + 1], blob[pos + 2], blob[pos + 3]]) as usize;
+    pos += 4;
+    if pos + rans_len > blob.len() {
+        return Err(CubrimError::Decode("rANS0: payload truncated".into()));
+    }
+    let payload = &blob[pos..pos + rans_len];
+    pos += rans_len;
+
+    if count == 0 {
+        return Ok((vec![], pos - offset));
+    }
+    if payload.len() < 4 {
+        return Err(CubrimError::Decode("rANS0: payload too short for state".into()));
+    }
+    let mut cursor = 0usize;
+    let mut x: u32 = payload[0] as u32
+        | (payload[1] as u32) << 8
+        | (payload[2] as u32) << 16
+        | (payload[3] as u32) << 24;
+    cursor += 4;
+
+    let mut result = Vec::with_capacity(count);
+    for _ in 0..count {
+        let slot = x & mask;
+        let s = slot_to_sym[slot as usize] as usize;
+        let f = freq[s];
+        let c = cum[s];
+        x = f * (x >> scale_bits) + slot - c;
+        while x < RANS_L {
+            if cursor >= payload.len() {
+                return Err(CubrimError::Decode("rANS0: payload exhausted".into()));
+            }
+            x = (x << 8) | payload[cursor] as u32;
+            cursor += 1;
+        }
+        result.push(s);
+    }
+    Ok((result, pos - offset))
+}
+
 /// Encode the value-code stream with BWT + order-1 rANS.
 /// Wire: [primary_index: u16 BE] + rANS order-1 stream of BWT output.
 pub(crate) fn bwt_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
@@ -4401,117 +4562,49 @@ pub(crate) fn bwt_geomix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
     bwt_geomix_encode(seq_codes, n_distinct).len()
 }
 
-// ─── LzRans (H-25): LZ77 match modeling + rANS, a NON-BWT value-stream class ──
+// ─── LzRans (H-25b): LZ77 match modeling + rANS, a NON-BWT value-stream class ─
 //
 // Motivation (holdout re-check): the entire gap to gzip/zstd on unseen data is
 // LZ dictionary matching (long-range repeats) — a capability the cube+BWT+rANS
 // pipeline has no model for. LzRans tokenizes the value-code stream into
-// (literal, match) tokens via greedy LZ77, then entropy-codes every sub-stream:
-//   - literals   → BWT + order-1 rANS backend (`bwt_rans_encode`, Cubrim's strength)
-//   - flags      → order-1 rANS over {0,1}
-//   - length/distance → split into a BIT-LENGTH BUCKET (order-1 rANS) + raw extra
-//     bits. The probe identified the DISTANCE stream as the crux (dominant cost,
-//     up to ~16 bits/match); bucket+extra reaches ~log2(d) (the information floor)
-//     while letting rANS model the bucket distribution.
+// (literal, match) tokens via greedy LZ77, then entropy-codes every sub-stream.
+//
+// H-25b strengthens the H-25 NO-GO by fixing its two measured overheads:
+//   (1) DISTANCE/length were bucket + RAW extra-bits — the raw bits left the
+//       within-bucket entropy uncoded. H-25b codes the FULL value: split each
+//       (≤u16) length/distance into low and high BYTE streams and order-0-rANS
+//       each. Uniform low bits compress to ~raw, but REPEATED distances (aligned
+//       records, fixed offsets) now compress below raw — the real structure.
+//   (2) literals went through the BWT + order-1 rANS backend, paying full
+//       per-context tables on the smaller literal sub-stream (2× worse standalone
+//       on large alphabets). H-25b codes literals with a single order-0 rANS
+//       table (the "lighter coder").
+//   Flags stay order-1 rANS over {0,1} (cheap; captures literal/match run structure).
 //
 // Wire (value stream, after cube header + gap streams):
 //   [n_tokens u32][n_lits u32][n_matches u32]
-//   flags_block    = rans_order1(flags,        alphabet 2)        (self-delimiting)
-//   lits_block     = bwt_rans_encode(literals,  n_distinct)        (count = n_lits)
-//   lenbkt_block   = rans_order1(len_buckets,   LZ_BUCKETS)        (count = n_matches)
-//   distbkt_block  = rans_order1(dist_buckets,  LZ_BUCKETS)        (count = n_matches)
-//   [extra_len u32][extra bytes]   — per match (token order): len-extra then dist-extra
+//   flags     = rans_order1(flags,  alphabet 2)            (count = n_tokens)
+//   lits      = rans_order0(literals, n_distinct)          (count = n_lits)
+//   len_lo    = rans_order0(len  & 0xFF, alphabet 256)     (count = n_matches)
+//   len_hi    = rans_order0(len  >> 8,   alphabet 256)     (count = n_matches)
+//   dist_lo   = rans_order0(dist & 0xFF, alphabet 256)     (count = n_matches)
+//   dist_hi   = rans_order0(dist >> 8,   alphabet 256)     (count = n_matches)
 //
 // Competitive (Gotcha #4): produced only as a winner of the scheme-7 selection
 // rail, so it can never regress a file. Header byte = 12.
 
-/// Bucket alphabet for LZ length/distance bit-length codes. A value v≥1 has
-/// `bit_length(v) ∈ [1, 17]` for v ≤ 131071 (distances ≤ 65535, lengths ≤ L ≤ 65536).
-const LZ_BUCKETS: usize = 18;
 /// LZ77 minimum match length (shorter matches are cheaper as literals).
 const LZ_MIN_MATCH: usize = 3;
 /// Hash-chain search depth cap (bounds encode time on repetitive data).
 const LZ_MAX_CHAIN: usize = 256;
-
-#[inline]
-fn lz_bit_length(v: usize) -> usize {
-    if v == 0 {
-        0
-    } else {
-        usize::BITS as usize - v.leading_zeros() as usize
-    }
-}
-
-/// LSB-first bit writer for the raw extra-bits stream.
-struct LzBitWriter {
-    bytes: Vec<u8>,
-    cur: u8,
-    nbits: u8,
-}
-impl LzBitWriter {
-    fn new() -> Self {
-        Self {
-            bytes: Vec::new(),
-            cur: 0,
-            nbits: 0,
-        }
-    }
-    fn write(&mut self, value: usize, nbits: usize) {
-        for i in 0..nbits {
-            let bit = ((value >> i) & 1) as u8;
-            self.cur |= bit << self.nbits;
-            self.nbits += 1;
-            if self.nbits == 8 {
-                self.bytes.push(self.cur);
-                self.cur = 0;
-                self.nbits = 0;
-            }
-        }
-    }
-    fn finish(mut self) -> Vec<u8> {
-        if self.nbits > 0 {
-            self.bytes.push(self.cur);
-        }
-        self.bytes
-    }
-}
-
-/// LSB-first bit reader for the raw extra-bits stream.
-struct LzBitReader<'a> {
-    bytes: &'a [u8],
-    byte_pos: usize,
-    bit_pos: u8,
-}
-impl<'a> LzBitReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self {
-            bytes,
-            byte_pos: 0,
-            bit_pos: 0,
-        }
-    }
-    fn read(&mut self, nbits: usize) -> Result<usize, CubrimError> {
-        let mut value = 0usize;
-        for i in 0..nbits {
-            if self.byte_pos >= self.bytes.len() {
-                return Err(CubrimError::Decode("LzRans: extra-bit stream exhausted".into()));
-            }
-            let bit = (self.bytes[self.byte_pos] >> self.bit_pos) & 1;
-            value |= (bit as usize) << i;
-            self.bit_pos += 1;
-            if self.bit_pos == 8 {
-                self.bit_pos = 0;
-                self.byte_pos += 1;
-            }
-        }
-        Ok(value)
-    }
-}
+/// Maximum match length — capped so length fits in a u16 (low/high byte split).
+const LZ_MAX_MATCH: usize = u16::MAX as usize;
 
 /// Greedy LZ77 parse of the value-code stream `seq` (codes in [0, 256)).
 /// Returns (flags, literals, lengths, distances) where flags[t]∈{0,1} marks each
 /// token (0=literal, 1=match); literals are in token order, lengths/distances in
-/// match order. Uses 3-code hash chains over the full prior window.
+/// match order. Uses 3-code hash chains over the full prior window. Match length
+/// is capped at LZ_MAX_MATCH so it fits a u16.
 #[allow(clippy::type_complexity)]
 fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>) {
     let n = seq.len();
@@ -4539,8 +4632,8 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
             let mut j = head.get(&k).copied().unwrap_or(usize::MAX);
             let mut chain = 0usize;
             while j != usize::MAX && chain < LZ_MAX_CHAIN {
-                // Extend the match at j vs i.
-                let maxl = n - i;
+                // Extend the match at j vs i (capped at LZ_MAX_MATCH).
+                let maxl = (n - i).min(LZ_MAX_MATCH);
                 let mut ml = 0usize;
                 while ml < maxl && seq[j + ml] == seq[i + ml] {
                     ml += 1;
@@ -4584,49 +4677,43 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
     (flags, literals, lengths, distances)
 }
 
-/// Encode the value-code stream with LzRans (LZ77 + rANS). See module comment.
+/// Encode the value-code stream with LzRans (LZ77 + rANS, H-25b). See module comment.
 pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
     let (flags, literals, lengths, distances) = lz77_parse(seq_codes);
     let n_tokens = flags.len();
     let n_lits = literals.len();
     let n_matches = lengths.len();
 
-    // Bucket the length/distance values; collect extra bits in match (token) order.
-    let mut len_buckets = Vec::with_capacity(n_matches);
-    let mut dist_buckets = Vec::with_capacity(n_matches);
-    let mut bw = LzBitWriter::new();
-    for m in 0..n_matches {
-        let lv = lengths[m];
-        let lb = lz_bit_length(lv);
-        len_buckets.push(lb);
-        bw.write(lv - (1 << (lb - 1)), lb - 1);
-
-        let dv = distances[m];
-        let db = lz_bit_length(dv);
-        dist_buckets.push(db);
-        bw.write(dv - (1 << (db - 1)), db - 1);
-    }
-    let extra = bw.finish();
+    // Full-value byte-split of length/distance (both ≤ u16) — no raw bits.
+    let len_lo: Vec<usize> = lengths.iter().map(|&v| v & 0xFF).collect();
+    let len_hi: Vec<usize> = lengths.iter().map(|&v| v >> 8).collect();
+    let dist_lo: Vec<usize> = distances.iter().map(|&v| v & 0xFF).collect();
+    let dist_hi: Vec<usize> = distances.iter().map(|&v| v >> 8).collect();
 
     let flags_block = rans_order1_encode(&flags, 2);
-    let lits_block = bwt_rans_encode(&literals, n_distinct);
-    let lenbkt_block = rans_order1_encode(&len_buckets, LZ_BUCKETS);
-    let distbkt_block = rans_order1_encode(&dist_buckets, LZ_BUCKETS);
+    let lits_block = rans_order0_encode(&literals, n_distinct.max(1));
+    let len_lo_block = rans_order0_encode(&len_lo, 256);
+    let len_hi_block = rans_order0_encode(&len_hi, 256);
+    let dist_lo_block = rans_order0_encode(&dist_lo, 256);
+    let dist_hi_block = rans_order0_encode(&dist_hi, 256);
 
     let mut out = Vec::with_capacity(
-        12 + flags_block.len() + lits_block.len() + lenbkt_block.len() + distbkt_block.len()
-            + 4
-            + extra.len(),
+        12 + flags_block.len()
+            + lits_block.len()
+            + len_lo_block.len()
+            + len_hi_block.len()
+            + dist_lo_block.len()
+            + dist_hi_block.len(),
     );
     out.extend_from_slice(&(n_tokens as u32).to_be_bytes());
     out.extend_from_slice(&(n_lits as u32).to_be_bytes());
     out.extend_from_slice(&(n_matches as u32).to_be_bytes());
     out.extend_from_slice(&flags_block);
     out.extend_from_slice(&lits_block);
-    out.extend_from_slice(&lenbkt_block);
-    out.extend_from_slice(&distbkt_block);
-    out.extend_from_slice(&(extra.len() as u32).to_be_bytes());
-    out.extend_from_slice(&extra);
+    out.extend_from_slice(&len_lo_block);
+    out.extend_from_slice(&len_hi_block);
+    out.extend_from_slice(&dist_lo_block);
+    out.extend_from_slice(&dist_hi_block);
     out
 }
 
@@ -4651,20 +4738,16 @@ pub(crate) fn lz_rans_decode(
 
     let (flags, consumed) = rans_order1_decode(blob, pos, n_tokens, 2)?;
     pos += consumed;
-    let (literals, consumed) = bwt_rans_decode(blob, pos, n_lits, n_distinct)?;
+    let (literals, consumed) = rans_order0_decode(blob, pos, n_lits, n_distinct.max(1))?;
     pos += consumed;
-    let (len_buckets, consumed) = rans_order1_decode(blob, pos, n_matches, LZ_BUCKETS)?;
+    let (len_lo, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
     pos += consumed;
-    let (dist_buckets, consumed) = rans_order1_decode(blob, pos, n_matches, LZ_BUCKETS)?;
+    let (len_hi, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
     pos += consumed;
-
-    let extra_len = read_u32(blob, pos)?;
-    pos += 4;
-    if pos + extra_len > blob.len() {
-        return Err(CubrimError::Decode("LzRans: extra-bit block truncated".into()));
-    }
-    let mut br = LzBitReader::new(&blob[pos..pos + extra_len]);
-    pos += extra_len;
+    let (dist_lo, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
+    pos += consumed;
+    let (dist_hi, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
+    pos += consumed;
 
     let mut out: Vec<usize> = Vec::with_capacity(count);
     let mut li = 0usize;
@@ -4680,25 +4763,18 @@ pub(crate) fn lz_rans_decode(
             if mi >= n_matches {
                 return Err(CubrimError::Decode("LzRans: match stream underflow".into()));
             }
-            let lb = len_buckets[mi];
-            let db = dist_buckets[mi];
+            let length = (len_hi[mi] << 8) | len_lo[mi];
+            let distance = (dist_hi[mi] << 8) | dist_lo[mi];
             mi += 1;
-            if lb == 0 || lb > 32 || db == 0 || db > 32 {
+            if distance == 0 || distance > out.len() {
                 return Err(CubrimError::Decode(format!(
-                    "LzRans: corrupt bucket (len {lb}, dist {db})"
-                )));
-            }
-            let length = (1usize << (lb - 1)) + br.read(lb - 1)?;
-            let distance = (1usize << (db - 1)) + br.read(db - 1)?;
-            if distance > out.len() {
-                return Err(CubrimError::Decode(format!(
-                    "LzRans: distance {distance} exceeds output length {}",
+                    "LzRans: invalid distance {distance} (output length {})",
                     out.len()
                 )));
             }
-            if out.len() + length > count {
+            if length == 0 || out.len() + length > count {
                 return Err(CubrimError::Decode(
-                    "LzRans: match overflows declared count".into(),
+                    "LzRans: match length 0 or overflows declared count".into(),
                 ));
             }
             let start = out.len() - distance;
