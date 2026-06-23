@@ -38,6 +38,13 @@ pub const VERSION: u8 = 1;
 // Mode constants (R6/R7)
 pub const MODE_CUBE: u8 = 0;
 pub const MODE_RAW: u8 = 1;
+/// Chunked container (CUBR big-file support). Wraps N independent sub-blobs, each
+/// of which is itself a self-describing Cubrim blob (mode 0/1) for an input slice
+/// of at most `cube_size_limit()` (≤65536) bytes. Used only when the whole input
+/// exceeds the single-block cube ceiling; smaller inputs are byte-identical to v1.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_CHUNKED 1B][n_blocks 4B BE]
+///       then n_blocks × ( [sub_len 4B BE][sub_blob sub_len bytes] ).
+pub const MODE_CHUNKED: u8 = 2;
 
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;

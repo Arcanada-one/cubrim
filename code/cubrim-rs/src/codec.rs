@@ -24,7 +24,8 @@ use crate::cube::build_cube_with_params;
 use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
-    parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MODE_CUBE, MODE_RAW,
+    parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_CHUNKED,
+    MODE_CUBE, MODE_RAW, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -248,11 +249,13 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         "n_effective={n_effective} B^N < L={l}: injectivity violated after clamp"
     );
 
-    // R7 fast-path: L > cube_size_limit; cube mode always expands beyond this point
+    // Big-file path: L > cube_size_limit. A single cube cannot represent more than
+    // cube_size_limit values (and the BWT primary_index is a u16, valid only while a
+    // block is ≤65536), so split the input into independently-encoded blocks and wrap
+    // them in a MODE_CHUNKED container. Each block re-enters the full competitive
+    // machinery (cube / BWT / raw), so big files compress instead of raw-storing.
     if l > config.cube_size_limit() {
-        let mut out = serialize_raw_header(n_effective, b, l);
-        out.extend_from_slice(data);
-        return out;
+        return encode_chunked(data, config);
     }
 
     // R7: small inputs always raw-store (header alone would exceed any savings)
@@ -508,11 +511,95 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     out
 }
 
+/// Big-file block size. Each chunk is encoded as an independent single-block blob,
+/// so it must stay within BOTH limits that bound single-block encoding:
+///   - `cube_size_limit()` — beyond it a single cube/blob would itself overflow; and
+///   - 65536 — the BWT `primary_index` is a u16, valid only while a block is ≤65536
+///     (a block of exactly 65536 yields primary < 65536 ≤ u16::MAX).
+/// Taking the min satisfies both for every config (default: 65536).
+fn chunk_block_size(config: &EncodeConfig) -> usize {
+    config.cube_size_limit().min(65536)
+}
+
+/// Encode an input larger than the single-block ceiling as a MODE_CHUNKED container.
+///
+/// The input is sliced into `chunk_block_size(config)`-byte blocks; each block is
+/// encoded independently via `encode_with_config` (re-entering the full competitive
+/// machinery — cube / BWT / raw) and framed with its serialized length. The decoder
+/// (`decode_chunked`) decodes every sub-blob and concatenates the results, so the
+/// round-trip is byte-exact for any input length.
+///
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_CHUNKED 1B][n_blocks u32 BE]
+///       then n_blocks × ( [sub_len u32 BE][sub_blob] ).
+fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    let block_size = chunk_block_size(config);
+    debug_assert!(block_size >= 1, "chunk block size must be positive");
+
+    let n_blocks = data.len().div_ceil(block_size);
+    let mut out = Vec::with_capacity(data.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_CHUNKED);
+    out.extend_from_slice(&(n_blocks as u32).to_be_bytes());
+
+    for block in data.chunks(block_size) {
+        let sub_blob = encode_with_config(block, config);
+        out.extend_from_slice(&(sub_blob.len() as u32).to_be_bytes());
+        out.extend_from_slice(&sub_blob);
+    }
+    out
+}
+
+/// Decode a MODE_CHUNKED container produced by `encode_chunked`.
+/// Fail-closed: any truncation or sub-blob decode error propagates.
+fn decode_chunked(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    // Header: MAGIC(4) + VERSION(1) + MODE_CHUNKED(1) + n_blocks(4) = 10 bytes.
+    const CHUNK_HEADER_SIZE: usize = 10;
+    if blob.len() < CHUNK_HEADER_SIZE {
+        return Err(CubrimError::Decode(format!(
+            "Chunked container too short: {} < {CHUNK_HEADER_SIZE} bytes",
+            blob.len()
+        )));
+    }
+    let n_blocks = u32::from_be_bytes([blob[6], blob[7], blob[8], blob[9]]) as usize;
+    let mut offset = CHUNK_HEADER_SIZE;
+    let mut out = Vec::new();
+    for block_idx in 0..n_blocks {
+        if offset + 4 > blob.len() {
+            return Err(CubrimError::Decode(format!(
+                "Chunked container truncated at block {block_idx} length field"
+            )));
+        }
+        let sub_len = u32::from_be_bytes([
+            blob[offset],
+            blob[offset + 1],
+            blob[offset + 2],
+            blob[offset + 3],
+        ]) as usize;
+        offset += 4;
+        if offset + sub_len > blob.len() {
+            return Err(CubrimError::Decode(format!(
+                "Chunked container truncated at block {block_idx} payload: need {sub_len} bytes"
+            )));
+        }
+        let sub_blob = &blob[offset..offset + sub_len];
+        out.extend_from_slice(&decode(sub_blob)?);
+        offset += sub_len;
+    }
+    Ok(out)
+}
+
 /// R6: Decode a Cubrim v1 blob back to original bytes.
 ///
 /// Deterministic decode from header alone — no out-of-band state.
 /// Corrupt input raises CubrimError (never silent garbage).
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    // Big-file path: a MODE_CHUNKED container wraps independent sub-blobs. Detect it
+    // before parse_header (which only knows the single-block modes 0/1) and dispatch.
+    if blob.len() >= 6 && blob[0..4] == MAGIC && blob[4] == VERSION && blob[5] == MODE_CHUNKED {
+        return decode_chunked(blob);
+    }
+
     // Parse header (R6)
     let (hdr, mut offset) = parse_header(blob)?;
     let l = hdr.l;
@@ -4164,23 +4251,86 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn test_raw_store_for_large_input() {
-        use crate::header::{parse_header, MODE_RAW};
-        // >65536 bytes -> always raw-store
+    fn test_chunked_container_for_large_input() {
+        use crate::header::MODE_CHUNKED;
+        // >65536 bytes -> MODE_CHUNKED container (no longer a flat raw-store).
         let data: Vec<u8> = (0usize..66000).map(|i| (i % 256) as u8).collect();
         let blob = encode(&data);
-        let (hdr, _) = parse_header(&blob).unwrap();
-        assert_eq!(hdr.mode, MODE_RAW, "large input must trigger raw-store");
-        let overhead = blob.len() - data.len();
-        assert!(
-            overhead <= HEADER_OVERHEAD_BOUND,
-            "raw-store overhead {overhead} > HEADER_OVERHEAD_BOUND {HEADER_OVERHEAD_BOUND}"
+        assert_eq!(
+            blob[5], MODE_CHUNKED,
+            "large input (>cube ceiling) must produce a chunked container"
         );
         assert_eq!(
             decode(&blob).unwrap(),
             data,
-            "large raw-store round-trip failed"
+            "large chunked round-trip failed"
         );
+    }
+
+    #[test]
+    fn test_chunked_large_compressible_round_trips_and_shrinks() {
+        use crate::header::MODE_CHUNKED;
+        // ~300 KB of structured/compressible text spanning multiple chunks. Uses the
+        // v1-default (fast) scheme so the suite stays quick; the heavy BWT-family path
+        // on a big file is exercised by the release-CLI verification, not in-suite.
+        let unit = b"The quick brown fox jumps over the lazy dog. 0123456789. ";
+        let mut data = Vec::new();
+        while data.len() < 300_000 {
+            data.extend_from_slice(unit);
+        }
+        let blob = encode(&data);
+        assert_eq!(blob[5], MODE_CHUNKED, "big input must be chunked");
+        assert_eq!(decode(&blob).unwrap(), data, "big round-trip must be exact");
+        assert!(
+            blob.len() < data.len(),
+            "chunked compressible input must shrink: {} >= {}",
+            blob.len(),
+            data.len()
+        );
+    }
+
+    #[test]
+    fn test_chunked_bwt_family_round_trips() {
+        use crate::header::MODE_CHUNKED;
+        // Prove a BWT-family scheme survives the chunk-boundary split. The chunk block
+        // size derives from cube_size_limit() = b*b, so a small edge-bound (b=64 ->
+        // 4096-byte blocks) forces many small blocks cheaply — the competitive BWT path
+        // is slow in debug builds, so we keep each block small rather than ≤65536.
+        let cfg = EncodeConfig {
+            b: 64,
+            value_scheme: ValueScheme::BwtGeoMix,
+            ..EncodeConfig::v1_default()
+        };
+        assert_eq!(cfg.cube_size_limit(), 4096);
+        let unit = b"abracadabra-banana-mississippi-";
+        let mut data = Vec::new();
+        while data.len() < 20_000 {
+            data.extend_from_slice(unit);
+        }
+        let blob = encode_with_config(&data, &cfg);
+        assert_eq!(
+            blob[5], MODE_CHUNKED,
+            "input past cube_size_limit must be chunked"
+        );
+        assert_eq!(
+            decode(&blob).unwrap(),
+            data,
+            "BWT-family chunked round-trip must be exact"
+        );
+    }
+
+    #[test]
+    fn test_chunked_round_trip_various_sizes() {
+        // Boundary and multi-block sizes around the 65536 ceiling must round-trip.
+        for &n in &[65536usize, 65537, 70000, 131072, 200001] {
+            let data: Vec<u8> = (0..n).map(|i| (i.wrapping_mul(31) % 256) as u8).collect();
+            let blob = encode(&data);
+            assert_eq!(
+                decode(&blob).unwrap(),
+                data,
+                "round-trip failed for size {n}"
+            );
+        }
     }
 
     #[test]
