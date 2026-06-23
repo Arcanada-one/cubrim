@@ -143,16 +143,26 @@ runs), but encodes the permutation implicitly via LF-mapping + one
 primary_index integer. No transmitted coordinate map — escapes the
 Gotcha #7 information-conservation trap.
 
-**Current best (SHIPPED):** aggregate **0.207618** — **Order2Rans** (BWT +
-order-2 context rANS, ValueScheme byte 8), code_sha 13c26aa, 10-file frozen
-corpus. Supersedes BwtRans 0.221726 (−6.36% rel; H-20, merged 2026-06-23,
-independently re-verified). Per-file wins vs BwtRans: binary_mixed 8205→6885,
-text 3177→2889, sparse_clustered 443→400; rest byte-identical (competitive
-min(scheme) rail, schemes 0–7 intact). Champion lineage on the 10-file corpus:
-BwtEntropy 0.299337 → BwtRans 0.221726 (H-19) → Order2Rans 0.207618 (H-20).
-Note: order-2 was CLOSED for *Huffman* (table cost, Gotcha #6) but rANS's
-fractional coding amortises the extra contexts — the re-probe confirmed it, as
-flagged. Prior milestone: BwtEntropy 0.504412 on the 7-file subset (CUBR-0028).
+**Current best (SHIPPED):** aggregate **0.168227** — **Consolidated 8+9+10**
+(one codec carrying ValueScheme bytes 8 Order2Rans, 9 BwtAdaptive, 10
+BwtContextMix, all behind the competitive min(scheme) per-file rail), code_sha
+f0ff451, 10-file frozen corpus, merged 2026-06-23, independently re-verified.
+Per-file the rail picks the best scheme: sparse_clustered 179 (sch9), text 1757
+(sch10), log_like 570 (sch9), binary_mixed 5679 (sch10), block_bound_runs 2950
+(sch10) — 4 bytes better than the strongest standalone (H-22 0.168262).
+
+Champion lineage on the 10-file corpus:
+BwtEntropy 0.299337 → BwtRans 0.221726 (H-19, order-1 rANS) → Order2Rans
+0.207618 (H-20, order-2 rANS) → {H-21 BwtAdaptive 0.177122, H-22 BwtContextMix
+0.168262 forked separately} → **Consolidated 0.168227** (all schemes in one
+competitive codec). Goal: beat gzip 0.159674 — now ~5% away.
+
+Measurement note: aggregate is via the competitive rail (compress with
+`--value-scheme bwt-rans`, which selects min of schemes 7/8/9/10 per file). The
+codec's bare default (no flag) is bitpack 0.556651; always measure through the
+competitive flag. Order-2 (sch 8) was CLOSED for *Huffman* (table cost,
+Gotcha #6) but rANS fractional coding amortises it. Prior milestone: BwtEntropy
+0.504412 on the 7-file subset (CUBR-0028).
 
 **Open sub-directions:**
 - Larger BWT blocks (pending: widening primary_index u16→u32 costs +14 B,
