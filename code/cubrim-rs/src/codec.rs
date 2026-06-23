@@ -2045,43 +2045,278 @@ pub(crate) fn order2_context_huffman_size(
 // are unchanged.  The encoder selects BwtEntropy only when its real encoded
 // size is smaller than EntropyContext.
 
-/// Compute the BWT of `seq` (elements in [0, n_distinct)).
-/// Returns (bwt_out, primary_index).
+// ─── SA-IS linear-time suffix array (for fast BWT) ───────────────────────────
+//
+// The BWT below sorts the cyclic rotations of `seq`.  A naive comparison sort is
+// O(n² log n) and takes minutes on a full 65536-element block.  Instead we build
+// the suffix array of the *doubled* string (seq·seq + sentinel) in linear time
+// with SA-IS (Nong–Zhang–Chan induced sorting); a suffix starting in [0, n) has
+// the corresponding rotation as its first n symbols, so SA order over those
+// positions IS the rotation order.  Output is byte-identical to the naive sort
+// (see test_sais_bwt_matches_naive): within a tie-group of fully-equal rotations
+// the last-column values are identical, so `bwt_out` is invariant, and the exact
+// `primary` is recovered with a Z-function (rotation 0 is last in its SA tie-group).
+
+/// Sentinel for "empty slot" in the SA-IS workspace (positions are always < n).
+const SAIS_EMPTY: usize = usize::MAX;
+
+/// Bucket boundaries for alphabet size `k`. `end=false` → bucket heads (start
+/// offsets); `end=true` → bucket tails (one past the last offset).
+fn sais_buckets(s: &[usize], k: usize, end: bool) -> Vec<usize> {
+    let mut count = vec![0usize; k];
+    for &c in s {
+        count[c] += 1;
+    }
+    let mut out = vec![0usize; k];
+    let mut sum = 0usize;
+    for i in 0..k {
+        sum += count[i];
+        out[i] = if end { sum } else { sum - count[i] };
+    }
+    out
+}
+
+#[inline]
+fn sais_is_lms(t: &[bool], i: usize) -> bool {
+    i > 0 && t[i] && !t[i - 1]
+}
+
+/// Induced-sort pass: given LMS suffixes already placed at their bucket tails,
+/// induce all L-type then all S-type suffixes into their sorted positions.
+fn sais_induce(s: &[usize], sa: &mut [usize], t: &[bool], k: usize) {
+    let n = s.len();
+    // L-type, scan left→right, place at bucket heads.
+    let mut heads = sais_buckets(s, k, false);
+    for i in 0..n {
+        let j = sa[i];
+        if j != SAIS_EMPTY && j != 0 {
+            let p = j - 1;
+            if !t[p] {
+                let c = s[p];
+                sa[heads[c]] = p;
+                heads[c] += 1;
+            }
+        }
+    }
+    // S-type, scan right→left, place at bucket tails.
+    let mut tails = sais_buckets(s, k, true);
+    for i in (0..n).rev() {
+        let j = sa[i];
+        if j != SAIS_EMPTY && j != 0 {
+            let p = j - 1;
+            if t[p] {
+                let c = s[p];
+                tails[c] -= 1;
+                sa[tails[c]] = p;
+            }
+        }
+    }
+}
+
+/// Are the LMS substrings starting at `a` and `b` identical (same symbols and
+/// L/S types, same length)?  Used to name LMS substrings during SA-IS.
+fn sais_lms_equal(s: &[usize], t: &[bool], a: usize, b: usize) -> bool {
+    if a == b {
+        return true;
+    }
+    let n = s.len();
+    let mut i = 0usize;
+    loop {
+        let aa = a + i;
+        let bb = b + i;
+        if aa >= n || bb >= n {
+            return false;
+        }
+        if s[aa] != s[bb] || t[aa] != t[bb] {
+            return false;
+        }
+        let a_lms = i > 0 && sais_is_lms(t, aa);
+        let b_lms = i > 0 && sais_is_lms(t, bb);
+        if a_lms && b_lms {
+            return true; // both substrings end here; all prior symbols matched
+        }
+        if a_lms != b_lms {
+            return false; // different lengths
+        }
+        i += 1;
+    }
+}
+
+/// SA-IS suffix array of `s` over alphabet `0..k`. `s` MUST end with a unique
+/// smallest sentinel (value 0 appearing exactly once, at the last position).
+fn sais(s: &[usize], k: usize) -> Vec<usize> {
+    let n = s.len();
+    if n == 0 {
+        return vec![];
+    }
+    if n == 1 {
+        return vec![0];
+    }
+
+    // 1. Classify suffix types (true = S-type). Sentinel is S-type.
+    let mut t = vec![false; n];
+    t[n - 1] = true;
+    for i in (0..n - 1).rev() {
+        t[i] = s[i] < s[i + 1] || (s[i] == s[i + 1] && t[i + 1]);
+    }
+
+    // 2. Place LMS suffixes at bucket tails, then induced-sort.
+    let mut sa = vec![SAIS_EMPTY; n];
+    {
+        let mut tails = sais_buckets(s, k, true);
+        for i in (1..n).rev() {
+            if sais_is_lms(&t, i) {
+                let c = s[i];
+                tails[c] -= 1;
+                sa[tails[c]] = i;
+            }
+        }
+    }
+    sais_induce(s, &mut sa, &t, k);
+
+    // 3. Name the LMS substrings in their (now sorted) SA order.
+    let sorted_lms: Vec<usize> = sa
+        .iter()
+        .copied()
+        .filter(|&x| x != SAIS_EMPTY && sais_is_lms(&t, x))
+        .collect();
+    let mut names = vec![SAIS_EMPTY; n];
+    let mut name = 0usize;
+    let mut prev = SAIS_EMPTY;
+    for &cur in &sorted_lms {
+        if prev != SAIS_EMPTY && !sais_lms_equal(s, &t, prev, cur) {
+            name += 1;
+        }
+        names[cur] = name;
+        prev = cur;
+    }
+    let num_names = if sorted_lms.is_empty() { 0 } else { name + 1 };
+
+    // 4. Reduced string in LMS *text* order; recurse if any names collide.
+    let lms_text: Vec<usize> = (1..n).filter(|&i| sais_is_lms(&t, i)).collect();
+    let reduced: Vec<usize> = lms_text.iter().map(|&i| names[i]).collect();
+    let lms_sa: Vec<usize> = if num_names == reduced.len() {
+        // All names unique → SA is the inverse permutation of the names.
+        let mut inv = vec![0usize; reduced.len()];
+        for (idx, &nm) in reduced.iter().enumerate() {
+            inv[nm] = idx;
+        }
+        inv
+    } else {
+        sais(&reduced, num_names)
+    };
+
+    // 5. Re-place LMS at bucket tails in correct order, induced-sort once more.
+    for x in sa.iter_mut() {
+        *x = SAIS_EMPTY;
+    }
+    {
+        let mut tails = sais_buckets(s, k, true);
+        for &r in lms_sa.iter().rev() {
+            let i = lms_text[r];
+            let c = s[i];
+            tails[c] -= 1;
+            sa[tails[c]] = i;
+        }
+    }
+    sais_induce(s, &mut sa, &t, k);
+    sa
+}
+
+/// Size of rotation 0's tie-group: the number of cyclic rotations of `seq` that
+/// are byte-for-byte equal to rotation 0 (i.e. `{0, p, 2p, …}` where `p` is the
+/// minimal cyclic period). Computed via the Z-function over the doubled stream.
+fn sais_rotation0_group_size(seq: &[usize]) -> usize {
+    let n = seq.len();
+    if n <= 1 {
+        return 1;
+    }
+    let m = 2 * n;
+    let get = |idx: usize| seq[idx % n];
+    let mut z = vec![0usize; m];
+    let (mut l, mut r) = (0usize, 0usize);
+    for i in 1..m {
+        if i < r {
+            z[i] = (r - i).min(z[i - l]);
+        }
+        while i + z[i] < m && get(z[i]) == get(i + z[i]) {
+            z[i] += 1;
+        }
+        if i + z[i] > r {
+            l = i;
+            r = i + z[i];
+        }
+    }
+    let mut count = 1usize; // rotation 0 itself
+    for &zi in z.iter().take(n).skip(1) {
+        if zi >= n {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Compute the BWT of `seq` (elements in [0, n_distinct)) over its cyclic
+/// rotations. Returns (bwt_out, primary_index).
 ///
 /// The primary index is the row in the sorted-rotation matrix that corresponds
-/// to the original sequence (i.e., the rotation starting at position 0).
-/// For exact inversion, every caller stores this value on the wire (2 bytes).
+/// to the original sequence (the rotation starting at position 0). For exact
+/// inversion, every caller stores this value on the wire (2 bytes).
 ///
-/// Algorithm: O(n log n × k) via Rust's stable sort on index slices.
-/// For codec-side n ≤ 65536 and small n_distinct this is fast enough.
+/// Algorithm: O(n) SA-IS suffix array of the doubled stream. Output is
+/// byte-identical to the previous naive O(n² log n) rotation sort — see
+/// `test_sais_bwt_matches_naive`. The LF-mapping inverse (`bwt_decode_codes`)
+/// and the wire format (u16 `primary_index`) are unchanged.
 pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
     let n = seq.len();
     if n == 0 {
         return (vec![], 0);
     }
-    // Build sorted rotation indices.
-    let mut indices: Vec<usize> = (0..n).collect();
-    indices.sort_by(|&a, &b| {
-        // Compare rotation starting at a vs rotation starting at b
-        for k in 0..n {
-            let ca = seq[(a + k) % n];
-            let cb = seq[(b + k) % n];
-            if ca != cb {
-                return ca.cmp(&cb);
+    if n == 1 {
+        return (vec![seq[0]], 0);
+    }
+
+    // Build the doubled stream with a +1 shift so 0 is a unique smallest sentinel.
+    let max_code = *seq.iter().max().unwrap();
+    let k = max_code + 2; // symbols 1..=max_code+1, plus sentinel 0
+    let mut doubled = Vec::with_capacity(2 * n + 1);
+    for &c in seq {
+        doubled.push(c + 1);
+    }
+    for &c in seq {
+        doubled.push(c + 1);
+    }
+    doubled.push(0); // unique smallest sentinel
+    let sa = sais(&doubled, k);
+
+    // Rotation order = SA entries starting in [0, n), kept in SA order.
+    let mut bwt_out = Vec::with_capacity(n);
+    let mut pos0 = 0usize; // SA-rank of rotation 0 among the rotations
+    let mut r = 0usize;
+    for &start in &sa {
+        if start < n {
+            // Last column of this rotation = element just before its start.
+            bwt_out.push(seq[(start + n - 1) % n]);
+            if start == 0 {
+                pos0 = r;
             }
+            r += 1;
         }
-        std::cmp::Ordering::Equal
-    });
-    // Last column = element just before the start of each rotation.
-    let bwt_out: Vec<usize> = indices.iter().map(|&i| seq[(i + n - 1) % n]).collect();
-    // Primary index = row where the rotation starting at 0 appears.
-    let primary = indices.iter().position(|&i| i == 0).unwrap_or(0);
-    // Safety: cube mode is only reached when l <= cube_size_limit() = b*b = 65536
-    // (config.rs:216-222, codec.rs:217-224), so primary < l <= 65536 <= u16::MAX.
-    // If cube_size_limit() is ever raised above 65536, revisit this cast.
+    }
+    debug_assert_eq!(bwt_out.len(), n, "SA-IS rotation count mismatch");
+
+    // Periodic-tie correction: equal rotations are placed shorter-suffix-first in
+    // SA, so rotation 0 (longest suffix) is LAST in its tie-group. The naive stable
+    // sort placed it FIRST (smallest start index). primary = pos0 − (group − 1).
+    let group_size = sais_rotation0_group_size(seq);
+    let primary = pos0 - (group_size - 1);
+
+    // Safety: cube mode is only reached when l <= cube_size_limit() = b*b = 65536,
+    // so primary < l <= 65536 <= u16::MAX. If the chunk/cube ceiling is ever raised
+    // above 65536, revisit this cast (and the BWT wire format).
     debug_assert!(
         primary <= u16::MAX as usize,
-        "primary_index {primary} exceeds u16::MAX; cube_size_limit() may have been raised above 65536 without updating BWT wire format"
+        "primary_index {primary} exceeds u16::MAX; cube/chunk ceiling may have been raised above 65536 without updating BWT wire format"
     );
     (bwt_out, primary as u16)
 }
@@ -4134,6 +4369,90 @@ pub(crate) fn bwt_geomix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
 mod tests {
     use super::*;
     use crate::header::VALUE_SCHEME_RLE_CODES;
+
+    /// Reference cyclic-rotation BWT (the previous O(n² log n) implementation),
+    /// kept only to prove the SA-IS replacement is byte-identical.
+    fn bwt_encode_codes_naive(seq: &[usize]) -> (Vec<usize>, u16) {
+        let n = seq.len();
+        if n == 0 {
+            return (vec![], 0);
+        }
+        let mut indices: Vec<usize> = (0..n).collect();
+        indices.sort_by(|&a, &b| {
+            for k in 0..n {
+                let ca = seq[(a + k) % n];
+                let cb = seq[(b + k) % n];
+                if ca != cb {
+                    return ca.cmp(&cb);
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+        let bwt_out: Vec<usize> = indices.iter().map(|&i| seq[(i + n - 1) % n]).collect();
+        let primary = indices.iter().position(|&i| i == 0).unwrap_or(0);
+        (bwt_out, primary as u16)
+    }
+
+    #[test]
+    fn test_sais_bwt_matches_naive() {
+        // SA-IS BWT must be byte-identical (bwt_out AND primary) to the naive
+        // rotation sort across a battery incl. periodic/all-same/random inputs.
+        // Deterministic LCG; no external RNG.
+        let mut state: u64 = 0x9E3779B97F4A7C15;
+        let mut next = |m: usize| -> usize {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((state >> 33) as usize) % m
+        };
+
+        // Fixed structural cases (empty, singletons, periodic, all-same).
+        let fixed: Vec<Vec<usize>> = vec![
+            vec![],
+            vec![0],
+            vec![5],
+            vec![1, 1, 1, 1, 1, 1],          // all-same → period 1
+            vec![1, 0, 1, 0, 1, 0],          // period 2
+            vec![2, 1, 3, 2, 1, 3, 2, 1, 3], // period 3
+            vec![0, 1, 2, 3, 4, 5, 6, 7],    // strictly increasing
+            vec![7, 6, 5, 4, 3, 2, 1, 0],    // strictly decreasing
+            b"abracadabra".iter().map(|&c| c as usize).collect(),
+            b"mississippi".iter().map(|&c| c as usize).collect(),
+        ];
+        for seq in &fixed {
+            assert_eq!(
+                bwt_encode_codes(seq),
+                bwt_encode_codes_naive(seq),
+                "SA-IS BWT mismatch on fixed case {seq:?}"
+            );
+        }
+
+        // Random inputs: vary length and alphabet (incl. tiny alphabets that force
+        // many periodic ties).
+        for _ in 0..2000 {
+            let len = 1 + next(40);
+            let alpha = 1 + next(4); // 1..=4 distinct → lots of ties
+            let seq: Vec<usize> = (0..len).map(|_| next(alpha)).collect();
+            let got = bwt_encode_codes(&seq);
+            let want = bwt_encode_codes_naive(&seq);
+            assert_eq!(got, want, "SA-IS BWT mismatch on random seq {seq:?}");
+            // And the LF-decode must still invert it.
+            let decoded = bwt_decode_codes(&got.0, got.1, alpha).unwrap();
+            assert_eq!(decoded, seq, "BWT round-trip failed for {seq:?}");
+        }
+
+        // A few larger periodic blocks (exercise the recursion + tie correction).
+        for unit in [&b"ab"[..], &b"abc"[..], &b"abcd"[..], &b"hello "[..]] {
+            let mut seq = Vec::new();
+            while seq.len() < 1500 {
+                seq.extend(unit.iter().map(|&c| c as usize));
+            }
+            assert_eq!(
+                bwt_encode_codes(&seq),
+                bwt_encode_codes_naive(&seq),
+                "SA-IS BWT mismatch on periodic block (unit len {})",
+                unit.len()
+            );
+        }
+    }
 
     // -------------------------------------------------------------------------
     // V-AC-1: Byte-exact lossless round-trip (CORNERSTONE)
