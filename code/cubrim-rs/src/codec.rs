@@ -4562,36 +4562,44 @@ pub(crate) fn bwt_geomix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
     bwt_geomix_encode(seq_codes, n_distinct).len()
 }
 
-// ─── LzRans (H-25b): LZ77 match modeling + rANS, a NON-BWT value-stream class ─
+// ─── LzRans (H-25c): LZ77 match modeling + rANS, a NON-BWT value-stream class ─
 //
 // Motivation (holdout re-check): the entire gap to gzip/zstd on unseen data is
 // LZ dictionary matching (long-range repeats) — a capability the cube+BWT+rANS
 // pipeline has no model for. LzRans tokenizes the value-code stream into
 // (literal, match) tokens via greedy LZ77, then entropy-codes every sub-stream.
 //
-// H-25b strengthens the H-25 NO-GO by fixing its two measured overheads:
-//   (1) DISTANCE/length were bucket + RAW extra-bits — the raw bits left the
-//       within-bucket entropy uncoded. H-25b codes the FULL value: split each
-//       (≤u16) length/distance into low and high BYTE streams and order-0-rANS
-//       each. Uniform low bits compress to ~raw, but REPEATED distances (aligned
-//       records, fixed offsets) now compress below raw — the real structure.
-//   (2) literals went through the BWT + order-1 rANS backend, paying full
-//       per-context tables on the smaller literal sub-stream (2× worse standalone
-//       on large alphabets). H-25b codes literals with a single order-0 rANS
-//       table (the "lighter coder").
-//   Flags stay order-1 rANS over {0,1} (cheap; captures literal/match run structure).
+// H-25c implements the H-25b re-open condition — the two zstd levers that the
+// byte-split (H-25b) still missed:
+//   (1) REPEAT-OFFSET DISTANCE CACHE (zstd's real lever). Keep the last 3 distinct
+//       match offsets (move-to-front LRU). Each match codes a 4-symbol mode:
+//       0/1/2 = "reuse recent offset rep[k]" (≈2 bits), 3 = "new distance" (full
+//       byte-split). Long-range structure (repeated records, fixed strides, shared
+//       boilerplate across copies) collapses to mode-0 runs — the win BWT cannot
+//       reach because it lives BEYOND a single 64KB block's local context.
+//   (2) LIGHTER ORDER-1 LITERAL CODER. H-25b used order-0 to dodge the BWT+order-1
+//       table blowup; H-25c picks min(order-0, order-1) for the literal stream —
+//       the fallback-table order-1 rANS keeps literal order-1 structure WITHOUT
+//       the BWT doubling and only pays own tables for well-observed contexts.
+//   Flags stay order-1 rANS over {0,1}.
 //
 // Wire (value stream, after cube header + gap streams):
 //   [n_tokens u32][n_lits u32][n_matches u32]
-//   flags     = rans_order1(flags,  alphabet 2)            (count = n_tokens)
-//   lits      = rans_order0(literals, n_distinct)          (count = n_lits)
-//   len_lo    = rans_order0(len  & 0xFF, alphabet 256)     (count = n_matches)
-//   len_hi    = rans_order0(len  >> 8,   alphabet 256)     (count = n_matches)
-//   dist_lo   = rans_order0(dist & 0xFF, alphabet 256)     (count = n_matches)
-//   dist_hi   = rans_order0(dist >> 8,   alphabet 256)     (count = n_matches)
+//   flags     = rans_order1(flags,       alphabet 2)       (count = n_tokens)
+//   [lit_mode u8]  (0 = order-0, 1 = order-1)
+//   lits      = rans_order{lit_mode}(literals, n_distinct) (count = n_lits)
+//   dmodes    = rans_order1(dist_modes,  alphabet 4)       (count = n_matches)
+//   new_lo    = rans_order0(new_dist & 0xFF, 256)          (count = #{mode==3})
+//   new_hi    = rans_order0(new_dist >> 8,   256)          (count = #{mode==3})
+//   len_lo    = rans_order0(len & 0xFF, 256)               (count = n_matches)
+//   len_hi    = rans_order0(len >> 8,   256)               (count = n_matches)
 //
 // Competitive (Gotcha #4): produced only as a winner of the scheme-7 selection
 // rail, so it can never regress a file. Header byte = 12.
+
+/// Initial repeat-offset cache (seeds; only ever used if a real match happens to
+/// have one of these distances early). Encoder and decoder MUST share this.
+const LZ_REP_INIT: [usize; 3] = [1, 4, 8];
 
 /// LZ77 minimum match length (shorter matches are cheaper as literals).
 const LZ_MIN_MATCH: usize = 3;
@@ -4677,43 +4685,80 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
     (flags, literals, lengths, distances)
 }
 
-/// Encode the value-code stream with LzRans (LZ77 + rANS, H-25b). See module comment.
+/// Encode the value-code stream with LzRans (LZ77 + rANS, H-25c). See module comment.
 pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
     let (flags, literals, lengths, distances) = lz77_parse(seq_codes);
     let n_tokens = flags.len();
     let n_lits = literals.len();
     let n_matches = lengths.len();
 
-    // Full-value byte-split of length/distance (both ≤ u16) — no raw bits.
+    // Repeat-offset cache: code each distance as a reuse of one of the last 3 distinct
+    // offsets (mode 0/1/2, move-to-front) or a new distance (mode 3, byte-split).
+    let mut rep = LZ_REP_INIT;
+    let mut dist_modes: Vec<usize> = Vec::with_capacity(n_matches);
+    let mut new_dists: Vec<usize> = Vec::new();
+    for &d in &distances {
+        if d == rep[0] {
+            dist_modes.push(0);
+        } else if d == rep[1] {
+            dist_modes.push(1);
+            rep.swap(0, 1);
+        } else if d == rep[2] {
+            dist_modes.push(2);
+            let r2 = rep[2];
+            rep[2] = rep[1];
+            rep[1] = rep[0];
+            rep[0] = r2;
+        } else {
+            dist_modes.push(3);
+            new_dists.push(d);
+            rep[2] = rep[1];
+            rep[1] = rep[0];
+            rep[0] = d;
+        }
+    }
+
+    // Full-value byte-split of length (≤ u16) and the NEW distances only.
     let len_lo: Vec<usize> = lengths.iter().map(|&v| v & 0xFF).collect();
     let len_hi: Vec<usize> = lengths.iter().map(|&v| v >> 8).collect();
-    let dist_lo: Vec<usize> = distances.iter().map(|&v| v & 0xFF).collect();
-    let dist_hi: Vec<usize> = distances.iter().map(|&v| v >> 8).collect();
+    let new_lo: Vec<usize> = new_dists.iter().map(|&v| v & 0xFF).collect();
+    let new_hi: Vec<usize> = new_dists.iter().map(|&v| v >> 8).collect();
 
     let flags_block = rans_order1_encode(&flags, 2);
-    let lits_block = rans_order0_encode(&literals, n_distinct.max(1));
+    // Literals: pick the lighter of order-0 / order-1 (fallback-table) coders.
+    let lit0 = rans_order0_encode(&literals, n_distinct.max(1));
+    let lit1 = rans_order1_encode(&literals, n_distinct.max(1));
+    let (lit_mode, lits_block) = if lit1.len() < lit0.len() {
+        (1u8, lit1)
+    } else {
+        (0u8, lit0)
+    };
+    let dmode_block = rans_order1_encode(&dist_modes, 4);
+    let new_lo_block = rans_order0_encode(&new_lo, 256);
+    let new_hi_block = rans_order0_encode(&new_hi, 256);
     let len_lo_block = rans_order0_encode(&len_lo, 256);
     let len_hi_block = rans_order0_encode(&len_hi, 256);
-    let dist_lo_block = rans_order0_encode(&dist_lo, 256);
-    let dist_hi_block = rans_order0_encode(&dist_hi, 256);
 
     let mut out = Vec::with_capacity(
-        12 + flags_block.len()
+        13 + flags_block.len()
             + lits_block.len()
+            + dmode_block.len()
+            + new_lo_block.len()
+            + new_hi_block.len()
             + len_lo_block.len()
-            + len_hi_block.len()
-            + dist_lo_block.len()
-            + dist_hi_block.len(),
+            + len_hi_block.len(),
     );
     out.extend_from_slice(&(n_tokens as u32).to_be_bytes());
     out.extend_from_slice(&(n_lits as u32).to_be_bytes());
     out.extend_from_slice(&(n_matches as u32).to_be_bytes());
     out.extend_from_slice(&flags_block);
+    out.push(lit_mode);
     out.extend_from_slice(&lits_block);
+    out.extend_from_slice(&dmode_block);
+    out.extend_from_slice(&new_lo_block);
+    out.extend_from_slice(&new_hi_block);
     out.extend_from_slice(&len_lo_block);
     out.extend_from_slice(&len_hi_block);
-    out.extend_from_slice(&dist_lo_block);
-    out.extend_from_slice(&dist_hi_block);
     out
 }
 
@@ -4738,16 +4783,60 @@ pub(crate) fn lz_rans_decode(
 
     let (flags, consumed) = rans_order1_decode(blob, pos, n_tokens, 2)?;
     pos += consumed;
-    let (literals, consumed) = rans_order0_decode(blob, pos, n_lits, n_distinct.max(1))?;
+    if pos >= blob.len() {
+        return Err(CubrimError::Decode("LzRans: missing lit_mode byte".into()));
+    }
+    let lit_mode = blob[pos];
+    pos += 1;
+    let (literals, consumed) = match lit_mode {
+        0 => rans_order0_decode(blob, pos, n_lits, n_distinct.max(1))?,
+        1 => rans_order1_decode(blob, pos, n_lits, n_distinct.max(1))?,
+        m => {
+            return Err(CubrimError::Decode(format!("LzRans: bad lit_mode {m}")));
+        }
+    };
+    pos += consumed;
+    let (dist_modes, consumed) = rans_order1_decode(blob, pos, n_matches, 4)?;
+    pos += consumed;
+    let n_new = dist_modes.iter().filter(|&&m| m == 3).count();
+    let (new_lo, consumed) = rans_order0_decode(blob, pos, n_new, 256)?;
+    pos += consumed;
+    let (new_hi, consumed) = rans_order0_decode(blob, pos, n_new, 256)?;
     pos += consumed;
     let (len_lo, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
     pos += consumed;
     let (len_hi, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
     pos += consumed;
-    let (dist_lo, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
-    pos += consumed;
-    let (dist_hi, consumed) = rans_order0_decode(blob, pos, n_matches, 256)?;
-    pos += consumed;
+
+    // Reconstruct distances from the repeat-offset modes (mirror of the encoder).
+    let mut rep = LZ_REP_INIT;
+    let mut ni = 0usize;
+    let mut distances: Vec<usize> = Vec::with_capacity(n_matches);
+    for &m in &dist_modes {
+        let d = match m {
+            0 => rep[0],
+            1 => {
+                rep.swap(0, 1);
+                rep[0]
+            }
+            2 => {
+                let r2 = rep[2];
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = r2;
+                rep[0]
+            }
+            _ => {
+                let d = (new_hi[ni] << 8) | new_lo[ni];
+                ni += 1;
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = d;
+                d
+            }
+        };
+        distances.push(d);
+    }
 
     let mut out: Vec<usize> = Vec::with_capacity(count);
     let mut li = 0usize;
@@ -4764,7 +4853,7 @@ pub(crate) fn lz_rans_decode(
                 return Err(CubrimError::Decode("LzRans: match stream underflow".into()));
             }
             let length = (len_hi[mi] << 8) | len_lo[mi];
-            let distance = (dist_hi[mi] << 8) | dist_lo[mi];
+            let distance = distances[mi];
             mi += 1;
             if distance == 0 || distance > out.len() {
                 return Err(CubrimError::Decode(format!(
@@ -4962,6 +5051,34 @@ mod tests {
         assert_eq!(lz.len(), rans.len(), "competitive rail must pick same per-file min");
         assert_eq!(decode(&lz).unwrap(), data);
         assert_eq!(decode(&rans).unwrap(), data);
+    }
+
+    #[test]
+    fn test_lz_rans_wins_on_long_range_and_dispatch_round_trips() {
+        // A within-block long-range input (10KB structured unit × 5 ≈ 50KB): the
+        // repeat-offset cache codes the inter-copy distances as mode-0, so LzRans
+        // should WIN the competitive rail. This both proves the repeat-offset lever
+        // and exercises the scheme-12 decode dispatch end-to-end.
+        let mut state: u64 = 0xABCDEF0123456789;
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+        let table = b"abcdefghij  ,.0123";
+        let unit: Vec<u8> = (0..10000).map(|_| table[nxt(table.len())]).collect();
+        let mut data = Vec::new();
+        for _ in 0..5 {
+            data.extend_from_slice(&unit);
+        }
+        let blob = encode_with_config(&data, &lz_rans_cfg());
+        assert_eq!(decode(&blob).unwrap(), data, "long-range round-trip");
+        // value_scheme byte is at the cube header (N=2): offset 22.
+        assert_eq!(blob[5], crate::header::MODE_CUBE, "must be cube mode");
+        assert_eq!(
+            blob[22],
+            ValueScheme::LzRans.scheme_byte(),
+            "LzRans must win the rail on long-range data (repeat-offset lever)"
+        );
     }
 
     #[test]
