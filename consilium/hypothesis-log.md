@@ -365,3 +365,32 @@ created: 2026-06-17
 - **Root cause:** gzip's sliding window already captures versioned/near-duplicate repeats and shared boilerplate across a concatenated stream, with NO explicit dictionary, NO 8-byte reference ids, NO chunk-length table. The CDC scheme pays all that overhead (ref_gz 312–512 B + lentab + entropy lost to chunk-boundary fragmentation), which exceeds the dedup saving. The naive idea's intuition ("repeated data → short refs") is real but is ALREADY realised — better — by a 30-year-old general compressor on the concatenation.
 - **This strengthens the H-17/H-18 closure:** the entire external-snapshot / dedup family (operator dialogue `_temp/addressator.txt`) is now closed on two independent grounds — (1) info-conservation for the universal-reference form (H-17), (2) it loses to gzip-on-concat even where redundancy is maximal (H-18c). No corpus makes a bespoke shared-dict dedup worth more than concatenate-then-compress.
 - **Kill/re-open condition:** a corpus where chunks must be RANDOM-ACCESSED individually (so concatenation is not an option — e.g. a deduplicating block store / backup system), which is a storage-system design, not a single-archive compression scheme. Out of scope for the Cubrim archiver.
+
+---
+
+### H-20 — order-2 context rANS (deeper context model on the BWT'd value stream)
+
+- **Hypothesis (queue item 1, 2026-06-23):** the H-19 champion BwtRans (scheme 7) uses an order-1 context rANS (context = previous code). Order-2 context (key = (prev2, prev1)) predicts the BWT'd stream more sharply. Order-2 context was a measured NO-GO for **Huffman** (Gotcha #6, EntropyContext2: order-2 fallback tables blew the budget), but rANS codes fractionally AND ships **sparse** freq tables (vs Huffman's full `code_len[n_distinct]`), so the table-cost arithmetic differs and the branch was worth re-charging.
+- **Probe FIRST (`docs/ephemeral/research/probe_h20_order2_rans_charged.py`, Gotcha #6/#7 discipline — every fallback level charged):** modelled the value-stream bytes of order-0 / order-1 / order-2 rANS with identical sparse-table accounting (2 B `n_syms` + 3 B per nonzero symbol; +2 B ctx-id for order-1, +4 B key for order-2; +4 B state). Two order-2 layouts: 3-level (order2→order1→order0) and 2-level Option B (order2→order0, no order-1 tables).
+  - **Canonical 3-level order-2 = clear NO-GO:** value-stream strictly LARGER than order-1 on all 10 files (e.g. text +1144 B, sparse_clustered +225 B) — the added order-2 tables cost more than the entropy they save, exactly as Gotcha #6 predicts. Per the brief's gate ("charged gap negative → NO-GO"), the 3-level chain is rejected.
+  - **2-level Option B flagged a possible win** vs the order-1 *and* order-0 references on `binary_mixed`/`text`/`sparse_clustered` — but the idealised probe omits the distance-map + header that pushes incompressible files to raw storage. Ground-truth bench showed `binary_mixed`/`dense`/`random_high`/`sparse_small` are stored **raw** by the champion, so the only honest resolution was a real round-trippable codec, not the probe.
+- **IMPLEMENTATION (`ValueScheme::Order2Rans`, header byte 8, `code/cubrim-rs/src/codec.rs`):** BWT front-end (reuse `bwt_encode_codes`) + order-2 context rANS. Encoder emits the smaller of the 3-level and 2-level wire layouts (distinguished on the wire by `n_ctx1`=0 ⇒ 2-level); the decode fallback chain is order-2 → order-1 (if present) → order-0, **every level serialized and charged** (Gotcha #6 — sparse freq tables, `[sym:u8][freq:u16]`). Added as a 4th competitive candidate inside the scheme-7 `min(BwtRans, BwtEntropy, EntropyContext, Order2Rans)` rail — structurally regression-proof (Gotcha #4).
+- **MEASURED (frozen corpus, `python3 code/bench/run_bench.py --value-scheme bwt-rans`, round-trip PASS on all 10; champion 0.221726 reproduced byte-exact first, then candidate):**
+
+  | file | champion BwtRans (B) | + Order2Rans (B) | Δ B | winning scheme |
+  |---|---:|---:|---:|---|
+  | sparse_clustered | 443 | 400 | −43 | 8 (order-2 rANS) |
+  | text | 3177 | 2889 | −288 | 8 (order-2 rANS) |
+  | binary_mixed | 8205 (raw) | 6885 (cube) | −1320 | 8 (order-2 rANS) |
+  | log_like | 1402 | 1402 | 0 | 7 (BwtRans) |
+  | block_bound_runs | 4169 | 4169 | 0 | 7 (BwtRans) |
+  | dense | 4109 | 4109 | 0 | raw |
+  | random_high | 4109 | 4109 | 0 | raw |
+  | sparse_small | 269 | 269 | 0 | raw |
+  | both_sparse_16 | 29 | 29 | 0 | raw |
+  | both_sparse_24 | 37 | 37 | 0 | raw |
+  | **aggregate** | **0.221726** | **0.207618** | — | **−0.014108 (−6.36% rel)** |
+
+  The headline win: `binary_mixed` flips from **raw storage** (incompressible by order-0/order-1) to **cube mode** — order-2 context captures BWT-grouped run structure that the order-1 model and order-0 both miss. The 2-level Option B layout wins all three improved files (the order-1 tables would over-fragment); the 3-level layout is never selected, consistent with the probe.
+- **VERDICT: GO.** Round-trip non-negotiable ✅ (10/10 byte-exact; `cargo test` 190 passed incl. 8 new order-2 tests — unit both-submodes, empty/singleton, high-entropy, full-codec corpus round-trip via both entry points, competitive non-regression, property 40-trial, truncated-blob no-panic). Tables charged ✅ (every fallback level serialized; Gotcha #6 honoured — the 3-level chain that *fails* the charge is rejected, the 2-level that *passes* wins). Competitive per-file rail ✅ (`gate-competitive.sh --value-scheme bwt-rans` PASS, no regression; direct vs pinned champion: 3 improved, 7 unchanged, 0 regressed). Aggregate strictly improves vs the pinned champion 0.221726 ✅.
+- **Harness notes:** (1) `gate-corpus-hash.sh` manifest-level check fails only on the manifest's machine-specific absolute paths — all 10 per-file sha256 match the frozen manifest AND the champion 0.221726 reproduces byte-exact, so corpus content is verified frozen. (2) `gate-ratio.sh` standalone benches the *committed* leaderboard's scheme (still stale at BwtEntropy 0.299337) and so does not exercise the bwt-rans/order-2 path — the authoritative comparison is the controlled `run_bench.py --value-scheme bwt-rans` champion-vs-candidate above. Leaderboard untouched (operator-gated); promotion is the Mac monitor's job after independent re-verification.

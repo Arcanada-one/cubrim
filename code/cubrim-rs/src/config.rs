@@ -137,6 +137,33 @@ pub enum ValueScheme {
     ///
     /// Header byte = 7.
     BwtRans,
+    /// BWT reorder + order-2 context-adaptive rANS on the transformed code stream (H-20).
+    ///
+    /// Same BWT front-end as BwtRans (scheme 7); the entropy back-end uses an
+    /// order-2 context model (key = (prev2_code, prev_code)) instead of order-1.
+    /// Every fallback level the decoder needs is serialized and charged (Gotcha #6):
+    /// the encoder emits the smaller of two wire layouts —
+    ///   submode A (3-level): fallback order-0 table + order-1 tables + order-2 tables,
+    ///   submode B (2-level): fallback order-0 table + order-2 tables (no order-1),
+    /// distinguished on the wire by n_ctx1 (0 ⇒ submode B). The fallback chain at
+    /// decode is order-2 → order-1 (if present) → order-0.
+    ///
+    /// Competitive (Gotcha #4): produced only as a winner of the scheme-7 selection
+    /// when it is strictly smaller than BwtRans / BwtEntropy / EntropyContext, so it
+    /// can never regress a file.
+    ///
+    /// Wire (after header + gap streams):
+    ///   [primary_index : u16 BE]     — 2 bytes; BWT primary index (≤ L ≤ 65536)
+    ///   [scale_bits    : u8]         — rANS total M = 1 << scale_bits
+    ///   [fallback(order-0) table]    — [n_syms u16 BE] then (sym u8, freq u16 BE)*
+    ///   [n_ctx1 : u16 BE]            — number of order-1 tables (0 ⇒ submode B)
+    ///   for each order-1 table: [ctx_id u16 BE] [table]
+    ///   [n_ctx2 : u16 BE]            — number of order-2 tables
+    ///   for each order-2 table: [prev2 u16 BE] [prev1 u16 BE] [table]
+    ///   [rans_len : u32 BE] [rans payload : bytes]
+    ///
+    /// Header byte = 8.
+    Order2Rans,
 }
 
 impl GapScheme {
@@ -169,6 +196,7 @@ impl ValueScheme {
             ValueScheme::EntropyContext2 => 5,
             ValueScheme::BwtEntropy => 6,
             ValueScheme::BwtRans => 7,
+            ValueScheme::Order2Rans => 8,
         }
     }
 
@@ -182,6 +210,7 @@ impl ValueScheme {
             5 => Some(ValueScheme::EntropyContext2),
             6 => Some(ValueScheme::BwtEntropy),
             7 => Some(ValueScheme::BwtRans),
+            8 => Some(ValueScheme::Order2Rans),
             _ => None,
         }
     }
@@ -314,9 +343,13 @@ mod tests {
             "0 is not a valid value_scheme byte"
         );
         assert_eq!(
-            ValueScheme::from_byte(8),
+            ValueScheme::from_byte(ValueScheme::Order2Rans.scheme_byte()),
+            Some(ValueScheme::Order2Rans)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(9),
             None,
-            "8 is not a valid value_scheme byte"
+            "9 is not a valid value_scheme byte"
         );
         assert_eq!(
             ValueScheme::from_byte(99),

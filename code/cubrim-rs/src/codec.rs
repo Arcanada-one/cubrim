@@ -95,10 +95,21 @@ fn estimate_cube_size(
             bwt_entropy_size(seq_codes, state.inverse_dict.len())
         }
         ValueScheme::BwtRans => {
-            // Competitive: encoder emits min(BwtRans, BwtEntropy, EntropyContext).
-            // Estimate with the same minimum so the raw-vs-cube decision matches.
+            // Competitive: encoder emits min(BwtRans, BwtEntropy, EntropyContext,
+            // Order2Rans). Estimate with the same minimum so the raw-vs-cube decision
+            // matches.
             let n_distinct = state.inverse_dict.len();
             bwt_rans_size(seq_codes, n_distinct)
+                .min(bwt_entropy_size(seq_codes, n_distinct))
+                .min(context_huffman_size(seq_codes, n_distinct))
+                .min(bwt_order2_rans_size(seq_codes, n_distinct))
+        }
+        ValueScheme::Order2Rans => {
+            // Same competitive minimum as the BwtRans arm (Order2Rans is a winner
+            // of that selection; its direct-config estimate mirrors it).
+            let n_distinct = state.inverse_dict.len();
+            bwt_order2_rans_size(seq_codes, n_distinct)
+                .min(bwt_rans_size(seq_codes, n_distinct))
                 .min(bwt_entropy_size(seq_codes, n_distinct))
                 .min(context_huffman_size(seq_codes, n_distinct))
         }
@@ -418,10 +429,61 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             let rans_bytes = bwt_rans_encode(&seq_codes, n_distinct);
             let bwt_huff_bytes = bwt_entropy_encode(&seq_codes, n_distinct);
             let t4_bytes_val = context_huffman_encode(&seq_codes, n_distinct);
+            // H-20 order-2 rANS candidate (competitive, never regresses — Gotcha #4).
+            let order2_bytes = bwt_order2_rans_encode(&seq_codes, n_distinct);
 
-            // Choose the smallest of the three candidates.
+            // Choose the smallest of the four candidates.
             let mut winner_scheme = ValueScheme::BwtRans;
             let mut encoded_values = rans_bytes;
+            if bwt_huff_bytes.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::BwtEntropy;
+                encoded_values = bwt_huff_bytes;
+            }
+            if t4_bytes_val.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::EntropyContext;
+                encoded_values = t4_bytes_val;
+            }
+            if order2_bytes.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::Order2Rans;
+                encoded_values = order2_bytes;
+            }
+
+            let winner_cube_state = CubeHeaderState {
+                n,
+                b,
+                l,
+                count: cube.count,
+                b_k,
+                map_scheme: gap_scheme.scheme_byte(),
+                value_scheme: winner_scheme.scheme_byte(),
+                w,
+                inverse_dict: &inverse_dict,
+                axis_gap_counts: &axis_gap_counts,
+            };
+            let hdr = serialize_cube_header(&winner_cube_state);
+            let mut out = hdr;
+            for stream in &gap_streams {
+                out.extend_from_slice(stream);
+            }
+            out.extend_from_slice(&encoded_values);
+            return out;
+        }
+        ValueScheme::Order2Rans => {
+            // Direct selection mirrors the BwtRans competitive arm: emit
+            // min(Order2Rans, BwtRans, BwtEntropy, EntropyContext) with the winner's
+            // scheme byte, so a direct config request can never regress either.
+            let n_distinct = inverse_dict.len();
+            let order2_bytes = bwt_order2_rans_encode(&seq_codes, n_distinct);
+            let rans_bytes = bwt_rans_encode(&seq_codes, n_distinct);
+            let bwt_huff_bytes = bwt_entropy_encode(&seq_codes, n_distinct);
+            let t4_bytes_val = context_huffman_encode(&seq_codes, n_distinct);
+
+            let mut winner_scheme = ValueScheme::Order2Rans;
+            let mut encoded_values = order2_bytes;
+            if rans_bytes.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::BwtRans;
+                encoded_values = rans_bytes;
+            }
             if bwt_huff_bytes.len() < encoded_values.len() {
                 winner_scheme = ValueScheme::BwtEntropy;
                 encoded_values = bwt_huff_bytes;
@@ -796,6 +858,33 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 if code >= n_distinct {
                     return Err(CubrimError::Decode(format!(
                         "BwtRans code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::Order2Rans => {
+            // BWT inverse + order-2 context rANS decode (H-20).
+            let n_distinct = inverse_dict.len();
+            let (seq_codes, _consumed) = bwt_order2_rans_decode(blob, offset, count, n_distinct)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "Order2Rans decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(),
+                    count
+                )));
+            }
+
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "Order2Rans code {} at position {} >= n_distinct {}",
                         code, i, n_distinct
                     )));
                 }
@@ -2408,6 +2497,404 @@ pub(crate) fn bwt_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
     bwt_rans_encode(seq_codes, n_distinct).len()
 }
 
+// ── H-20: order-2 context rANS ───────────────────────────────────────────────
+//
+// Generalizes the order-1 rANS back-end (scheme 7) to an order-2 context model
+// keyed by (prev2_code, prev_code). The decoder's fallback chain is
+// order-2 → order-1 → order-0; EVERY level is serialized and charged (Gotcha #6).
+// The encoder additionally tries a 2-level layout (order-2 → order-0, omitting the
+// order-1 tables) and keeps whichever is smaller — the 2-level layout wins when the
+// order-1 tables cost more than the payload they save (over-fragmentation).
+
+/// Read one sparse rANS freq table (same wire format as rans_serialize_ctx_table)
+/// at `pos`, building a full RansCtxTable (freq + cum + slot_to_sym). Standalone
+/// twin of the closure inside rans_order1_decode, reused by the order-2 decoder.
+fn rans_read_ctx_table(
+    blob: &[u8],
+    mut pos: usize,
+    n_distinct: usize,
+    m: u32,
+) -> Result<(RansCtxTable, usize), CubrimError> {
+    if pos + 2 > blob.len() {
+        return Err(CubrimError::Decode("rANS2: table n_syms truncated".into()));
+    }
+    let n_syms = u16::from_be_bytes([blob[pos], blob[pos + 1]]) as usize;
+    pos += 2;
+    let mut freq = vec![0u32; n_distinct];
+    let mut sum: u32 = 0;
+    for _ in 0..n_syms {
+        if pos + 3 > blob.len() {
+            return Err(CubrimError::Decode("rANS2: table entry truncated".into()));
+        }
+        let sym = blob[pos] as usize;
+        let f = u16::from_be_bytes([blob[pos + 1], blob[pos + 2]]) as u32;
+        pos += 3;
+        if sym >= n_distinct {
+            return Err(CubrimError::Decode(format!(
+                "rANS2: table symbol {sym} >= n_distinct {n_distinct}"
+            )));
+        }
+        if f == 0 {
+            return Err(CubrimError::Decode("rANS2: table freq 0 (corrupt)".into()));
+        }
+        freq[sym] = f;
+        sum += f;
+    }
+    let mut cum = vec![0u32; n_distinct];
+    let mut slot_to_sym = vec![0u16; m as usize];
+    let mut acc: u32 = 0;
+    for s in 0..n_distinct {
+        cum[s] = acc;
+        let end = acc + freq[s];
+        for slot in acc..end {
+            slot_to_sym[slot as usize] = s as u16;
+        }
+        acc = end;
+    }
+    if n_syms > 0 && sum != m {
+        return Err(CubrimError::Decode(format!(
+            "rANS2: freq sum {sum} != M {m} (corrupt)"
+        )));
+    }
+    Ok((
+        RansCtxTable {
+            freq,
+            cum,
+            slot_to_sym,
+        },
+        pos,
+    ))
+}
+
+/// Build order-0 (global), order-1, and order-2 per-context COUNT tables.
+/// Every position contributes to its order-0/1/2 context. A context qualifies for
+/// its own table only when it has >= MIN_CTX_COUNT observations (mirrors the order-1
+/// champion's fallback discipline). Returns counts (not yet normalized).
+#[allow(clippy::type_complexity)]
+fn build_order2_count_tables(
+    seq_codes: &[usize],
+    n_distinct: usize,
+) -> (
+    Vec<usize>,
+    std::collections::BTreeMap<u16, Vec<usize>>,
+    std::collections::BTreeMap<(u16, u16), Vec<usize>>,
+) {
+    use std::collections::BTreeMap;
+    let mut global = vec![0usize; n_distinct];
+    let mut c1: BTreeMap<u16, Vec<usize>> = BTreeMap::new();
+    let mut c2: BTreeMap<(u16, u16), Vec<usize>> = BTreeMap::new();
+    let mut p2: u16 = 0;
+    let mut p1: u16 = 0;
+    for &code in seq_codes {
+        if code < n_distinct {
+            global[code] += 1;
+            c1.entry(p1).or_insert_with(|| vec![0usize; n_distinct])[code] += 1;
+            c2.entry((p2, p1)).or_insert_with(|| vec![0usize; n_distinct])[code] += 1;
+        }
+        p2 = p1;
+        p1 = code as u16;
+    }
+    (global, c1, c2)
+}
+
+/// Select the table for context (p2, p1): order-2 → order-1 → order-0 fallback.
+fn order2_select<'a>(
+    o2_idx: &std::collections::HashMap<(u16, u16), usize>,
+    o2_tables: &'a [RansCtxTable],
+    o1_idx: &std::collections::HashMap<u16, usize>,
+    o1_tables: &'a [RansCtxTable],
+    fallback: &'a RansCtxTable,
+    p2: u16,
+    p1: u16,
+) -> &'a RansCtxTable {
+    if let Some(&i) = o2_idx.get(&(p2, p1)) {
+        return &o2_tables[i];
+    }
+    if let Some(&i) = o1_idx.get(&p1) {
+        return &o1_tables[i];
+    }
+    fallback
+}
+
+/// Encode the (already-BWT'd) code stream with order-2 context rANS.
+/// `use_order1` toggles the 3-level (true) vs 2-level (false) wire layout.
+/// Wire: scale_bits(1) + fallback table + n_ctx1(2) + order-1 tables
+///       + n_ctx2(2) + order-2 tables + rans_len(4) + rans bytes.
+fn order2_rans_encode(seq_codes: &[usize], n_distinct: usize, use_order1: bool) -> Vec<u8> {
+    use std::collections::HashMap;
+    let scale_bits = RANS_SCALE_BITS;
+    let mut out: Vec<u8> = Vec::new();
+    out.push(scale_bits as u8);
+
+    if seq_codes.is_empty() || n_distinct == 0 {
+        out.extend_from_slice(&0u16.to_be_bytes()); // fallback n_syms = 0
+        out.extend_from_slice(&0u16.to_be_bytes()); // n_ctx1 = 0
+        out.extend_from_slice(&0u16.to_be_bytes()); // n_ctx2 = 0
+        out.extend_from_slice(&0u32.to_be_bytes()); // rans_len = 0
+        return out;
+    }
+
+    let (global, c1, c2) = build_order2_count_tables(seq_codes, n_distinct);
+    let fallback_freq = rans_normalize(&global, scale_bits);
+    let fallback_table = rans_table_from_freq(fallback_freq.clone());
+
+    // Qualifying order-1 tables (only if use_order1).
+    let mut o1_tables: Vec<RansCtxTable> = Vec::new();
+    let mut o1_idx: HashMap<u16, usize> = HashMap::new();
+    let mut o1_serial: Vec<(u16, Vec<u32>)> = Vec::new();
+    if use_order1 {
+        for (&ctx, counts) in &c1 {
+            if counts.iter().sum::<usize>() >= MIN_CTX_COUNT {
+                let freq = rans_normalize(counts, scale_bits);
+                o1_idx.insert(ctx, o1_tables.len());
+                o1_tables.push(rans_table_from_freq(freq.clone()));
+                o1_serial.push((ctx, freq));
+            }
+        }
+    }
+
+    // Qualifying order-2 tables.
+    let mut o2_tables: Vec<RansCtxTable> = Vec::new();
+    let mut o2_idx: HashMap<(u16, u16), usize> = HashMap::new();
+    let mut o2_serial: Vec<((u16, u16), Vec<u32>)> = Vec::new();
+    for (&key, counts) in &c2 {
+        if counts.iter().sum::<usize>() >= MIN_CTX_COUNT {
+            let freq = rans_normalize(counts, scale_bits);
+            o2_idx.insert(key, o2_tables.len());
+            o2_tables.push(rans_table_from_freq(freq.clone()));
+            o2_serial.push((key, freq));
+        }
+    }
+
+    // Serialize header.
+    rans_serialize_ctx_table(&mut out, &fallback_freq);
+    out.extend_from_slice(&(o1_serial.len() as u16).to_be_bytes());
+    for (ctx, freq) in &o1_serial {
+        out.extend_from_slice(&ctx.to_be_bytes());
+        rans_serialize_ctx_table(&mut out, freq);
+    }
+    out.extend_from_slice(&(o2_serial.len() as u16).to_be_bytes());
+    for ((p2, p1), freq) in &o2_serial {
+        out.extend_from_slice(&p2.to_be_bytes());
+        out.extend_from_slice(&p1.to_be_bytes());
+        rans_serialize_ctx_table(&mut out, freq);
+    }
+
+    // rANS encode in reverse so decode is forward (context always available).
+    let n = seq_codes.len();
+    let mut buf = vec![0u8; 16 + 4 * n];
+    let mut p = buf.len();
+    let mut x: u32 = RANS_L;
+    for i in (0..n).rev() {
+        let p1 = if i >= 1 { seq_codes[i - 1] as u16 } else { 0 };
+        let p2 = if i >= 2 { seq_codes[i - 2] as u16 } else { 0 };
+        let table = order2_select(
+            &o2_idx,
+            &o2_tables,
+            &o1_idx,
+            &o1_tables,
+            &fallback_table,
+            p2,
+            p1,
+        );
+        let s = seq_codes[i];
+        let f = table.freq[s];
+        let c = table.cum[s];
+        debug_assert!(f > 0, "rANS2 encode: zero freq for symbol {s}");
+        let x_max = ((RANS_L >> scale_bits) << 8) * f;
+        while x >= x_max {
+            p -= 1;
+            buf[p] = (x & 0xff) as u8;
+            x >>= 8;
+        }
+        x = ((x / f) << scale_bits) + (x % f) + c;
+    }
+    p -= 4;
+    buf[p] = (x & 0xff) as u8;
+    buf[p + 1] = ((x >> 8) & 0xff) as u8;
+    buf[p + 2] = ((x >> 16) & 0xff) as u8;
+    buf[p + 3] = ((x >> 24) & 0xff) as u8;
+    let rans_bytes = &buf[p..];
+    out.extend_from_slice(&(rans_bytes.len() as u32).to_be_bytes());
+    out.extend_from_slice(rans_bytes);
+    out
+}
+
+/// Decode the order-2 context rANS stream from blob at offset.
+/// Returns (decoded codes, bytes consumed from offset).
+fn order2_rans_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    use std::collections::HashMap;
+    let mut pos = offset;
+    if pos + 1 > blob.len() {
+        return Err(CubrimError::Decode("rANS2: blob too short for scale_bits".into()));
+    }
+    let scale_bits = blob[pos] as u32;
+    pos += 1;
+    if scale_bits == 0 || scale_bits > 16 {
+        return Err(CubrimError::Decode(format!(
+            "rANS2: invalid scale_bits {scale_bits}"
+        )));
+    }
+    let m: u32 = 1 << scale_bits;
+    let mask: u32 = m - 1;
+
+    // Fallback (order-0) table.
+    let (fallback_table, np) = rans_read_ctx_table(blob, pos, n_distinct, m)?;
+    pos = np;
+
+    // Order-1 tables.
+    if pos + 2 > blob.len() {
+        return Err(CubrimError::Decode("rANS2: blob too short for n_ctx1".into()));
+    }
+    let n_ctx1 = u16::from_be_bytes([blob[pos], blob[pos + 1]]) as usize;
+    pos += 2;
+    let mut o1_idx: HashMap<u16, usize> = HashMap::new();
+    let mut o1_tables: Vec<RansCtxTable> = Vec::with_capacity(n_ctx1);
+    for _ in 0..n_ctx1 {
+        if pos + 2 > blob.len() {
+            return Err(CubrimError::Decode("rANS2: ctx1 id truncated".into()));
+        }
+        let ctx_id = u16::from_be_bytes([blob[pos], blob[pos + 1]]);
+        pos += 2;
+        let (table, np) = rans_read_ctx_table(blob, pos, n_distinct, m)?;
+        pos = np;
+        o1_idx.insert(ctx_id, o1_tables.len());
+        o1_tables.push(table);
+    }
+
+    // Order-2 tables.
+    if pos + 2 > blob.len() {
+        return Err(CubrimError::Decode("rANS2: blob too short for n_ctx2".into()));
+    }
+    let n_ctx2 = u16::from_be_bytes([blob[pos], blob[pos + 1]]) as usize;
+    pos += 2;
+    let mut o2_idx: HashMap<(u16, u16), usize> = HashMap::new();
+    let mut o2_tables: Vec<RansCtxTable> = Vec::with_capacity(n_ctx2);
+    for _ in 0..n_ctx2 {
+        if pos + 4 > blob.len() {
+            return Err(CubrimError::Decode("rANS2: ctx2 key truncated".into()));
+        }
+        let p2 = u16::from_be_bytes([blob[pos], blob[pos + 1]]);
+        let p1 = u16::from_be_bytes([blob[pos + 2], blob[pos + 3]]);
+        pos += 4;
+        let (table, np) = rans_read_ctx_table(blob, pos, n_distinct, m)?;
+        pos = np;
+        o2_idx.insert((p2, p1), o2_tables.len());
+        o2_tables.push(table);
+    }
+
+    // rANS payload.
+    if pos + 4 > blob.len() {
+        return Err(CubrimError::Decode("rANS2: blob too short for rans_len".into()));
+    }
+    let rans_len =
+        u32::from_be_bytes([blob[pos], blob[pos + 1], blob[pos + 2], blob[pos + 3]]) as usize;
+    pos += 4;
+    if pos + rans_len > blob.len() {
+        return Err(CubrimError::Decode(format!(
+            "rANS2: payload truncated: need {rans_len}, have {}",
+            blob.len().saturating_sub(pos)
+        )));
+    }
+    let payload = &blob[pos..pos + rans_len];
+    pos += rans_len;
+
+    if count == 0 {
+        return Ok((vec![], pos - offset));
+    }
+    if payload.len() < 4 {
+        return Err(CubrimError::Decode("rANS2: payload too short for state".into()));
+    }
+
+    let mut cursor = 0usize;
+    let mut x: u32 = payload[0] as u32
+        | (payload[1] as u32) << 8
+        | (payload[2] as u32) << 16
+        | (payload[3] as u32) << 24;
+    cursor += 4;
+
+    let mut result = Vec::with_capacity(count);
+    let mut p2: u16 = 0;
+    let mut p1: u16 = 0;
+    for _ in 0..count {
+        let table = order2_select(
+            &o2_idx,
+            &o2_tables,
+            &o1_idx,
+            &o1_tables,
+            &fallback_table,
+            p2,
+            p1,
+        );
+        let slot = x & mask;
+        let s = table.slot_to_sym[slot as usize] as usize;
+        let f = table.freq[s];
+        let c = table.cum[s];
+        x = f * (x >> scale_bits) + slot - c;
+        while x < RANS_L {
+            if cursor >= payload.len() {
+                return Err(CubrimError::Decode("rANS2: payload exhausted in renorm".into()));
+            }
+            x = (x << 8) | payload[cursor] as u32;
+            cursor += 1;
+        }
+        result.push(s);
+        p2 = p1;
+        p1 = s as u16;
+    }
+
+    Ok((result, pos - offset))
+}
+
+/// Encode the value-code stream with BWT + order-2 rANS, picking the smaller of the
+/// 3-level and 2-level wire layouts. Wire: [primary u16 BE] + order-2 rANS body.
+pub(crate) fn bwt_order2_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (bwt_out, primary) = bwt_encode_codes(seq_codes);
+    let body3 = order2_rans_encode(&bwt_out, n_distinct, true);
+    let body2 = order2_rans_encode(&bwt_out, n_distinct, false);
+    let body = if body2.len() < body3.len() { body2 } else { body3 };
+    let mut out = Vec::with_capacity(2 + body.len());
+    out.extend_from_slice(&primary.to_be_bytes());
+    out.extend_from_slice(&body);
+    out
+}
+
+/// Decode the BWT + order-2 rANS stream from blob at offset.
+pub(crate) fn bwt_order2_rans_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if offset + 2 > blob.len() {
+        return Err(CubrimError::Decode(
+            "Order2Rans: blob too short for primary_index".into(),
+        ));
+    }
+    let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
+    let body_offset = offset + 2;
+    let (bwt_out, consumed) = order2_rans_decode(blob, body_offset, count, n_distinct)?;
+    let seq_codes = bwt_decode_codes(&bwt_out, primary, n_distinct)?;
+    if seq_codes.len() != count {
+        return Err(CubrimError::Decode(format!(
+            "Order2Rans: decoded {} codes but expected {}",
+            seq_codes.len(),
+            count
+        )));
+    }
+    Ok((seq_codes, 2 + consumed))
+}
+
+/// Estimate byte size of the BWT + order-2 rANS stream (full encode then len).
+pub(crate) fn bwt_order2_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    bwt_order2_rans_encode(seq_codes, n_distinct).len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3393,7 +3880,10 @@ mod tests {
         // scheme byte 7 = BwtRans (added after BwtEntropy, H-19)
         assert_eq!(ValueScheme::BwtRans.scheme_byte(), 7u8);
         assert_eq!(ValueScheme::from_byte(7u8), Some(ValueScheme::BwtRans));
-        assert_eq!(ValueScheme::from_byte(8u8), None);
+        // scheme byte 8 = Order2Rans (added after BwtRans, H-20)
+        assert_eq!(ValueScheme::Order2Rans.scheme_byte(), 8u8);
+        assert_eq!(ValueScheme::from_byte(8u8), Some(ValueScheme::Order2Rans));
+        assert_eq!(ValueScheme::from_byte(9u8), None);
     }
 
     // ── Step 5.2: Context-key derivation + sentinels ──────────────────────────
@@ -4122,6 +4612,153 @@ mod tests {
     fn test_bwt_rans_scheme_byte() {
         assert_eq!(ValueScheme::BwtRans.scheme_byte(), 7u8);
         assert_eq!(ValueScheme::from_byte(7u8), Some(ValueScheme::BwtRans));
+    }
+
+    // ── H-20 order-2 rANS (scheme 8) tests ──────────────────────────────────
+
+    fn order2_rans_cfg() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::Order2Rans,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    #[test]
+    fn test_order2_rans_scheme_byte() {
+        assert_eq!(ValueScheme::Order2Rans.scheme_byte(), 8u8);
+        assert_eq!(ValueScheme::from_byte(8u8), Some(ValueScheme::Order2Rans));
+    }
+
+    #[test]
+    fn test_order2_rans_unit_round_trip_both_submodes() {
+        // Stream with strong order-2 structure (the H-20 win zone). Exercise both
+        // the 3-level and 2-level wire layouts directly.
+        let n_distinct = 5usize;
+        let mut seq = Vec::new();
+        for _ in 0..300 {
+            seq.extend_from_slice(&[0, 1, 2, 0, 1, 3, 0, 1, 2, 4]);
+        }
+        for use_o1 in [true, false] {
+            let enc = order2_rans_encode(&seq, n_distinct, use_o1);
+            let (dec, consumed) = order2_rans_decode(&enc, 0, seq.len(), n_distinct).unwrap();
+            assert_eq!(dec, seq, "order-2 rANS round-trip mismatch (use_order1={use_o1})");
+            assert_eq!(consumed, enc.len(), "decode must consume the whole stream");
+        }
+    }
+
+    #[test]
+    fn test_order2_rans_empty_and_singletons() {
+        let enc = order2_rans_encode(&[], 0, true);
+        let (dec, _) = order2_rans_decode(&enc, 0, 0, 0).unwrap();
+        assert!(dec.is_empty());
+        let seq = vec![0usize; 500];
+        for use_o1 in [true, false] {
+            let enc = order2_rans_encode(&seq, 1, use_o1);
+            let (dec, _) = order2_rans_decode(&enc, 0, seq.len(), 1).unwrap();
+            assert_eq!(dec, seq);
+        }
+    }
+
+    #[test]
+    fn test_order2_rans_high_entropy_round_trip() {
+        // Near-random stream, many distinct — must round-trip (no freq-0 / renorm loop).
+        let n_distinct = 256usize;
+        let seq: Vec<usize> = (0..8192).map(|i| ((i * 73 + 11) % 256) as usize).collect();
+        for use_o1 in [true, false] {
+            let enc = order2_rans_encode(&seq, n_distinct, use_o1);
+            let (dec, _) = order2_rans_decode(&enc, 0, seq.len(), n_distinct).unwrap();
+            assert_eq!(dec, seq, "high-entropy order-2 rANS round-trip mismatch (o1={use_o1})");
+        }
+    }
+
+    #[test]
+    fn test_bwt_order2_rans_corpus_round_trip_all_files() {
+        // Byte-exact round-trip on all 10 frozen corpus files through the full codec.
+        // Scheme 7's competitive selection may emit scheme byte 8 (Order2Rans) — the
+        // decoder MUST recover every file. Round-trip is non-negotiable (Gotcha).
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        // Test BOTH entry points: direct Order2Rans config AND the scheme-7 path that
+        // may select scheme 8 as the competitive winner.
+        for cfg in [order2_rans_cfg(), bwt_rans_cfg()] {
+            let mut ok = 0;
+            for name in &names {
+                let path = format!("{corpus_dir}/{name}.bin");
+                if let Ok(data) = fs::read(&path) {
+                    let blob = encode_with_config(&data, &cfg);
+                    let recovered = decode(&blob)
+                        .unwrap_or_else(|e| panic!("Order2Rans decode failed for '{name}': {e:?}"));
+                    assert_eq!(recovered, data, "Order2Rans round-trip FAILED for '{name}'");
+                    ok += 1;
+                }
+            }
+            assert_eq!(ok, 10, "Order2Rans corpus round-trip: {ok}/10 files present and clean");
+        }
+    }
+
+    #[test]
+    fn test_order2_rans_never_regresses_competition() {
+        // Competitive (Gotcha #4): the scheme-7 blob with Order2Rans in the candidate
+        // set can NEVER be larger than the BwtEntropy leader on any corpus file.
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        let bwt_cfg = EncodeConfig {
+            value_scheme: ValueScheme::BwtEntropy,
+            ..EncodeConfig::v1_default()
+        };
+        for name in &names {
+            let path = format!("{corpus_dir}/{name}.bin");
+            if let Ok(data) = fs::read(&path) {
+                let cand = encode_with_config(&data, &order2_rans_cfg());
+                let leader = encode_with_config(&data, &bwt_cfg);
+                assert!(
+                    cand.len() <= leader.len(),
+                    "Order2Rans regressed '{name}': {} > bwt-entropy {}",
+                    cand.len(), leader.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_order2_rans_property_random_inputs() {
+        let mut state: u64 = 0x243f6a8885a308d3;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        for trial in 0..40 {
+            let len = 321 + (next() as usize % 4000);
+            let alphabet = 1 + (next() as usize % 200);
+            let data: Vec<u8> = (0..len).map(|_| (next() as usize % alphabet) as u8).collect();
+            let blob = encode_with_config(&data, &order2_rans_cfg());
+            let recovered = decode(&blob).expect("decode");
+            assert_eq!(recovered, data, "Order2Rans property round-trip failed (trial {trial}, len {len}, alpha {alphabet})");
+        }
+    }
+
+    #[test]
+    fn test_order2_rans_truncated_blob_errors_no_panic() {
+        let data: Vec<u8> = b"the quick brown fox jumps over "
+            .iter().copied().cycle().take(8192).collect();
+        let blob = encode_with_config(&data, &order2_rans_cfg());
+        for cut in (8..blob.len()).step_by(41) {
+            let _ = decode(&blob[..cut]); // must not panic
+        }
     }
 
     #[test]

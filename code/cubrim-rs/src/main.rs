@@ -118,8 +118,9 @@ fn main() {
                     "entropy-context-2" | "entropy_context_2" => ValueScheme::EntropyContext2,
                     "bwt-entropy" | "bwt_entropy" | "bwt" => ValueScheme::BwtEntropy,
                     "bwt-rans" | "bwt_rans" | "rans" => ValueScheme::BwtRans,
+                    "order2-rans" | "order2_rans" | "bwt-order2-rans" => ValueScheme::Order2Rans,
                     other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, or bwt-rans.");
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, bwt-rans, or order2-rans.");
                         process::exit(1);
                     }
                 };
