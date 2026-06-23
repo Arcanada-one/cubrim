@@ -143,13 +143,16 @@ runs), but encodes the permutation implicitly via LF-mapping + one
 primary_index integer. No transmitted coordinate map — escapes the
 Gotcha #7 information-conservation trap.
 
-**Current best (SHIPPED):** aggregate **0.221726** — **BwtRans** (BWT + order-1
-rANS, ValueScheme byte 7), code_sha 0fd208bd7dada9d50a0670c7743ae10784d19715,
-10-file frozen corpus. Supersedes BwtEntropy 0.299337 (−25.9% rel). Merged to
-main 2026-06-23. Per-file wins: block_bound_runs 9011→4169, log_like 5178→1402,
-text 3583→3177, sparse_clustered 502→443; raw-mode files byte-identical (zero
-regression, competitive min(scheme) rail). Prior milestone: BwtEntropy 0.504412
-on the 7-file subset (CUBR-0028).
+**Current best (SHIPPED):** aggregate **0.207618** — **Order2Rans** (BWT +
+order-2 context rANS, ValueScheme byte 8), code_sha 13c26aa, 10-file frozen
+corpus. Supersedes BwtRans 0.221726 (−6.36% rel; H-20, merged 2026-06-23,
+independently re-verified). Per-file wins vs BwtRans: binary_mixed 8205→6885,
+text 3177→2889, sparse_clustered 443→400; rest byte-identical (competitive
+min(scheme) rail, schemes 0–7 intact). Champion lineage on the 10-file corpus:
+BwtEntropy 0.299337 → BwtRans 0.221726 (H-19) → Order2Rans 0.207618 (H-20).
+Note: order-2 was CLOSED for *Huffman* (table cost, Gotcha #6) but rANS's
+fractional coding amortises the extra contexts — the re-probe confirmed it, as
+flagged. Prior milestone: BwtEntropy 0.504412 on the 7-file subset (CUBR-0028).
 
 **Open sub-directions:**
 - Larger BWT blocks (pending: widening primary_index u16→u32 costs +14 B,

@@ -1,16 +1,16 @@
 {
   "note": "Pinned baseline used when the leaderboard file is not yet committed to the main branch (bootstrap). Once docs/leaderboard/cubrim-leaderboard.json is committed to main, gates read it via git show main: and this file becomes a dead fallback. Update this file in the gate dir (not in a candidate branch) whenever the baseline advances.",
   "current_best": {
-    "scheme": "BwtRans",
-    "aggregate": 0.221726,
-    "code_sha": "0fd208bd7dada9d50a0670c7743ae10784d19715",
+    "scheme": "Order2Rans",
+    "aggregate": 0.207618,
+    "code_sha": "13c26aa",
     "corpus_manifest_sha256": "8e6cf6a743d0ff58f7666484006392029cd04c0fb7f86ec99cdc0a66a186f2b3",
     "per_file": [
-      {"file": "sparse_clustered", "bytes": 443},
+      {"file": "sparse_clustered", "bytes": 400},
       {"file": "dense",            "bytes": 4109},
-      {"file": "text",             "bytes": 3177},
+      {"file": "text",             "bytes": 2889},
       {"file": "log_like",         "bytes": 1402},
-      {"file": "binary_mixed",     "bytes": 8205},
+      {"file": "binary_mixed",     "bytes": 6885},
       {"file": "random_high",      "bytes": 4109},
       {"file": "sparse_small",     "bytes": 269},
       {"file": "both_sparse_16",   "bytes": 29},
