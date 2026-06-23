@@ -107,6 +107,36 @@ pub enum ValueScheme {
     ///
     /// Header byte = 6.
     BwtEntropy,
+    /// BWT reorder + order-1 context-adaptive rANS on the transformed code stream.
+    ///
+    /// Identical front-end to BwtEntropy (scheme 6): the value-code sequence is
+    /// Burrows-Wheeler-transformed, the primary index is stored, and the same
+    /// order-1 context model (context = previous code, fallback to the global
+    /// order-0 table for contexts below MIN_CTX_COUNT) is used.  The only change
+    /// is the entropy back-end: rANS replaces canonical Huffman, removing the
+    /// per-symbol integer-bit rounding penalty.  On structured streams where BWT
+    /// makes contexts near-deterministic, Huffman pays its 1-bit floor while rANS
+    /// reaches the entropy bound to a fraction of a bit (H-19).
+    ///
+    /// The encoder is competitive (Gotcha #4): it emits min(BwtRans, BwtEntropy,
+    /// EntropyContext) per file with the winner's scheme byte, so the scheme can
+    /// never regress a file relative to the existing leader.
+    ///
+    /// Wire (after header + gap streams):
+    ///   [primary_index : u16 BE]     — 2 bytes; BWT primary index (≤ L ≤ 65536)
+    ///   [scale_bits    : u8]         — rANS total M = 1 << scale_bits
+    ///   [n_contexts    : u16 BE]     — number of context freq tables (incl. fallback)
+    ///   for each context entry (wire order = encoder emit order):
+    ///     [ctx_id : u16 BE]          — 0 = fallback/order-0
+    ///     [n_syms : u16 BE]          — number of nonzero-freq symbols in this ctx
+    ///     for each symbol (ascending symbol index):
+    ///       [symbol : u8]            — value code in [0, n_distinct)
+    ///       [freq   : u16 BE]        — normalized freq; sum over ctx = M
+    ///   [rans_len : u32 BE]          — byte length of the rANS payload
+    ///   [rans payload : rANS bytes]  — byte-wise rANS, LE state prefix
+    ///
+    /// Header byte = 7.
+    BwtRans,
 }
 
 impl GapScheme {
@@ -138,6 +168,7 @@ impl ValueScheme {
             ValueScheme::EntropyContext => 4,
             ValueScheme::EntropyContext2 => 5,
             ValueScheme::BwtEntropy => 6,
+            ValueScheme::BwtRans => 7,
         }
     }
 
@@ -150,6 +181,7 @@ impl ValueScheme {
             4 => Some(ValueScheme::EntropyContext),
             5 => Some(ValueScheme::EntropyContext2),
             6 => Some(ValueScheme::BwtEntropy),
+            7 => Some(ValueScheme::BwtRans),
             _ => None,
         }
     }
@@ -273,14 +305,18 @@ mod tests {
             Some(ValueScheme::BwtEntropy)
         );
         assert_eq!(
+            ValueScheme::from_byte(ValueScheme::BwtRans.scheme_byte()),
+            Some(ValueScheme::BwtRans)
+        );
+        assert_eq!(
             ValueScheme::from_byte(0),
             None,
             "0 is not a valid value_scheme byte"
         );
         assert_eq!(
-            ValueScheme::from_byte(7),
+            ValueScheme::from_byte(8),
             None,
-            "7 is not a valid value_scheme byte"
+            "8 is not a valid value_scheme byte"
         );
         assert_eq!(
             ValueScheme::from_byte(99),
@@ -298,6 +334,7 @@ mod tests {
         assert_eq!(ValueScheme::EntropyContext.scheme_byte(), 4u8);
         assert_eq!(ValueScheme::EntropyContext2.scheme_byte(), 5u8);
         assert_eq!(ValueScheme::BwtEntropy.scheme_byte(), 6u8);
+        assert_eq!(ValueScheme::BwtRans.scheme_byte(), 7u8);
     }
 
     #[test]

@@ -500,9 +500,10 @@ def main():
                         help="Gap encoding scheme: rle (default) or packed_nibble")
     parser.add_argument("--value-scheme", default=None,
                         choices=["bitpack-fixed", "rle-codes", "entropy", "entropy-context",
-                                 "entropy-context-2", "bwt-entropy"],
+                                 "entropy-context-2", "bwt-entropy", "bwt-rans"],
                         help="Value encoding scheme: bitpack-fixed (default), rle-codes, entropy, "
-                             "entropy-context, entropy-context-2, or bwt-entropy (current leaderboard best)")
+                             "entropy-context, entropy-context-2, bwt-entropy (current leaderboard best), "
+                             "or bwt-rans (H-19 order-1 rANS)")
     parser.add_argument("--report-id", default="bench",
                         help="Report file prefix (e.g. bench, v1, axis-sweep; used in output filenames)")
     args = parser.parse_args()

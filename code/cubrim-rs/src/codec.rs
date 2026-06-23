@@ -94,6 +94,14 @@ fn estimate_cube_size(
             // Wire: primary_index(2) + T4 context_huffman stream of BWT output
             bwt_entropy_size(seq_codes, state.inverse_dict.len())
         }
+        ValueScheme::BwtRans => {
+            // Competitive: encoder emits min(BwtRans, BwtEntropy, EntropyContext).
+            // Estimate with the same minimum so the raw-vs-cube decision matches.
+            let n_distinct = state.inverse_dict.len();
+            bwt_rans_size(seq_codes, n_distinct)
+                .min(bwt_entropy_size(seq_codes, n_distinct))
+                .min(context_huffman_size(seq_codes, n_distinct))
+        }
     };
 
     hdr_size + gap_total + value_total
@@ -381,6 +389,48 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
             // Re-build the cube header with the winner's scheme byte (may differ from
             // what was used in estimate_cube_size, but the header is self-describing).
+            let winner_cube_state = CubeHeaderState {
+                n,
+                b,
+                l,
+                count: cube.count,
+                b_k,
+                map_scheme: gap_scheme.scheme_byte(),
+                value_scheme: winner_scheme.scheme_byte(),
+                w,
+                inverse_dict: &inverse_dict,
+                axis_gap_counts: &axis_gap_counts,
+            };
+            let hdr = serialize_cube_header(&winner_cube_state);
+            let mut out = hdr;
+            for stream in &gap_streams {
+                out.extend_from_slice(stream);
+            }
+            out.extend_from_slice(&encoded_values);
+            return out;
+        }
+        ValueScheme::BwtRans => {
+            // H-19 competitive selection: BWT+rANS vs the existing leader options
+            // (BWT+T4 Huffman = scheme 6, plain T4 = scheme 4). Pick the smallest
+            // and write that scheme byte. This makes scheme 7 structurally
+            // regression-proof relative to the BwtEntropy leader (Gotcha #4).
+            let n_distinct = inverse_dict.len();
+            let rans_bytes = bwt_rans_encode(&seq_codes, n_distinct);
+            let bwt_huff_bytes = bwt_entropy_encode(&seq_codes, n_distinct);
+            let t4_bytes_val = context_huffman_encode(&seq_codes, n_distinct);
+
+            // Choose the smallest of the three candidates.
+            let mut winner_scheme = ValueScheme::BwtRans;
+            let mut encoded_values = rans_bytes;
+            if bwt_huff_bytes.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::BwtEntropy;
+                encoded_values = bwt_huff_bytes;
+            }
+            if t4_bytes_val.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::EntropyContext;
+                encoded_values = t4_bytes_val;
+            }
+
             let winner_cube_state = CubeHeaderState {
                 n,
                 b,
@@ -718,6 +768,34 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 if code >= n_distinct {
                     return Err(CubrimError::Decode(format!(
                         "BwtEntropy code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::BwtRans => {
+            // BWT inverse + order-1 context rANS decode (H-19).
+            let n_distinct = inverse_dict.len();
+            let (seq_codes, _consumed) = bwt_rans_decode(blob, offset, count, n_distinct)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "BwtRans decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(),
+                    count
+                )));
+            }
+
+            // Reconstruct: result[i] = inverse_dict[seq_codes[i]] as u8.
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "BwtRans code {} at position {} >= n_distinct {}",
                         code, i, n_distinct
                     )));
                 }
@@ -1882,6 +1960,454 @@ pub(crate) fn bwt_entropy_size(seq_codes: &[usize], n_distinct: usize) -> usize 
     2 + context_huffman_size(&bwt_out, n_distinct)
 }
 
+// ─── H-19: Order-1 Context-Adaptive rANS ─────────────────────────────────────
+//
+// Same order-1 context model as T4 (context = previous code, fallback to the
+// global order-0 table for contexts below MIN_CTX_COUNT) but with a rANS entropy
+// back-end instead of canonical Huffman.  rANS reaches the entropy bound to a
+// fraction of a bit; Huffman rounds every code length up to an integer bit and
+// so pays a ~1-bit floor on near-deterministic contexts (the BWT'd structured
+// streams).  All frequency tables are serialized and charged (Gotcha #6).
+//
+// Byte-wise rANS (Giesen rans_byte.h convention): 32-bit state, lower bound
+// RANS_L = 1<<23, renormalize one byte at a time.  Frequencies are normalized to
+// a power-of-two total M = 1 << RANS_SCALE_BITS so the modulo/divide reduce to
+// mask/shift on decode.
+//
+// Encoding processes symbols in REVERSE so the decoder pops them in FORWARD order
+// — the order-1 context of symbol i (= symbol i-1) is therefore always available
+// (already in the input on encode, already decoded on decode).
+
+/// rANS lower bound for the 32-bit state (renorm emits a byte whenever x < L).
+const RANS_L: u32 = 1 << 23;
+/// rANS normalization total exponent: M = 1 << RANS_SCALE_BITS.
+const RANS_SCALE_BITS: u32 = 12;
+
+/// One normalized order-1 context frequency table.
+struct RansCtxTable {
+    /// freq[sym] in [0, M]; 0 iff the symbol never occurs in this context.
+    freq: Vec<u32>,
+    /// cum[sym] = sum of freq[0..sym]; cum.len() == n_distinct.
+    cum: Vec<u32>,
+    /// slot -> symbol map of length M (decode only; empty on encode).
+    slot_to_sym: Vec<u16>,
+}
+
+/// Normalize raw counts to frequencies summing to exactly M = 1<<scale_bits.
+/// Every symbol with count > 0 gets freq >= 1; symbols with count 0 stay 0.
+/// Returns the freq vector (length n_distinct). Caller guarantees total > 0 and
+/// the number of nonzero counts <= M (true here: n_distinct <= 256 <= 4096).
+fn rans_normalize(counts: &[usize], scale_bits: u32) -> Vec<u32> {
+    let m: u32 = 1 << scale_bits;
+    let total: usize = counts.iter().sum();
+    let n = counts.len();
+    let mut freq = vec![0u32; n];
+    if total == 0 {
+        return freq;
+    }
+    // Initial proportional allocation, flooring nonzero counts to >= 1.
+    let mut allocated: u32 = 0;
+    for (s, &c) in counts.iter().enumerate() {
+        if c == 0 {
+            continue;
+        }
+        // round(c * M / total), then clamp to >= 1.
+        let scaled = ((c as u64 * m as u64) + (total as u64 / 2)) / total as u64;
+        let f = scaled.max(1) as u32;
+        freq[s] = f;
+        allocated = allocated.saturating_add(f);
+    }
+    // Reconcile to exactly M by adjusting the largest-frequency symbol(s).
+    // Adding is always safe; subtracting never takes a symbol below 1.
+    if allocated < m {
+        let mut deficit = m - allocated;
+        // Give the surplus to the current maximum (keeps distortion minimal).
+        let max_sym = (0..n).filter(|&s| freq[s] > 0).max_by_key(|&s| freq[s]).unwrap();
+        freq[max_sym] += deficit;
+        deficit = 0;
+        let _ = deficit;
+    } else if allocated > m {
+        let mut surplus = allocated - m;
+        // Repeatedly trim the current maximum, never below 1.
+        while surplus > 0 {
+            let max_sym = (0..n)
+                .filter(|&s| freq[s] > 1)
+                .max_by_key(|&s| freq[s])
+                .expect("normalize: cannot trim surplus without dropping a symbol below 1");
+            let take = surplus.min(freq[max_sym] - 1);
+            freq[max_sym] -= take;
+            surplus -= take;
+        }
+    }
+    debug_assert_eq!(freq.iter().sum::<u32>(), m, "rans_normalize: sum != M");
+    freq
+}
+
+/// Build order-1 context COUNT tables, mirroring build_context_tables' selection
+/// logic exactly (fallback at ctx_id=0 from global counts, then each context with
+/// >= MIN_CTX_COUNT observations, sorted ascending by ctx_id) but returning raw
+/// per-context counts (length n_distinct) instead of Huffman code lengths.
+fn build_context_count_tables(seq_codes: &[usize], n_distinct: usize) -> Vec<(u16, Vec<usize>)> {
+    if seq_codes.is_empty() || n_distinct == 0 {
+        return vec![];
+    }
+    use std::collections::BTreeMap;
+    let mut ctx_freq: BTreeMap<u16, Vec<usize>> = BTreeMap::new();
+    let mut fallback_freq = vec![0usize; n_distinct];
+
+    let mut prev_ctx: u16 = 0;
+    for &code in seq_codes.iter() {
+        let entry = ctx_freq
+            .entry(prev_ctx)
+            .or_insert_with(|| vec![0usize; n_distinct]);
+        if code < n_distinct {
+            entry[code] += 1;
+            fallback_freq[code] += 1;
+        }
+        prev_ctx = code as u16;
+    }
+
+    // Fallback (order-0 global) first at ctx_id=0.
+    let mut result: Vec<(u16, Vec<usize>)> = vec![(FALLBACK_CTX, fallback_freq)];
+
+    for (&ctx, freq) in &ctx_freq {
+        let obs: usize = freq.iter().sum();
+        if obs < MIN_CTX_COUNT {
+            continue;
+        }
+        result.push((ctx, freq.clone()));
+    }
+    result.sort_by_key(|(ctx, _)| *ctx);
+    result
+}
+
+/// Serialize one context's normalized freq table to the wire as a sparse list:
+///   [n_syms : u16 BE] then for each nonzero symbol (ascending) [sym:u8][freq:u16 BE]
+fn rans_serialize_ctx_table(out: &mut Vec<u8>, freq: &[u32]) {
+    let nz: Vec<usize> = (0..freq.len()).filter(|&s| freq[s] > 0).collect();
+    out.extend_from_slice(&(nz.len() as u16).to_be_bytes());
+    for s in nz {
+        out.push(s as u8);
+        out.extend_from_slice(&(freq[s] as u16).to_be_bytes());
+    }
+}
+
+/// Build a full RansCtxTable (freq + cum, no slot map) from a normalized freq vec.
+fn rans_table_from_freq(freq: Vec<u32>) -> RansCtxTable {
+    let n = freq.len();
+    let mut cum = vec![0u32; n];
+    let mut acc = 0u32;
+    for s in 0..n {
+        cum[s] = acc;
+        acc += freq[s];
+    }
+    RansCtxTable {
+        freq,
+        cum,
+        slot_to_sym: Vec::new(),
+    }
+}
+
+/// Encode the value-code stream with order-1 context rANS.
+/// Wire: scale_bits(1) + fallback table + n_contexts(2) + per-ctx tables
+///       + rans_len(4) + rans bytes.
+///
+/// The fallback (global order-0) table is a DEDICATED wire entity, separate from
+/// the context list — never shadowed by a same-id real context (this avoids the
+/// latent ctx_id-0 collision that would make rANS see a freq-0 symbol).
+pub(crate) fn rans_order1_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let scale_bits = RANS_SCALE_BITS;
+    let mut out: Vec<u8> = Vec::new();
+    out.push(scale_bits as u8);
+
+    if seq_codes.is_empty() || n_distinct == 0 {
+        // Empty fallback table + zero contexts + zero rANS bytes.
+        out.extend_from_slice(&0u16.to_be_bytes()); // fallback n_syms = 0
+        out.extend_from_slice(&0u16.to_be_bytes()); // n_contexts = 0
+        out.extend_from_slice(&0u32.to_be_bytes()); // rans_len = 0
+        return out;
+    }
+
+    let count_tables = build_context_count_tables(seq_codes, n_distinct);
+    // count_tables[0] is always the FALLBACK_CTX global table; the rest are
+    // per-context own tables (which may include a real ctx_id == 0).
+    debug_assert!(!count_tables.is_empty() && count_tables[0].0 == FALLBACK_CTX);
+    let fallback_freq = rans_normalize(&count_tables[0].1, scale_bits);
+    let fallback_table = rans_table_from_freq(fallback_freq.clone());
+    let own = &count_tables[1..];
+    let n_ctx = own.len() as u16;
+
+    // Serialize fallback first, then own context tables; build encode lookup.
+    use std::collections::HashMap;
+    let mut ctx_idx: HashMap<u16, usize> = HashMap::new();
+    let mut tables: Vec<RansCtxTable> = Vec::with_capacity(own.len());
+
+    rans_serialize_ctx_table(&mut out, &fallback_freq);
+    out.extend_from_slice(&n_ctx.to_be_bytes());
+    for (i, (ctx_id, counts)) in own.iter().enumerate() {
+        let freq = rans_normalize(counts, scale_bits);
+        out.extend_from_slice(&ctx_id.to_be_bytes());
+        rans_serialize_ctx_table(&mut out, &freq);
+        ctx_idx.insert(*ctx_id, i);
+        tables.push(rans_table_from_freq(freq));
+    }
+
+    // rANS encode in reverse so decode is forward (context always available).
+    let n = seq_codes.len();
+    let mut buf = vec![0u8; 16 + 4 * n];
+    let mut p = buf.len();
+    let mut x: u32 = RANS_L;
+
+    for i in (0..n).rev() {
+        let ctx = if i == 0 { 0u16 } else { seq_codes[i - 1] as u16 };
+        let table = match ctx_idx.get(&ctx) {
+            Some(&idx) => &tables[idx],
+            None => &fallback_table,
+        };
+        let s = seq_codes[i];
+        let f = table.freq[s];
+        let c = table.cum[s];
+        debug_assert!(f > 0, "rans encode: zero freq for symbol {s} in ctx {ctx}");
+        // Renormalize: emit bytes while x would overflow the slot range.
+        let x_max = ((RANS_L >> scale_bits) << 8) * f;
+        while x >= x_max {
+            p -= 1;
+            buf[p] = (x & 0xff) as u8;
+            x >>= 8;
+        }
+        // x = (x / f) * M + (x % f) + c
+        x = ((x / f) << scale_bits) + (x % f) + c;
+    }
+    // Flush 4-byte state, little-endian, at the lowest written addresses.
+    p -= 4;
+    buf[p] = (x & 0xff) as u8;
+    buf[p + 1] = ((x >> 8) & 0xff) as u8;
+    buf[p + 2] = ((x >> 16) & 0xff) as u8;
+    buf[p + 3] = ((x >> 24) & 0xff) as u8;
+
+    let rans_bytes = &buf[p..];
+    out.extend_from_slice(&(rans_bytes.len() as u32).to_be_bytes());
+    out.extend_from_slice(rans_bytes);
+    out
+}
+
+/// Decode the order-1 context rANS stream from blob at offset.
+/// Returns (decoded seq_codes, bytes consumed from offset).
+pub(crate) fn rans_order1_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    let mut pos = offset;
+    if pos + 1 > blob.len() {
+        return Err(CubrimError::Decode(
+            "rANS: blob too short for scale_bits".into(),
+        ));
+    }
+    let scale_bits = blob[pos] as u32;
+    pos += 1;
+    if scale_bits == 0 || scale_bits > 16 {
+        return Err(CubrimError::Decode(format!(
+            "rANS: invalid scale_bits {scale_bits} (expected 1..=16)"
+        )));
+    }
+    let m: u32 = 1 << scale_bits;
+    let mask: u32 = m - 1;
+
+    // Helper: read one freq table (sparse list) at `pos`, build a full RansCtxTable.
+    // Returns the table or an error; advances pos via the returned new position.
+    let read_table = |blob: &[u8], mut pos: usize| -> Result<(RansCtxTable, usize), CubrimError> {
+        if pos + 2 > blob.len() {
+            return Err(CubrimError::Decode("rANS: table n_syms truncated".into()));
+        }
+        let n_syms = u16::from_be_bytes([blob[pos], blob[pos + 1]]) as usize;
+        pos += 2;
+        let mut freq = vec![0u32; n_distinct];
+        let mut sum: u32 = 0;
+        for _ in 0..n_syms {
+            if pos + 3 > blob.len() {
+                return Err(CubrimError::Decode("rANS: table entry truncated".into()));
+            }
+            let sym = blob[pos] as usize;
+            let f = u16::from_be_bytes([blob[pos + 1], blob[pos + 2]]) as u32;
+            pos += 3;
+            if sym >= n_distinct {
+                return Err(CubrimError::Decode(format!(
+                    "rANS: table symbol {sym} >= n_distinct {n_distinct}"
+                )));
+            }
+            if f == 0 {
+                return Err(CubrimError::Decode(
+                    "rANS: table freq 0 (corrupt stream)".into(),
+                ));
+            }
+            freq[sym] = f;
+            sum += f;
+        }
+        let mut cum = vec![0u32; n_distinct];
+        let mut slot_to_sym = vec![0u16; m as usize];
+        let mut acc: u32 = 0;
+        for s in 0..n_distinct {
+            cum[s] = acc;
+            let end = acc + freq[s];
+            for slot in acc..end {
+                slot_to_sym[slot as usize] = s as u16;
+            }
+            acc = end;
+        }
+        // sum must equal M unless the table is empty (n_syms == 0, used only by the
+        // empty-stream sentinel where count == 0 and no symbol is ever decoded).
+        if n_syms > 0 && sum != m {
+            return Err(CubrimError::Decode(format!(
+                "rANS: freq sum {sum} != M {m} (corrupt stream)"
+            )));
+        }
+        Ok((
+            RansCtxTable {
+                freq,
+                cum,
+                slot_to_sym,
+            },
+            pos,
+        ))
+    };
+
+    // Read the dedicated fallback (global order-0) table.
+    let (fallback_table, new_pos) = read_table(blob, pos)?;
+    pos = new_pos;
+
+    if pos + 2 > blob.len() {
+        return Err(CubrimError::Decode("rANS: blob too short for n_contexts".into()));
+    }
+    let n_ctx = u16::from_be_bytes([blob[pos], blob[pos + 1]]) as usize;
+    pos += 2;
+
+    // Read own context tables (wire order = encoder emit order).
+    use std::collections::HashMap;
+    let mut ctx_idx: HashMap<u16, usize> = HashMap::new();
+    let mut tables: Vec<RansCtxTable> = Vec::with_capacity(n_ctx);
+
+    for _ in 0..n_ctx {
+        if pos + 2 > blob.len() {
+            return Err(CubrimError::Decode("rANS: ctx table ctx_id truncated".into()));
+        }
+        let ctx_id = u16::from_be_bytes([blob[pos], blob[pos + 1]]);
+        pos += 2;
+        let (table, new_pos) = read_table(blob, pos)?;
+        pos = new_pos;
+        ctx_idx.insert(ctx_id, tables.len());
+        tables.push(table);
+    }
+
+    // Read rans payload length + bytes.
+    if pos + 4 > blob.len() {
+        return Err(CubrimError::Decode("rANS: blob too short for rans_len".into()));
+    }
+    let rans_len =
+        u32::from_be_bytes([blob[pos], blob[pos + 1], blob[pos + 2], blob[pos + 3]]) as usize;
+    pos += 4;
+    if pos + rans_len > blob.len() {
+        return Err(CubrimError::Decode(format!(
+            "rANS: payload truncated: need {rans_len} bytes, have {}",
+            blob.len().saturating_sub(pos)
+        )));
+    }
+    let payload = &blob[pos..pos + rans_len];
+    pos += rans_len;
+
+    if count == 0 {
+        return Ok((vec![], pos - offset));
+    }
+    if payload.len() < 4 {
+        return Err(CubrimError::Decode(
+            "rANS: payload too short for state init".into(),
+        ));
+    }
+
+    // Init state (little-endian) and decode forward.
+    let mut cursor = 0usize;
+    let mut x: u32 = payload[0] as u32
+        | (payload[1] as u32) << 8
+        | (payload[2] as u32) << 16
+        | (payload[3] as u32) << 24;
+    cursor += 4;
+
+    let mut result = Vec::with_capacity(count);
+    let mut prev_ctx: u16 = 0;
+    for _ in 0..count {
+        let table = match ctx_idx.get(&prev_ctx) {
+            Some(&idx) => &tables[idx],
+            None => &fallback_table,
+        };
+        let slot = x & mask;
+        let s = table.slot_to_sym[slot as usize] as usize;
+        let f = table.freq[s];
+        let c = table.cum[s];
+        // x = f * (x >> scale_bits) + slot - c
+        x = f * (x >> scale_bits) + slot - c;
+        // Renormalize.
+        while x < RANS_L {
+            if cursor >= payload.len() {
+                return Err(CubrimError::Decode(
+                    "rANS: payload exhausted during renorm".into(),
+                ));
+            }
+            x = (x << 8) | payload[cursor] as u32;
+            cursor += 1;
+        }
+        result.push(s);
+        prev_ctx = s as u16;
+    }
+
+    Ok((result, pos - offset))
+}
+
+/// Encode the value-code stream with BWT + order-1 rANS.
+/// Wire: [primary_index: u16 BE] + rANS order-1 stream of BWT output.
+pub(crate) fn bwt_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (bwt_out, primary) = bwt_encode_codes(seq_codes);
+    let body = rans_order1_encode(&bwt_out, n_distinct);
+    let mut out = Vec::with_capacity(2 + body.len());
+    out.extend_from_slice(&primary.to_be_bytes());
+    out.extend_from_slice(&body);
+    out
+}
+
+/// Decode the BWT + order-1 rANS stream from blob at offset.
+/// Returns (decoded seq_codes, bytes consumed from offset).
+pub(crate) fn bwt_rans_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if offset + 2 > blob.len() {
+        return Err(CubrimError::Decode(
+            "BwtRans: blob too short for primary_index (need 2 bytes)".into(),
+        ));
+    }
+    let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
+    let body_offset = offset + 2;
+
+    let (bwt_out, consumed) = rans_order1_decode(blob, body_offset, count, n_distinct)?;
+    let seq_codes = bwt_decode_codes(&bwt_out, primary, n_distinct)?;
+
+    if seq_codes.len() != count {
+        return Err(CubrimError::Decode(format!(
+            "BwtRans: decoded {} codes but expected {} (count from header)",
+            seq_codes.len(),
+            count
+        )));
+    }
+    Ok((seq_codes, 2 + consumed))
+}
+
+/// Estimate byte size of the BWT + order-1 rANS stream (full encode then len).
+pub(crate) fn bwt_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    bwt_rans_encode(seq_codes, n_distinct).len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2864,7 +3390,10 @@ mod tests {
         // scheme byte 6 = BwtEntropy (added after EntropyContext2)
         assert_eq!(ValueScheme::BwtEntropy.scheme_byte(), 6u8);
         assert_eq!(ValueScheme::from_byte(6u8), Some(ValueScheme::BwtEntropy));
-        assert_eq!(ValueScheme::from_byte(7u8), None);
+        // scheme byte 7 = BwtRans (added after BwtEntropy, H-19)
+        assert_eq!(ValueScheme::BwtRans.scheme_byte(), 7u8);
+        assert_eq!(ValueScheme::from_byte(7u8), Some(ValueScheme::BwtRans));
+        assert_eq!(ValueScheme::from_byte(8u8), None);
     }
 
     // ── Step 5.2: Context-key derivation + sentinels ──────────────────────────
@@ -3410,6 +3939,189 @@ mod tests {
         }
         assert_eq!(ok_count, 7,
             "T5 corpus round-trip: {ok_count}/7 files tested — all 7 must be present and round-trip clean");
+    }
+
+    // ─── H-19: BWT + order-1 rANS (scheme 7) ─────────────────────────────────
+
+    fn bwt_rans_cfg() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::BwtRans,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    #[test]
+    fn test_rans_order1_unit_round_trip() {
+        // Direct rANS order-1 encode/decode on a hand-built code stream with
+        // near-deterministic context structure (the H-19 win zone).
+        let n_distinct = 5usize;
+        let seq: Vec<usize> = {
+            let mut v = Vec::new();
+            for _ in 0..200 {
+                v.extend_from_slice(&[0, 0, 0, 1, 0, 2, 0, 0, 3, 4]);
+            }
+            v
+        };
+        let enc = rans_order1_encode(&seq, n_distinct);
+        let (dec, consumed) = rans_order1_decode(&enc, 0, seq.len(), n_distinct).unwrap();
+        assert_eq!(dec, seq, "rANS order-1 round-trip mismatch");
+        assert_eq!(consumed, enc.len(), "rANS decode must consume the whole stream");
+    }
+
+    #[test]
+    fn test_rans_order1_empty_and_singletons() {
+        // Empty stream.
+        let enc = rans_order1_encode(&[], 0);
+        let (dec, _) = rans_order1_decode(&enc, 0, 0, 0).unwrap();
+        assert!(dec.is_empty());
+        // Single repeated symbol (degenerate distribution).
+        let seq = vec![0usize; 500];
+        let enc = rans_order1_encode(&seq, 1);
+        let (dec, _) = rans_order1_decode(&enc, 0, seq.len(), 1).unwrap();
+        assert_eq!(dec, seq);
+    }
+
+    #[test]
+    fn test_rans_high_entropy_round_trip() {
+        // High-entropy stream: every symbol equally likely, many distinct.
+        // This is exactly the case that triggered the ctx_id-0 fallback collision
+        // (freq-0 → x_max=0 → infinite renorm). Must round-trip, not loop/panic.
+        let n_distinct = 256usize;
+        let seq: Vec<usize> = (0..4096)
+            .map(|i| ((i * 73 + 11) % 256) as usize)
+            .collect();
+        let enc = rans_order1_encode(&seq, n_distinct);
+        let (dec, _) = rans_order1_decode(&enc, 0, seq.len(), n_distinct).unwrap();
+        assert_eq!(dec, seq, "high-entropy rANS round-trip mismatch");
+    }
+
+    #[test]
+    fn test_bwt_rans_corpus_round_trip_all_files() {
+        // Byte-exact round-trip on all 10 frozen corpus files through the full
+        // codec with scheme 7. Round-trip is non-negotiable (Gotcha).
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!(
+                "{}/../../docs/ephemeral/research/corpus",
+                env!("CARGO_MANIFEST_DIR")
+            )
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        let cfg = bwt_rans_cfg();
+        let mut ok_count = 0;
+        for name in &names {
+            let path = format!("{corpus_dir}/{name}.bin");
+            match fs::read(&path) {
+                Ok(data) => {
+                    let blob = encode_with_config(&data, &cfg);
+                    let recovered = decode(&blob)
+                        .unwrap_or_else(|e| panic!("BwtRans corpus decode failed for '{name}': {e:?}"));
+                    assert_eq!(
+                        recovered, data,
+                        "BwtRans corpus round-trip FAILED for '{name}': byte mismatch"
+                    );
+                    ok_count += 1;
+                }
+                Err(e) => eprintln!("SKIP corpus file '{name}' ({path}): {e}"),
+            }
+        }
+        assert_eq!(ok_count, 10,
+            "BwtRans corpus round-trip: {ok_count}/10 files tested — all must be present and clean");
+    }
+
+    #[test]
+    fn test_bwt_rans_never_larger_than_bwt_entropy() {
+        // Competitive selection (Gotcha #4): scheme 7 internally picks
+        // min(BwtRans, BwtEntropy, EntropyContext), so its blob can NEVER be
+        // larger than the BwtEntropy leader on any input.
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!(
+                "{}/../../docs/ephemeral/research/corpus",
+                env!("CARGO_MANIFEST_DIR")
+            )
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        let rans_cfg = bwt_rans_cfg();
+        let bwt_cfg = EncodeConfig {
+            value_scheme: ValueScheme::BwtEntropy,
+            ..EncodeConfig::v1_default()
+        };
+        for name in &names {
+            let path = format!("{corpus_dir}/{name}.bin");
+            if let Ok(data) = fs::read(&path) {
+                let rans_blob = encode_with_config(&data, &rans_cfg);
+                let bwt_blob = encode_with_config(&data, &bwt_cfg);
+                assert!(
+                    rans_blob.len() <= bwt_blob.len(),
+                    "BwtRans regressed '{name}': rans {} > bwt-entropy {}",
+                    rans_blob.len(),
+                    bwt_blob.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_bwt_rans_property_random_inputs() {
+        // Deterministic pseudo-random inputs of varied length/alphabet must
+        // round-trip byte-exact (no RNG crate; LCG for reproducibility).
+        let mut state: u64 = 0x9e3779b97f4a7c15;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        for trial in 0..40 {
+            let len = 321 + (next() as usize % 4000); // > raw_store_bound to reach cube mode
+            let alphabet = 1 + (next() as usize % 200);
+            let data: Vec<u8> = (0..len).map(|_| (next() as usize % alphabet) as u8).collect();
+            let blob = encode_with_config(&data, &bwt_rans_cfg());
+            let recovered = decode(&blob).expect("decode");
+            assert_eq!(recovered, data, "BwtRans property round-trip failed (trial {trial}, len {len}, alpha {alphabet})");
+        }
+    }
+
+    #[test]
+    fn test_bwt_rans_truncated_blob_errors_no_panic() {
+        let data: Vec<u8> = b"the quick brown fox jumps over "
+            .iter()
+            .copied()
+            .cycle()
+            .take(4096)
+            .collect();
+        let blob = encode_with_config(&data, &bwt_rans_cfg());
+        // Truncate at many points after the header; every prefix must Err, never panic.
+        for cut in (8..blob.len()).step_by(37) {
+            let _ = decode(&blob[..cut]); // must not panic
+        }
+    }
+
+    #[test]
+    fn test_rans_normalize_sums_to_m() {
+        let counts = vec![1000usize, 1, 0, 3, 50, 0, 7];
+        let freq = rans_normalize(&counts, RANS_SCALE_BITS);
+        assert_eq!(freq.iter().sum::<u32>(), 1 << RANS_SCALE_BITS);
+        for (s, &c) in counts.iter().enumerate() {
+            if c > 0 {
+                assert!(freq[s] >= 1, "symbol {s} with count {c} got freq 0");
+            } else {
+                assert_eq!(freq[s], 0, "symbol {s} with count 0 got nonzero freq");
+            }
+        }
+    }
+
+    #[test]
+    fn test_bwt_rans_scheme_byte() {
+        assert_eq!(ValueScheme::BwtRans.scheme_byte(), 7u8);
+        assert_eq!(ValueScheme::from_byte(7u8), Some(ValueScheme::BwtRans));
     }
 
     #[test]

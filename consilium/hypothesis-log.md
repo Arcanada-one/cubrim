@@ -312,13 +312,34 @@ created: 2026-06-17
 
 - **Hypothesis (operator-directed 2026-06-23, "new idea class beyond BWT"):** replace the codec's canonical Huffman entropy coder (order-0/1 and the BWT+order-1 leader) with ANS/tANS (or range coding). Huffman rounds every code length up to an integer bit, losing up to ~1 bit/symbol on skewed alphabets; ANS reaches the entropy bound to within a fraction of a bit total. Same frequency tables shipped, so table cost cancels in the comparison.
 - **Maps to:** LIVE branch "arithmetic / range coding replacing Huffman (fractional-bit savings)" in closed-branches.md — now measured.
-- **Status:** `GO (narrow) — Huffman→entropy gap probe 2026-06-23. Real fractional-bit headroom exists but is modest; charge tables for BOTH coders (Gotcha #6 discipline).`
+- **Status:** `GO (IMPLEMENTED + MEASURED) — ValueScheme byte 7 BwtRans (BWT + order-1 rANS). Real round-trip-clean aggregate 0.221726 vs leader BwtEntropy 0.299337 (−0.077611, −25.9% relative). Frozen corpus. Committed on `feat/cubr-h19-ans` (not pushed — operator-gated).`
 - **Probe 1 — naive gap (`docs/ephemeral/research/probe_h19_ans_gap.py`):** Huffman→entropy gap on the BWT+order-1 stream = 9071.8 B = 40.52% of the bitstream. FLAGGED as over-optimistic: order-1 splits the stream into many tiny contexts where Huffman's integer rounding looks huge in % but the entropy bound is reachable only if ANS still ships the per-context tables.
 - **Probe 2 — CHARGED gap (`docs/ephemeral/research/probe_h19_ans_charged.py`, Gotcha #6 discipline):** charges per-context frequency tables for BOTH coders.
   - **Order-0 (single table, no context-proliferation artifact): ANS ceiling = 0.73%** of the full entropy-coded payload (448.7 B over 61141.9 B). This is the honest "pure" fractional-bit advantage — small.
   - **Order-1: bitstream gap 9071.8 B is real, but tables cost 12575 B** and concentrate on high-entropy files (dense 3977 B, random_high 3969 B) where the gap is ~0. The gap lives on structured files (text +1205 B, log_like +1779 B, block_bound_runs +5644 B) where BWT made the stream near-deterministic and Huffman pays the 1-bit floor in near-zero-entropy contexts.
 - **Why NOT a false GO (vs Gotcha #6 order-2):** order-2 omitted fallback-table cost terms. Here tables are charged for Huffman AND ANS and they cancel in the gap; the residual is genuine integer-rounding waste ANS recovers. The competitive per-file selector already falls back on the high-table-cost files, so ANS only needs to win on the structured files where the gap is real.
-- **Realistic expectation:** single-digit % aggregate improvement on the structured-file subset, not the 40% the naive probe suggested. Worth a full size model + Rust impl as ValueScheme byte 7 (AnsEntropy / Bwt+Ans), behind the same competitive min(scheme) rail (structurally regression-proof). NOT YET implemented in Rust — next step is the arbiter size-model then codec.rs.
+- **Realistic expectation (pre-impl):** single-digit % aggregate improvement on the structured-file subset, not the 40% the naive probe suggested. Worth a full size model + Rust impl as ValueScheme byte 7, behind the same competitive min(scheme) rail (structurally regression-proof).
+- **IMPLEMENTATION (2026-06-23, branch `feat/cubr-h19-ans`):** `ValueScheme::BwtRans` (header byte 7), `code/cubrim-rs/src/codec.rs`. BWT-transform the value-code stream (reuse `bwt_encode_codes` from scheme 6) then order-1 context rANS (byte-wise rANS, `RANS_L = 1<<23`, `M = 1<<12`). Same order-1 context model as T4 (context = previous code; sparse contexts fall back to the global order-0 table). Encoder is competitive (Gotcha #4): emits `min(BwtRans, BwtEntropy, EntropyContext)` per file with the winner's scheme byte — structurally cannot regress vs the BwtEntropy leader.
+  - **Two table-cost levers, both charged for real (Gotcha #6/#7):** (1) rANS reaches the entropy bound where Huffman pays its 1-bit floor on near-deterministic BWT contexts; (2) rANS ships **sparse** freq tables (only nonzero symbols: `[sym:u8][freq:u16]`) where T4 Huffman ships a **full** `code_len[n_distinct]` per context. Both effects are inside the measured round-trippable blob — no size-model estimate, the real `cubrim_bytes` from the gate.
+  - **Latent bug found + fixed:** the T4 `ctx_id=0` collision (global fallback shadowed by a real context-0 own-table) is harmless for Huffman on this corpus but fatal for rANS (a fallback symbol with `freq=0` → `x_max=0` → infinite renorm). Fixed by giving the fallback table a **dedicated wire slot** separate from the context list. Covered by `test_rans_high_entropy_round_trip`.
+- **MEASURED (frozen corpus, `python3 code/bench/run_bench.py --value-scheme bwt-rans`, round-trip PASS on all 10; gate `code/cluster/gate/gate-ratio.sh` PASS):**
+
+  | file | leader BwtEntropy (B) | BwtRans (B) | Δ B | Δ % |
+  |---|---:|---:|---:|---:|
+  | sparse_clustered | 502 | 443 | −59 | −11.8% |
+  | text | 3583 | 3177 | −406 | −11.3% |
+  | log_like | 5178 | 1402 | −3776 | −72.9% |
+  | block_bound_runs | 9011 | 4169 | −4842 | −53.7% |
+  | dense | 4109 | 4109 | 0 | raw |
+  | binary_mixed | 8205 | 8205 | 0 | raw |
+  | random_high | 4109 | 4109 | 0 | raw |
+  | sparse_small | 269 | 269 | 0 | raw |
+  | both_sparse_16 | 29 | 29 | 0 | raw |
+  | both_sparse_24 | 37 | 37 | 0 | raw |
+  | **aggregate** | **0.299337** | **0.221726** | — | **−25.9% rel** |
+
+  The win is concentrated on the 4 cube-mode files (the only ones using the value stream); raw-mode files are byte-identical (competitive selection / value stream unused). The gap matches the H-18/probe-2 prediction that the headroom lives on structured files where BWT makes contexts near-deterministic — but the realized win (−25.9%) far exceeds the pre-impl "single-digit %" estimate because the probe charged tables 1-byte/entry for *both* coders, missing that real T4 ships full-`n_distinct` tables while rANS ships sparse ones.
+- **VERDICT: GO.** Round-trip non-negotiable ✅ (10/10 byte-exact, `cargo test` 182 passed incl. 14 new rANS tests + property/corpus/competitive). Tables charged ✅. Competitive per-file rail ✅ (`gate-competitive.sh --value-scheme bwt-rans` PASS, no regression). Aggregate strictly improves ✅. Leaderboard update + merge is operator-gated (committed locally, not pushed).
 
 ---
 
