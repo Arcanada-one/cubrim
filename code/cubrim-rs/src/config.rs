@@ -164,6 +164,53 @@ pub enum ValueScheme {
     ///
     /// Header byte = 8.
     Order2Rans,
+    /// BWT reorder + ADAPTIVE order-1 range coding on the transformed code stream (H-21).
+    ///
+    /// Same BWT front-end as BwtRans (scheme 7), but the entropy back-end transmits
+    /// NO frequency tables: the decoder rebuilds the exact order-1 model symbol-by-
+    /// symbol from the codes it has already decoded. On short, structured BWT'd streams
+    /// the champion's per-context tables dominate the value-stream cost; removing them
+    /// is the win. A range coder (not rANS) is used because adaptive modelling needs
+    /// forward coding + symmetric count rescaling, which rANS's reverse-encode cannot
+    /// provide; range coding is informationally equivalent.
+    ///
+    /// Model: per-context (context = previous code) integer freqs, init 1 each,
+    /// increment `inc` per observation (effective Laplace alpha = 1/inc), halved when a
+    /// context total exceeds 2^15. The encoder tries a small set of `inc` values and
+    /// keeps the smallest payload. Competitive (Gotcha #4): produced only as a winner
+    /// of the scheme-7 selection, so it can never regress a file.
+    ///
+    /// Wire (after header + gap streams):
+    ///   [primary_index : u16 BE]     — 2 bytes; BWT primary index (≤ L ≤ 65536)
+    ///   [inc           : u8]         — model increment (effective alpha = 1/inc)
+    ///   [rc_len        : u32 BE]     — range-coded payload length
+    ///   [rc payload    : bytes]      — carryless (Subbotin) range-coder bytes
+    ///
+    /// Header byte = 9.
+    BwtAdaptive,
+    /// BWT reorder + CONTEXT-MIXING of order-1 and order-0 predictions (H-22).
+    ///
+    /// Same BWT front-end as BwtRans (scheme 7). The entropy back-end transmits NO
+    /// frequency tables; the decoder rebuilds the model symbol-by-symbol (like the
+    /// adaptive order-1 scheme) but blends two predictions per symbol via a LEARNED
+    /// scalar weight that adapts toward whichever model has been predicting better.
+    /// Mixing the stabler order-0 estimate into the order-1 estimate reduces the
+    /// variance of low-count contexts. A range coder is used (adaptive forward coding,
+    /// like H-21). The encoder picks per file, via a one-byte mode, between:
+    ///   mode 0 — pure adaptive order-1 (never worse than the adaptive baseline),
+    ///   mode 1 — learned-weight linear mix of order-1 and order-0.
+    /// Competitive (Gotcha #4): produced only as a winner of the scheme-7 selection.
+    ///
+    /// Wire (after header + gap streams):
+    ///   [primary_index : u16 BE]     — 2 bytes; BWT primary index (≤ L ≤ 65536)
+    ///   [mode          : u8]         — 0 = pure order-1, 1 = learned mix
+    ///   [inc           : u8]         — model increment (effective alpha = 1/inc)
+    ///   [lr_idx        : u8]         — learning-rate index (mode 1 only)
+    ///   [rc_len        : u32 BE]     — range-coded payload length
+    ///   [rc payload    : bytes]      — carryless (Subbotin) range-coder bytes
+    ///
+    /// Header byte = 10.
+    BwtContextMix,
 }
 
 impl GapScheme {
@@ -197,6 +244,8 @@ impl ValueScheme {
             ValueScheme::BwtEntropy => 6,
             ValueScheme::BwtRans => 7,
             ValueScheme::Order2Rans => 8,
+            ValueScheme::BwtAdaptive => 9,
+            ValueScheme::BwtContextMix => 10,
         }
     }
 
@@ -211,6 +260,8 @@ impl ValueScheme {
             6 => Some(ValueScheme::BwtEntropy),
             7 => Some(ValueScheme::BwtRans),
             8 => Some(ValueScheme::Order2Rans),
+            9 => Some(ValueScheme::BwtAdaptive),
+            10 => Some(ValueScheme::BwtContextMix),
             _ => None,
         }
     }
@@ -347,9 +398,17 @@ mod tests {
             Some(ValueScheme::Order2Rans)
         );
         assert_eq!(
-            ValueScheme::from_byte(9),
+            ValueScheme::from_byte(ValueScheme::BwtAdaptive.scheme_byte()),
+            Some(ValueScheme::BwtAdaptive)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(ValueScheme::BwtContextMix.scheme_byte()),
+            Some(ValueScheme::BwtContextMix)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(11),
             None,
-            "9 is not a valid value_scheme byte"
+            "11 is not a valid value_scheme byte"
         );
         assert_eq!(
             ValueScheme::from_byte(99),

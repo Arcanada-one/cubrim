@@ -94,24 +94,22 @@ fn estimate_cube_size(
             // Wire: primary_index(2) + T4 context_huffman stream of BWT output
             bwt_entropy_size(seq_codes, state.inverse_dict.len())
         }
-        ValueScheme::BwtRans => {
-            // Competitive: encoder emits min(BwtRans, BwtEntropy, EntropyContext,
-            // Order2Rans). Estimate with the same minimum so the raw-vs-cube decision
-            // matches.
+        ValueScheme::BwtRans
+        | ValueScheme::Order2Rans
+        | ValueScheme::BwtAdaptive
+        | ValueScheme::BwtContextMix => {
+            // Competitive: every BWT-family scheme emits the same per-file minimum
+            // over the full candidate set (BwtRans, BwtEntropy, EntropyContext,
+            // Order2Rans, BwtAdaptive, BwtContextMix) and writes the winner's scheme
+            // byte. Estimate with that same minimum so the raw-vs-cube decision matches
+            // the bytes the encoder will actually produce (Gotcha #4 / #6).
             let n_distinct = state.inverse_dict.len();
             bwt_rans_size(seq_codes, n_distinct)
                 .min(bwt_entropy_size(seq_codes, n_distinct))
                 .min(context_huffman_size(seq_codes, n_distinct))
                 .min(bwt_order2_rans_size(seq_codes, n_distinct))
-        }
-        ValueScheme::Order2Rans => {
-            // Same competitive minimum as the BwtRans arm (Order2Rans is a winner
-            // of that selection; its direct-config estimate mirrors it).
-            let n_distinct = state.inverse_dict.len();
-            bwt_order2_rans_size(seq_codes, n_distinct)
-                .min(bwt_rans_size(seq_codes, n_distinct))
-                .min(bwt_entropy_size(seq_codes, n_distinct))
-                .min(context_huffman_size(seq_codes, n_distinct))
+                .min(bwt_adaptive_size(seq_codes, n_distinct))
+                .min(bwt_ctxmix_size(seq_codes, n_distinct))
         }
     };
 
@@ -420,19 +418,31 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             out.extend_from_slice(&encoded_values);
             return out;
         }
-        ValueScheme::BwtRans => {
-            // H-19 competitive selection: BWT+rANS vs the existing leader options
-            // (BWT+T4 Huffman = scheme 6, plain T4 = scheme 4). Pick the smallest
-            // and write that scheme byte. This makes scheme 7 structurally
-            // regression-proof relative to the BwtEntropy leader (Gotcha #4).
+        ValueScheme::BwtRans
+        | ValueScheme::Order2Rans
+        | ValueScheme::BwtAdaptive
+        | ValueScheme::BwtContextMix => {
+            // Consolidated competitive selection (Gotcha #4). Any BWT-family scheme
+            // request emits the smallest of the full candidate set and writes the
+            // winner's scheme byte, so requesting any one of them can never regress
+            // another:
+            //   BwtRans (7)       — BWT + order-1 rANS                  (H-19)
+            //   BwtEntropy (6)    — BWT + order-1 Huffman
+            //   EntropyContext (4)— plain order-1 Huffman (no BWT)
+            //   Order2Rans (8)    — BWT + order-2 rANS                  (H-20)
+            //   BwtAdaptive (9)   — BWT + adaptive order-1 range coding (H-21)
+            //   BwtContextMix (10)— BWT + context-mixing range coding   (H-22)
+            // Decode is header-driven, so the winner's byte is all the decoder needs.
             let n_distinct = inverse_dict.len();
             let rans_bytes = bwt_rans_encode(&seq_codes, n_distinct);
             let bwt_huff_bytes = bwt_entropy_encode(&seq_codes, n_distinct);
             let t4_bytes_val = context_huffman_encode(&seq_codes, n_distinct);
-            // H-20 order-2 rANS candidate (competitive, never regresses — Gotcha #4).
             let order2_bytes = bwt_order2_rans_encode(&seq_codes, n_distinct);
+            let adaptive_bytes = bwt_adaptive_encode(&seq_codes, n_distinct);
+            let ctxmix_bytes = bwt_ctxmix_encode(&seq_codes, n_distinct);
 
-            // Choose the smallest of the four candidates.
+            // Start from BwtRans and keep the strictly-smaller candidate, so ties
+            // resolve to the earlier-listed scheme (stable, deterministic).
             let mut winner_scheme = ValueScheme::BwtRans;
             let mut encoded_values = rans_bytes;
             if bwt_huff_bytes.len() < encoded_values.len() {
@@ -447,50 +457,13 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
                 winner_scheme = ValueScheme::Order2Rans;
                 encoded_values = order2_bytes;
             }
-
-            let winner_cube_state = CubeHeaderState {
-                n,
-                b,
-                l,
-                count: cube.count,
-                b_k,
-                map_scheme: gap_scheme.scheme_byte(),
-                value_scheme: winner_scheme.scheme_byte(),
-                w,
-                inverse_dict: &inverse_dict,
-                axis_gap_counts: &axis_gap_counts,
-            };
-            let hdr = serialize_cube_header(&winner_cube_state);
-            let mut out = hdr;
-            for stream in &gap_streams {
-                out.extend_from_slice(stream);
+            if adaptive_bytes.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::BwtAdaptive;
+                encoded_values = adaptive_bytes;
             }
-            out.extend_from_slice(&encoded_values);
-            return out;
-        }
-        ValueScheme::Order2Rans => {
-            // Direct selection mirrors the BwtRans competitive arm: emit
-            // min(Order2Rans, BwtRans, BwtEntropy, EntropyContext) with the winner's
-            // scheme byte, so a direct config request can never regress either.
-            let n_distinct = inverse_dict.len();
-            let order2_bytes = bwt_order2_rans_encode(&seq_codes, n_distinct);
-            let rans_bytes = bwt_rans_encode(&seq_codes, n_distinct);
-            let bwt_huff_bytes = bwt_entropy_encode(&seq_codes, n_distinct);
-            let t4_bytes_val = context_huffman_encode(&seq_codes, n_distinct);
-
-            let mut winner_scheme = ValueScheme::Order2Rans;
-            let mut encoded_values = order2_bytes;
-            if rans_bytes.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::BwtRans;
-                encoded_values = rans_bytes;
-            }
-            if bwt_huff_bytes.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::BwtEntropy;
-                encoded_values = bwt_huff_bytes;
-            }
-            if t4_bytes_val.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::EntropyContext;
-                encoded_values = t4_bytes_val;
+            if ctxmix_bytes.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::BwtContextMix;
+                encoded_values = ctxmix_bytes;
             }
 
             let winner_cube_state = CubeHeaderState {
@@ -885,6 +858,60 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 if code >= n_distinct {
                     return Err(CubrimError::Decode(format!(
                         "Order2Rans code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::BwtAdaptive => {
+            // BWT inverse + adaptive order-1 range-coding decode (H-21).
+            let n_distinct = inverse_dict.len();
+            let (seq_codes, _consumed) = bwt_adaptive_decode(blob, offset, count, n_distinct)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "BwtAdaptive decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(),
+                    count
+                )));
+            }
+
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "BwtAdaptive code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::BwtContextMix => {
+            // BWT inverse + context-mixing decode (H-22).
+            let n_distinct = inverse_dict.len();
+            let (seq_codes, _consumed) = bwt_ctxmix_decode(blob, offset, count, n_distinct)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "BwtContextMix decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(),
+                    count
+                )));
+            }
+
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "BwtContextMix code {} at position {} >= n_distinct {}",
                         code, i, n_distinct
                     )));
                 }
@@ -2895,6 +2922,758 @@ pub(crate) fn bwt_order2_rans_size(seq_codes: &[usize], n_distinct: usize) -> us
     bwt_order2_rans_encode(seq_codes, n_distinct).len()
 }
 
+// ── H-21: adaptive order-1 entropy coding (no transmitted frequency tables) ───
+//
+// The champion (scheme 7) transmits a per-context frequency table; on short,
+// structured BWT'd streams those tables dominate the value-stream cost. An ADAPTIVE
+// model removes the tables entirely: the decoder rebuilds the exact same model the
+// encoder used, symbol-by-symbol, from the data it has already decoded. The only
+// side information is the alphabet size (already in the cube header) and one `inc`
+// byte (the model's learning rate).
+//
+// BACKEND CHOICE — range coder, not rANS. rANS encodes LIFO (reverse), which fights
+// a forward-adapting model: the model state at position i depends on symbols [0,i),
+// but a reverse encoder visits i last. The decrement trick recovers that ONLY when
+// counts never rescale — yet byte-rANS REQUIRES the model total stay ≤ ~2^15, so a
+// growing adaptive model MUST rescale, and rescaling (a lossy halving) is not
+// reversible for the reverse pass. A range coder codes FORWARD; the decoder mirrors
+// the model update and the rescale identically, so determinism is trivial. Range
+// coding and rANS are informationally equivalent (both reach the entropy bound), so
+// this realizes the "adaptive / no-table" hypothesis faithfully.
+
+/// Carryless range coder constants (Subbotin scheme). `total` passed to encode/decode
+/// must stay ≤ BOT so `range/total ≥ 1` holds after renorm (range ≥ BOT).
+const RC_TOP: u32 = 1 << 24;
+const RC_BOT: u32 = 1 << 16;
+/// Rescale the adaptive model when a context total would exceed this. Kept well under
+/// RC_BOT so `total + inc` never reaches RC_BOT (max inc 64 → 32768+64 < 65536).
+const ADAPT_RESCALE: u32 = 1 << 15;
+/// Increment values the encoder tries (effective Laplace alpha = 1/inc). Smaller alpha
+/// (larger inc) sharpens the model faster on run-structured BWT streams.
+const ADAPT_INCS: [u32; 4] = [8, 16, 32, 64];
+
+struct RangeEncoder {
+    low: u32,
+    range: u32,
+    out: Vec<u8>,
+}
+
+impl RangeEncoder {
+    fn new() -> Self {
+        Self {
+            low: 0,
+            range: 0xFFFF_FFFF,
+            out: Vec::new(),
+        }
+    }
+    #[inline]
+    fn encode(&mut self, cum: u32, freq: u32, total: u32) {
+        let r = self.range / total;
+        self.low = self.low.wrapping_add(r * cum);
+        self.range = r * freq;
+        loop {
+            if (self.low ^ self.low.wrapping_add(self.range)) < RC_TOP {
+                // top byte settled.
+            } else if self.range < RC_BOT {
+                // underflow: force range up (carryless trick).
+                self.range = self.low.wrapping_neg() & (RC_BOT - 1);
+            } else {
+                break;
+            }
+            self.out.push((self.low >> 24) as u8);
+            self.low <<= 8;
+            self.range <<= 8;
+        }
+    }
+    fn finish(mut self) -> Vec<u8> {
+        for _ in 0..4 {
+            self.out.push((self.low >> 24) as u8);
+            self.low <<= 8;
+        }
+        self.out
+    }
+}
+
+struct RangeDecoder<'a> {
+    low: u32,
+    range: u32,
+    code: u32,
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> RangeDecoder<'a> {
+    fn new(buf: &'a [u8]) -> Self {
+        let mut code: u32 = 0;
+        let mut pos = 0;
+        for _ in 0..4 {
+            code = (code << 8) | (*buf.get(pos).unwrap_or(&0) as u32);
+            pos += 1;
+        }
+        Self {
+            low: 0,
+            range: 0xFFFF_FFFF,
+            code,
+            buf,
+            pos,
+        }
+    }
+    #[inline]
+    fn get_freq(&self, total: u32) -> u32 {
+        let r = self.range / total;
+        let dv = (self.code.wrapping_sub(self.low)) / r;
+        if dv >= total {
+            total - 1
+        } else {
+            dv
+        }
+    }
+    #[inline]
+    fn decode(&mut self, cum: u32, freq: u32, total: u32) {
+        let r = self.range / total;
+        self.low = self.low.wrapping_add(r * cum);
+        self.range = r * freq;
+        loop {
+            if (self.low ^ self.low.wrapping_add(self.range)) < RC_TOP {
+            } else if self.range < RC_BOT {
+                self.range = self.low.wrapping_neg() & (RC_BOT - 1);
+            } else {
+                break;
+            }
+            self.code = (self.code << 8) | (*self.buf.get(self.pos).unwrap_or(&0) as u32);
+            self.pos += 1;
+            self.low <<= 8;
+            self.range <<= 8;
+        }
+    }
+}
+
+/// One adaptive order-1 context model: integer freqs (init 1 each) + running total.
+struct AdaptModel {
+    freq: Vec<u32>,
+    total: u32,
+}
+
+impl AdaptModel {
+    fn new(a: usize) -> Self {
+        Self {
+            freq: vec![1u32; a],
+            total: a as u32,
+        }
+    }
+    /// Cumulative freq below symbol `s` (linear; A ≤ 256).
+    #[inline]
+    fn cum(&self, s: usize) -> u32 {
+        let mut c = 0u32;
+        for &f in &self.freq[..s] {
+            c += f;
+        }
+        c
+    }
+    /// Find the symbol whose cum range contains decode value `dv`; return (s, cum_s).
+    #[inline]
+    fn find(&self, dv: u32) -> (usize, u32) {
+        let mut c = 0u32;
+        for (s, &f) in self.freq.iter().enumerate() {
+            if c + f > dv {
+                return (s, c);
+            }
+            c += f;
+        }
+        // dv < total guarantees a hit; fall back to last symbol defensively.
+        let last = self.freq.len() - 1;
+        (last, self.total - self.freq[last])
+    }
+    /// Observe symbol `s`: bump its freq by `inc`, rescale if total exceeds the cap.
+    #[inline]
+    fn update(&mut self, s: usize, inc: u32) {
+        self.freq[s] += inc;
+        self.total += inc;
+        if self.total > ADAPT_RESCALE {
+            let mut nt = 0u32;
+            for f in &mut self.freq {
+                *f = (*f + 1) >> 1;
+                nt += *f;
+            }
+            self.total = nt;
+        }
+    }
+}
+
+/// Adaptive order-1 range-code the (already-BWT'd) code stream. No tables on the wire.
+/// Context = previous code (sentinel 0 at position 0).
+fn adaptive_range_o1_encode(seq_codes: &[usize], n_distinct: usize, inc: u32) -> Vec<u8> {
+    if seq_codes.is_empty() || n_distinct == 0 {
+        return Vec::new();
+    }
+    let a = n_distinct;
+    let mut models: Vec<AdaptModel> = (0..a).map(|_| AdaptModel::new(a)).collect();
+    let mut enc = RangeEncoder::new();
+    let mut prev = 0usize;
+    for &s in seq_codes {
+        let m = &models[prev];
+        let cum = m.cum(s);
+        let freq = m.freq[s];
+        let total = m.total;
+        enc.encode(cum, freq, total);
+        models[prev].update(s, inc);
+        prev = s;
+    }
+    enc.finish()
+}
+
+/// Decode an adaptive order-1 range-coded stream (mirror of the encoder).
+fn adaptive_range_o1_decode(
+    payload: &[u8],
+    count: usize,
+    n_distinct: usize,
+    inc: u32,
+) -> Result<Vec<usize>, CubrimError> {
+    if count == 0 || n_distinct == 0 {
+        return Ok(vec![]);
+    }
+    let a = n_distinct;
+    let mut models: Vec<AdaptModel> = (0..a).map(|_| AdaptModel::new(a)).collect();
+    let mut dec = RangeDecoder::new(payload);
+    let mut out = Vec::with_capacity(count);
+    let mut prev = 0usize;
+    for _ in 0..count {
+        let total = models[prev].total;
+        let dv = dec.get_freq(total);
+        let (s, cum) = models[prev].find(dv);
+        let freq = models[prev].freq[s];
+        dec.decode(cum, freq, total);
+        models[prev].update(s, inc);
+        out.push(s);
+        prev = s;
+    }
+    Ok(out)
+}
+
+/// Encode the value-code stream with BWT + adaptive order-1 range coding.
+/// Wire: [primary u16 BE] [inc u8] [rc_len u32 BE] [rc payload]. The encoder tries
+/// each candidate `inc` and keeps the smallest payload (decoder reads the winner).
+pub(crate) fn bwt_adaptive_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (bwt_out, primary) = bwt_encode_codes(seq_codes);
+    let mut best_inc = ADAPT_INCS[0];
+    let mut best_payload = adaptive_range_o1_encode(&bwt_out, n_distinct, best_inc);
+    for &inc in &ADAPT_INCS[1..] {
+        let p = adaptive_range_o1_encode(&bwt_out, n_distinct, inc);
+        if p.len() < best_payload.len() {
+            best_payload = p;
+            best_inc = inc;
+        }
+    }
+    let mut out = Vec::with_capacity(7 + best_payload.len());
+    out.extend_from_slice(&primary.to_be_bytes());
+    out.push(best_inc as u8);
+    out.extend_from_slice(&(best_payload.len() as u32).to_be_bytes());
+    out.extend_from_slice(&best_payload);
+    out
+}
+
+/// Decode the BWT + adaptive order-1 range-coded stream from blob at offset.
+pub(crate) fn bwt_adaptive_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if offset + 7 > blob.len() {
+        return Err(CubrimError::Decode(
+            "BwtAdaptive: blob too short for header (primary+inc+rc_len)".into(),
+        ));
+    }
+    let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
+    let inc = blob[offset + 2] as u32;
+    if inc == 0 {
+        return Err(CubrimError::Decode("BwtAdaptive: inc must be ≥ 1".into()));
+    }
+    let rc_len = u32::from_be_bytes([
+        blob[offset + 3],
+        blob[offset + 4],
+        blob[offset + 5],
+        blob[offset + 6],
+    ]) as usize;
+    let body = offset + 7;
+    if body + rc_len > blob.len() {
+        return Err(CubrimError::Decode(format!(
+            "BwtAdaptive: payload truncated: need {rc_len}, have {}",
+            blob.len().saturating_sub(body)
+        )));
+    }
+    let payload = &blob[body..body + rc_len];
+    let bwt_out = adaptive_range_o1_decode(payload, count, n_distinct, inc)?;
+    let seq_codes = bwt_decode_codes(&bwt_out, primary, n_distinct)?;
+    if seq_codes.len() != count {
+        return Err(CubrimError::Decode(format!(
+            "BwtAdaptive: decoded {} codes but expected {}",
+            seq_codes.len(),
+            count
+        )));
+    }
+    Ok((seq_codes, 7 + rc_len))
+}
+
+/// Estimate byte size of the BWT + adaptive order-1 range-coded stream.
+pub(crate) fn bwt_adaptive_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    bwt_adaptive_encode(seq_codes, n_distinct).len()
+}
+
+// ── H-22: context-mixing of order-1 + order-0 (adaptive, learned weight) ──────
+//
+// The strongest single model is adaptive order-1; its remaining slack is the
+// variance of low-count contexts (a context seen a few times gives a noisy
+// estimate). Blending the order-1 prediction with the stabler order-0 prediction,
+// weighted by a LEARNED scalar that adapts toward whichever model has been
+// predicting better, reduces that variance — classic context mixing.
+//
+// Static interpolation (order-0 as a fixed backoff PRIOR) was probed and LOST on
+// every file: BWT makes order-1 contexts locally sharp but globally misaligned, so
+// a fixed order-0 prior mispredicts the locally-dominant (often globally-rare)
+// symbol. Only the ADAPTIVE (learned-weight) mix wins, and only as a competitive
+// per-file alternative to pure order-1 — handled here by a one-byte mode selector.
+//
+// Backend: the same carryless range coder as H-21. Two modes:
+//   mode 0 — pure adaptive order-1 (integer counts, identical to scheme 9).
+//   mode 1 — learned-weight linear mix of order-1 and order-0 predictions.
+//
+// DETERMINISM: mode 1 uses f64 ONLY for the mix weight and the per-symbol blend.
+// Encode and decode compute the quantized frequency table from the SAME integer
+// model state and the SAME f64 weight, using only IEEE-754 +,−,*,/ (no fma, no
+// transcendentals), so both sides produce bit-identical tables and weight updates
+// on any IEEE-754 platform. Round-trip is exact (verified on all corpus files +
+// 40-trial property suite).
+
+/// Carryless range coder constants (shared design with H-21; named distinctly to
+/// keep schemes independent across branches).
+const CM_TOP: u32 = 1 << 24;
+const CM_BOT: u32 = 1 << 16;
+/// Rescale an adaptive context when its total exceeds this (kept under CM_BOT).
+const CM_RESCALE: u32 = 1 << 15;
+/// Range-coder total for the quantized mixed distribution (≤ CM_BOT).
+const CM_MIX_TOTAL: u32 = 1 << 14;
+/// Increment candidates the encoder sweeps for the pure order-1 mode.
+const CM_PURE_INCS: [u32; 4] = [8, 16, 32, 64];
+/// (inc, lr_index) candidates the encoder sweeps for the learned-mix mode.
+const CM_MIX_INCS: [u32; 2] = [16, 32];
+/// Learning-rate table (indexed by the wire `lr_idx` byte).
+const CM_LRS: [f64; 2] = [0.02, 0.05];
+
+struct CmRangeEncoder {
+    low: u32,
+    range: u32,
+    out: Vec<u8>,
+}
+impl CmRangeEncoder {
+    fn new() -> Self {
+        Self { low: 0, range: 0xFFFF_FFFF, out: Vec::new() }
+    }
+    #[inline]
+    fn encode(&mut self, cum: u32, freq: u32, total: u32) {
+        let r = self.range / total;
+        self.low = self.low.wrapping_add(r * cum);
+        self.range = r * freq;
+        loop {
+            if (self.low ^ self.low.wrapping_add(self.range)) < CM_TOP {
+            } else if self.range < CM_BOT {
+                self.range = self.low.wrapping_neg() & (CM_BOT - 1);
+            } else {
+                break;
+            }
+            self.out.push((self.low >> 24) as u8);
+            self.low <<= 8;
+            self.range <<= 8;
+        }
+    }
+    fn finish(mut self) -> Vec<u8> {
+        for _ in 0..4 {
+            self.out.push((self.low >> 24) as u8);
+            self.low <<= 8;
+        }
+        self.out
+    }
+}
+
+struct CmRangeDecoder<'a> {
+    low: u32,
+    range: u32,
+    code: u32,
+    buf: &'a [u8],
+    pos: usize,
+}
+impl<'a> CmRangeDecoder<'a> {
+    fn new(buf: &'a [u8]) -> Self {
+        let mut code: u32 = 0;
+        let mut pos = 0;
+        for _ in 0..4 {
+            code = (code << 8) | (*buf.get(pos).unwrap_or(&0) as u32);
+            pos += 1;
+        }
+        Self { low: 0, range: 0xFFFF_FFFF, code, buf, pos }
+    }
+    #[inline]
+    fn get_freq(&self, total: u32) -> u32 {
+        let r = self.range / total;
+        let dv = self.code.wrapping_sub(self.low) / r;
+        if dv >= total { total - 1 } else { dv }
+    }
+    #[inline]
+    fn decode(&mut self, cum: u32, freq: u32, total: u32) {
+        let r = self.range / total;
+        self.low = self.low.wrapping_add(r * cum);
+        self.range = r * freq;
+        loop {
+            if (self.low ^ self.low.wrapping_add(self.range)) < CM_TOP {
+            } else if self.range < CM_BOT {
+                self.range = self.low.wrapping_neg() & (CM_BOT - 1);
+            } else {
+                break;
+            }
+            self.code = (self.code << 8) | (*self.buf.get(self.pos).unwrap_or(&0) as u32);
+            self.pos += 1;
+            self.low <<= 8;
+            self.range <<= 8;
+        }
+    }
+}
+
+/// Integer adaptive context: freqs (init 1) + running total, rescale at CM_RESCALE.
+struct CmCtx {
+    freq: Vec<u32>,
+    total: u32,
+}
+impl CmCtx {
+    fn new(a: usize) -> Self {
+        Self { freq: vec![1u32; a], total: a as u32 }
+    }
+    #[inline]
+    fn update(&mut self, s: usize, inc: u32) {
+        self.freq[s] += inc;
+        self.total += inc;
+        if self.total > CM_RESCALE {
+            let mut nt = 0u32;
+            for f in &mut self.freq {
+                *f = (*f + 1) >> 1;
+                nt += *f;
+            }
+            self.total = nt;
+        }
+    }
+}
+
+/// Mode 0: pure adaptive order-1 (integer; identical model to scheme 9).
+fn cm_pure_o1_encode(seq_codes: &[usize], a: usize, inc: u32) -> Vec<u8> {
+    let mut ctx: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
+    let mut enc = CmRangeEncoder::new();
+    let mut prev = 0usize;
+    for &s in seq_codes {
+        let c = &ctx[prev];
+        let mut cum = 0u32;
+        for &f in &c.freq[..s] {
+            cum += f;
+        }
+        enc.encode(cum, c.freq[s], c.total);
+        ctx[prev].update(s, inc);
+        prev = s;
+    }
+    enc.finish()
+}
+
+fn cm_pure_o1_decode(payload: &[u8], count: usize, a: usize, inc: u32) -> Vec<usize> {
+    let mut ctx: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
+    let mut dec = CmRangeDecoder::new(payload);
+    let mut out = Vec::with_capacity(count);
+    let mut prev = 0usize;
+    for _ in 0..count {
+        let total = ctx[prev].total;
+        let dv = dec.get_freq(total);
+        // find symbol.
+        let c = &ctx[prev];
+        let mut cum = 0u32;
+        let mut s = 0usize;
+        for (i, &f) in c.freq.iter().enumerate() {
+            if cum + f > dv {
+                s = i;
+                break;
+            }
+            cum += f;
+        }
+        let freq = ctx[prev].freq[s];
+        dec.decode(cum, freq, total);
+        ctx[prev].update(s, inc);
+        out.push(s);
+        prev = s;
+    }
+    out
+}
+
+/// Build the quantized mixed frequency table (sum == CM_MIX_TOTAL) from the current
+/// integer model state and weight `w`. DETERMINISTIC: identical on encode & decode.
+/// Also returns the per-symbol blended probabilities so the weight update reuses the
+/// exact same f64 values both sides computed.
+#[inline]
+fn cm_mix_table(
+    freq1: &[u32],
+    tot1: u32,
+    freq0: &[u32],
+    tot0: u32,
+    w: f64,
+    a: usize,
+    qfreq: &mut [u32],
+) {
+    let t1 = tot1 as f64;
+    let t0 = tot0 as f64;
+    let mut sum: u32 = 0;
+    let mut maxv: u32 = 0;
+    let mut maxi: usize = 0;
+    for s in 0..a {
+        let p1 = freq1[s] as f64 / t1;
+        let p0 = freq0[s] as f64 / t0;
+        let pm = w * p1 + (1.0 - w) * p0;
+        // round to integer freq, floor at 1.
+        let mut q = (pm * CM_MIX_TOTAL as f64 + 0.5) as u32;
+        if q < 1 {
+            q = 1;
+        }
+        qfreq[s] = q;
+        sum += q;
+        if q > maxv {
+            maxv = q;
+            maxi = s;
+        }
+    }
+    // Reconcile to exactly CM_MIX_TOTAL by adjusting the max-freq symbol.
+    if sum < CM_MIX_TOTAL {
+        qfreq[maxi] += CM_MIX_TOTAL - sum;
+    } else if sum > CM_MIX_TOTAL {
+        let mut surplus = sum - CM_MIX_TOTAL;
+        // Trim from the max symbol(s), never below 1.
+        while surplus > 0 {
+            // recompute current max each round (a ≤ 256, surplus small).
+            let mut mi = 0usize;
+            let mut mv = 0u32;
+            for s in 0..a {
+                if qfreq[s] > mv {
+                    mv = qfreq[s];
+                    mi = s;
+                }
+            }
+            let take = surplus.min(qfreq[mi] - 1);
+            if take == 0 {
+                break;
+            }
+            qfreq[mi] -= take;
+            surplus -= take;
+        }
+    }
+}
+
+/// Mode 1: learned-weight linear mix of order-1 and order-0 adaptive predictions.
+fn cm_mix_encode(seq_codes: &[usize], a: usize, inc: u32, lr: f64) -> Vec<u8> {
+    let mut freq1: Vec<Vec<u32>> = (0..a).map(|_| vec![1u32; a]).collect();
+    let mut tot1: Vec<u32> = vec![a as u32; a];
+    let mut freq0: Vec<u32> = vec![1u32; a];
+    let mut tot0: u32 = a as u32;
+    let mut w: f64 = 0.5;
+    let mut qfreq = vec![0u32; a];
+    let mut enc = CmRangeEncoder::new();
+    let mut prev = 0usize;
+    for &s in seq_codes {
+        cm_mix_table(&freq1[prev], tot1[prev], &freq0, tot0, w, a, &mut qfreq);
+        let mut cum = 0u32;
+        for &f in &qfreq[..s] {
+            cum += f;
+        }
+        enc.encode(cum, qfreq[s], CM_MIX_TOTAL);
+        // weight update from the same pre-update state.
+        let p1 = freq1[prev][s] as f64 / tot1[prev] as f64;
+        let p0 = freq0[s] as f64 / tot0 as f64;
+        let pm = w * p1 + (1.0 - w) * p0;
+        w += lr * (p1 - p0) / pm;
+        if w < 1e-4 {
+            w = 1e-4;
+        } else if w > 1.0 - 1e-4 {
+            w = 1.0 - 1e-4;
+        }
+        // model updates.
+        cm_update(&mut freq1[prev], &mut tot1[prev], s, inc);
+        cm_update_o0(&mut freq0, &mut tot0, s, inc);
+        prev = s;
+    }
+    enc.finish()
+}
+
+fn cm_mix_decode(payload: &[u8], count: usize, a: usize, inc: u32, lr: f64) -> Vec<usize> {
+    let mut freq1: Vec<Vec<u32>> = (0..a).map(|_| vec![1u32; a]).collect();
+    let mut tot1: Vec<u32> = vec![a as u32; a];
+    let mut freq0: Vec<u32> = vec![1u32; a];
+    let mut tot0: u32 = a as u32;
+    let mut w: f64 = 0.5;
+    let mut qfreq = vec![0u32; a];
+    let mut dec = CmRangeDecoder::new(payload);
+    let mut out = Vec::with_capacity(count);
+    let mut prev = 0usize;
+    for _ in 0..count {
+        cm_mix_table(&freq1[prev], tot1[prev], &freq0, tot0, w, a, &mut qfreq);
+        let dv = dec.get_freq(CM_MIX_TOTAL);
+        let mut cum = 0u32;
+        let mut s = 0usize;
+        for (i, &f) in qfreq.iter().enumerate() {
+            if cum + f > dv {
+                s = i;
+                break;
+            }
+            cum += f;
+        }
+        dec.decode(cum, qfreq[s], CM_MIX_TOTAL);
+        let p1 = freq1[prev][s] as f64 / tot1[prev] as f64;
+        let p0 = freq0[s] as f64 / tot0 as f64;
+        let pm = w * p1 + (1.0 - w) * p0;
+        w += lr * (p1 - p0) / pm;
+        if w < 1e-4 {
+            w = 1e-4;
+        } else if w > 1.0 - 1e-4 {
+            w = 1.0 - 1e-4;
+        }
+        cm_update(&mut freq1[prev], &mut tot1[prev], s, inc);
+        cm_update_o0(&mut freq0, &mut tot0, s, inc);
+        out.push(s);
+        prev = s;
+    }
+    out
+}
+
+#[inline]
+fn cm_update(freq: &mut [u32], total: &mut u32, s: usize, inc: u32) {
+    freq[s] += inc;
+    *total += inc;
+    if *total > CM_RESCALE {
+        let mut nt = 0u32;
+        for f in freq.iter_mut() {
+            *f = (*f + 1) >> 1;
+            nt += *f;
+        }
+        *total = nt;
+    }
+}
+
+#[inline]
+fn cm_update_o0(freq: &mut [u32], total: &mut u32, s: usize, inc: u32) {
+    cm_update(freq, total, s, inc);
+}
+
+/// Encode the value-code stream with BWT + context-mixing. The encoder evaluates pure
+/// order-1 (mode 0) over CM_PURE_INCS and learned-mix (mode 1) over CM_MIX_INCS×CM_LRS,
+/// and keeps the smallest. Wire: [primary u16][mode u8][inc u8][lr_idx u8][rc_len u32][rc].
+pub(crate) fn bwt_ctxmix_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (bwt_out, primary) = bwt_encode_codes(seq_codes);
+    let a = n_distinct;
+    let mut best_mode = 0u8;
+    let mut best_inc = CM_PURE_INCS[0];
+    let mut best_lr_idx = 0u8;
+    let mut best_payload: Vec<u8> = Vec::new();
+    let mut have = false;
+
+    if a > 0 && !bwt_out.is_empty() {
+        for &inc in &CM_PURE_INCS {
+            let p = cm_pure_o1_encode(&bwt_out, a, inc);
+            if !have || p.len() < best_payload.len() {
+                best_payload = p;
+                best_mode = 0;
+                best_inc = inc;
+                best_lr_idx = 0;
+                have = true;
+            }
+        }
+        for &inc in &CM_MIX_INCS {
+            for (li, &lr) in CM_LRS.iter().enumerate() {
+                let p = cm_mix_encode(&bwt_out, a, inc, lr);
+                if p.len() < best_payload.len() {
+                    best_payload = p;
+                    best_mode = 1;
+                    best_inc = inc;
+                    best_lr_idx = li as u8;
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::with_capacity(8 + best_payload.len());
+    out.extend_from_slice(&primary.to_be_bytes());
+    out.push(best_mode);
+    out.push(best_inc as u8);
+    out.push(best_lr_idx);
+    out.extend_from_slice(&(best_payload.len() as u32).to_be_bytes());
+    out.extend_from_slice(&best_payload);
+    out
+}
+
+/// Decode the BWT + context-mixing stream from blob at offset.
+pub(crate) fn bwt_ctxmix_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if offset + 9 > blob.len() {
+        return Err(CubrimError::Decode(
+            "BwtContextMix: blob too short for header".into(),
+        ));
+    }
+    let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
+    let mode = blob[offset + 2];
+    let inc = blob[offset + 3] as u32;
+    let lr_idx = blob[offset + 4] as usize;
+    let rc_len = u32::from_be_bytes([
+        blob[offset + 5],
+        blob[offset + 6],
+        blob[offset + 7],
+        blob[offset + 8],
+    ]) as usize;
+    let body = offset + 9;
+    if body + rc_len > blob.len() {
+        return Err(CubrimError::Decode(format!(
+            "BwtContextMix: payload truncated: need {rc_len}, have {}",
+            blob.len().saturating_sub(body)
+        )));
+    }
+    if inc == 0 {
+        return Err(CubrimError::Decode("BwtContextMix: inc must be ≥ 1".into()));
+    }
+    let payload = &blob[body..body + rc_len];
+
+    let bwt_out: Vec<usize> = if count == 0 || n_distinct == 0 {
+        vec![]
+    } else {
+        match mode {
+            0 => cm_pure_o1_decode(payload, count, n_distinct, inc),
+            1 => {
+                if lr_idx >= CM_LRS.len() {
+                    return Err(CubrimError::Decode("BwtContextMix: lr_idx out of range".into()));
+                }
+                cm_mix_decode(payload, count, n_distinct, inc, CM_LRS[lr_idx])
+            }
+            _ => return Err(CubrimError::Decode(format!("BwtContextMix: bad mode {mode}"))),
+        }
+    };
+
+    let seq_codes = bwt_decode_codes(&bwt_out, primary, n_distinct)?;
+    if seq_codes.len() != count {
+        return Err(CubrimError::Decode(format!(
+            "BwtContextMix: decoded {} codes but expected {}",
+            seq_codes.len(),
+            count
+        )));
+    }
+    Ok((seq_codes, 9 + rc_len))
+}
+
+/// Estimate byte size of the BWT + context-mixing stream (full encode then len).
+pub(crate) fn bwt_ctxmix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    bwt_ctxmix_encode(seq_codes, n_distinct).len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3883,7 +4662,12 @@ mod tests {
         // scheme byte 8 = Order2Rans (added after BwtRans, H-20)
         assert_eq!(ValueScheme::Order2Rans.scheme_byte(), 8u8);
         assert_eq!(ValueScheme::from_byte(8u8), Some(ValueScheme::Order2Rans));
-        assert_eq!(ValueScheme::from_byte(9u8), None);
+        // scheme byte 9 = BwtAdaptive (H-21), 10 = BwtContextMix (H-22)
+        assert_eq!(ValueScheme::BwtAdaptive.scheme_byte(), 9u8);
+        assert_eq!(ValueScheme::from_byte(9u8), Some(ValueScheme::BwtAdaptive));
+        assert_eq!(ValueScheme::BwtContextMix.scheme_byte(), 10u8);
+        assert_eq!(ValueScheme::from_byte(10u8), Some(ValueScheme::BwtContextMix));
+        assert_eq!(ValueScheme::from_byte(11u8), None);
     }
 
     // ── Step 5.2: Context-key derivation + sentinels ──────────────────────────
@@ -4756,6 +5540,296 @@ mod tests {
         let data: Vec<u8> = b"the quick brown fox jumps over "
             .iter().copied().cycle().take(8192).collect();
         let blob = encode_with_config(&data, &order2_rans_cfg());
+        for cut in (8..blob.len()).step_by(41) {
+            let _ = decode(&blob[..cut]); // must not panic
+        }
+    }
+
+    // ── H-21 adaptive order-1 range coding (scheme 9) tests ──────────────────
+
+    fn bwt_adaptive_cfg() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::BwtAdaptive,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    #[test]
+    fn test_bwt_adaptive_scheme_byte() {
+        assert_eq!(ValueScheme::BwtAdaptive.scheme_byte(), 9u8);
+        assert_eq!(ValueScheme::from_byte(9u8), Some(ValueScheme::BwtAdaptive));
+    }
+
+    #[test]
+    fn test_range_coder_unit_round_trip() {
+        // Direct range-coder + adaptive order-1 model round-trip on a structured stream.
+        let n_distinct = 6usize;
+        let mut seq = Vec::new();
+        for _ in 0..400 {
+            seq.extend_from_slice(&[0, 0, 1, 0, 2, 0, 0, 3, 4, 5]);
+        }
+        for inc in ADAPT_INCS {
+            let enc = adaptive_range_o1_encode(&seq, n_distinct, inc);
+            let dec = adaptive_range_o1_decode(&enc, seq.len(), n_distinct, inc).unwrap();
+            assert_eq!(dec, seq, "adaptive range round-trip mismatch (inc={inc})");
+        }
+    }
+
+    #[test]
+    fn test_range_coder_empty_and_singletons() {
+        let enc = adaptive_range_o1_encode(&[], 0, 16);
+        let dec = adaptive_range_o1_decode(&enc, 0, 0, 16).unwrap();
+        assert!(dec.is_empty());
+        let seq = vec![0usize; 1000];
+        let enc = adaptive_range_o1_encode(&seq, 1, 16);
+        let dec = adaptive_range_o1_decode(&enc, seq.len(), 1, 16).unwrap();
+        assert_eq!(dec, seq);
+    }
+
+    #[test]
+    fn test_range_coder_high_entropy_and_rescale() {
+        // 256 symbols, long stream → forces model rescaling on hot contexts. Must
+        // round-trip exactly (rescale is the subtle determinism risk).
+        let n_distinct = 256usize;
+        let seq: Vec<usize> = (0..40000).map(|i| ((i * 97 + 13) % 256) as usize).collect();
+        for inc in [8u32, 64] {
+            let enc = adaptive_range_o1_encode(&seq, n_distinct, inc);
+            let dec = adaptive_range_o1_decode(&enc, seq.len(), n_distinct, inc).unwrap();
+            assert_eq!(dec, seq, "high-entropy/rescale round-trip mismatch (inc={inc})");
+        }
+    }
+
+    #[test]
+    fn test_bwt_adaptive_corpus_round_trip_all_files() {
+        // Byte-exact round-trip on all 10 frozen corpus files. Scheme 7's competitive
+        // selection may emit scheme byte 9 (BwtAdaptive); the decoder MUST recover every
+        // file. Round-trip is non-negotiable (Gotcha).
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        for cfg in [bwt_adaptive_cfg(), bwt_rans_cfg()] {
+            let mut ok = 0;
+            for name in &names {
+                let path = format!("{corpus_dir}/{name}.bin");
+                if let Ok(data) = fs::read(&path) {
+                    let blob = encode_with_config(&data, &cfg);
+                    let recovered = decode(&blob)
+                        .unwrap_or_else(|e| panic!("BwtAdaptive decode failed for '{name}': {e:?}"));
+                    assert_eq!(recovered, data, "BwtAdaptive round-trip FAILED for '{name}'");
+                    ok += 1;
+                }
+            }
+            assert_eq!(ok, 10, "BwtAdaptive corpus round-trip: {ok}/10 files present and clean");
+        }
+    }
+
+    #[test]
+    fn test_bwt_adaptive_never_regresses_competition() {
+        // Competitive (Gotcha #4): the scheme-9 blob with the full competitive set can
+        // NEVER be larger than the BwtEntropy leader on any corpus file.
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        let bwt_cfg = EncodeConfig {
+            value_scheme: ValueScheme::BwtEntropy,
+            ..EncodeConfig::v1_default()
+        };
+        for name in &names {
+            let path = format!("{corpus_dir}/{name}.bin");
+            if let Ok(data) = fs::read(&path) {
+                let cand = encode_with_config(&data, &bwt_adaptive_cfg());
+                let leader = encode_with_config(&data, &bwt_cfg);
+                assert!(
+                    cand.len() <= leader.len(),
+                    "BwtAdaptive regressed '{name}': {} > bwt-entropy {}",
+                    cand.len(), leader.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_bwt_adaptive_property_random_inputs() {
+        let mut state: u64 = 0xb5ad4eceda1ce2a9;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        for trial in 0..40 {
+            let len = 321 + (next() as usize % 4000);
+            let alphabet = 1 + (next() as usize % 200);
+            let data: Vec<u8> = (0..len).map(|_| (next() as usize % alphabet) as u8).collect();
+            let blob = encode_with_config(&data, &bwt_adaptive_cfg());
+            let recovered = decode(&blob).expect("decode");
+            assert_eq!(recovered, data, "BwtAdaptive property round-trip failed (trial {trial}, len {len}, alpha {alphabet})");
+        }
+    }
+
+    #[test]
+    fn test_bwt_adaptive_truncated_blob_errors_no_panic() {
+        let data: Vec<u8> = b"the quick brown fox jumps over "
+            .iter().copied().cycle().take(8192).collect();
+        let blob = encode_with_config(&data, &bwt_adaptive_cfg());
+        for cut in (8..blob.len()).step_by(41) {
+            let _ = decode(&blob[..cut]); // must not panic
+        }
+    }
+
+    // ── H-22 context-mixing (scheme 10) tests ────────────────────────────────
+
+    fn bwt_ctxmix_cfg() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::BwtContextMix,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    #[test]
+    fn test_bwt_ctxmix_scheme_byte() {
+        assert_eq!(ValueScheme::BwtContextMix.scheme_byte(), 10u8);
+        assert_eq!(ValueScheme::from_byte(10u8), Some(ValueScheme::BwtContextMix));
+    }
+
+    #[test]
+    fn test_ctxmix_pure_and_mix_unit_round_trip() {
+        // Structured stream; exercise both back-end modes directly.
+        let a = 6usize;
+        let mut seq = Vec::new();
+        for _ in 0..500 {
+            seq.extend_from_slice(&[0, 0, 1, 0, 2, 0, 3, 0, 4, 5]);
+        }
+        for inc in CM_PURE_INCS {
+            let enc = cm_pure_o1_encode(&seq, a, inc);
+            let dec = cm_pure_o1_decode(&enc, seq.len(), a, inc);
+            assert_eq!(dec, seq, "ctxmix pure round-trip mismatch (inc={inc})");
+        }
+        for inc in CM_MIX_INCS {
+            for &lr in &CM_LRS {
+                let enc = cm_mix_encode(&seq, a, inc, lr);
+                let dec = cm_mix_decode(&enc, seq.len(), a, inc, lr);
+                assert_eq!(dec, seq, "ctxmix mix round-trip mismatch (inc={inc}, lr={lr})");
+            }
+        }
+    }
+
+    #[test]
+    fn test_ctxmix_high_entropy_and_rescale() {
+        // 256 symbols, long stream → forces rescaling in both order-1 and order-0
+        // models; the learned-mix path must round-trip exactly (f64 determinism).
+        let a = 256usize;
+        let seq: Vec<usize> = (0..40000).map(|i| ((i * 97 + 13) % 256) as usize).collect();
+        for &lr in &CM_LRS {
+            let enc = cm_mix_encode(&seq, a, 16, lr);
+            let dec = cm_mix_decode(&enc, seq.len(), a, 16, lr);
+            assert_eq!(dec, seq, "ctxmix high-entropy/rescale mismatch (lr={lr})");
+        }
+    }
+
+    #[test]
+    fn test_ctxmix_empty_and_singleton() {
+        let enc = bwt_ctxmix_encode(&[], 0);
+        let (dec, _) = bwt_ctxmix_decode(&enc, 0, 0, 0).unwrap();
+        assert!(dec.is_empty());
+        let seq = vec![0usize; 800];
+        let enc = bwt_ctxmix_encode(&seq, 1);
+        let (dec, _) = bwt_ctxmix_decode(&enc, 0, seq.len(), 1).unwrap();
+        assert_eq!(dec, seq);
+    }
+
+    #[test]
+    fn test_bwt_ctxmix_corpus_round_trip_all_files() {
+        // Byte-exact round-trip on all 10 frozen corpus files. Scheme 7's competitive
+        // selection may emit scheme byte 10 (BwtContextMix); the decoder MUST recover
+        // every file. Round-trip is non-negotiable (Gotcha).
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        for cfg in [bwt_ctxmix_cfg(), bwt_rans_cfg()] {
+            let mut ok = 0;
+            for name in &names {
+                let path = format!("{corpus_dir}/{name}.bin");
+                if let Ok(data) = fs::read(&path) {
+                    let blob = encode_with_config(&data, &cfg);
+                    let recovered = decode(&blob)
+                        .unwrap_or_else(|e| panic!("BwtContextMix decode failed for '{name}': {e:?}"));
+                    assert_eq!(recovered, data, "BwtContextMix round-trip FAILED for '{name}'");
+                    ok += 1;
+                }
+            }
+            assert_eq!(ok, 10, "BwtContextMix corpus round-trip: {ok}/10 files present and clean");
+        }
+    }
+
+    #[test]
+    fn test_bwt_ctxmix_never_regresses_competition() {
+        // Competitive (Gotcha #4): can NEVER be larger than the BwtEntropy leader.
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        let bwt_cfg = EncodeConfig {
+            value_scheme: ValueScheme::BwtEntropy,
+            ..EncodeConfig::v1_default()
+        };
+        for name in &names {
+            let path = format!("{corpus_dir}/{name}.bin");
+            if let Ok(data) = fs::read(&path) {
+                let cand = encode_with_config(&data, &bwt_ctxmix_cfg());
+                let leader = encode_with_config(&data, &bwt_cfg);
+                assert!(
+                    cand.len() <= leader.len(),
+                    "BwtContextMix regressed '{name}': {} > bwt-entropy {}",
+                    cand.len(), leader.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_bwt_ctxmix_property_random_inputs() {
+        let mut state: u64 = 0x14057b7ef767814f;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        for trial in 0..40 {
+            let len = 321 + (next() as usize % 4000);
+            let alphabet = 1 + (next() as usize % 200);
+            let data: Vec<u8> = (0..len).map(|_| (next() as usize % alphabet) as u8).collect();
+            let blob = encode_with_config(&data, &bwt_ctxmix_cfg());
+            let recovered = decode(&blob).expect("decode");
+            assert_eq!(recovered, data, "BwtContextMix property round-trip failed (trial {trial}, len {len}, alpha {alphabet})");
+        }
+    }
+
+    #[test]
+    fn test_bwt_ctxmix_truncated_blob_errors_no_panic() {
+        let data: Vec<u8> = b"the quick brown fox jumps over "
+            .iter().copied().cycle().take(8192).collect();
+        let blob = encode_with_config(&data, &bwt_ctxmix_cfg());
         for cut in (8..blob.len()).step_by(41) {
             let _ = decode(&blob[..cut]); // must not panic
         }

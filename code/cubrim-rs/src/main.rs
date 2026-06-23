@@ -119,8 +119,10 @@ fn main() {
                     "bwt-entropy" | "bwt_entropy" | "bwt" => ValueScheme::BwtEntropy,
                     "bwt-rans" | "bwt_rans" | "rans" => ValueScheme::BwtRans,
                     "order2-rans" | "order2_rans" | "bwt-order2-rans" => ValueScheme::Order2Rans,
+                    "bwt-adaptive" | "bwt_adaptive" | "adaptive" => ValueScheme::BwtAdaptive,
+                    "bwt-ctxmix" | "bwt_ctxmix" | "ctxmix" => ValueScheme::BwtContextMix,
                     other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, bwt-rans, or order2-rans.");
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, bwt-rans, order2-rans, bwt-adaptive, or bwt-ctxmix.");
                         process::exit(1);
                     }
                 };
