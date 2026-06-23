@@ -252,6 +252,14 @@ def gather_env() -> dict:
         r = subprocess.run(cmd, capture_output=True, text=True, shell=True)
         return r.stdout.strip() if r.returncode == 0 else "unavailable"
 
+    # code_sha: the git commit the sweep ran on. Measured numbers are only
+    # reproducible against a known revision (CLAUDE.md mandate). A "-dirty" suffix
+    # flags an uncommitted working tree (result not archivable until committed).
+    code_sha = run("git rev-parse HEAD")
+    dirty = run("git status --porcelain")
+    if dirty and dirty != "unavailable":
+        code_sha = f"{code_sha}-dirty"
+
     return {
         "host": platform.node(),
         "os": platform.platform(),
@@ -260,6 +268,7 @@ def gather_env() -> dict:
         "cargo": run("cargo --version"),
         "zstd": run("zstd --version | head -1"),
         "brotli": run("brotli --version 2>&1 | head -1"),
+        "code_sha": code_sha,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 

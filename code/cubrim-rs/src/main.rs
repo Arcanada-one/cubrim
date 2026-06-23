@@ -121,8 +121,9 @@ fn main() {
                     "order2-rans" | "order2_rans" | "bwt-order2-rans" => ValueScheme::Order2Rans,
                     "bwt-adaptive" | "bwt_adaptive" | "adaptive" => ValueScheme::BwtAdaptive,
                     "bwt-ctxmix" | "bwt_ctxmix" | "ctxmix" => ValueScheme::BwtContextMix,
+                    "bwt-geomix" | "bwt_geomix" | "geomix" => ValueScheme::BwtGeoMix,
                     other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, bwt-rans, order2-rans, bwt-adaptive, or bwt-ctxmix.");
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, bwt-rans, order2-rans, bwt-adaptive, bwt-ctxmix, or bwt-geomix.");
                         process::exit(1);
                     }
                 };

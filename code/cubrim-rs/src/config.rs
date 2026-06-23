@@ -211,6 +211,28 @@ pub enum ValueScheme {
     ///
     /// Header byte = 10.
     BwtContextMix,
+    /// BWT reorder + GEOMETRIC (logistic) context-mixing of order-2/1/0 (H-24).
+    ///
+    /// Same BWT front-end as BwtRans (scheme 7). The entropy back-end transmits NO
+    /// frequency tables; the decoder rebuilds three adaptive models (order-2 key
+    /// (prev2,prev1), order-1 key prev1, order-0) symbol-by-symbol and blends their
+    /// predictions in the LOG domain — p(s) ∝ ∏_k p_k(s)^{w_k}, renormalized over the
+    /// alphabet — with three weights learned online by gradient on the per-symbol
+    /// log-loss. Geometric mixing sharpens high-confidence predictions (multiply, not
+    /// average), beating the scheme-10 linear o1+o0 mix on every structured cube file.
+    /// A range coder is used (adaptive forward coding, like H-21/H-22). The encoder
+    /// sweeps a small (inc, lr) grid and keeps the smallest payload. Competitive
+    /// (Gotcha #4): produced only as a winner of the scheme-7 selection.
+    ///
+    /// Wire (after header + gap streams):
+    ///   [primary_index : u16 BE]     — 2 bytes; BWT primary index (≤ L ≤ 65536)
+    ///   [inc           : u8]         — model increment (effective alpha = 1/inc)
+    ///   [lr_idx        : u8]         — learning-rate index into GM_LRS
+    ///   [rc_len        : u32 BE]     — range-coded payload length
+    ///   [rc payload    : bytes]      — carryless range-coder bytes
+    ///
+    /// Header byte = 11.
+    BwtGeoMix,
 }
 
 impl GapScheme {
@@ -246,6 +268,7 @@ impl ValueScheme {
             ValueScheme::Order2Rans => 8,
             ValueScheme::BwtAdaptive => 9,
             ValueScheme::BwtContextMix => 10,
+            ValueScheme::BwtGeoMix => 11,
         }
     }
 
@@ -262,6 +285,7 @@ impl ValueScheme {
             8 => Some(ValueScheme::Order2Rans),
             9 => Some(ValueScheme::BwtAdaptive),
             10 => Some(ValueScheme::BwtContextMix),
+            11 => Some(ValueScheme::BwtGeoMix),
             _ => None,
         }
     }
@@ -406,9 +430,13 @@ mod tests {
             Some(ValueScheme::BwtContextMix)
         );
         assert_eq!(
-            ValueScheme::from_byte(11),
+            ValueScheme::from_byte(ValueScheme::BwtGeoMix.scheme_byte()),
+            Some(ValueScheme::BwtGeoMix)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(12),
             None,
-            "11 is not a valid value_scheme byte"
+            "12 is not a valid value_scheme byte"
         );
         assert_eq!(
             ValueScheme::from_byte(99),

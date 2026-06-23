@@ -97,12 +97,13 @@ fn estimate_cube_size(
         ValueScheme::BwtRans
         | ValueScheme::Order2Rans
         | ValueScheme::BwtAdaptive
-        | ValueScheme::BwtContextMix => {
+        | ValueScheme::BwtContextMix
+        | ValueScheme::BwtGeoMix => {
             // Competitive: every BWT-family scheme emits the same per-file minimum
             // over the full candidate set (BwtRans, BwtEntropy, EntropyContext,
-            // Order2Rans, BwtAdaptive, BwtContextMix) and writes the winner's scheme
-            // byte. Estimate with that same minimum so the raw-vs-cube decision matches
-            // the bytes the encoder will actually produce (Gotcha #4 / #6).
+            // Order2Rans, BwtAdaptive, BwtContextMix, BwtGeoMix) and writes the winner's
+            // scheme byte. Estimate with that same minimum so the raw-vs-cube decision
+            // matches the bytes the encoder will actually produce (Gotcha #4 / #6).
             let n_distinct = state.inverse_dict.len();
             bwt_rans_size(seq_codes, n_distinct)
                 .min(bwt_entropy_size(seq_codes, n_distinct))
@@ -110,6 +111,7 @@ fn estimate_cube_size(
                 .min(bwt_order2_rans_size(seq_codes, n_distinct))
                 .min(bwt_adaptive_size(seq_codes, n_distinct))
                 .min(bwt_ctxmix_size(seq_codes, n_distinct))
+                .min(bwt_geomix_size(seq_codes, n_distinct))
         }
     };
 
@@ -421,7 +423,8 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         ValueScheme::BwtRans
         | ValueScheme::Order2Rans
         | ValueScheme::BwtAdaptive
-        | ValueScheme::BwtContextMix => {
+        | ValueScheme::BwtContextMix
+        | ValueScheme::BwtGeoMix => {
             // Consolidated competitive selection (Gotcha #4). Any BWT-family scheme
             // request emits the smallest of the full candidate set and writes the
             // winner's scheme byte, so requesting any one of them can never regress
@@ -432,6 +435,7 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             //   Order2Rans (8)    — BWT + order-2 rANS                  (H-20)
             //   BwtAdaptive (9)   — BWT + adaptive order-1 range coding (H-21)
             //   BwtContextMix (10)— BWT + context-mixing range coding   (H-22)
+            //   BwtGeoMix (11)    — BWT + geometric o2/o1/o0 mixing     (H-24)
             // Decode is header-driven, so the winner's byte is all the decoder needs.
             let n_distinct = inverse_dict.len();
             let rans_bytes = bwt_rans_encode(&seq_codes, n_distinct);
@@ -440,6 +444,7 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             let order2_bytes = bwt_order2_rans_encode(&seq_codes, n_distinct);
             let adaptive_bytes = bwt_adaptive_encode(&seq_codes, n_distinct);
             let ctxmix_bytes = bwt_ctxmix_encode(&seq_codes, n_distinct);
+            let geomix_bytes = bwt_geomix_encode(&seq_codes, n_distinct);
 
             // Start from BwtRans and keep the strictly-smaller candidate, so ties
             // resolve to the earlier-listed scheme (stable, deterministic).
@@ -464,6 +469,10 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             if ctxmix_bytes.len() < encoded_values.len() {
                 winner_scheme = ValueScheme::BwtContextMix;
                 encoded_values = ctxmix_bytes;
+            }
+            if geomix_bytes.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::BwtGeoMix;
+                encoded_values = geomix_bytes;
             }
 
             let winner_cube_state = CubeHeaderState {
@@ -912,6 +921,33 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 if code >= n_distinct {
                     return Err(CubrimError::Decode(format!(
                         "BwtContextMix code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::BwtGeoMix => {
+            // BWT inverse + geometric context-mixing decode (H-24).
+            let n_distinct = inverse_dict.len();
+            let (seq_codes, _consumed) = bwt_geomix_decode(blob, offset, count, n_distinct)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "BwtGeoMix decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(),
+                    count
+                )));
+            }
+
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "BwtGeoMix code {} at position {} >= n_distinct {}",
                         code, i, n_distinct
                     )));
                 }
@@ -3674,6 +3710,339 @@ pub(crate) fn bwt_ctxmix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
     bwt_ctxmix_encode(seq_codes, n_distinct).len()
 }
 
+// ---------------------------------------------------------------------------
+// Scheme 11 — BWT + GEOMETRIC (logistic) context-mixing of order-2/1/0 (H-24)
+// ---------------------------------------------------------------------------
+//
+// Same BWT front-end as scheme 7. The back-end blends THREE adaptive predictions
+// (order-2 key (prev2,prev1), order-1 key prev1, order-0) in the LOG domain:
+//   p(s) ∝ ∏_k p_k(s)^{w_k}      (geometric / logistic mixing)
+// renormalized over the alphabet, then quantized to CM_MIX_TOTAL for the range
+// coder. The three weights w_k are learned online by gradient on the per-symbol
+// log-loss (∂L/∂w_k = -(ln p_k(s) − E_q[ln p_k])), identically on encode & decode.
+// Geometric mixing beats the scheme-10 linear o1+o0 mix because high-confidence
+// models multiply (a near-certain predictor sharpens the blend) instead of being
+// averaged down. No frequency tables are transmitted (regression-proof: emitted
+// only when it wins the competitive min, Gotcha #4).
+
+/// Learning-rate table (indexed by the wire `lr_idx` byte) for the geometric mix.
+const GM_LRS: [f64; 2] = [0.01, 0.02];
+/// Model-increment candidates the encoder sweeps.
+const GM_INCS: [u32; 2] = [16, 32];
+/// Weight clamp range [0, GM_WCLAMP] — keeps a single model from dominating absurdly.
+const GM_WCLAMP: f64 = 8.0;
+
+/// Precompute ln(i) for i in 0..=max so the per-symbol mix avoids repeated transcendental
+/// calls. Index 0 is never used as a numerator/denominator (freqs & totals are ≥ 1).
+fn gm_ln_table(max: u32) -> Vec<f64> {
+    let mut t = vec![0.0f64; (max as usize) + 1];
+    for (i, slot) in t.iter_mut().enumerate().skip(1) {
+        *slot = (i as f64).ln();
+    }
+    t
+}
+
+/// Fill the quantized mixed frequency table `q` (sum == CM_MIX_TOTAL) and the per-model
+/// log-prob arrays + posterior numerators `ex` (with returned normaliser Z) from the
+/// current integer model state and weights `w`. DETERMINISTIC: identical on both sides
+/// (does NOT depend on the symbol being coded).
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn gm_predict(
+    fr2: &[u32],
+    t2: u32,
+    fr1: &[u32],
+    t1: u32,
+    fr0: &[u32],
+    t0: u32,
+    w: &[f64; 3],
+    a: usize,
+    ln: &[f64],
+    lnp2: &mut [f64],
+    lnp1: &mut [f64],
+    lnp0: &mut [f64],
+    ex: &mut [f64],
+    q: &mut [u32],
+) -> f64 {
+    let lt2 = ln[t2 as usize];
+    let lt1 = ln[t1 as usize];
+    let lt0 = ln[t0 as usize];
+    let mut maxlog = f64::NEG_INFINITY;
+    for x in 0..a {
+        let l2 = ln[fr2[x] as usize] - lt2;
+        let l1 = ln[fr1[x] as usize] - lt1;
+        let l0 = ln[fr0[x] as usize] - lt0;
+        lnp2[x] = l2;
+        lnp1[x] = l1;
+        lnp0[x] = l0;
+        let lp = w[0] * l2 + w[1] * l1 + w[2] * l0;
+        ex[x] = lp; // hold logp, convert after we know the max
+        if lp > maxlog {
+            maxlog = lp;
+        }
+    }
+    let mut z = 0.0f64;
+    for e in ex.iter_mut().take(a) {
+        *e = (*e - maxlog).exp();
+        z += *e;
+    }
+    // Quantize posterior ex/z to CM_MIX_TOTAL, floor at 1, reconcile on the max symbol.
+    let mut sum: u32 = 0;
+    let mut maxv: u32 = 0;
+    let mut maxi: usize = 0;
+    for x in 0..a {
+        let mut qv = ((ex[x] / z) * CM_MIX_TOTAL as f64 + 0.5) as u32;
+        if qv < 1 {
+            qv = 1;
+        }
+        q[x] = qv;
+        sum += qv;
+        if qv > maxv {
+            maxv = qv;
+            maxi = x;
+        }
+    }
+    if sum < CM_MIX_TOTAL {
+        q[maxi] += CM_MIX_TOTAL - sum;
+    } else if sum > CM_MIX_TOTAL {
+        let mut surplus = sum - CM_MIX_TOTAL;
+        while surplus > 0 {
+            let mut mi = 0usize;
+            let mut mv = 0u32;
+            for (x, &qx) in q.iter().enumerate().take(a) {
+                if qx > mv {
+                    mv = qx;
+                    mi = x;
+                }
+            }
+            let take = surplus.min(q[mi] - 1);
+            if take == 0 {
+                break;
+            }
+            q[mi] -= take;
+            surplus -= take;
+        }
+    }
+    z
+}
+
+/// Online weight update (gradient ascent on the geometric-mix log-likelihood). Uses the
+/// float posterior `ex/z` for E_q — identical on encode & decode since both reconstruct
+/// `ex`, `z`, and the lnp arrays from synced integer state.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn gm_update_weights(
+    w: &mut [f64; 3],
+    lnp2: &[f64],
+    lnp1: &[f64],
+    lnp0: &[f64],
+    ex: &[f64],
+    z: f64,
+    a: usize,
+    s: usize,
+    lr: f64,
+) {
+    let mut eq = [0.0f64; 3];
+    for x in 0..a {
+        let qx = ex[x] / z;
+        eq[0] += qx * lnp2[x];
+        eq[1] += qx * lnp1[x];
+        eq[2] += qx * lnp0[x];
+    }
+    let gk = [lnp2[s] - eq[0], lnp1[s] - eq[1], lnp0[s] - eq[2]];
+    for k in 0..3 {
+        w[k] = (w[k] + lr * gk[k]).clamp(0.0, GM_WCLAMP);
+    }
+}
+
+/// Fetch-or-create the order-2 context (key = prev2*a + prev1).
+#[inline]
+fn gm_o2(
+    map: &mut std::collections::HashMap<usize, CmCtx>,
+    key: usize,
+    a: usize,
+) -> &mut CmCtx {
+    map.entry(key).or_insert_with(|| CmCtx::new(a))
+}
+
+fn gm_mix_encode(bwt_out: &[usize], a: usize, inc: u32, lr: f64, ln: &[f64]) -> Vec<u8> {
+    let mut o2: std::collections::HashMap<usize, CmCtx> = std::collections::HashMap::new();
+    let mut o1: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
+    let mut o0 = CmCtx::new(a);
+    let mut w = [1.0f64, 1.0, 1.0];
+    let mut lnp2 = vec![0.0f64; a];
+    let mut lnp1 = vec![0.0f64; a];
+    let mut lnp0 = vec![0.0f64; a];
+    let mut ex = vec![0.0f64; a];
+    let mut q = vec![0u32; a];
+    let mut enc = CmRangeEncoder::new();
+    let mut prev2 = 0usize;
+    let mut prev1 = 0usize;
+    for &s in bwt_out {
+        let key = prev2 * a + prev1;
+        let z = {
+            let c2 = gm_o2(&mut o2, key, a);
+            let (f2, tt2) = (c2.freq.as_slice(), c2.total);
+            // SAFETY-free: copy small slices out by re-borrowing immutably below.
+            gm_predict(
+                f2, tt2, &o1[prev1].freq, o1[prev1].total, &o0.freq, o0.total, &w, a, ln,
+                &mut lnp2, &mut lnp1, &mut lnp0, &mut ex, &mut q,
+            )
+        };
+        let mut cum = 0u32;
+        for &f in &q[..s] {
+            cum += f;
+        }
+        enc.encode(cum, q[s], CM_MIX_TOTAL);
+        gm_update_weights(&mut w, &lnp2, &lnp1, &lnp0, &ex, z, a, s, lr);
+        gm_o2(&mut o2, key, a).update(s, inc);
+        o1[prev1].update(s, inc);
+        o0.update(s, inc);
+        prev2 = prev1;
+        prev1 = s;
+    }
+    enc.finish()
+}
+
+fn gm_mix_decode(payload: &[u8], count: usize, a: usize, inc: u32, lr: f64, ln: &[f64]) -> Vec<usize> {
+    let mut o2: std::collections::HashMap<usize, CmCtx> = std::collections::HashMap::new();
+    let mut o1: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
+    let mut o0 = CmCtx::new(a);
+    let mut w = [1.0f64, 1.0, 1.0];
+    let mut lnp2 = vec![0.0f64; a];
+    let mut lnp1 = vec![0.0f64; a];
+    let mut lnp0 = vec![0.0f64; a];
+    let mut ex = vec![0.0f64; a];
+    let mut q = vec![0u32; a];
+    let mut dec = CmRangeDecoder::new(payload);
+    let mut out = Vec::with_capacity(count);
+    let mut prev2 = 0usize;
+    let mut prev1 = 0usize;
+    for _ in 0..count {
+        let key = prev2 * a + prev1;
+        let z = {
+            let c2 = gm_o2(&mut o2, key, a);
+            gm_predict(
+                &c2.freq, c2.total, &o1[prev1].freq, o1[prev1].total, &o0.freq, o0.total,
+                &w, a, ln, &mut lnp2, &mut lnp1, &mut lnp0, &mut ex, &mut q,
+            )
+        };
+        let dv = dec.get_freq(CM_MIX_TOTAL);
+        let mut cum = 0u32;
+        let mut s = 0usize;
+        for (i, &f) in q.iter().enumerate() {
+            if cum + f > dv {
+                s = i;
+                break;
+            }
+            cum += f;
+        }
+        dec.decode(cum, q[s], CM_MIX_TOTAL);
+        gm_update_weights(&mut w, &lnp2, &lnp1, &lnp0, &ex, z, a, s, lr);
+        gm_o2(&mut o2, key, a).update(s, inc);
+        o1[prev1].update(s, inc);
+        o0.update(s, inc);
+        out.push(s);
+        prev2 = prev1;
+        prev1 = s;
+    }
+    out
+}
+
+/// Encode the value-code stream with BWT + geometric context-mixing. The encoder sweeps
+/// GM_INCS × GM_LRS and keeps the smallest payload.
+/// Wire: [primary u16][inc u8][lr_idx u8][rc_len u32][rc].
+pub(crate) fn bwt_geomix_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (bwt_out, primary) = bwt_encode_codes(seq_codes);
+    let a = n_distinct;
+    let mut best_inc = GM_INCS[0];
+    let mut best_lr_idx = 0u8;
+    let mut best_payload: Vec<u8> = Vec::new();
+    let mut have = false;
+
+    if a > 0 && !bwt_out.is_empty() {
+        let ln = gm_ln_table(CM_RESCALE + 128);
+        for &inc in &GM_INCS {
+            for (li, &lr) in GM_LRS.iter().enumerate() {
+                let p = gm_mix_encode(&bwt_out, a, inc, lr, &ln);
+                if !have || p.len() < best_payload.len() {
+                    best_payload = p;
+                    best_inc = inc;
+                    best_lr_idx = li as u8;
+                    have = true;
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::with_capacity(8 + best_payload.len());
+    out.extend_from_slice(&primary.to_be_bytes());
+    out.push(best_inc as u8);
+    out.push(best_lr_idx);
+    out.extend_from_slice(&(best_payload.len() as u32).to_be_bytes());
+    out.extend_from_slice(&best_payload);
+    out
+}
+
+/// Decode the BWT + geometric context-mixing stream from blob at offset.
+pub(crate) fn bwt_geomix_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if offset + 8 > blob.len() {
+        return Err(CubrimError::Decode(
+            "BwtGeoMix: blob too short for header".into(),
+        ));
+    }
+    let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
+    let inc = blob[offset + 2] as u32;
+    let lr_idx = blob[offset + 3] as usize;
+    let rc_len = u32::from_be_bytes([
+        blob[offset + 4],
+        blob[offset + 5],
+        blob[offset + 6],
+        blob[offset + 7],
+    ]) as usize;
+    let body = offset + 8;
+    if body + rc_len > blob.len() {
+        return Err(CubrimError::Decode(format!(
+            "BwtGeoMix: payload truncated: need {rc_len}, have {}",
+            blob.len().saturating_sub(body)
+        )));
+    }
+    if inc == 0 {
+        return Err(CubrimError::Decode("BwtGeoMix: inc must be ≥ 1".into()));
+    }
+    let payload = &blob[body..body + rc_len];
+
+    let bwt_out: Vec<usize> = if count == 0 || n_distinct == 0 {
+        vec![]
+    } else {
+        if lr_idx >= GM_LRS.len() {
+            return Err(CubrimError::Decode("BwtGeoMix: lr_idx out of range".into()));
+        }
+        let ln = gm_ln_table(CM_RESCALE + 128);
+        gm_mix_decode(payload, count, n_distinct, inc, GM_LRS[lr_idx], &ln)
+    };
+
+    let seq_codes = bwt_decode_codes(&bwt_out, primary, n_distinct)?;
+    if seq_codes.len() != count {
+        return Err(CubrimError::Decode(format!(
+            "BwtGeoMix: decoded {} codes but expected {}",
+            seq_codes.len(),
+            count
+        )));
+    }
+    Ok((seq_codes, 8 + rc_len))
+}
+
+/// Estimate byte size of the BWT + geometric context-mixing stream.
+pub(crate) fn bwt_geomix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    bwt_geomix_encode(seq_codes, n_distinct).len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4667,7 +5036,10 @@ mod tests {
         assert_eq!(ValueScheme::from_byte(9u8), Some(ValueScheme::BwtAdaptive));
         assert_eq!(ValueScheme::BwtContextMix.scheme_byte(), 10u8);
         assert_eq!(ValueScheme::from_byte(10u8), Some(ValueScheme::BwtContextMix));
-        assert_eq!(ValueScheme::from_byte(11u8), None);
+        // scheme byte 11 = BwtGeoMix (geometric o2/o1/o0 mixing, H-24)
+        assert_eq!(ValueScheme::BwtGeoMix.scheme_byte(), 11u8);
+        assert_eq!(ValueScheme::from_byte(11u8), Some(ValueScheme::BwtGeoMix));
+        assert_eq!(ValueScheme::from_byte(12u8), None);
     }
 
     // ── Step 5.2: Context-key derivation + sentinels ──────────────────────────
@@ -5830,6 +6202,151 @@ mod tests {
         let data: Vec<u8> = b"the quick brown fox jumps over "
             .iter().copied().cycle().take(8192).collect();
         let blob = encode_with_config(&data, &bwt_ctxmix_cfg());
+        for cut in (8..blob.len()).step_by(41) {
+            let _ = decode(&blob[..cut]); // must not panic
+        }
+    }
+
+    // ── H-24 geometric context-mixing (scheme 11) tests ─────────────────────
+
+    fn bwt_geomix_cfg() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::BwtGeoMix,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    #[test]
+    fn test_bwt_geomix_scheme_byte() {
+        assert_eq!(ValueScheme::BwtGeoMix.scheme_byte(), 11u8);
+        assert_eq!(ValueScheme::from_byte(11u8), Some(ValueScheme::BwtGeoMix));
+    }
+
+    #[test]
+    fn test_geomix_unit_round_trip() {
+        // Structured stream; exercise the geometric-mix back-end directly across the grid.
+        let a = 6usize;
+        let mut seq = Vec::new();
+        for _ in 0..500 {
+            seq.extend_from_slice(&[0, 0, 1, 0, 2, 0, 3, 0, 4, 5]);
+        }
+        let ln = gm_ln_table(CM_RESCALE + 128);
+        for inc in GM_INCS {
+            for &lr in &GM_LRS {
+                let enc = gm_mix_encode(&seq, a, inc, lr, &ln);
+                let dec = gm_mix_decode(&enc, seq.len(), a, inc, lr, &ln);
+                assert_eq!(dec, seq, "geomix round-trip mismatch (inc={inc}, lr={lr})");
+            }
+        }
+    }
+
+    #[test]
+    fn test_geomix_high_entropy_and_rescale() {
+        // 256 symbols, long stream → forces rescaling in all three models; the
+        // geometric-mix path must round-trip exactly (f64 determinism, log/exp).
+        let a = 256usize;
+        let seq: Vec<usize> = (0..40000).map(|i| ((i * 97 + 13) % 256) as usize).collect();
+        let ln = gm_ln_table(CM_RESCALE + 128);
+        for &lr in &GM_LRS {
+            let enc = gm_mix_encode(&seq, a, 16, lr, &ln);
+            let dec = gm_mix_decode(&enc, seq.len(), a, 16, lr, &ln);
+            assert_eq!(dec, seq, "geomix high-entropy/rescale mismatch (lr={lr})");
+        }
+    }
+
+    #[test]
+    fn test_geomix_empty_and_singleton() {
+        let enc = bwt_geomix_encode(&[], 0);
+        let (dec, _) = bwt_geomix_decode(&enc, 0, 0, 0).unwrap();
+        assert!(dec.is_empty());
+        let seq = vec![0usize; 800];
+        let enc = bwt_geomix_encode(&seq, 1);
+        let (dec, _) = bwt_geomix_decode(&enc, 0, seq.len(), 1).unwrap();
+        assert_eq!(dec, seq);
+    }
+
+    #[test]
+    fn test_bwt_geomix_corpus_round_trip_all_files() {
+        // Byte-exact round-trip on all 10 frozen corpus files. Scheme 7's competitive
+        // selection may emit scheme byte 11 (BwtGeoMix); the decoder MUST recover every
+        // file. Round-trip is non-negotiable (Gotcha).
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        for cfg in [bwt_geomix_cfg(), bwt_rans_cfg()] {
+            let mut ok = 0;
+            for name in &names {
+                let path = format!("{corpus_dir}/{name}.bin");
+                if let Ok(data) = fs::read(&path) {
+                    let blob = encode_with_config(&data, &cfg);
+                    let recovered = decode(&blob)
+                        .unwrap_or_else(|e| panic!("BwtGeoMix decode failed for '{name}': {e:?}"));
+                    assert_eq!(recovered, data, "BwtGeoMix round-trip FAILED for '{name}'");
+                    ok += 1;
+                }
+            }
+            assert_eq!(ok, 10, "BwtGeoMix corpus round-trip: {ok}/10 files present and clean");
+        }
+    }
+
+    #[test]
+    fn test_bwt_geomix_never_regresses_competition() {
+        // Competitive (Gotcha #4): can NEVER be larger than the BwtEntropy leader.
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        let bwt_cfg = EncodeConfig {
+            value_scheme: ValueScheme::BwtEntropy,
+            ..EncodeConfig::v1_default()
+        };
+        for name in &names {
+            let path = format!("{corpus_dir}/{name}.bin");
+            if let Ok(data) = fs::read(&path) {
+                let cand = encode_with_config(&data, &bwt_geomix_cfg());
+                let leader = encode_with_config(&data, &bwt_cfg);
+                assert!(
+                    cand.len() <= leader.len(),
+                    "BwtGeoMix regressed '{name}': {} > bwt-entropy {}",
+                    cand.len(), leader.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_bwt_geomix_property_random_inputs() {
+        let mut state: u64 = 0x243f6a8885a308d3;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        for trial in 0..40 {
+            let len = 321 + (next() as usize % 4000);
+            let alphabet = 1 + (next() as usize % 200);
+            let data: Vec<u8> = (0..len).map(|_| (next() as usize % alphabet) as u8).collect();
+            let blob = encode_with_config(&data, &bwt_geomix_cfg());
+            let recovered = decode(&blob).expect("decode");
+            assert_eq!(recovered, data, "BwtGeoMix property round-trip failed (trial {trial}, len {len}, alpha {alphabet})");
+        }
+    }
+
+    #[test]
+    fn test_bwt_geomix_truncated_blob_errors_no_panic() {
+        let data: Vec<u8> = b"the quick brown fox jumps over "
+            .iter().copied().cycle().take(8192).collect();
+        let blob = encode_with_config(&data, &bwt_geomix_cfg());
         for cut in (8..blob.len()).step_by(41) {
             let _ = decode(&blob[..cut]); // must not panic
         }
