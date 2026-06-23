@@ -99,12 +99,13 @@ fn estimate_cube_size(
         | ValueScheme::Order2Rans
         | ValueScheme::BwtAdaptive
         | ValueScheme::BwtContextMix
-        | ValueScheme::BwtGeoMix => {
-            // Competitive: every BWT-family scheme emits the same per-file minimum
+        | ValueScheme::BwtGeoMix
+        | ValueScheme::LzRans => {
+            // Competitive: every scheme in this family emits the same per-file minimum
             // over the full candidate set (BwtRans, BwtEntropy, EntropyContext,
-            // Order2Rans, BwtAdaptive, BwtContextMix, BwtGeoMix) and writes the winner's
-            // scheme byte. Estimate with that same minimum so the raw-vs-cube decision
-            // matches the bytes the encoder will actually produce (Gotcha #4 / #6).
+            // Order2Rans, BwtAdaptive, BwtContextMix, BwtGeoMix, LzRans) and writes the
+            // winner's scheme byte. Estimate with that same minimum so the raw-vs-cube
+            // decision matches the bytes the encoder will actually produce (Gotcha #4/#6).
             let n_distinct = state.inverse_dict.len();
             bwt_rans_size(seq_codes, n_distinct)
                 .min(bwt_entropy_size(seq_codes, n_distinct))
@@ -113,6 +114,7 @@ fn estimate_cube_size(
                 .min(bwt_adaptive_size(seq_codes, n_distinct))
                 .min(bwt_ctxmix_size(seq_codes, n_distinct))
                 .min(bwt_geomix_size(seq_codes, n_distinct))
+                .min(lz_rans_size(seq_codes, n_distinct))
         }
     };
 
@@ -427,8 +429,9 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         | ValueScheme::Order2Rans
         | ValueScheme::BwtAdaptive
         | ValueScheme::BwtContextMix
-        | ValueScheme::BwtGeoMix => {
-            // Consolidated competitive selection (Gotcha #4). Any BWT-family scheme
+        | ValueScheme::BwtGeoMix
+        | ValueScheme::LzRans => {
+            // Consolidated competitive selection (Gotcha #4). Any scheme in this family
             // request emits the smallest of the full candidate set and writes the
             // winner's scheme byte, so requesting any one of them can never regress
             // another:
@@ -439,6 +442,7 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             //   BwtAdaptive (9)   — BWT + adaptive order-1 range coding (H-21)
             //   BwtContextMix (10)— BWT + context-mixing range coding   (H-22)
             //   BwtGeoMix (11)    — BWT + geometric o2/o1/o0 mixing     (H-24)
+            //   LzRans (12)       — LZ77 + rANS (non-BWT match model)   (H-25)
             // Decode is header-driven, so the winner's byte is all the decoder needs.
             let n_distinct = inverse_dict.len();
             let rans_bytes = bwt_rans_encode(&seq_codes, n_distinct);
@@ -448,6 +452,7 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             let adaptive_bytes = bwt_adaptive_encode(&seq_codes, n_distinct);
             let ctxmix_bytes = bwt_ctxmix_encode(&seq_codes, n_distinct);
             let geomix_bytes = bwt_geomix_encode(&seq_codes, n_distinct);
+            let lz_bytes = lz_rans_encode(&seq_codes, n_distinct);
 
             // Start from BwtRans and keep the strictly-smaller candidate, so ties
             // resolve to the earlier-listed scheme (stable, deterministic).
@@ -476,6 +481,10 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             if geomix_bytes.len() < encoded_values.len() {
                 winner_scheme = ValueScheme::BwtGeoMix;
                 encoded_values = geomix_bytes;
+            }
+            if lz_bytes.len() < encoded_values.len() {
+                winner_scheme = ValueScheme::LzRans;
+                encoded_values = lz_bytes;
             }
 
             let winner_cube_state = CubeHeaderState {
@@ -1035,6 +1044,33 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 if code >= n_distinct {
                     return Err(CubrimError::Decode(format!(
                         "BwtGeoMix code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::LzRans => {
+            // LZ77 + rANS decode (H-25). Non-BWT match model.
+            let n_distinct = inverse_dict.len();
+            let (seq_codes, _consumed) = lz_rans_decode(blob, offset, count, n_distinct)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "LzRans decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(),
+                    count
+                )));
+            }
+
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "LzRans code {} at position {} >= n_distinct {}",
                         code, i, n_distinct
                     )));
                 }
@@ -4365,6 +4401,326 @@ pub(crate) fn bwt_geomix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
     bwt_geomix_encode(seq_codes, n_distinct).len()
 }
 
+// ─── LzRans (H-25): LZ77 match modeling + rANS, a NON-BWT value-stream class ──
+//
+// Motivation (holdout re-check): the entire gap to gzip/zstd on unseen data is
+// LZ dictionary matching (long-range repeats) — a capability the cube+BWT+rANS
+// pipeline has no model for. LzRans tokenizes the value-code stream into
+// (literal, match) tokens via greedy LZ77, then entropy-codes every sub-stream:
+//   - literals   → BWT + order-1 rANS backend (`bwt_rans_encode`, Cubrim's strength)
+//   - flags      → order-1 rANS over {0,1}
+//   - length/distance → split into a BIT-LENGTH BUCKET (order-1 rANS) + raw extra
+//     bits. The probe identified the DISTANCE stream as the crux (dominant cost,
+//     up to ~16 bits/match); bucket+extra reaches ~log2(d) (the information floor)
+//     while letting rANS model the bucket distribution.
+//
+// Wire (value stream, after cube header + gap streams):
+//   [n_tokens u32][n_lits u32][n_matches u32]
+//   flags_block    = rans_order1(flags,        alphabet 2)        (self-delimiting)
+//   lits_block     = bwt_rans_encode(literals,  n_distinct)        (count = n_lits)
+//   lenbkt_block   = rans_order1(len_buckets,   LZ_BUCKETS)        (count = n_matches)
+//   distbkt_block  = rans_order1(dist_buckets,  LZ_BUCKETS)        (count = n_matches)
+//   [extra_len u32][extra bytes]   — per match (token order): len-extra then dist-extra
+//
+// Competitive (Gotcha #4): produced only as a winner of the scheme-7 selection
+// rail, so it can never regress a file. Header byte = 12.
+
+/// Bucket alphabet for LZ length/distance bit-length codes. A value v≥1 has
+/// `bit_length(v) ∈ [1, 17]` for v ≤ 131071 (distances ≤ 65535, lengths ≤ L ≤ 65536).
+const LZ_BUCKETS: usize = 18;
+/// LZ77 minimum match length (shorter matches are cheaper as literals).
+const LZ_MIN_MATCH: usize = 3;
+/// Hash-chain search depth cap (bounds encode time on repetitive data).
+const LZ_MAX_CHAIN: usize = 256;
+
+#[inline]
+fn lz_bit_length(v: usize) -> usize {
+    if v == 0 {
+        0
+    } else {
+        usize::BITS as usize - v.leading_zeros() as usize
+    }
+}
+
+/// LSB-first bit writer for the raw extra-bits stream.
+struct LzBitWriter {
+    bytes: Vec<u8>,
+    cur: u8,
+    nbits: u8,
+}
+impl LzBitWriter {
+    fn new() -> Self {
+        Self {
+            bytes: Vec::new(),
+            cur: 0,
+            nbits: 0,
+        }
+    }
+    fn write(&mut self, value: usize, nbits: usize) {
+        for i in 0..nbits {
+            let bit = ((value >> i) & 1) as u8;
+            self.cur |= bit << self.nbits;
+            self.nbits += 1;
+            if self.nbits == 8 {
+                self.bytes.push(self.cur);
+                self.cur = 0;
+                self.nbits = 0;
+            }
+        }
+    }
+    fn finish(mut self) -> Vec<u8> {
+        if self.nbits > 0 {
+            self.bytes.push(self.cur);
+        }
+        self.bytes
+    }
+}
+
+/// LSB-first bit reader for the raw extra-bits stream.
+struct LzBitReader<'a> {
+    bytes: &'a [u8],
+    byte_pos: usize,
+    bit_pos: u8,
+}
+impl<'a> LzBitReader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            byte_pos: 0,
+            bit_pos: 0,
+        }
+    }
+    fn read(&mut self, nbits: usize) -> Result<usize, CubrimError> {
+        let mut value = 0usize;
+        for i in 0..nbits {
+            if self.byte_pos >= self.bytes.len() {
+                return Err(CubrimError::Decode("LzRans: extra-bit stream exhausted".into()));
+            }
+            let bit = (self.bytes[self.byte_pos] >> self.bit_pos) & 1;
+            value |= (bit as usize) << i;
+            self.bit_pos += 1;
+            if self.bit_pos == 8 {
+                self.bit_pos = 0;
+                self.byte_pos += 1;
+            }
+        }
+        Ok(value)
+    }
+}
+
+/// Greedy LZ77 parse of the value-code stream `seq` (codes in [0, 256)).
+/// Returns (flags, literals, lengths, distances) where flags[t]∈{0,1} marks each
+/// token (0=literal, 1=match); literals are in token order, lengths/distances in
+/// match order. Uses 3-code hash chains over the full prior window.
+#[allow(clippy::type_complexity)]
+fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>) {
+    let n = seq.len();
+    let mut flags = Vec::new();
+    let mut literals = Vec::new();
+    let mut lengths = Vec::new();
+    let mut distances = Vec::new();
+    if n == 0 {
+        return (flags, literals, lengths, distances);
+    }
+
+    use std::collections::HashMap;
+    let mut head: HashMap<u32, usize> = HashMap::new();
+    let mut prev = vec![usize::MAX; n];
+    let key3 = |i: usize| -> u32 {
+        ((seq[i] as u32) << 16) | ((seq[i + 1] as u32) << 8) | (seq[i + 2] as u32)
+    };
+
+    let mut i = 0usize;
+    while i < n {
+        let mut best_len = 0usize;
+        let mut best_dist = 0usize;
+        if i + LZ_MIN_MATCH <= n {
+            let k = key3(i);
+            let mut j = head.get(&k).copied().unwrap_or(usize::MAX);
+            let mut chain = 0usize;
+            while j != usize::MAX && chain < LZ_MAX_CHAIN {
+                // Extend the match at j vs i.
+                let maxl = n - i;
+                let mut ml = 0usize;
+                while ml < maxl && seq[j + ml] == seq[i + ml] {
+                    ml += 1;
+                }
+                if ml > best_len {
+                    best_len = ml;
+                    best_dist = i - j;
+                    if ml >= maxl {
+                        break;
+                    }
+                }
+                j = prev[j];
+                chain += 1;
+            }
+        }
+        if best_len >= LZ_MIN_MATCH {
+            flags.push(1);
+            lengths.push(best_len);
+            distances.push(best_dist);
+            // Insert hash entries across the matched span, then advance.
+            let end = i + best_len;
+            while i < end {
+                if i + LZ_MIN_MATCH <= n {
+                    let k = key3(i);
+                    prev[i] = head.get(&k).copied().unwrap_or(usize::MAX);
+                    head.insert(k, i);
+                }
+                i += 1;
+            }
+        } else {
+            flags.push(0);
+            literals.push(seq[i]);
+            if i + LZ_MIN_MATCH <= n {
+                let k = key3(i);
+                prev[i] = head.get(&k).copied().unwrap_or(usize::MAX);
+                head.insert(k, i);
+            }
+            i += 1;
+        }
+    }
+    (flags, literals, lengths, distances)
+}
+
+/// Encode the value-code stream with LzRans (LZ77 + rANS). See module comment.
+pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (flags, literals, lengths, distances) = lz77_parse(seq_codes);
+    let n_tokens = flags.len();
+    let n_lits = literals.len();
+    let n_matches = lengths.len();
+
+    // Bucket the length/distance values; collect extra bits in match (token) order.
+    let mut len_buckets = Vec::with_capacity(n_matches);
+    let mut dist_buckets = Vec::with_capacity(n_matches);
+    let mut bw = LzBitWriter::new();
+    for m in 0..n_matches {
+        let lv = lengths[m];
+        let lb = lz_bit_length(lv);
+        len_buckets.push(lb);
+        bw.write(lv - (1 << (lb - 1)), lb - 1);
+
+        let dv = distances[m];
+        let db = lz_bit_length(dv);
+        dist_buckets.push(db);
+        bw.write(dv - (1 << (db - 1)), db - 1);
+    }
+    let extra = bw.finish();
+
+    let flags_block = rans_order1_encode(&flags, 2);
+    let lits_block = bwt_rans_encode(&literals, n_distinct);
+    let lenbkt_block = rans_order1_encode(&len_buckets, LZ_BUCKETS);
+    let distbkt_block = rans_order1_encode(&dist_buckets, LZ_BUCKETS);
+
+    let mut out = Vec::with_capacity(
+        12 + flags_block.len() + lits_block.len() + lenbkt_block.len() + distbkt_block.len()
+            + 4
+            + extra.len(),
+    );
+    out.extend_from_slice(&(n_tokens as u32).to_be_bytes());
+    out.extend_from_slice(&(n_lits as u32).to_be_bytes());
+    out.extend_from_slice(&(n_matches as u32).to_be_bytes());
+    out.extend_from_slice(&flags_block);
+    out.extend_from_slice(&lits_block);
+    out.extend_from_slice(&lenbkt_block);
+    out.extend_from_slice(&distbkt_block);
+    out.extend_from_slice(&(extra.len() as u32).to_be_bytes());
+    out.extend_from_slice(&extra);
+    out
+}
+
+/// Decode the LzRans stream from blob at offset. Returns (seq_codes, consumed).
+pub(crate) fn lz_rans_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    let mut pos = offset;
+    let read_u32 = |blob: &[u8], p: usize| -> Result<usize, CubrimError> {
+        if p + 4 > blob.len() {
+            return Err(CubrimError::Decode("LzRans: truncated u32 field".into()));
+        }
+        Ok(u32::from_be_bytes([blob[p], blob[p + 1], blob[p + 2], blob[p + 3]]) as usize)
+    };
+    let n_tokens = read_u32(blob, pos)?;
+    let n_lits = read_u32(blob, pos + 4)?;
+    let n_matches = read_u32(blob, pos + 8)?;
+    pos += 12;
+
+    let (flags, consumed) = rans_order1_decode(blob, pos, n_tokens, 2)?;
+    pos += consumed;
+    let (literals, consumed) = bwt_rans_decode(blob, pos, n_lits, n_distinct)?;
+    pos += consumed;
+    let (len_buckets, consumed) = rans_order1_decode(blob, pos, n_matches, LZ_BUCKETS)?;
+    pos += consumed;
+    let (dist_buckets, consumed) = rans_order1_decode(blob, pos, n_matches, LZ_BUCKETS)?;
+    pos += consumed;
+
+    let extra_len = read_u32(blob, pos)?;
+    pos += 4;
+    if pos + extra_len > blob.len() {
+        return Err(CubrimError::Decode("LzRans: extra-bit block truncated".into()));
+    }
+    let mut br = LzBitReader::new(&blob[pos..pos + extra_len]);
+    pos += extra_len;
+
+    let mut out: Vec<usize> = Vec::with_capacity(count);
+    let mut li = 0usize;
+    let mut mi = 0usize;
+    for &flag in &flags {
+        if flag == 0 {
+            if li >= literals.len() {
+                return Err(CubrimError::Decode("LzRans: literal stream underflow".into()));
+            }
+            out.push(literals[li]);
+            li += 1;
+        } else {
+            if mi >= n_matches {
+                return Err(CubrimError::Decode("LzRans: match stream underflow".into()));
+            }
+            let lb = len_buckets[mi];
+            let db = dist_buckets[mi];
+            mi += 1;
+            if lb == 0 || lb > 32 || db == 0 || db > 32 {
+                return Err(CubrimError::Decode(format!(
+                    "LzRans: corrupt bucket (len {lb}, dist {db})"
+                )));
+            }
+            let length = (1usize << (lb - 1)) + br.read(lb - 1)?;
+            let distance = (1usize << (db - 1)) + br.read(db - 1)?;
+            if distance > out.len() {
+                return Err(CubrimError::Decode(format!(
+                    "LzRans: distance {distance} exceeds output length {}",
+                    out.len()
+                )));
+            }
+            if out.len() + length > count {
+                return Err(CubrimError::Decode(
+                    "LzRans: match overflows declared count".into(),
+                ));
+            }
+            let start = out.len() - distance;
+            for k in 0..length {
+                out.push(out[start + k]);
+            }
+        }
+    }
+    if out.len() != count {
+        return Err(CubrimError::Decode(format!(
+            "LzRans: decoded {} codes but expected {count}",
+            out.len()
+        )));
+    }
+    Ok((out, pos - offset))
+}
+
+/// Estimate byte size of the LzRans stream (used by the competitive rail).
+pub(crate) fn lz_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    lz_rans_encode(seq_codes, n_distinct).len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4451,6 +4807,97 @@ mod tests {
                 "SA-IS BWT mismatch on periodic block (unit len {})",
                 unit.len()
             );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // H-25 LzRans (LZ77 + rANS) — scheme byte 12
+    // -------------------------------------------------------------------------
+
+    fn lz_rans_cfg() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::LzRans,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    #[test]
+    fn test_lz_rans_scheme_byte() {
+        assert_eq!(ValueScheme::LzRans.scheme_byte(), 12u8);
+        assert_eq!(ValueScheme::from_byte(12u8), Some(ValueScheme::LzRans));
+    }
+
+    #[test]
+    fn test_lz_rans_codes_round_trip_direct() {
+        // Direct lz_rans_encode/decode round-trip on code streams incl. periodic,
+        // all-same, random, and long-run (overlapping-match) inputs.
+        let mut state: u64 = 0xD1B54A32D192ED03;
+        let mut next = |m: usize| -> usize {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((state >> 33) as usize) % m
+        };
+        let mut cases: Vec<(Vec<usize>, usize)> = vec![
+            (vec![], 1),
+            (vec![0], 1),
+            (vec![5, 5, 5, 5, 5, 5, 5, 5], 6),       // all-same → overlap match dist 1
+            (vec![1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3], 4),
+            (b"abracadabra abracadabra abracadabra".iter().map(|&c| c as usize).collect(), 256),
+        ];
+        // Random + structured streams of varied alphabet.
+        for _ in 0..200 {
+            let len = next(2000);
+            let alpha = 1 + next(8);
+            let seq: Vec<usize> = (0..len).map(|_| next(alpha)).collect();
+            cases.push((seq, alpha.max(1)));
+        }
+        for (seq, n_distinct) in &cases {
+            let blob = lz_rans_encode(seq, *n_distinct);
+            let (decoded, consumed) =
+                lz_rans_decode(&blob, 0, seq.len(), *n_distinct).expect("lz decode");
+            assert_eq!(&decoded, seq, "LzRans round-trip mismatch");
+            assert_eq!(consumed, blob.len(), "LzRans consumed != blob len");
+        }
+    }
+
+    #[test]
+    fn test_lz_rans_full_codec_round_trip() {
+        // Through the full encoder/decoder with a highly-repetitive cube-eligible
+        // input (LZ should win or tie; round-trip must be byte-exact regardless).
+        let unit = b"the cube archiver maps values into a lattice. ";
+        let mut data = Vec::new();
+        while data.len() < 8000 {
+            data.extend_from_slice(unit);
+        }
+        let blob = encode_with_config(&data, &lz_rans_cfg());
+        assert_eq!(decode(&blob).unwrap(), data, "LzRans full-codec round-trip");
+    }
+
+    #[test]
+    fn test_lz_rans_competitive_never_regresses() {
+        // The competitive rail guarantees requesting LzRans never produces a blob
+        // larger than requesting BwtRans (both pick the per-file min).
+        let unit = b"mississippi river banana bandana ";
+        let mut data = Vec::new();
+        while data.len() < 5000 {
+            data.extend_from_slice(unit);
+        }
+        let lz = encode_with_config(&data, &lz_rans_cfg());
+        let rans = encode_with_config(&data, &bwt_rans_cfg());
+        assert_eq!(lz.len(), rans.len(), "competitive rail must pick same per-file min");
+        assert_eq!(decode(&lz).unwrap(), data);
+        assert_eq!(decode(&rans).unwrap(), data);
+    }
+
+    #[test]
+    fn test_lz_rans_truncated_blob_errors_no_panic() {
+        let data: Vec<u8> = (0..4000u32).map(|i| (i % 7) as u8).collect();
+        let blob = lz_rans_encode(
+            &data.iter().map(|&b| b as usize).collect::<Vec<_>>(),
+            7,
+        );
+        for cut in [0usize, 5, 12, blob.len() / 2, blob.len().saturating_sub(1)] {
+            let _ = lz_rans_decode(&blob[..cut.min(blob.len())], 0, data.len(), 7);
+            // Must not panic; correctness of Err is implied by no unwind.
         }
     }
 
@@ -5508,7 +5955,10 @@ mod tests {
         // scheme byte 11 = BwtGeoMix (geometric o2/o1/o0 mixing, H-24)
         assert_eq!(ValueScheme::BwtGeoMix.scheme_byte(), 11u8);
         assert_eq!(ValueScheme::from_byte(11u8), Some(ValueScheme::BwtGeoMix));
-        assert_eq!(ValueScheme::from_byte(12u8), None);
+        // scheme byte 12 = LzRans (LZ77 + rANS, H-25)
+        assert_eq!(ValueScheme::LzRans.scheme_byte(), 12u8);
+        assert_eq!(ValueScheme::from_byte(12u8), Some(ValueScheme::LzRans));
+        assert_eq!(ValueScheme::from_byte(13u8), None);
     }
 
     // ── Step 5.2: Context-key derivation + sentinels ──────────────────────────

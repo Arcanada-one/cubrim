@@ -13,7 +13,7 @@ use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2|bwt-entropy] [--min-ctx-count N]");
+    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2|bwt-entropy|bwt-rans|order2-rans|bwt-adaptive|bwt-ctxmix|bwt-geomix|lz-rans] [--min-ctx-count N]");
     eprintln!("  cubrim decompress <input> <output>");
     process::exit(1);
 }
@@ -122,8 +122,9 @@ fn main() {
                     "bwt-adaptive" | "bwt_adaptive" | "adaptive" => ValueScheme::BwtAdaptive,
                     "bwt-ctxmix" | "bwt_ctxmix" | "ctxmix" => ValueScheme::BwtContextMix,
                     "bwt-geomix" | "bwt_geomix" | "geomix" => ValueScheme::BwtGeoMix,
+                    "lz-rans" | "lz_rans" | "lz" => ValueScheme::LzRans,
                     other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, bwt-rans, order2-rans, bwt-adaptive, bwt-ctxmix, or bwt-geomix.");
+                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, bwt-rans, order2-rans, bwt-adaptive, bwt-ctxmix, bwt-geomix, or lz-rans.");
                         process::exit(1);
                     }
                 };
