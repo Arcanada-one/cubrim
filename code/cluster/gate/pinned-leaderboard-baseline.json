@@ -1,21 +1,21 @@
 {
-  "note": "Pinned baseline used when the leaderboard file is not yet committed to the main branch (bootstrap). Once docs/leaderboard/cubrim-leaderboard.json is committed to main, gates read it via git show main: and this file becomes a dead fallback. Update this file in the gate dir (not in a candidate branch) whenever the baseline advances. NOTE: the aggregate is measured via the competitive rail (compress with --value-scheme bwt-rans, which selects the smallest of schemes 7/8/9/10 per file). The codec's bare default (no flag) is bitpack (0.556651); always measure champions through the competitive flag.",
+  "note": "Pinned baseline used when the leaderboard file is not yet committed to the main branch (bootstrap). Once docs/leaderboard/cubrim-leaderboard.json is committed to main, gates read it via git show main: and this file becomes a dead fallback. Update this file in the gate dir (not in a candidate branch) whenever the baseline advances. NOTE: the aggregate is measured via the competitive rail (compress with --value-scheme bwt-rans, which selects the smallest of schemes 7..11 per file). The codec's bare default (no flag) is bitpack (0.556651); always measure champions through the competitive flag. gzip-CAVEAT: this aggregate (0.158273) edges gzip-9 (0.158290) by only 2 bytes on THIS 10-file corpus, and the win rests almost entirely on block_bound_runs; gzip is still smaller on most files. Do NOT claim Cubrim beats gzip in general — it is corpus-specific and fragile.",
   "current_best": {
-    "scheme": "Consolidated-8-9-10 (BwtRans/Order2Rans/BwtAdaptive/BwtContextMix competitive)",
-    "aggregate": 0.168227,
-    "code_sha": "f0ff451",
+    "scheme": "BwtGeoMix (scheme 11, logistic-mix; competitive rail over schemes 7..11)",
+    "aggregate": 0.158273,
+    "code_sha": "48e28b7",
     "corpus_manifest_sha256": "8e6cf6a743d0ff58f7666484006392029cd04c0fb7f86ec99cdc0a66a186f2b3",
     "per_file": [
-      {"file": "sparse_clustered", "bytes": 179},
+      {"file": "sparse_clustered", "bytes": 169},
       {"file": "dense",            "bytes": 4109},
-      {"file": "text",             "bytes": 1757},
-      {"file": "log_like",         "bytes": 570},
-      {"file": "binary_mixed",     "bytes": 5679},
+      {"file": "text",             "bytes": 1525},
+      {"file": "log_like",         "bytes": 557},
+      {"file": "binary_mixed",     "bytes": 5330},
       {"file": "random_high",      "bytes": 4109},
       {"file": "sparse_small",     "bytes": 269},
       {"file": "both_sparse_16",   "bytes": 29},
       {"file": "both_sparse_24",   "bytes": 37},
-      {"file": "block_bound_runs", "bytes": 2950}
+      {"file": "block_bound_runs", "bytes": 2389}
     ]
   }
 }
