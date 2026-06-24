@@ -636,14 +636,22 @@ fn build_lz_container(
         lit_blob = direct1;
     }
 
-    // Token coding: separate per-stream (0) vs H-25g combined sequence (1).
+    // Token coding: separate per-stream (0) vs H-25g combined sequence (1) vs H-25k
+    // offset-code sequence (2). Competitive — pick the smallest, so a new format can
+    // never regress a file (it only wins where it is strictly smaller).
     let token_separate = lz_encode_token_streams(flags, lengths, distances);
     let token_combined = lz_encode_token_combined(flags, lengths, distances);
-    let (seq_format, token_block) = if token_combined.len() < token_separate.len() {
-        (1u8, token_combined)
-    } else {
-        (0u8, token_separate)
-    };
+    let token_offcode = lz_encode_token_offcode(flags, lengths, distances);
+    let mut seq_format = 0u8;
+    let mut token_block = token_separate;
+    if token_combined.len() < token_block.len() {
+        seq_format = 1;
+        token_block = token_combined;
+    }
+    if token_offcode.len() < token_block.len() {
+        seq_format = 2;
+        token_block = token_offcode;
+    }
 
     let mut out = Vec::with_capacity(26 + lit_blob.len() + token_block.len());
     out.extend_from_slice(&MAGIC);
@@ -745,9 +753,14 @@ fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 }
             }
         }
-        1 => {
-            let (lit_lengths, final_ll, lengths, distances, _consumed) =
-                lz_decode_token_combined(blob, pos, n_matches)?;
+        1 | 2 => {
+            // Both combined formats yield the same logical sequence (per-match literal
+            // run-lengths + lengths + distances); only the offset encoding differs.
+            let (lit_lengths, final_ll, lengths, distances, _consumed) = if seq_format == 1 {
+                lz_decode_token_combined(blob, pos, n_matches)?
+            } else {
+                lz_decode_token_offcode(blob, pos, n_matches)?
+            };
             let mut li = 0usize;
             for m in 0..n_matches {
                 for _ in 0..lit_lengths[m] {
@@ -4912,6 +4925,37 @@ fn lz_rep_update(rep: &mut [usize; 3], d: usize) {
     }
 }
 
+/// Classify a match distance against the repeat-offset cache and advance the cache.
+/// Returns `(offset_mode, new_distance)`: modes 0/1/2 reuse `rep[mode]` (no distance
+/// transmitted); mode 3 is a new distance (returned as `Some`). Shared by the H-25g
+/// combined and the H-25k offset-code sequence coders so they classify identically.
+#[inline]
+fn lz_repcode_classify(rep: &mut [usize; 3], d: usize) -> (usize, Option<usize>) {
+    let out = if d == rep[0] {
+        (0usize, None)
+    } else if d == rep[1] {
+        (1, None)
+    } else if d == rep[2] {
+        (2, None)
+    } else {
+        (3, Some(d))
+    };
+    lz_rep_update(rep, d);
+    out
+}
+
+/// zstd-style offset *code* of distance `d` (≥1 ⇒ code ≥1): its bit-length. The code
+/// captures the offset magnitude — a small, skewed alphabet worth entropy-coding —
+/// while the low `code-1` bits are near-uniform and stored raw.
+#[inline]
+fn lz_offset_code(d: usize) -> usize {
+    lz_bit_length(d)
+}
+
+/// Alphabet bound for the offset-code stream. A u32 `orig_len` caps any distance at
+/// 2^32, so the bit-length code is ≤ 32; 40 leaves headroom for the rANS counts vec.
+const LZ_OC_ALPHABET: usize = 40;
+
 /// Cost-aware + lazy LZ77 parse of `seq` (codes/bytes in [0, 256)).
 /// Returns (flags, literals, lengths, distances). A candidate match is only taken
 /// when its estimated coded cost (offset via the repeat-offset cache + length +
@@ -5712,6 +5756,240 @@ fn lz_decode_token_combined(
     Ok((lit_lengths, final_ll, lengths, distances, pos - offset))
 }
 
+/// **H-25k offset-code sequence coder (seq_format 2).** Like the H-25g combined coder,
+/// but a new-distance offset is NOT stored as a LEB128 varint inside the structural
+/// buffer; it is split zstd-style into an offset *code* (its bit-length — a small,
+/// skewed alphabet entropy-coded with rANS) plus its `code-1` low bits packed raw
+/// (near-uniform, incompressible). This stops the byte-level rANS from spending
+/// framing on the uniform low bits while still entropy-coding the skewed magnitude —
+/// the residual long-range floor H-25j-full named. Structural bytes (literal-run /
+/// match-length varints + the 2-bit offset mode) stay in `ser`, coded as before.
+///
+/// Wire: [ser: coder u8, ser_len u32, payload][oc: coder u8, oc_count u32, payload]
+///       [extra: nbits u32, ceil(nbits/8) bytes packed MSB-first].
+fn lz_encode_token_offcode(flags: &[usize], lengths: &[usize], distances: &[usize]) -> Vec<u8> {
+    let mut rep = LZ_REP_INIT;
+    let mut ser: Vec<u8> = Vec::new();
+    let mut oc_codes: Vec<usize> = Vec::new();
+    let mut extra: Vec<u8> = Vec::new();
+    let mut acc: u32 = 0;
+    let mut acc_n: u32 = 0;
+    let mut nbits: u32 = 0;
+    let mut ll = 0usize;
+    let mut mi = 0usize;
+    for &f in flags {
+        if f == 0 {
+            ll += 1;
+            continue;
+        }
+        let d = distances[mi];
+        let ml = lengths[mi];
+        mi += 1;
+        let (mode, new_d) = lz_repcode_classify(&mut rep, d);
+        lz_varint_write(&mut ser, ll);
+        lz_varint_write(&mut ser, ml);
+        ser.push(mode as u8);
+        if let Some(nd) = new_d {
+            let oc = lz_offset_code(nd);
+            oc_codes.push(oc);
+            // Emit the low (oc-1) bits of nd, MSB-first, into the packed bit buffer.
+            let mut k = oc - 1;
+            while k > 0 {
+                k -= 1;
+                acc = (acc << 1) | ((nd >> k) & 1) as u32;
+                acc_n += 1;
+                nbits += 1;
+                if acc_n == 8 {
+                    extra.push(acc as u8);
+                    acc = 0;
+                    acc_n = 0;
+                }
+            }
+        }
+        ll = 0;
+    }
+    lz_varint_write(&mut ser, ll); // trailing literal run
+    if acc_n > 0 {
+        extra.push((acc << (8 - acc_n)) as u8);
+    }
+
+    // Code the structural buffer with the smallest of raw / order-0 / order-1 rANS.
+    let ser_codes: Vec<usize> = ser.iter().map(|&b| b as usize).collect();
+    let s0 = rans_order0_encode(&ser_codes, 256);
+    let s1 = rans_order1_encode(&ser_codes, 256);
+    let (ser_coder, ser_payload): (u8, &[u8]) = if s0.len() <= ser.len() && s0.len() <= s1.len() {
+        (1, &s0)
+    } else if s1.len() < ser.len() {
+        (2, &s1)
+    } else {
+        (0, &ser)
+    };
+
+    // Code the offset-code stream with the smallest of raw / order-0 / order-1 rANS.
+    let oc_raw: Vec<u8> = oc_codes.iter().map(|&c| c as u8).collect();
+    let oc0 = rans_order0_encode(&oc_codes, LZ_OC_ALPHABET);
+    let oc1 = rans_order1_encode(&oc_codes, LZ_OC_ALPHABET);
+    let (oc_coder, oc_payload): (u8, &[u8]) = if oc0.len() <= oc_raw.len() && oc0.len() <= oc1.len()
+    {
+        (1, &oc0)
+    } else if oc1.len() < oc_raw.len() {
+        (2, &oc1)
+    } else {
+        (0, &oc_raw)
+    };
+
+    let mut out = Vec::with_capacity(14 + ser_payload.len() + oc_payload.len() + extra.len());
+    out.push(ser_coder);
+    out.extend_from_slice(&(ser.len() as u32).to_be_bytes());
+    out.extend_from_slice(ser_payload);
+    out.push(oc_coder);
+    out.extend_from_slice(&(oc_codes.len() as u32).to_be_bytes());
+    out.extend_from_slice(oc_payload);
+    out.extend_from_slice(&nbits.to_be_bytes());
+    out.extend_from_slice(&extra);
+    out
+}
+
+/// Decode the H-25k offset-code sequence stream (mirror of `lz_encode_token_offcode`).
+/// Returns (literal_run_lengths, trailing_literal_run, lengths, distances, consumed),
+/// the same shape as `lz_decode_token_combined`. Fail-closed on every bound.
+#[allow(clippy::type_complexity)]
+fn lz_decode_token_offcode(
+    blob: &[u8],
+    offset: usize,
+    n_matches: usize,
+) -> Result<(Vec<usize>, usize, Vec<usize>, Vec<usize>, usize), CubrimError> {
+    let mut pos = offset;
+    let rd_u32 = |b: &[u8], p: usize| -> u32 {
+        u32::from_be_bytes([b[p], b[p + 1], b[p + 2], b[p + 3]])
+    };
+
+    // Structural buffer block.
+    if pos + 5 > blob.len() {
+        return Err(CubrimError::Decode("LZ offcode: ser header truncated".into()));
+    }
+    let ser_coder = blob[pos];
+    let ser_len = rd_u32(blob, pos + 1) as usize;
+    pos += 5;
+    let (ser, c): (Vec<u8>, usize) = match ser_coder {
+        0 => {
+            if pos + ser_len > blob.len() {
+                return Err(CubrimError::Decode("LZ offcode: ser raw truncated".into()));
+            }
+            (blob[pos..pos + ser_len].to_vec(), ser_len)
+        }
+        1 => {
+            let (codes, c) = rans_order0_decode(blob, pos, ser_len, 256)?;
+            (codes.iter().map(|&v| v as u8).collect(), c)
+        }
+        2 => {
+            let (codes, c) = rans_order1_decode(blob, pos, ser_len, 256)?;
+            (codes.iter().map(|&v| v as u8).collect(), c)
+        }
+        k => return Err(CubrimError::Decode(format!("LZ offcode: bad ser coder {k}"))),
+    };
+    pos += c;
+
+    // Offset-code stream block.
+    if pos + 5 > blob.len() {
+        return Err(CubrimError::Decode("LZ offcode: oc header truncated".into()));
+    }
+    let oc_coder = blob[pos];
+    let oc_count = rd_u32(blob, pos + 1) as usize;
+    pos += 5;
+    let (oc_codes, c): (Vec<usize>, usize) = match oc_coder {
+        0 => {
+            if pos + oc_count > blob.len() {
+                return Err(CubrimError::Decode("LZ offcode: oc raw truncated".into()));
+            }
+            (
+                blob[pos..pos + oc_count].iter().map(|&b| b as usize).collect(),
+                oc_count,
+            )
+        }
+        1 => rans_order0_decode(blob, pos, oc_count, LZ_OC_ALPHABET)?,
+        2 => rans_order1_decode(blob, pos, oc_count, LZ_OC_ALPHABET)?,
+        k => return Err(CubrimError::Decode(format!("LZ offcode: bad oc coder {k}"))),
+    };
+    pos += c;
+
+    // Raw extra-bits block.
+    if pos + 4 > blob.len() {
+        return Err(CubrimError::Decode("LZ offcode: extra header truncated".into()));
+    }
+    let nbits = rd_u32(blob, pos) as usize;
+    pos += 4;
+    let nbytes = nbits.div_ceil(8);
+    if pos + nbytes > blob.len() {
+        return Err(CubrimError::Decode("LZ offcode: extra bits truncated".into()));
+    }
+    let extra = &blob[pos..pos + nbytes];
+    pos += nbytes;
+
+    // Reconstruct the per-match sequence.
+    let mut rep = LZ_REP_INIT;
+    let mut p = 0usize;
+    let mut oc_idx = 0usize;
+    let mut bit_pos = 0usize;
+    let mut lit_lengths = Vec::with_capacity(n_matches);
+    let mut lengths = Vec::with_capacity(n_matches);
+    let mut distances = Vec::with_capacity(n_matches);
+    for _ in 0..n_matches {
+        let ll = lz_varint_read(&ser, &mut p)?;
+        let ml = lz_varint_read(&ser, &mut p)?;
+        if p >= ser.len() {
+            return Err(CubrimError::Decode("LZ offcode: missing offset mode".into()));
+        }
+        let mode = ser[p];
+        p += 1;
+        let d = match mode {
+            0 => rep[0],
+            1 => {
+                rep.swap(0, 1);
+                rep[0]
+            }
+            2 => {
+                let r2 = rep[2];
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = r2;
+                rep[0]
+            }
+            3 => {
+                if oc_idx >= oc_codes.len() {
+                    return Err(CubrimError::Decode("LZ offcode: offset-code underflow".into()));
+                }
+                let oc = oc_codes[oc_idx];
+                oc_idx += 1;
+                if oc == 0 || oc > 32 {
+                    return Err(CubrimError::Decode(format!("LZ offcode: bad offset code {oc}")));
+                }
+                let nb = oc - 1;
+                if bit_pos + nb > nbits {
+                    return Err(CubrimError::Decode("LZ offcode: extra-bit underflow".into()));
+                }
+                let mut low = 0usize;
+                for _ in 0..nb {
+                    let bit = (extra[bit_pos >> 3] >> (7 - (bit_pos & 7))) & 1;
+                    low = (low << 1) | bit as usize;
+                    bit_pos += 1;
+                }
+                let nd = (1usize << nb) | low;
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = nd;
+                nd
+            }
+            m => return Err(CubrimError::Decode(format!("LZ offcode: bad offset mode {m}"))),
+        };
+        lit_lengths.push(ll);
+        lengths.push(ml);
+        distances.push(d);
+    }
+    let final_ll = lz_varint_read(&ser, &mut p)?;
+    Ok((lit_lengths, final_ll, lengths, distances, pos - offset))
+}
+
 /// Encode the value-code stream with LzRans (LZ77 + rANS, H-25c). See module comment.
 pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
     // Value-scheme (within ≤64KB blocks, runs for every block in the rail): use the
@@ -6086,6 +6364,63 @@ mod tests {
             let blob = encode_with_config(&data, &EncodeConfig::v1_default());
             assert_eq!(decode(&blob).unwrap(), data, "round-trip failed for n={n}");
         }
+    }
+
+    #[test]
+    fn test_offcode_token_coder_round_trips() {
+        // H-25k: the offset-code sequence coder (seq_format 2) is a wire format —
+        // round-trip it directly on a token stream mixing repeat-offset matches (modes
+        // 0/1/2) and new offsets of many magnitudes (mode 3), so the bit-length codes,
+        // the raw low-bit packing, and the repcode MTF are all exercised.
+        let mut state: u64 = 0x1234_ABCD_5678_EF01;
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+        let mut flags = Vec::new();
+        let mut lengths = Vec::new();
+        let mut distances = Vec::new();
+        let mut rep = LZ_REP_INIT;
+        for _ in 0..2000 {
+            // Sprinkle literal runs.
+            for _ in 0..nxt(4) {
+                flags.push(0);
+            }
+            flags.push(1);
+            lengths.push(3 + nxt(300));
+            // Half the time reuse a recent offset; otherwise a fresh diverse offset.
+            let d = if nxt(2) == 0 {
+                rep[nxt(3)]
+            } else {
+                1 + nxt(1_000_000)
+            };
+            distances.push(d);
+            lz_rep_update(&mut rep, d);
+        }
+        for _ in 0..nxt(5) {
+            flags.push(0);
+        }
+
+        let n_matches = lengths.len();
+        let blob = lz_encode_token_offcode(&flags, &lengths, &distances);
+        let (lit_lengths, final_ll, dec_len, dec_dist, consumed) =
+            lz_decode_token_offcode(&blob, 0, n_matches).expect("offcode decode");
+        assert_eq!(consumed, blob.len(), "offcode must consume its whole block");
+        assert_eq!(dec_len, lengths, "match lengths must round-trip");
+        assert_eq!(dec_dist, distances, "distances must round-trip (incl. repcodes)");
+
+        // The reconstructed literal-run structure must reproduce the original flags.
+        let mut rebuilt = Vec::new();
+        for m in 0..n_matches {
+            for _ in 0..lit_lengths[m] {
+                rebuilt.push(0usize);
+            }
+            rebuilt.push(1usize);
+        }
+        for _ in 0..final_ll {
+            rebuilt.push(0usize);
+        }
+        assert_eq!(rebuilt, flags, "flag/literal-run structure must round-trip");
     }
 
     #[test]
