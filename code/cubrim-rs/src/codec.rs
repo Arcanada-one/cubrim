@@ -614,27 +614,36 @@ fn encode_lz_prepass(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         lit_blob = direct1;
     }
 
-    let token_streams = lz_encode_token_streams(&flags, &lengths, &distances);
+    // Token coding: competitive pick between the separate per-stream format (0) and
+    // the H-25g combined sequence format (1, lower fixed overhead for few matches).
+    let token_separate = lz_encode_token_streams(&flags, &lengths, &distances);
+    let token_combined = lz_encode_token_combined(&flags, &lengths, &distances);
+    let (seq_format, token_block) = if token_combined.len() < token_separate.len() {
+        (1u8, token_combined)
+    } else {
+        (0u8, token_separate)
+    };
 
-    let mut out = Vec::with_capacity(25 + lit_blob.len() + token_streams.len());
+    let mut out = Vec::with_capacity(26 + lit_blob.len() + token_block.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
     out.push(MODE_LZ);
     out.extend_from_slice(&(data.len() as u32).to_be_bytes());
     out.extend_from_slice(&(n_tokens as u32).to_be_bytes());
     out.extend_from_slice(&(n_matches as u32).to_be_bytes());
+    out.push(seq_format);
     out.push(lit_kind);
     out.extend_from_slice(&(lit_blob.len() as u32).to_be_bytes());
     out.extend_from_slice(&lit_blob);
-    out.extend_from_slice(&token_streams);
+    out.extend_from_slice(&token_block);
     out
 }
 
 /// Decode a MODE_LZ container (`encode_lz_prepass`). Fail-closed.
 fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     // Header: MAGIC(4)+VERSION(1)+MODE_LZ(1)+orig_len(4)+n_tokens(4)+n_matches(4)
-    //         +lit_kind(1)+lit_len(4) = 23.
-    const LZ_HEADER_SIZE: usize = 23;
+    //         +seq_format(1)+lit_kind(1)+lit_len(4) = 24.
+    const LZ_HEADER_SIZE: usize = 24;
     if blob.len() < LZ_HEADER_SIZE {
         return Err(CubrimError::Decode(format!(
             "MODE_LZ container too short: {} < {LZ_HEADER_SIZE}",
@@ -645,8 +654,9 @@ fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let orig_len = rd(6);
     let n_tokens = rd(10);
     let n_matches = rd(14);
-    let lit_kind = blob[18];
-    let lit_len = rd(19);
+    let seq_format = blob[18];
+    let lit_kind = blob[19];
+    let lit_len = rd(20);
     let n_lits = n_tokens.saturating_sub(n_matches);
     let mut pos = LZ_HEADER_SIZE;
     if pos + lit_len > blob.len() {
@@ -669,45 +679,76 @@ fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     };
     pos += lit_len;
 
-    let (flags, lengths, distances, consumed) =
-        lz_decode_token_streams(blob, pos, n_tokens, n_matches)?;
-    pos += consumed;
-    let _ = pos;
-
     let mut out: Vec<u8> = Vec::with_capacity(orig_len);
-    let mut li = 0usize;
-    let mut mi = 0usize;
-    for &flag in &flags {
-        if flag == 0 {
-            if li >= literals.len() {
-                return Err(CubrimError::Decode("MODE_LZ: literal underflow".into()));
-            }
-            out.push(literals[li]);
-            li += 1;
-        } else {
-            if mi >= n_matches {
-                return Err(CubrimError::Decode("MODE_LZ: match underflow".into()));
-            }
-            let length = lengths[mi];
-            let distance = distances[mi];
-            mi += 1;
-            if distance == 0 || distance > out.len() {
-                return Err(CubrimError::Decode(format!(
-                    "MODE_LZ: invalid distance {distance} (output len {})",
-                    out.len()
-                )));
-            }
-            if length == 0 || out.len() + length > orig_len {
-                return Err(CubrimError::Decode(
-                    "MODE_LZ: match length 0 or overflows orig_len".into(),
-                ));
-            }
-            let start = out.len() - distance;
-            for k in 0..length {
-                out.push(out[start + k]);
+    // Reconstruct the (literal, match) interleaving. The two token formats produce
+    // the same logical sequence — H-25g's combined format yields per-match literal
+    // run-lengths directly; the separate-stream format yields per-token flags.
+    let copy_match = |out: &mut Vec<u8>, length: usize, distance: usize| -> Result<(), CubrimError> {
+        if distance == 0 || distance > out.len() {
+            return Err(CubrimError::Decode(format!(
+                "MODE_LZ: invalid distance {distance} (output len {})",
+                out.len()
+            )));
+        }
+        if length == 0 || out.len() + length > orig_len {
+            return Err(CubrimError::Decode(
+                "MODE_LZ: match length 0 or overflows orig_len".into(),
+            ));
+        }
+        let start = out.len() - distance;
+        for k in 0..length {
+            out.push(out[start + k]);
+        }
+        Ok(())
+    };
+
+    match seq_format {
+        0 => {
+            let (flags, lengths, distances, _consumed) =
+                lz_decode_token_streams(blob, pos, n_tokens, n_matches)?;
+            let mut li = 0usize;
+            let mut mi = 0usize;
+            for &flag in &flags {
+                if flag == 0 {
+                    if li >= literals.len() {
+                        return Err(CubrimError::Decode("MODE_LZ: literal underflow".into()));
+                    }
+                    out.push(literals[li]);
+                    li += 1;
+                } else {
+                    if mi >= n_matches {
+                        return Err(CubrimError::Decode("MODE_LZ: match underflow".into()));
+                    }
+                    copy_match(&mut out, lengths[mi], distances[mi])?;
+                    mi += 1;
+                }
             }
         }
+        1 => {
+            let (lit_lengths, final_ll, lengths, distances, _consumed) =
+                lz_decode_token_combined(blob, pos, n_matches)?;
+            let mut li = 0usize;
+            for m in 0..n_matches {
+                for _ in 0..lit_lengths[m] {
+                    if li >= literals.len() {
+                        return Err(CubrimError::Decode("MODE_LZ: literal underflow".into()));
+                    }
+                    out.push(literals[li]);
+                    li += 1;
+                }
+                copy_match(&mut out, lengths[m], distances[m])?;
+            }
+            for _ in 0..final_ll {
+                if li >= literals.len() {
+                    return Err(CubrimError::Decode("MODE_LZ: literal underflow".into()));
+                }
+                out.push(literals[li]);
+                li += 1;
+            }
+        }
+        f => return Err(CubrimError::Decode(format!("MODE_LZ: bad seq_format {f}"))),
     }
+
     if out.len() != orig_len {
         return Err(CubrimError::Decode(format!(
             "MODE_LZ: decoded {} bytes but expected {orig_len}",
@@ -5057,6 +5098,182 @@ fn lz_decode_token_streams(
     }
     let lengths: Vec<usize> = (0..n_matches).map(|i| (len_hi[i] << 8) | len_lo[i]).collect();
     Ok((flags, lengths, distances, pos - offset))
+}
+
+/// LEB128 varint append.
+fn lz_varint_write(out: &mut Vec<u8>, mut v: usize) {
+    while v >= 0x80 {
+        out.push((v as u8 & 0x7f) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+/// LEB128 varint read. Advances `p`. Fail-closed on truncation / overlong.
+fn lz_varint_read(buf: &[u8], p: &mut usize) -> Result<usize, CubrimError> {
+    let mut v: usize = 0;
+    let mut shift = 0u32;
+    loop {
+        if *p >= buf.len() {
+            return Err(CubrimError::Decode("LZ seq: varint truncated".into()));
+        }
+        let b = buf[*p];
+        *p += 1;
+        v |= ((b & 0x7f) as usize) << shift;
+        if b & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+        if shift >= usize::BITS {
+            return Err(CubrimError::Decode("LZ seq: varint overlong".into()));
+        }
+    }
+    Ok(v)
+}
+
+/// H-25g combined sequence coder. Instead of 8 separate rANS streams (each paying a
+/// fixed table+state, which dominates for small match counts), serialize the whole
+/// token structure as zstd-style sequences — per match `(literal_length,
+/// match_length, offset_mode[, new_distance])` plus a trailing literal run — into ONE
+/// varint byte buffer, then code that buffer with the smallest of {raw, order-0 rANS,
+/// order-1 rANS}. Drops the per-token flag stream entirely.
+///
+/// Wire: [coder u8 (0=raw,1=o0,2=o1)][ser_len u32][payload].
+fn lz_encode_token_combined(flags: &[usize], lengths: &[usize], distances: &[usize]) -> Vec<u8> {
+    let mut rep = LZ_REP_INIT;
+    let mut ser: Vec<u8> = Vec::new();
+    let mut ll = 0usize;
+    let mut mi = 0usize;
+    for &f in flags {
+        if f == 0 {
+            ll += 1;
+        } else {
+            let d = distances[mi];
+            let ml = lengths[mi];
+            mi += 1;
+            let (mode, new_d) = if d == rep[0] {
+                (0usize, None)
+            } else if d == rep[1] {
+                rep.swap(0, 1);
+                (1, None)
+            } else if d == rep[2] {
+                let r2 = rep[2];
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = r2;
+                (2, None)
+            } else {
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = d;
+                (3, Some(d))
+            };
+            lz_varint_write(&mut ser, ll);
+            lz_varint_write(&mut ser, ml);
+            ser.push(mode as u8);
+            if let Some(nd) = new_d {
+                lz_varint_write(&mut ser, nd);
+            }
+            ll = 0;
+        }
+    }
+    lz_varint_write(&mut ser, ll); // trailing literal run
+
+    // Code the serialized buffer with the smallest of raw / order-0 / order-1 rANS.
+    let codes: Vec<usize> = ser.iter().map(|&b| b as usize).collect();
+    let o0 = rans_order0_encode(&codes, 256);
+    let o1 = rans_order1_encode(&codes, 256);
+    let (coder, payload): (u8, &[u8]) = if o0.len() <= ser.len() && o0.len() <= o1.len() {
+        (1, &o0)
+    } else if o1.len() < ser.len() {
+        (2, &o1)
+    } else {
+        (0, &ser)
+    };
+
+    let mut out = Vec::with_capacity(5 + payload.len());
+    out.push(coder);
+    out.extend_from_slice(&(ser.len() as u32).to_be_bytes());
+    out.extend_from_slice(payload);
+    out
+}
+
+/// Decode the H-25g combined sequence stream. Returns
+/// (literal_run_lengths[n_matches], trailing_literal_run, lengths, distances, consumed).
+#[allow(clippy::type_complexity)]
+fn lz_decode_token_combined(
+    blob: &[u8],
+    offset: usize,
+    n_matches: usize,
+) -> Result<(Vec<usize>, usize, Vec<usize>, Vec<usize>, usize), CubrimError> {
+    if offset + 5 > blob.len() {
+        return Err(CubrimError::Decode("LZ seq: combined header truncated".into()));
+    }
+    let coder = blob[offset];
+    let ser_len =
+        u32::from_be_bytes([blob[offset + 1], blob[offset + 2], blob[offset + 3], blob[offset + 4]])
+            as usize;
+    let mut pos = offset + 5;
+    let (ser, consumed): (Vec<u8>, usize) = match coder {
+        0 => {
+            if pos + ser_len > blob.len() {
+                return Err(CubrimError::Decode("LZ seq: raw payload truncated".into()));
+            }
+            (blob[pos..pos + ser_len].to_vec(), ser_len)
+        }
+        1 => {
+            let (codes, c) = rans_order0_decode(blob, pos, ser_len, 256)?;
+            (codes.iter().map(|&v| v as u8).collect(), c)
+        }
+        2 => {
+            let (codes, c) = rans_order1_decode(blob, pos, ser_len, 256)?;
+            (codes.iter().map(|&v| v as u8).collect(), c)
+        }
+        k => return Err(CubrimError::Decode(format!("LZ seq: bad coder {k}"))),
+    };
+    pos += consumed;
+
+    let mut rep = LZ_REP_INIT;
+    let mut p = 0usize;
+    let mut lit_lengths = Vec::with_capacity(n_matches);
+    let mut lengths = Vec::with_capacity(n_matches);
+    let mut distances = Vec::with_capacity(n_matches);
+    for _ in 0..n_matches {
+        let ll = lz_varint_read(&ser, &mut p)?;
+        let ml = lz_varint_read(&ser, &mut p)?;
+        if p >= ser.len() {
+            return Err(CubrimError::Decode("LZ seq: missing offset mode".into()));
+        }
+        let mode = ser[p];
+        p += 1;
+        let d = match mode {
+            0 => rep[0],
+            1 => {
+                rep.swap(0, 1);
+                rep[0]
+            }
+            2 => {
+                let r2 = rep[2];
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = r2;
+                rep[0]
+            }
+            3 => {
+                let d = lz_varint_read(&ser, &mut p)?;
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = d;
+                d
+            }
+            m => return Err(CubrimError::Decode(format!("LZ seq: bad offset mode {m}"))),
+        };
+        lit_lengths.push(ll);
+        lengths.push(ml);
+        distances.push(d);
+    }
+    let final_ll = lz_varint_read(&ser, &mut p)?;
+    Ok((lit_lengths, final_ll, lengths, distances, pos - offset))
 }
 
 /// Encode the value-code stream with LzRans (LZ77 + rANS, H-25c). See module comment.

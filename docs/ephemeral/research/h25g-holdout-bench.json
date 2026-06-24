@@ -1,0 +1,115 @@
+{
+  "report_id": "h25g-holdout",
+  "corpus": "holdout (diverse real-world; disjoint from leaderboard corpus)",
+  "aggregate_metric": "sum(compressed_bytes)/sum(input_bytes)",
+  "environment": {
+    "host": "arcana-dev",
+    "os": "Linux-6.8.0-106-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "zstd": "*** Zstandard CLI (64-bit) v1.5.5, by Yann Collet ***",
+    "gzip": "gzip 1.12",
+    "code_sha": "5cd66a5e8407e23c362a869e3de8043323c767e8-dirty",
+    "timestamp": "2026-06-24T00:42:28Z"
+  },
+  "round_trip_all": "PASS",
+  "totals": {
+    "input_bytes": 201935,
+    "cubrim_bwt-rans_bytes": 48255,
+    "cubrim_bwt-geomix_bytes": 48255,
+    "gzip_bytes": 47638,
+    "zstd_bytes": 44701
+  },
+  "aggregate": {
+    "cubrim_bwt-rans": 0.238963,
+    "cubrim_bwt-geomix": 0.238963,
+    "gzip": 0.235908,
+    "zstd": 0.221363
+  },
+  "results": [
+    {
+      "name": "rust_src.rs",
+      "category": "source-code-rust",
+      "size_bytes": 26805,
+      "cubrim_bwt-rans_bytes": 6987,
+      "cubrim_bwt-rans_ratio": 0.26066,
+      "cubrim_bwt-geomix_bytes": 6987,
+      "cubrim_bwt-geomix_ratio": 0.26066,
+      "gzip_bytes": 6775,
+      "gzip_ratio": 0.252751,
+      "zstd_bytes": 6544,
+      "zstd_ratio": 0.244134,
+      "round_trip": "PASS"
+    },
+    {
+      "name": "c_header.h",
+      "category": "source-code-c",
+      "size_bytes": 34649,
+      "cubrim_bwt-rans_bytes": 7161,
+      "cubrim_bwt-rans_ratio": 0.206673,
+      "cubrim_bwt-geomix_bytes": 7161,
+      "cubrim_bwt-geomix_ratio": 0.206673,
+      "gzip_bytes": 6862,
+      "gzip_ratio": 0.198043,
+      "zstd_bytes": 6525,
+      "zstd_ratio": 0.188317,
+      "round_trip": "PASS"
+    },
+    {
+      "name": "config.json",
+      "category": "json",
+      "size_bytes": 66294,
+      "cubrim_bwt-rans_bytes": 9278,
+      "cubrim_bwt-rans_ratio": 0.139952,
+      "cubrim_bwt-geomix_bytes": 9278,
+      "cubrim_bwt-geomix_ratio": 0.139952,
+      "gzip_bytes": 8839,
+      "gzip_ratio": 0.13333,
+      "zstd_bytes": 8335,
+      "zstd_ratio": 0.125728,
+      "round_trip": "PASS"
+    },
+    {
+      "name": "prose.txt",
+      "category": "english-prose",
+      "size_bytes": 17774,
+      "cubrim_bwt-rans_bytes": 6600,
+      "cubrim_bwt-rans_ratio": 0.371329,
+      "cubrim_bwt-geomix_bytes": 6600,
+      "cubrim_bwt-geomix_ratio": 0.371329,
+      "gzip_bytes": 6687,
+      "gzip_ratio": 0.376224,
+      "zstd_bytes": 6433,
+      "zstd_ratio": 0.361933,
+      "round_trip": "PASS"
+    },
+    {
+      "name": "data.csv",
+      "category": "csv",
+      "size_bytes": 17029,
+      "cubrim_bwt-rans_bytes": 3639,
+      "cubrim_bwt-rans_ratio": 0.213694,
+      "cubrim_bwt-geomix_bytes": 3639,
+      "cubrim_bwt-geomix_ratio": 0.213694,
+      "gzip_bytes": 4087,
+      "gzip_ratio": 0.240002,
+      "zstd_bytes": 3402,
+      "zstd_ratio": 0.199777,
+      "round_trip": "PASS"
+    },
+    {
+      "name": "exe.bin",
+      "category": "binary-executable",
+      "size_bytes": 39384,
+      "cubrim_bwt-rans_bytes": 14590,
+      "cubrim_bwt-rans_ratio": 0.370455,
+      "cubrim_bwt-geomix_bytes": 14590,
+      "cubrim_bwt-geomix_ratio": 0.370455,
+      "gzip_bytes": 14388,
+      "gzip_ratio": 0.365326,
+      "zstd_bytes": 13462,
+      "zstd_ratio": 0.341814,
+      "round_trip": "PASS"
+    }
+  ]
+}
