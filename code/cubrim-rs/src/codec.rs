@@ -595,16 +595,35 @@ fn encode_lz_prepass(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let n_matches = lengths.len();
     let lit_bytes: Vec<u8> = literals.iter().map(|&c| c as u8).collect();
 
-    let lit_blob = encode_base(&lit_bytes, config);
+    // H-25f dedicated literal coder: the LZ residue can be coded EITHER through the
+    // full cube/BWT/rANS pipeline (kind 0, strongest local model, but pays the cube
+    // header) OR by a direct entropy coder with no cube framing — order-0 rANS (kind
+    // 1) or a tuned order-1 rANS (kind 2, zstd-style separate literal table). Pick
+    // the smallest; the kind byte tells the decoder which (regression-proof).
+    let nested = encode_base(&lit_bytes, config);
+    let direct0 = rans_order0_encode(&literals, 256);
+    let direct1 = rans_order1_encode(&literals, 256);
+    let mut lit_kind = 0u8;
+    let mut lit_blob = nested;
+    if direct0.len() < lit_blob.len() {
+        lit_kind = 1;
+        lit_blob = direct0;
+    }
+    if direct1.len() < lit_blob.len() {
+        lit_kind = 2;
+        lit_blob = direct1;
+    }
+
     let token_streams = lz_encode_token_streams(&flags, &lengths, &distances);
 
-    let mut out = Vec::with_capacity(24 + lit_blob.len() + token_streams.len());
+    let mut out = Vec::with_capacity(25 + lit_blob.len() + token_streams.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
     out.push(MODE_LZ);
     out.extend_from_slice(&(data.len() as u32).to_be_bytes());
     out.extend_from_slice(&(n_tokens as u32).to_be_bytes());
     out.extend_from_slice(&(n_matches as u32).to_be_bytes());
+    out.push(lit_kind);
     out.extend_from_slice(&(lit_blob.len() as u32).to_be_bytes());
     out.extend_from_slice(&lit_blob);
     out.extend_from_slice(&token_streams);
@@ -613,8 +632,9 @@ fn encode_lz_prepass(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
 /// Decode a MODE_LZ container (`encode_lz_prepass`). Fail-closed.
 fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
-    // Header: MAGIC(4)+VERSION(1)+MODE_LZ(1)+orig_len(4)+n_tokens(4)+n_matches(4)+lit_len(4) = 22.
-    const LZ_HEADER_SIZE: usize = 22;
+    // Header: MAGIC(4)+VERSION(1)+MODE_LZ(1)+orig_len(4)+n_tokens(4)+n_matches(4)
+    //         +lit_kind(1)+lit_len(4) = 23.
+    const LZ_HEADER_SIZE: usize = 23;
     if blob.len() < LZ_HEADER_SIZE {
         return Err(CubrimError::Decode(format!(
             "MODE_LZ container too short: {} < {LZ_HEADER_SIZE}",
@@ -625,12 +645,28 @@ fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let orig_len = rd(6);
     let n_tokens = rd(10);
     let n_matches = rd(14);
-    let lit_len = rd(18);
+    let lit_kind = blob[18];
+    let lit_len = rd(19);
+    let n_lits = n_tokens.saturating_sub(n_matches);
     let mut pos = LZ_HEADER_SIZE;
     if pos + lit_len > blob.len() {
         return Err(CubrimError::Decode("MODE_LZ: literal blob truncated".into()));
     }
-    let literals = decode(&blob[pos..pos + lit_len])?;
+    // The literal residue is coded by one of three coders (H-25f), selected on size.
+    let literals: Vec<u8> = match lit_kind {
+        0 => decode(&blob[pos..pos + lit_len])?,
+        1 => {
+            let (codes, _) = rans_order0_decode(&blob[pos..pos + lit_len], 0, n_lits, 256)?;
+            codes.iter().map(|&c| c as u8).collect()
+        }
+        2 => {
+            let (codes, _) = rans_order1_decode(&blob[pos..pos + lit_len], 0, n_lits, 256)?;
+            codes.iter().map(|&c| c as u8).collect()
+        }
+        k => {
+            return Err(CubrimError::Decode(format!("MODE_LZ: bad lit_kind {k}")));
+        }
+    };
     pos += lit_len;
 
     let (flags, lengths, distances, consumed) =
