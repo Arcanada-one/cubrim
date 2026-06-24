@@ -506,3 +506,22 @@ created: 2026-06-17
   | holdout aggregate | 0.2390 | 0.2390 | 0.2359 | 0.2214 |
 
 - **VERDICT: WIN on long-range — gap to zstd CLOSED.** On genuine long-range/duplicate data the combined sequence coder removes the per-stream framing overhead (5335 → 5211, −124 B) and brings Cubrim to **within 9 bytes of zstd-19 — 5211 vs 5202, 0.17% behind (down from 2.5%)** — essentially TIED, while beating gzip by 25%, all regression-proof and round-trip byte-exact. This confirms the H-25f re-diagnosis (framing, not literals). The **holdout does not move** (0.2390, MODE_LZ selected 0/6) and the concatenated *diverse* holdout is unchanged (49106 > gzip, MODE_LZ falls back) — those corpora lack the cross-block / duplicate structure whole-file LZ exploits; their ceiling is the local BWT-family entropy coder (~gzip parity, behind zstd), which no LZ work can move. **The H-25 line is complete:** whole-file LZ (H-25d) + optimal parse (H-25e) + competitive literal coder (H-25f) + combined sequence coder (H-25g) takes Cubrim from 2× worse than gzip on long-range to MATCHING zstd-19 there, regression-proof; on the diverse holdout no LZ helps because the structure isn't there. Remaining direction for the holdout is purely the local coder (the BWT-family schemes 6–11), already explored through H-24. Competitive rail keeps schemes 0–11 and modes 0–2 intact; leaderboard untouched.
+
+---
+
+### H-25h — repeat-offset-aware cost-optimal LZ parse (toward beating zstd uniformly)
+
+- **Goal (operator, 2026-06-24):** beat zstd-19 uniformly, not just match it. Cubrim already beats zstd on repeated logs (−18%, via the BWT chunked path) and ties on pure duplicates; the gaps are srctree.tar (+11%) and the synthetic 12×-copy (+0.17%).
+- **DIAGNOSIS:** on srctree.tar the MODE_LZ token block is 217652 of 286447 (76%) for 78248 matches — sub-streams: offsets (dist_b0/b1/b2) = 142575 (66%, ~16 bits each for 71931 DISTINCT offsets) + length 49450 (22%). The cost is the offset entropy floor for ~72K distinct cross-file offsets — driven by MATCH COUNT, not offset-reuse (only ~6300/78248 matches hit a recent offset; tarball cross-file matches are genuinely diverse).
+- **IMPLEMENTATION:** replaced the longest-match greedy with a **cost-optimal repeat-offset-aware** selection — at each position, pick the maximum net-byte-saving among {hash-chain longest match, matches at the 3 recent offsets}; a shorter repeat-offset match (offset ≈ 3 bits) can out-save a longer new-offset match (offset ≈ 16–26 bits). Lazy-1 lookahead on net saving. This is zstd's repcode lever. cargo test green (227 passed, 0 failed); round-trip byte-exact.
+- **MEASURED (cubrim vs gzip-9 vs zstd-19, RT PASS each):**
+
+  | corpus | H-25g | H-25h | gzip-9 | zstd-19 |
+  |---|---:|---:|---:|---:|
+  | srctree.tar | 286447 | 284369 | 320321 | 257542 |
+  | multiversion.bin | 61886 | 61734 | 172553 | 56165 |
+  | repeated.log | 22041 | 22041 | 37295 | 26970 |
+  | 120 KB multi-copy | 5211 | 5213 | 6950 | 5202 |
+
+  Zero regression: tuned 0.158273 (byte-identical), RT 10/10; holdout 0.2390, RT 6/6.
+- **VERDICT: MARGINAL — correct algorithm, but uniform zstd-beat NOT achieved.** The repeat-offset-aware cost-optimal parse improves real long-range data slightly (srctree −0.7%, multiversion −0.2%), is regression-proof and byte-exact, but cannot close the mixed-tarball gap because that gap is **fundamental to match count**: ~72K distinct cross-file offsets at ~16 bits each ≈ 143 KB offset floor. zstd wins there via its **btultra optimal parser** (dynamic-programming cost minimisation + binary-tree match finder) which finds FEWER/LONGER matches → fewer offsets to code. Deeper hash chains (tested at 2048) gave only −0.7% for **25 s** (match count barely dropped 77973→77044) — confirming the lever is parse OPTIMALITY, not search depth. Net vs zstd-19: **beats on logs (−18%), ties on pure duplicates, within ~10% on near-duplicate versions and mixed tarballs; beats gzip on ALL long-range shapes.** **Kill/re-open condition (H-25i):** a btultra-class optimal parser — full dynamic-programming parse over a window with a price model (literal/match/repeat-offset costs) and an all-matches match finder (binary tree or suffix automaton), so the globally-cheapest sequence of matches is chosen rather than a greedy/lazy one. This is the only remaining lever for the mixed-tarball gap and is a substantial (multi-day) algorithm. Competitive rail keeps schemes 0–11 and modes 0–2 intact; leaderboard untouched.

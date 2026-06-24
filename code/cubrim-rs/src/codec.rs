@@ -4908,10 +4908,12 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
         (best_len, best_dist)
     };
 
-    // Estimated coded cost (bits) of a match vs coding its span as literals.
-    let match_worth_it = |len: usize, dist: usize, rep: &[usize; 3]| -> bool {
+    // Estimated coded BYTES SAVED by taking a match vs coding its span as literals.
+    // The offset term is cheap for a recent (repeat) offset and dear for a new one —
+    // so a slightly-shorter repeat-offset match can out-save a longer new-offset one.
+    let net_save = |len: usize, dist: usize, rep: &[usize; 3]| -> f64 {
         if len < LZ_MIN_MATCH {
-            return false;
+            return f64::MIN;
         }
         let off_bits = if dist == rep[0] || dist == rep[1] || dist == rep[2] {
             3.0 // a recent offset: ~mode only
@@ -4920,7 +4922,46 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
         };
         let len_bits = 8.0 + if len > 0xFF { 8.0 } else { 0.0 };
         let match_bits = 1.0 + off_bits + len_bits;
-        match_bits < len as f64 * lit_bits
+        len as f64 * lit_bits - match_bits
+    };
+
+    // Match length at a fixed distance (the repeat-offset probe). Overlapping
+    // (dist < len) is allowed — the decoder copies byte-by-byte.
+    let match_len_at = |p: usize, dist: usize| -> usize {
+        if dist == 0 || dist > p {
+            return 0;
+        }
+        let maxl = (n - p).min(LZ_MAX_MATCH);
+        let mut ml = 0usize;
+        while ml < maxl && seq[p - dist + ml] == seq[p + ml] {
+            ml += 1;
+        }
+        ml
+    };
+
+    // Best match at `p`: the cost-optimal of the hash-chain longest match and the
+    // three repeat-offset matches. Returns (len, dist, net_save_bytes).
+    let best_at = |p: usize,
+                   head: &HashMap<u32, usize>,
+                   prev: &[usize],
+                   rep: &[usize; 3]|
+     -> (usize, usize, f64) {
+        let (hl, hd) = find(p, head, prev);
+        let mut blen = hl;
+        let mut bdist = hd;
+        let mut bsave = net_save(hl, hd, rep);
+        for &ro in rep.iter() {
+            let rl = match_len_at(p, ro);
+            if rl >= LZ_MIN_MATCH {
+                let s = net_save(rl, ro, rep);
+                if s > bsave {
+                    bsave = s;
+                    blen = rl;
+                    bdist = ro;
+                }
+            }
+        }
+        (blen, bdist, bsave)
     };
 
     let insert = |p: usize, head: &mut HashMap<u32, usize>, prev: &mut [usize]| {
@@ -4933,16 +4974,15 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
 
     let mut i = 0usize;
     while i < n {
-        let (blen, bdist) = find(i, &head, &prev);
-        if match_worth_it(blen, bdist, &rep) {
+        let (blen, bdist, bsave) = best_at(i, &head, &prev, &rep);
+        if bsave > 0.0 {
             // The current position's hash must be inserted before the lazy probe at
             // i+1, and is part of the matched span either way.
             insert(i, &mut head, &mut prev);
-            // Lazy: if i+1 has a strictly longer worthwhile match, defer (emit a
-            // literal here and take the better match next iteration).
+            // Lazy: if i+1 has a strictly better (higher-saving) match, defer.
             if i + 1 < n {
-                let (l1, d1) = find(i + 1, &head, &prev);
-                if l1 > blen && match_worth_it(l1, d1, &rep) {
+                let (_l1, _d1, s1) = best_at(i + 1, &head, &prev, &rep);
+                if s1 > bsave {
                     flags.push(0);
                     literals.push(seq[i]);
                     i += 1;
