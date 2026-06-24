@@ -4736,11 +4736,50 @@ const LZ_MAX_CHAIN: usize = 256;
 /// Maximum match length — capped so length fits in a u16 (low/high byte split).
 const LZ_MAX_MATCH: usize = u16::MAX as usize;
 
-/// Greedy LZ77 parse of the value-code stream `seq` (codes in [0, 256)).
-/// Returns (flags, literals, lengths, distances) where flags[t]∈{0,1} marks each
-/// token (0=literal, 1=match); literals are in token order, lengths/distances in
-/// match order. Uses 3-code hash chains over the full prior window. Match length
-/// is capped at LZ_MAX_MATCH so it fits a u16.
+/// Order-0 entropy (bits/symbol) of `seq`, clamped to [2.0, 8.0]. Used as the
+/// per-literal cost estimate in the cost-aware parse so a match is only taken when
+/// it is genuinely cheaper than coding the literals it would replace.
+fn lz_literal_bits_estimate(seq: &[usize]) -> f64 {
+    if seq.is_empty() {
+        return 8.0;
+    }
+    let maxv = *seq.iter().max().unwrap();
+    let mut counts = vec![0u32; maxv + 1];
+    for &s in seq {
+        counts[s] += 1;
+    }
+    let n = seq.len() as f64;
+    let mut h = 0.0f64;
+    for &c in &counts {
+        if c > 0 {
+            let p = c as f64 / n;
+            h -= p * p.log2();
+        }
+    }
+    h.clamp(2.0, 8.0)
+}
+
+/// Number of bytes the new-distance byte-split would spend on distance `d`.
+#[inline]
+fn lz_dist_bytes(d: usize) -> usize {
+    if d < 0x100 {
+        1
+    } else if d < 0x10000 {
+        2
+    } else if d < 0x1000000 {
+        3
+    } else {
+        4
+    }
+}
+
+/// Cost-aware + lazy LZ77 parse of `seq` (codes/bytes in [0, 256)).
+/// Returns (flags, literals, lengths, distances). A candidate match is only taken
+/// when its estimated coded cost (offset via the repeat-offset cache + length +
+/// flag) is smaller than coding the bytes it covers as literals — this is the key
+/// fix vs greedy, which took every length-3 match even at an expensive far offset.
+/// A 1-step lazy lookahead prefers a strictly-better match one position later.
+/// Match length is capped at LZ_MAX_MATCH so it fits a u16.
 #[allow(clippy::type_complexity)]
 fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>) {
     let n = seq.len();
@@ -4752,6 +4791,7 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
         return (flags, literals, lengths, distances);
     }
 
+    let lit_bits = lz_literal_bits_estimate(seq);
     use std::collections::HashMap;
     let mut head: HashMap<u32, usize> = HashMap::new();
     let mut prev = vec![usize::MAX; n];
@@ -4759,24 +4799,27 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
         ((seq[i] as u32) << 16) | ((seq[i + 1] as u32) << 8) | (seq[i + 2] as u32)
     };
 
-    let mut i = 0usize;
-    while i < n {
+    // Repeat-offset mirror, kept in sync with the encoder so the offset-cost
+    // estimate (cheap for a recent offset, dear for a new one) is accurate.
+    let mut rep = LZ_REP_INIT;
+
+    // Find the best (len, dist) at position p via the hash chains.
+    let find = |p: usize, head: &HashMap<u32, usize>, prev: &[usize]| -> (usize, usize) {
         let mut best_len = 0usize;
         let mut best_dist = 0usize;
-        if i + LZ_MIN_MATCH <= n {
-            let k = key3(i);
+        if p + LZ_MIN_MATCH <= n {
+            let k = key3(p);
             let mut j = head.get(&k).copied().unwrap_or(usize::MAX);
             let mut chain = 0usize;
             while j != usize::MAX && chain < LZ_MAX_CHAIN {
-                // Extend the match at j vs i (capped at LZ_MAX_MATCH).
-                let maxl = (n - i).min(LZ_MAX_MATCH);
+                let maxl = (n - p).min(LZ_MAX_MATCH);
                 let mut ml = 0usize;
-                while ml < maxl && seq[j + ml] == seq[i + ml] {
+                while ml < maxl && seq[j + ml] == seq[p + ml] {
                     ml += 1;
                 }
                 if ml > best_len {
                     best_len = ml;
-                    best_dist = i - j;
+                    best_dist = p - j;
                     if ml >= maxl {
                         break;
                     }
@@ -4785,28 +4828,80 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
                 chain += 1;
             }
         }
-        if best_len >= LZ_MIN_MATCH {
-            flags.push(1);
-            lengths.push(best_len);
-            distances.push(best_dist);
-            // Insert hash entries across the matched span, then advance.
-            let end = i + best_len;
-            while i < end {
-                if i + LZ_MIN_MATCH <= n {
-                    let k = key3(i);
-                    prev[i] = head.get(&k).copied().unwrap_or(usize::MAX);
-                    head.insert(k, i);
+        (best_len, best_dist)
+    };
+
+    // Estimated coded cost (bits) of a match vs coding its span as literals.
+    let match_worth_it = |len: usize, dist: usize, rep: &[usize; 3]| -> bool {
+        if len < LZ_MIN_MATCH {
+            return false;
+        }
+        let off_bits = if dist == rep[0] || dist == rep[1] || dist == rep[2] {
+            3.0 // a recent offset: ~mode only
+        } else {
+            2.0 + 8.0 * lz_dist_bytes(dist) as f64
+        };
+        let len_bits = 8.0 + if len > 0xFF { 8.0 } else { 0.0 };
+        let match_bits = 1.0 + off_bits + len_bits;
+        match_bits < len as f64 * lit_bits
+    };
+
+    let insert = |p: usize, head: &mut HashMap<u32, usize>, prev: &mut [usize]| {
+        if p + LZ_MIN_MATCH <= n {
+            let k = key3(p);
+            prev[p] = head.get(&k).copied().unwrap_or(usize::MAX);
+            head.insert(k, p);
+        }
+    };
+
+    let mut i = 0usize;
+    while i < n {
+        let (blen, bdist) = find(i, &head, &prev);
+        if match_worth_it(blen, bdist, &rep) {
+            // The current position's hash must be inserted before the lazy probe at
+            // i+1, and is part of the matched span either way.
+            insert(i, &mut head, &mut prev);
+            // Lazy: if i+1 has a strictly longer worthwhile match, defer (emit a
+            // literal here and take the better match next iteration).
+            if i + 1 < n {
+                let (l1, d1) = find(i + 1, &head, &prev);
+                if l1 > blen && match_worth_it(l1, d1, &rep) {
+                    flags.push(0);
+                    literals.push(seq[i]);
+                    i += 1;
+                    continue;
                 }
+            }
+            flags.push(1);
+            lengths.push(blen);
+            distances.push(bdist);
+            // Update the repeat-offset mirror exactly as the encoder will.
+            let d = bdist;
+            if d == rep[0] {
+                // mode 0: unchanged
+            } else if d == rep[1] {
+                rep.swap(0, 1);
+            } else if d == rep[2] {
+                let r2 = rep[2];
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = r2;
+            } else {
+                rep[2] = rep[1];
+                rep[1] = rep[0];
+                rep[0] = d;
+            }
+            // Insert hashes across the rest of the matched span (i already inserted).
+            let end = i + blen;
+            i += 1;
+            while i < end {
+                insert(i, &mut head, &mut prev);
                 i += 1;
             }
         } else {
             flags.push(0);
             literals.push(seq[i]);
-            if i + LZ_MIN_MATCH <= n {
-                let k = key3(i);
-                prev[i] = head.get(&k).copied().unwrap_or(usize::MAX);
-                head.insert(k, i);
-            }
+            insert(i, &mut head, &mut prev);
             i += 1;
         }
     }
