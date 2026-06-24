@@ -590,19 +590,41 @@ fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 /// competitive size pick, so this is never returned when it does not help.
 fn encode_lz_prepass(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let seq: Vec<usize> = data.iter().map(|&b| b as usize).collect();
-    let (flags, literals, lengths, distances) = lz77_parse(&seq);
+    // Competitive parse pick (H-25i): the fast greedy parse preserves repeat-offset
+    // structure (wins on duplicate/repetitive data) while the slow optimal DP parse
+    // finds fewer/longer matches (wins on mixed data with many distinct offsets).
+    // Build a container with each and return the smaller — regression-proof, and the
+    // 120KB repeat case keeps the greedy result while srctree keeps the optimal one.
+    let greedy = lz77_parse_greedy(&seq);
+    let optimal = lz77_parse_optimal(&seq);
+    let c_greedy = build_lz_container(data, config, &greedy);
+    let c_optimal = build_lz_container(data, config, &optimal);
+    if c_optimal.len() < c_greedy.len() {
+        c_optimal
+    } else {
+        c_greedy
+    }
+}
+
+/// Assemble a MODE_LZ container from one parse result. The literal residue is coded
+/// by the smallest of {nested pipeline, order-0 rANS, order-1 rANS} (lit_kind), and
+/// the token streams by the smaller of {separate, combined} (seq_format).
+#[allow(clippy::type_complexity)]
+fn build_lz_container(
+    data: &[u8],
+    config: &EncodeConfig,
+    parse: &(Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>),
+) -> Vec<u8> {
+    let (flags, literals, lengths, distances) = parse;
     let n_tokens = flags.len();
     let n_matches = lengths.len();
     let lit_bytes: Vec<u8> = literals.iter().map(|&c| c as u8).collect();
 
-    // H-25f dedicated literal coder: the LZ residue can be coded EITHER through the
-    // full cube/BWT/rANS pipeline (kind 0, strongest local model, but pays the cube
-    // header) OR by a direct entropy coder with no cube framing — order-0 rANS (kind
-    // 1) or a tuned order-1 rANS (kind 2, zstd-style separate literal table). Pick
-    // the smallest; the kind byte tells the decoder which (regression-proof).
+    // H-25f dedicated literal coder: cube/BWT/rANS pipeline (kind 0), or a direct
+    // order-0 (kind 1) / order-1 (kind 2) rANS with no cube framing. Pick smallest.
     let nested = encode_base(&lit_bytes, config);
-    let direct0 = rans_order0_encode(&literals, 256);
-    let direct1 = rans_order1_encode(&literals, 256);
+    let direct0 = rans_order0_encode(literals, 256);
+    let direct1 = rans_order1_encode(literals, 256);
     let mut lit_kind = 0u8;
     let mut lit_blob = nested;
     if direct0.len() < lit_blob.len() {
@@ -614,10 +636,9 @@ fn encode_lz_prepass(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         lit_blob = direct1;
     }
 
-    // Token coding: competitive pick between the separate per-stream format (0) and
-    // the H-25g combined sequence format (1, lower fixed overhead for few matches).
-    let token_separate = lz_encode_token_streams(&flags, &lengths, &distances);
-    let token_combined = lz_encode_token_combined(&flags, &lengths, &distances);
+    // Token coding: separate per-stream (0) vs H-25g combined sequence (1).
+    let token_separate = lz_encode_token_streams(flags, lengths, distances);
+    let token_combined = lz_encode_token_combined(flags, lengths, distances);
     let (seq_format, token_block) = if token_combined.len() < token_separate.len() {
         (1u8, token_combined)
     } else {
@@ -4812,6 +4833,10 @@ const LZ_MIN_MATCH: usize = 3;
 const LZ_MAX_CHAIN: usize = 256;
 /// Maximum match length — capped so length fits in a u16 (low/high byte split).
 const LZ_MAX_MATCH: usize = u16::MAX as usize;
+/// Optimal parse: per frontier point, expand at most this many distinct match
+/// lengths as DP edges (the full longest match is always added separately, so long
+/// runs are still covered by a single edge). Bounds DP edge count on long matches.
+const LZ_OPT_LEN_CAP: usize = 128;
 
 /// Order-0 entropy (bits/symbol) of `seq`, clamped to [2.0, 8.0]. Used as the
 /// per-literal cost estimate in the cost-aware parse so a match is only taken when
@@ -4836,6 +4861,16 @@ fn lz_literal_bits_estimate(seq: &[usize]) -> f64 {
     h.clamp(2.0, 8.0)
 }
 
+/// Bit length of `v` (0 for v==0, else floor(log2 v)+1). A log2-ish cost proxy.
+#[inline]
+fn lz_bit_length(v: usize) -> usize {
+    if v == 0 {
+        0
+    } else {
+        usize::BITS as usize - v.leading_zeros() as usize
+    }
+}
+
 /// Number of bytes the new-distance byte-split would spend on distance `d`.
 #[inline]
 fn lz_dist_bytes(d: usize) -> usize {
@@ -4858,7 +4893,7 @@ fn lz_dist_bytes(d: usize) -> usize {
 /// A 1-step lazy lookahead prefers a strictly-better match one position later.
 /// Match length is capped at LZ_MAX_MATCH so it fits a u16.
 #[allow(clippy::type_complexity)]
-fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>) {
+fn lz77_parse_greedy(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>) {
     let n = seq.len();
     let mut flags = Vec::new();
     let mut literals = Vec::new();
@@ -5020,6 +5055,153 @@ fn lz77_parse(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>)
             literals.push(seq[i]);
             insert(i, &mut head, &mut prev);
             i += 1;
+        }
+    }
+    (flags, literals, lengths, distances)
+}
+
+/// **Optimal LZ77 parse (H-25i)** — dynamic-programming cost minimisation over the
+/// match graph. Instead of greedy/lazy (which takes the longest match at each
+/// position and so produces many short, expensive-offset matches on mixed data),
+/// this finds the globally cheapest sequence of literals and matches.
+///
+/// Forward DP: `cost[i]` = min coded cost (in bits, an estimate) to reach position
+/// `i`. Edges from `i`: a literal (`+lit_bits`) to `i+1`, and a match of length `L`
+/// at the best (smallest) distance reaching that length, to `i+L`, for every length
+/// on the hash-chain match frontier (capped per frontier point, with the full
+/// longest match always added so long runs cost one edge). The cost model is a
+/// principled log2 entropy estimate (NOT tuned to any corpus); the repeat-offset
+/// model is applied later by the exact encoder, so the DP only needs to find
+/// few/long matches. Round-trip is guaranteed by the exact encoder/decoder
+/// regardless of parse quality, and the competitive rail guarantees no regression.
+#[allow(clippy::type_complexity)]
+fn lz77_parse_optimal(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<usize>) {
+    let n = seq.len();
+    if n == 0 {
+        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    }
+
+    let lit_bits = lz_literal_bits_estimate(seq);
+    use std::collections::HashMap;
+    let mut head: HashMap<u32, usize> = HashMap::new();
+    let mut prev = vec![usize::MAX; n];
+    let key3 = |p: usize| -> u32 {
+        ((seq[p] as u32) << 16) | ((seq[p + 1] as u32) << 8) | (seq[p + 2] as u32)
+    };
+    // Per-edge coded cost (bits): a principled log2 entropy estimate. The actual
+    // repeat-offset discount is applied by the exact encoder, so this need only
+    // rank parses (few/long matches cheaper than many short ones).
+    let match_cost = |len: usize, dist: usize| -> f64 {
+        let off = 2.0 + lz_bit_length(dist) as f64;
+        let lenb = 2.0 + lz_bit_length(len) as f64;
+        1.0 + off + lenb
+    };
+
+    let mut cost = vec![f64::INFINITY; n + 1];
+    cost[0] = 0.0;
+    let mut from_len = vec![0u32; n + 1]; // 0 = literal edge into this position
+    let mut from_dist = vec![0u32; n + 1];
+
+    for i in 0..n {
+        let ci = cost[i];
+        // Literal edge i -> i+1.
+        let lc = ci + lit_bits;
+        if lc < cost[i + 1] {
+            cost[i + 1] = lc;
+            from_len[i + 1] = 0;
+            from_dist[i + 1] = 0;
+        }
+        // Match edges: walk the hash chain, building the length-increasing,
+        // distance-increasing frontier and relaxing DP edges.
+        if i + LZ_MIN_MATCH <= n {
+            let maxl = (n - i).min(LZ_MAX_MATCH);
+            let k = key3(i);
+            let mut j = head.get(&k).copied().unwrap_or(usize::MAX);
+            let mut chain = 0usize;
+            let mut best = LZ_MIN_MATCH - 1;
+            while j != usize::MAX && chain < LZ_MAX_CHAIN {
+                if best >= maxl {
+                    break;
+                }
+                // Quick reject: to beat `best`, position `best` must already match.
+                if seq[j + best] == seq[i + best] {
+                    let mut ml = 0usize;
+                    while ml < maxl && seq[j + ml] == seq[i + ml] {
+                        ml += 1;
+                    }
+                    if ml > best {
+                        let d = i - j;
+                        // Relax DP edges for the lengths this frontier point owns:
+                        // (best, ml], at distance d, capped to LZ_OPT_LEN_CAP.
+                        let lo = best + 1;
+                        let cap_hi = ml.min(lo + LZ_OPT_LEN_CAP - 1);
+                        let mut l = lo;
+                        while l <= cap_hi {
+                            let c = ci + match_cost(l, d);
+                            let j2 = i + l;
+                            if c < cost[j2] {
+                                cost[j2] = c;
+                                from_len[j2] = l as u32;
+                                from_dist[j2] = d as u32;
+                            }
+                            l += 1;
+                        }
+                        // Always add the full longest edge (covers long runs cheaply).
+                        if ml > cap_hi {
+                            let c = ci + match_cost(ml, d);
+                            let j2 = i + ml;
+                            if c < cost[j2] {
+                                cost[j2] = c;
+                                from_len[j2] = ml as u32;
+                                from_dist[j2] = d as u32;
+                            }
+                        }
+                        best = ml;
+                    }
+                }
+                j = prev[j];
+                chain += 1;
+            }
+        }
+        // Insert position i into the hash chain.
+        if i + LZ_MIN_MATCH <= n {
+            let k = key3(i);
+            prev[i] = head.get(&k).copied().unwrap_or(usize::MAX);
+            head.insert(k, i);
+        }
+    }
+
+    // Backtrack the optimal path from n to 0 into (len, dist) ops (dist 0 = literal).
+    let mut ops: Vec<(usize, usize)> = Vec::new();
+    let mut p = n;
+    while p > 0 {
+        let fl = from_len[p] as usize;
+        if fl == 0 {
+            ops.push((1, 0));
+            p -= 1;
+        } else {
+            ops.push((fl, from_dist[p] as usize));
+            p -= fl;
+        }
+    }
+    ops.reverse();
+
+    // Emit token streams from the chosen parse.
+    let mut flags = Vec::new();
+    let mut literals = Vec::new();
+    let mut lengths = Vec::new();
+    let mut distances = Vec::new();
+    let mut pos = 0usize;
+    for (len, dist) in ops {
+        if dist == 0 {
+            flags.push(0);
+            literals.push(seq[pos]);
+            pos += 1;
+        } else {
+            flags.push(1);
+            lengths.push(len);
+            distances.push(dist);
+            pos += len;
         }
     }
     (flags, literals, lengths, distances)
@@ -5318,7 +5500,10 @@ fn lz_decode_token_combined(
 
 /// Encode the value-code stream with LzRans (LZ77 + rANS, H-25c). See module comment.
 pub(crate) fn lz_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
-    let (flags, literals, lengths, distances) = lz77_parse(seq_codes);
+    // Value-scheme (within ≤64KB blocks, runs for every block in the rail): use the
+    // fast greedy parse. The slow optimal parse is reserved for the file-level
+    // MODE_LZ container (encode_lz_prepass), where it is competitively size-picked.
+    let (flags, literals, lengths, distances) = lz77_parse_greedy(seq_codes);
     let n_tokens = flags.len();
     let n_lits = literals.len();
     let n_matches = lengths.len();

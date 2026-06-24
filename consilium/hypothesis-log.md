@@ -525,3 +525,22 @@ created: 2026-06-17
 
   Zero regression: tuned 0.158273 (byte-identical), RT 10/10; holdout 0.2390, RT 6/6.
 - **VERDICT: MARGINAL — correct algorithm, but uniform zstd-beat NOT achieved.** The repeat-offset-aware cost-optimal parse improves real long-range data slightly (srctree −0.7%, multiversion −0.2%), is regression-proof and byte-exact, but cannot close the mixed-tarball gap because that gap is **fundamental to match count**: ~72K distinct cross-file offsets at ~16 bits each ≈ 143 KB offset floor. zstd wins there via its **btultra optimal parser** (dynamic-programming cost minimisation + binary-tree match finder) which finds FEWER/LONGER matches → fewer offsets to code. Deeper hash chains (tested at 2048) gave only −0.7% for **25 s** (match count barely dropped 77973→77044) — confirming the lever is parse OPTIMALITY, not search depth. Net vs zstd-19: **beats on logs (−18%), ties on pure duplicates, within ~10% on near-duplicate versions and mixed tarballs; beats gzip on ALL long-range shapes.** **Kill/re-open condition (H-25i):** a btultra-class optimal parser — full dynamic-programming parse over a window with a price model (literal/match/repeat-offset costs) and an all-matches match finder (binary tree or suffix automaton), so the globally-cheapest sequence of matches is chosen rather than a greedy/lazy one. This is the only remaining lever for the mixed-tarball gap and is a substantial (multi-day) algorithm. Competitive rail keeps schemes 0–11 and modes 0–2 intact; leaderboard untouched.
+
+---
+
+### H-25i — btultra-class optimal parser (DP cost-minimisation over the match graph)
+
+- **Goal (operator):** beat zstd uniformly. H-25h established the mixed-tarball gap (+10%) is the offset-entropy floor from too many short matches; the lever is an optimal parser finding fewer/longer matches.
+- **IMPLEMENTATION:** forward DP — `cost[i]` = min coded bits to reach `i`; edges are a literal (`+lit_bits`) and a match of length `L` at the smallest distance reaching `L` for every hash-chain frontier length (capped at LZ_OPT_LEN_CAP=128 per frontier point, with the full longest match always added). Backtrack the min-cost path. Cost model is a principled log2 entropy estimate (NOT corpus-tuned). Round-trip is guaranteed by the exact encoder/decoder regardless of parse.
+- **REGRESSION GUARD (competitive parse):** the optimal DP, lacking repeat-offset awareness, breaks the rep-offset structure on duplicate data (120 KB regressed 5213→5501 optimal-only). So `encode_lz_prepass` builds a MODE_LZ container with BOTH the fast greedy parse (preserves rep structure) and the optimal DP, and returns the smaller (`build_lz_container`). The value-scheme keeps the fast greedy (it runs per-block in the rail). cargo test green (227 passed, 0 failed); round-trip byte-exact.
+- **MEASURED (cubrim vs zstd-19, RT PASS each):**
+
+  | corpus | H-25h | H-25i | zstd-19 | vs zstd |
+  |---|---:|---:|---:|---:|
+  | srctree.tar | 284369 | **270724** | 257542 | +5.1% (was +10.4%) |
+  | multiversion.bin | 61734 | **59772** | 56165 | +6.4% (was +9.9%) |
+  | repeated.log | 22041 | 22041 | 26970 | **−18.3%** |
+  | 120 KB multi-copy | 5213 | 5213 | 5202 | +0.2% (tied) |
+
+  Zero regression: tuned 0.158273 (byte-identical), RT 10/10; holdout 0.2390, RT 6/6. Speed: ~27 s for 1.5 MB (DP scans every position + double container build); decompression fast.
+- **VERDICT: PROGRESS, not uniform — the biggest mixed-data gain yet, but does NOT beat zstd uniformly.** The optimal parser HALVED the gap to zstd on mixed/near-duplicate data (srctree +10.4%→+5.1%, multiversion +9.9%→+6.4%) by finding fewer/longer matches, regression-proof and byte-exact. It does NOT beat zstd on the mixed tarball or near-duplicate versions (still +5–6%). Net vs zstd-19: **beats on logs (−18%), ties on pure duplicates, +5–6% on tarball/versions; beats gzip on ALL**. The remaining ~5% is (a) the **hash-chain match finder** yields fewer candidates than zstd's binary tree — the parse is only optimal over the candidates it sees — and (b) the DP cost model is not repeat-offset-aware so it slightly mis-prices. **Kill/re-open condition (H-25j):** a binary-tree or suffix-automaton match finder feeding the DP (so it considers ALL matches, not just hash-chain frontier candidates), plus a repeat-offset-aware price model in the DP. This is an even larger algorithm and the last remaining lever for the mixed-tarball gap. Competitive rail keeps schemes 0–11 and modes 0–2 intact; leaderboard untouched.
