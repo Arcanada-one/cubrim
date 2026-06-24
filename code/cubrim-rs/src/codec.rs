@@ -4885,6 +4885,27 @@ fn lz_dist_bytes(d: usize) -> usize {
     }
 }
 
+/// Update the 3-deep repeat-offset cache for a match at distance `d`
+/// (move-to-front, matching the exact MODE_LZ encoder/decoder). Shared by the
+/// greedy and optimal parsers so their offset-cost mirrors never diverge.
+#[inline]
+fn lz_rep_update(rep: &mut [usize; 3], d: usize) {
+    if d == rep[0] {
+        // mode 0: most-recent offset reused — order unchanged.
+    } else if d == rep[1] {
+        rep.swap(0, 1);
+    } else if d == rep[2] {
+        let r2 = rep[2];
+        rep[2] = rep[1];
+        rep[1] = rep[0];
+        rep[0] = r2;
+    } else {
+        rep[2] = rep[1];
+        rep[1] = rep[0];
+        rep[0] = d;
+    }
+}
+
 /// Cost-aware + lazy LZ77 parse of `seq` (codes/bytes in [0, 256)).
 /// Returns (flags, literals, lengths, distances). A candidate match is only taken
 /// when its estimated coded cost (offset via the repeat-offset cache + length +
@@ -5028,21 +5049,7 @@ fn lz77_parse_greedy(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<
             lengths.push(blen);
             distances.push(bdist);
             // Update the repeat-offset mirror exactly as the encoder will.
-            let d = bdist;
-            if d == rep[0] {
-                // mode 0: unchanged
-            } else if d == rep[1] {
-                rep.swap(0, 1);
-            } else if d == rep[2] {
-                let r2 = rep[2];
-                rep[2] = rep[1];
-                rep[1] = rep[0];
-                rep[0] = r2;
-            } else {
-                rep[2] = rep[1];
-                rep[1] = rep[0];
-                rep[0] = d;
-            }
+            lz_rep_update(&mut rep, bdist);
             // Insert hashes across the rest of the matched span (i already inserted).
             let end = i + blen;
             i += 1;
@@ -5088,21 +5095,63 @@ fn lz77_parse_optimal(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec
     let key3 = |p: usize| -> u32 {
         ((seq[p] as u32) << 16) | ((seq[p + 1] as u32) << 8) | (seq[p + 2] as u32)
     };
-    // Per-edge coded cost (bits): a principled log2 entropy estimate. The actual
-    // repeat-offset discount is applied by the exact encoder, so this need only
-    // rank parses (few/long matches cheaper than many short ones).
-    let match_cost = |len: usize, dist: usize| -> f64 {
-        let off = 2.0 + lz_bit_length(dist) as f64;
+    // Per-edge coded cost (bits): a principled log2 entropy estimate. **H-25j-lite:**
+    // the cost is now repeat-offset-aware. A match whose distance is one of the 3
+    // recent offsets is coded by the exact encoder in ~mode-only bits (≈3), not the
+    // full offset entropy — so the DP must price it that way, otherwise it
+    // under-uses the cheap rep structure that duplicate/near-duplicate data is made
+    // of (the H-25i DP charged every offset the full `2 + bit_length(dist)`, which
+    // mis-ranked long rep-offset chains below shorter new-offset matches).
+    let match_cost = |len: usize, dist: usize, is_rep: bool| -> f64 {
+        let off = if is_rep {
+            3.0 // recent (repeat) offset: mode index only, matches the greedy mirror
+        } else {
+            2.0 + lz_bit_length(dist) as f64
+        };
         let lenb = 2.0 + lz_bit_length(len) as f64;
         1.0 + off + lenb
+    };
+
+    // Match length at a fixed distance (the repeat-offset probe). Overlapping
+    // (dist < len) is allowed — the decoder copies byte-by-byte.
+    let match_len_at = |p: usize, dist: usize| -> usize {
+        if dist == 0 || dist > p {
+            return 0;
+        }
+        let maxl = (n - p).min(LZ_MAX_MATCH);
+        let mut ml = 0usize;
+        while ml < maxl && seq[p - dist + ml] == seq[p + ml] {
+            ml += 1;
+        }
+        ml
     };
 
     let mut cost = vec![f64::INFINITY; n + 1];
     cost[0] = 0.0;
     let mut from_len = vec![0u32; n + 1]; // 0 = literal edge into this position
     let mut from_dist = vec![0u32; n + 1];
+    // H-25j-lite: the repeat-offset cache on the incumbent best path reaching each
+    // position. This forward DP relaxes edges only to later positions, so when the
+    // loop reaches `i` every edge INTO `i` has already been relaxed and cost[i]/
+    // from_*[i] are final — we can reconstruct the rep cache of the chosen path
+    // here, before pricing the edges OUT of `i`. (Standard incumbent-path rep model,
+    // as in zstd's optimal parser; the competitive greedy/optimal rail + the exact
+    // encoder keep round-trip and no-regression guaranteed regardless.)
+    let mut rep_cache = vec![LZ_REP_INIT; n + 1];
 
     for i in 0..n {
+        // Finalise the rep cache for the incumbent best path into `i`.
+        if i > 0 {
+            let fl = from_len[i] as usize;
+            if fl == 0 {
+                rep_cache[i] = rep_cache[i - 1];
+            } else {
+                let mut r = rep_cache[i - fl];
+                lz_rep_update(&mut r, from_dist[i] as usize);
+                rep_cache[i] = r;
+            }
+        }
+        let rep = rep_cache[i];
         let ci = cost[i];
         // Literal edge i -> i+1.
         let lc = ci + lit_bits;
@@ -5110,6 +5159,38 @@ fn lz77_parse_optimal(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec
             cost[i + 1] = lc;
             from_len[i + 1] = 0;
             from_dist[i + 1] = 0;
+        }
+        // Repeat-offset edges (H-25j-lite): probe a match at each of the 3 recent
+        // offsets and relax with the cheap rep cost. A length-L rep match can beat a
+        // longer new-offset match because its offset costs ~3 bits, not ~16-26.
+        if i + LZ_MIN_MATCH <= n {
+            for &ro in rep.iter() {
+                let ml = match_len_at(i, ro);
+                if ml >= LZ_MIN_MATCH {
+                    let lo = LZ_MIN_MATCH;
+                    let cap_hi = ml.min(lo + LZ_OPT_LEN_CAP - 1);
+                    let mut l = lo;
+                    while l <= cap_hi {
+                        let c = ci + match_cost(l, ro, true);
+                        let j2 = i + l;
+                        if c < cost[j2] {
+                            cost[j2] = c;
+                            from_len[j2] = l as u32;
+                            from_dist[j2] = ro as u32;
+                        }
+                        l += 1;
+                    }
+                    if ml > cap_hi {
+                        let c = ci + match_cost(ml, ro, true);
+                        let j2 = i + ml;
+                        if c < cost[j2] {
+                            cost[j2] = c;
+                            from_len[j2] = ml as u32;
+                            from_dist[j2] = ro as u32;
+                        }
+                    }
+                }
+            }
         }
         // Match edges: walk the hash chain, building the length-increasing,
         // distance-increasing frontier and relaxing DP edges.
@@ -5131,13 +5212,14 @@ fn lz77_parse_optimal(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec
                     }
                     if ml > best {
                         let d = i - j;
+                        let is_rep = d == rep[0] || d == rep[1] || d == rep[2];
                         // Relax DP edges for the lengths this frontier point owns:
                         // (best, ml], at distance d, capped to LZ_OPT_LEN_CAP.
                         let lo = best + 1;
                         let cap_hi = ml.min(lo + LZ_OPT_LEN_CAP - 1);
                         let mut l = lo;
                         while l <= cap_hi {
-                            let c = ci + match_cost(l, d);
+                            let c = ci + match_cost(l, d, is_rep);
                             let j2 = i + l;
                             if c < cost[j2] {
                                 cost[j2] = c;
@@ -5148,7 +5230,7 @@ fn lz77_parse_optimal(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec
                         }
                         // Always add the full longest edge (covers long runs cheaply).
                         if ml > cap_hi {
-                            let c = ci + match_cost(ml, d);
+                            let c = ci + match_cost(ml, d, is_rep);
                             let j2 = i + ml;
                             if c < cost[j2] {
                                 cost[j2] = c;
