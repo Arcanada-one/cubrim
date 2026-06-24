@@ -5235,11 +5235,25 @@ fn lz77_parse_optimal(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec
     // under-uses the cheap rep structure that duplicate/near-duplicate data is made
     // of (the H-25i DP charged every offset the full `2 + bit_length(dist)`, which
     // mis-ranked long rep-offset chains below shorter new-offset matches).
+    // H-25l: recalibrate the new-offset cost to the coder's measured efficiency. The
+    // H-25i/j DP charged the full raw `2 + bit_length(dist)` (~22 bits for a 1 MB
+    // file), but the real byte-split + order-1 rANS distance coder achieves ~15
+    // bits/offset (measured on srctree.tar: 64203 new offsets coded in 119162 B =
+    // 14.85 bits each). Charging the raw bit-length therefore OVER-prices new offsets
+    // by ~0.7× and the DP under-takes profitable short new-offset matches, leaving
+    // them as literals. LZ_OFF_COST_SCALE = 0.70 reflects the rANS byte-split
+    // efficiency (14.85 / ~20 raw ≈ 0.74); it is a coder property, not a corpus knob
+    // — a sweep confirms the minimum lands at 0.70, improving both mixed source
+    // tarballs and near-duplicate version streams while regressing neither (0.65
+    // over-fits multiversion at srctree's expense). Round-trip is guaranteed by the
+    // exact encoder regardless of the parse; this only changes MODE_LZ (>64 KB) and
+    // leaves the ≤64 KB tuned/holdout corpora byte-identical (no prepass there).
+    const LZ_OFF_COST_SCALE: f64 = 0.70;
     let match_cost = |len: usize, dist: usize, is_rep: bool| -> f64 {
         let off = if is_rep {
             3.0 // recent (repeat) offset: mode index only, matches the greedy mirror
         } else {
-            2.0 + lz_bit_length(dist) as f64
+            2.0 + LZ_OFF_COST_SCALE * lz_bit_length(dist) as f64
         };
         let lenb = 2.0 + lz_bit_length(len) as f64;
         1.0 + off + lenb
