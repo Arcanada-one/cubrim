@@ -4837,6 +4837,12 @@ const LZ_MAX_MATCH: usize = u16::MAX as usize;
 /// lengths as DP edges (the full longest match is always added separately, so long
 /// runs are still covered by a single edge). Bounds DP edge count on long matches.
 const LZ_OPT_LEN_CAP: usize = 128;
+/// Binary-tree match finder (H-25j-full): descent depth cap per position. Bounds
+/// time on pathological inputs; the tree narrows the search far faster than a hash
+/// chain, so a modest cap still surfaces the longest-at-each-distance candidates.
+const LZ_BT_DEPTH: usize = 128;
+/// Empty child / head sentinel for the binary-tree `son` array.
+const LZ_BT_EMPTY: u32 = u32::MAX;
 
 /// Order-0 entropy (bits/symbol) of `seq`, clamped to [2.0, 8.0]. Used as the
 /// per-literal cost estimate in the cost-aware parse so a match is only taken when
@@ -5067,6 +5073,89 @@ fn lz77_parse_greedy(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec<
     (flags, literals, lengths, distances)
 }
 
+/// **Binary-tree match finder (H-25j-full)** — an LZMA-style binary search tree over
+/// the suffixes of `seq`, keyed (rooted) by the 3-byte prefix so every position that
+/// could start a ≥3 match shares a tree. `son[2*p]` / `son[2*p+1]` are the
+/// greater/less children of position `p`. One call both INSERTS `pos` into its tree
+/// and COLLECTS, into `out`, the longest match at each distance-class on the descent
+/// path — a strictly-increasing-length candidate set (each `(len, dist)` is a real,
+/// byte-verified match). This surfaces longer/cleaner matches than the hash chain,
+/// which only sees a depth-capped chain of one bucket — the lever H-25i named for the
+/// mixed-tarball gap (fewer/longer matches → fewer offsets to code).
+///
+/// MUST be called for every position in increasing order so the tree stays valid.
+/// Round-trip is unaffected: this only changes which `(len, dist)` the DP can pick,
+/// and the exact encoder/decoder round-trip any valid parse. Candidates are valid by
+/// construction (the prefix length is computed by direct byte comparison).
+fn bt_get_matches(
+    seq: &[usize],
+    son: &mut [u32],
+    bt_head: &mut std::collections::HashMap<u32, u32>,
+    pos: usize,
+    out: &mut Vec<(usize, usize)>,
+) {
+    out.clear();
+    let n = seq.len();
+    // The last LZ_MIN_MATCH-1 positions cannot form a 3-byte key — never tree nodes.
+    if pos + LZ_MIN_MATCH > n {
+        return;
+    }
+    let len_limit = (n - pos).min(LZ_MAX_MATCH);
+    let key = ((seq[pos] as u32) << 16) | ((seq[pos + 1] as u32) << 8) | (seq[pos + 2] as u32);
+    // Insert pos as the new tree root for this prefix; descend from the prior root.
+    let mut cur = bt_head.insert(key, pos as u32).unwrap_or(LZ_BT_EMPTY);
+
+    // ptr0 fills pos's "less" subtree (suffixes < pos), ptr1 its "greater" subtree.
+    let mut ptr0 = 2 * pos + 1;
+    let mut ptr1 = 2 * pos;
+    let mut len0 = 0usize;
+    let mut len1 = 0usize;
+    let mut max_len = LZ_MIN_MATCH - 1;
+    let mut depth = LZ_BT_DEPTH;
+
+    loop {
+        if cur == LZ_BT_EMPTY || depth == 0 {
+            son[ptr0] = LZ_BT_EMPTY;
+            son[ptr1] = LZ_BT_EMPTY;
+            break;
+        }
+        depth -= 1;
+        let cm = cur as usize;
+        let pair = 2 * cm;
+        // The BST invariant guarantees the suffix at `cm` shares at least
+        // min(len0, len1) bytes with `pos`; extend the common prefix from there.
+        let mut len = len0.min(len1);
+        if seq[cm + len] == seq[pos + len] {
+            len += 1;
+            while len < len_limit && seq[cm + len] == seq[pos + len] {
+                len += 1;
+            }
+            if len > max_len {
+                out.push((len, pos - cm));
+                max_len = len;
+                if len == len_limit {
+                    // Exact prefix to the limit: pos inherits cm's children and stops.
+                    son[ptr1] = son[pair];
+                    son[ptr0] = son[pair + 1];
+                    break;
+                }
+            }
+        }
+        // Descend: `cm` and everything on its matching side go to one of pos's subtrees.
+        if seq[cm + len] < seq[pos + len] {
+            son[ptr1] = cur;
+            ptr1 = pair + 1;
+            cur = son[ptr1];
+            len1 = len;
+        } else {
+            son[ptr0] = cur;
+            ptr0 = pair;
+            cur = son[ptr0];
+            len0 = len;
+        }
+    }
+}
+
 /// **Optimal LZ77 parse (H-25i)** — dynamic-programming cost minimisation over the
 /// match graph. Instead of greedy/lazy (which takes the longest match at each
 /// position and so produces many short, expensive-offset matches on mixed data),
@@ -5138,6 +5227,14 @@ fn lz77_parse_optimal(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec
     // as in zstd's optimal parser; the competitive greedy/optimal rail + the exact
     // encoder keep round-trip and no-regression guaranteed regardless.)
     let mut rep_cache = vec![LZ_REP_INIT; n + 1];
+
+    // H-25j-full: binary-tree match finder state. `son` holds the two child links per
+    // position; `bt_head` maps a 3-byte prefix to its current tree root. Run alongside
+    // the hash chain so the DP sees the UNION of both finders' candidates — a superset
+    // of H-25i's, so the chosen parse is never worse by the cost model.
+    let mut son = vec![LZ_BT_EMPTY; 2 * n];
+    let mut bt_head: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut cands: Vec<(usize, usize)> = Vec::new();
 
     for i in 0..n {
         // Finalise the rep cache for the incumbent best path into `i`.
@@ -5244,6 +5341,41 @@ fn lz77_parse_optimal(seq: &[usize]) -> (Vec<usize>, Vec<usize>, Vec<usize>, Vec
                 j = prev[j];
                 chain += 1;
             }
+        }
+        // Binary-tree match edges (H-25j-full). bt_get_matches inserts i into the tree
+        // and returns the longest-at-each-distance candidates (increasing length); we
+        // relax DP edges over the lengths each candidate owns, exactly like the chain
+        // frontier above. This adds the longer/cleaner matches the hash chain misses.
+        bt_get_matches(seq, &mut son, &mut bt_head, i, &mut cands);
+        let mut bbest = LZ_MIN_MATCH - 1;
+        for &(ml, d) in cands.iter() {
+            if ml <= bbest {
+                continue;
+            }
+            let is_rep = d == rep[0] || d == rep[1] || d == rep[2];
+            let lo = bbest + 1;
+            let cap_hi = ml.min(lo + LZ_OPT_LEN_CAP - 1);
+            let mut l = lo;
+            while l <= cap_hi {
+                let c = ci + match_cost(l, d, is_rep);
+                let j2 = i + l;
+                if c < cost[j2] {
+                    cost[j2] = c;
+                    from_len[j2] = l as u32;
+                    from_dist[j2] = d as u32;
+                }
+                l += 1;
+            }
+            if ml > cap_hi {
+                let c = ci + match_cost(ml, d, is_rep);
+                let j2 = i + ml;
+                if c < cost[j2] {
+                    cost[j2] = c;
+                    from_len[j2] = ml as u32;
+                    from_dist[j2] = d as u32;
+                }
+            }
+            bbest = ml;
         }
         // Insert position i into the hash chain.
         if i + LZ_MIN_MATCH <= n {
@@ -5954,6 +6086,64 @@ mod tests {
             let blob = encode_with_config(&data, &EncodeConfig::v1_default());
             assert_eq!(decode(&blob).unwrap(), data, "round-trip failed for n={n}");
         }
+    }
+
+    #[test]
+    fn test_bt_match_finder_round_trips_adversarial() {
+        // H-25j-full: stress the binary-tree match finder (drives lz77_parse_optimal
+        // inside the >64KB MODE_LZ pre-pass) with inputs that force deep tree descents
+        // and long matches at large offsets — exactly where the BST bookkeeping must
+        // stay correct. The exact encoder/decoder must round-trip every parse.
+        use crate::header::MODE_LZ;
+        let mut state: u64 = 0x0BADC0DE0FF1CE42;
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+
+        // (1) Near-duplicate pair: 70KB random-ish text, then the same with sparse
+        // edits — long matches at a ~70KB offset, the case the BT surfaces best.
+        let base: Vec<u8> = (0..70_000).map(|_| b"abcdefgh 0123.,"[nxt(15)]).collect();
+        let mut edited = base.clone();
+        for _ in 0..200 {
+            let p = nxt(edited.len());
+            edited[p] = b"XYZ"[nxt(3)];
+        }
+        let mut dup = base.clone();
+        dup.extend_from_slice(&edited);
+
+        // (2) Periodic / overlapping-run structure (pathological for naive BSTs):
+        // a short cycle repeated past the chunk boundary, plus a long literal tail.
+        let mut periodic = Vec::new();
+        let cycle = b"abcabcabd";
+        while periodic.len() < 90_000 {
+            periodic.extend_from_slice(cycle);
+        }
+        periodic.extend((0..20_000).map(|_| b"qwertyuiop"[nxt(10)]));
+
+        // (3) Many distinct 3-byte prefixes (wide, shallow trees) + a duplicated block.
+        let mut diverse: Vec<u8> = (0..75_000).map(|_| nxt(256) as u8).collect();
+        let block = diverse[1000..6000].to_vec();
+        diverse.extend_from_slice(&block);
+        diverse.extend_from_slice(&block);
+
+        let mut saw_mode_lz = false;
+        for data in [dup, periodic, diverse] {
+            let blob = encode_with_config(&data, &EncodeConfig::v1_default());
+            assert_eq!(
+                decode(&blob).unwrap(),
+                data,
+                "BT match-finder parse must round-trip byte-exact (len={})",
+                data.len()
+            );
+            if blob[5] == MODE_LZ {
+                saw_mode_lz = true;
+            }
+        }
+        assert!(
+            saw_mode_lz,
+            "at least one adversarial input must select MODE_LZ (exercise the BT path)"
+        );
     }
 
     #[test]
