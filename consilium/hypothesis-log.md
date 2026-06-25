@@ -823,3 +823,11 @@ created: 2026-06-17
 - **SPIKE (faithful, charged predictor; real wide telemetry forex OHLC + sensor + deterministic synth control; subtraction AND fitted-linear residual):** vs H-40 baseline — forex_tick 26315→26315/26361 = **0.998×**, forex_GBPJPY 1.00×, sensor 1.00×; deterministic control synth_corr (normalized=2·raw+13) 54505→41210 = **1.32×** best. NONE reach 1.5×.
 - **WHY:** cross-stream MI is non-subsumed in principle but NOT additive over Cubrim's existing temporal delta. (1) temporal corr dominates cross-column on smooth time-series (high[i]−high[i−1] < high−open); (2) OHLC/sensor relations are unit-coefficient → residual=intra-row spread, not crushed; fitted-linear helps only non-unit deterministic pairs (Backblaze/DMV — not the telemetry class), and even there 1.32× whole-file. Corra's −53..−85% are on non-temporal wide deterministic tables.
 - **VERDICT NO-GO** — refines Gotcha #11: "non-subsumed by the backend" ≠ "additive over the existing pipeline" (must beat what temporal delta ALREADY extracts). Fallback: **H-50 ALP-RD full double bit-split**, H-51 int-wavelet.
+
+---
+
+## H-51 — int-wavelet (Haar) : NO-GO (subsumed by delta+entropy) | H-50 ALP-RD: BLOCKED (no binary-float corpus)
+
+- **H-51 int-wavelet NO-GO (spike, no Rust):** Haar lifting vs temporal-delta through cubrim — forex col1 4465→6672 (+49.4% worse), sensor col2 2920→3699 (+26.7% worse). Temporal delta already extracts the smooth-column structure; multi-scale wavelet coefficients compress worse through the entropy backend (Gotcha #11).
+- **H-50 ALP-RD BLOCKED:** no binary IEEE-double arrays on host (*.parquet/*.npy empty); ALP-RD targets binary float arrays = a different input format from the CSV-decimal telemetry class (already won by H-40). Deferred pending operator scope decision.
+- **LADDER EXHAUSTED for the telemetry class:** Corra (H-49 not-additive), wavelet (H-51 subsumed), DoubleDelta (H-41 subsumed), dict+RLE (H-48 subsumed) — all closed; ALP-RD needs a different class. The telemetry class is temporally-smooth, so temporal delta + rANS/BWT already extract the structure near-optimally; the structural wins (H-30/H-31/H-40) were the information-changing transforms the pipeline didn't already do. Class won −53.6% class-wide. Next requires a NEW input class (binary floats / non-temporal wide tables) or accepting the telemetry-specialist position.
