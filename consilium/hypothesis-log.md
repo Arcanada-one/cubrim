@@ -737,6 +737,11 @@ created: 2026-06-17
 
 > **Round-4 demoted (non-subsumable but lower slack / higher complexity — note, don't prioritise):** (d) struct-of-arrays for binary wire formats (protobuf/msgpack/parquet tensor) = "columnar for binary," an extension of MODE_COLUMNAR but needs a per-format parser (heavy helper) — follow-on, not top-3. (f) genomic: 2-bit packing is SUBSUMED (low-card → rANS already ≈2 bits/base); only **reference-delta** is non-subsumable (cross-file shared reference — legitimate form of the CLOSED H-18 dictionary, but narrow + needs aligner + shared reference) — note for a genomic-specific track only.
 
+> **REAL CORPORA COLLECTED (operator `.brief-research-newclass.txt`, research agent 7aae20fd) → `/home/dev/cubrim-worldbench/`:**
+> - **CORPUS 2 (give A FIRST)** `corpus2-raw-doubles/` — UCI Superconductivity features as raw `float64` `.npy`; PRIMARY array z-score-standardised → **0.000 % short-decimal** (ALP-decimal/H-40 provably inapplicable, measured), 100 %-double whole-file slack → for **H-50 ALP-RD**. Lit ×4.3.
+> - **CORPUS 1 (second)** `corpus1-wide-deterministic/` — UCI Adult (`education`↔`education_num` exact 1:1 bijection) + Covertype (40 `Soil_Type` one-hots verified mutually exclusive 20 000/20 000 → 40 cols → one ~5.3-bit categorical) → for **H-49 reborn** on the NON-temporal class A's H-49 NO-GO never tested. Hand `covtype` before `adult` (bigger whole-file slack; answers A's "single predicted column is a fraction of the file"). Lit Corra −53..−85%.
+> - Provenance/SHAs/reproduce: each dir `MANIFEST.md`; ranking: `README-newclass-corpora.md`. Ceilings = lit estimate; helper = charged decoder branch; spike before Rust.
+
 ### H-47..H-48 — telemetry/columnar class-wide hardening (track 1: extend the PROVEN win; research agent 7aae20fd)
 
 > **Context (operator, track 1+4 parallel race).** H-29/H-30 PROVED the columnar field-split beats zstd-19 by −22% aggregate (beats gzip everywhere) — but on a **host-derived** corpus. Track 1 = harden that win to a **class-wide** claim on representative public real-world telemetry, and complete the per-column codec cascade so the win covers the whole telemetry schema, not just numeric CSV. Full acquisition plan + mechanism: `documentation/ephemeral/research/telemetry-classwide-corpus-plan.md`. The two CONFIRMED-weak classes (logs + small <64 KB) are a measured micro-efficiency ceiling — NOT revisited. Ceilings = lit estimate, not Cubrim measurement.
@@ -831,3 +836,12 @@ created: 2026-06-17
 - **H-51 int-wavelet NO-GO (spike, no Rust):** Haar lifting vs temporal-delta through cubrim — forex col1 4465→6672 (+49.4% worse), sensor col2 2920→3699 (+26.7% worse). Temporal delta already extracts the smooth-column structure; multi-scale wavelet coefficients compress worse through the entropy backend (Gotcha #11).
 - **H-50 ALP-RD BLOCKED:** no binary IEEE-double arrays on host (*.parquet/*.npy empty); ALP-RD targets binary float arrays = a different input format from the CSV-decimal telemetry class (already won by H-40). Deferred pending operator scope decision.
 - **LADDER EXHAUSTED for the telemetry class:** Corra (H-49 not-additive), wavelet (H-51 subsumed), DoubleDelta (H-41 subsumed), dict+RLE (H-48 subsumed) — all closed; ALP-RD needs a different class. The telemetry class is temporally-smooth, so temporal delta + rANS/BWT already extract the structure near-optimally; the structural wins (H-30/H-31/H-40) were the information-changing transforms the pipeline didn't already do. Class won −53.6% class-wide. Next requires a NEW input class (binary floats / non-temporal wide tables) or accepting the telemetry-specialist position.
+
+---
+
+## H-50 — ALP-RD (real-double bit-split) on raw float64: NO-GO (sub-byte separation loses to byte backend)
+
+- **STATUS:** NO-GO (spike, no Rust). CORPUS 2 (UCI Superconductivity float64 .npy, CUBR-RESEARCH RANK#1 of round-4).
+- **SPIKE (faithful, charged Gotcha #7; ALP-RD per-col best-R + 8-dict + exceptions; + byte-shuffle + transpose):** PRIMARY z-score zstd19=570610 — byte-shuffle 0.59×, transpose+shuffle 0.55×, ALP-RD charged 0.398× (exc 1.7%); CONTRAST best 0.60×. ALL sub-byte variants 1.7–2.5× LARGER than zstd on both arrays. cubrim(raw) already beats zstd −1.9% (no transform).
+- **WHY:** the doubles are LOW-PRECISION (source ~7 decimal digits ≈23-bit; z-score of low-precision inputs) → low mantissa NOT random → zstd/xz/cubrim entropy-code it (~21 bits/value); ALP-RD/shuffle bitpack right RAW (~50 bits/value) discarding that structure → net loss. "0% short-decimal" measured decimal-trick applicability, NOT mantissa randomness; the full-double slack is absent. ALP's lit ×4.3 is on full-entropy scientific doubles.
+- **VERDICT NO-GO** — refines Gotcha #11: "right=random→bitpack raw" is itself a subsumption trap on low-precision data. Next: **H-49-reborn on CORPUS 1** (covtype before adult).
