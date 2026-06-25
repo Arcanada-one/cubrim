@@ -722,3 +722,13 @@ created: 2026-06-17
 - **SPIKE (probe_h36_log_template.py, faithful real-codec, charged Gotcha #6):** template-dict + template-id stream + columnar variable blob (H-31 delta on monotone cols) + timestamp-delta stream, each compressed by real cubrim bwt-rans. Corpus: H-29 class real logs.
 - **MEASURED vs zstd-19 (best of CLP / CLP+ts):** journal.log (real syslog) 14507 vs 18688 = **1.29×**; toolchain 26274 vs 27548 = 1.05×; dpkg 7094 vs 6764 = 0.95× (loses); app_orchestrate 15749 vs 23218 = 1.47×. NONE reach 1.5×.
 - **VERDICT NO-GO** under the gate. Honest nuance: CLP beats zstd on 3/4 logs (1.05–1.47×) — a MODE_LOG would flip journal/toolchain/app to wins — but misses the 1.5× Rust-justification bar and dpkg loses. journal residual = template-dict 5367B + high-entropy variables 7040B (pids/addresses, data-determined). OPERATOR DECISION: hold 1.5× gate (ceiling) vs relax to "beat zstd" (parser justified for 1.0–1.47×).
+
+---
+
+## H-39 — Small-file class (<64KB structured): micro-efficiency ceiling, NO-GO
+
+- **STATUS:** NO-GO (multiply-confirmed micro-efficiency ceiling). No Rust. CUBR-RESEARCH priorities + faithful spikes both confirm.
+- **DIAGNOSIS:** alternatives.log 1238 vs zstd 969/brotli 921 (98% LZ-match, cubrim already < H2); deals_record.csv 3799 vs zstd 3549/brotli 3289 (> order-2 floor 3404). Rail already picks best scheme (geomix).
+- **SPIKES (faithful, all reverted byte-identical):** (1) optimal-parse+repcode LZ for small blocks → still mode-0 geomix, MODE_LZ ≥1238 LOSES to zstd 969; (2) columnar on small CSV → framing overhead, ≥3799 (probe 3702 still > zstd); (3) zstd --train dict cross-file → 970 vs 969 ZERO (dict dead at 18KB, helps only <1KB); (4) order-2 floor unreachable (static=table-cost, adaptive=unlearnable Gotcha #9).
+- **VERDICT NO-GO** — gap is repcode-LZ-parse + brotli order-2-literal + dictionary-cold-start, all micro-efficiency (research Lever 5 DEAD-structural). Mirrors H-36 logs + H-25l/26/27/28 general ceilings.
+- **CLASS-FINAL:** Cubrim WINS columnar/telemetry (−22.1% agg vs zstd, forex −40/−44%), beats gzip everywhere; logs + small-files are micro-efficiency ceilings, no remaining structural lever. OPERATOR DECISION: accept ceiling / brotli-class rewrite / domain mode.
