@@ -762,3 +762,13 @@ created: 2026-06-17
 - **MEASURED (class, --value-scheme bwt-rans, RT all):** forex_tick 36846→**26848** (zstd −39.9%→**−56.2%**), forex_usdchf 31207→**24881** (−43.8%→**−55.2%**), status_timeseries 20398→**11702** (−4.6%→**−45.3%**, float telemetry cols); class AGGREGATE 170654→**145634** vs zstd 219039 = −22.1%→**−33.5%** (beats), vs gzip −52.6%.
 - **ZERO-REGRESSION:** tuned 0.158273 byte-identical (RT 10/10), holdout 0.2390 byte-identical (RT 6/6); 238 tests green, clippy 0 new.
 - **VERDICT GO** — new-class hunt SUCCEEDED: Cubrim structurally crushes zstd on scientific/financial/sensor float columns. NEXT: **H-41 DoubleDelta** (research Lever 2) for fixed-interval timestamp/counter columns (variance-gated). Logs + tiny files remain at their ceilings.
+
+---
+
+## H-41 — DoubleDelta for fixed-interval columns: NO-GO (subsumed by entropy backend)
+
+- **STATUS:** NO-GO (spike, no Rust). Research Lever 2.
+- **SPIKE (probe_h41_doubledelta.py, faithful; generated Prometheus-15s + Intel-Berkeley-31s corpus):** single-delta vs double-delta through cubrim rANS/BWT — prometheus 27235→29096 (+6.8% WORSE), sensor 11730→13244 (+12.9% WORSE). Variance gate confirms cols ARE fixed-interval (ts stddev/mean=0.00) yet double-delta loses.
+- **WHY:** fixed-interval single-delta = constant stream; rANS/BWT already code it to ~0; delta-of-delta adds noise → worse. DoubleDelta subsumed by a strong entropy coder (BWT⊃MTF analogue); Gorilla/ClickHouse win it only in bit-packing without an entropy stage.
+- **BONUS:** current codec (H-31+H-40) ALREADY crushes the class — prometheus 32821 vs zstd 58354 (−43.8%), sensor 11821 vs zstd 47801 (−75.3%), RT byte-exact. Fixed-interval won WITHOUT DoubleDelta.
+- **VERDICT NO-GO** — honest subsumption. NEXT: **H-48 enum dictionary→RLE→rANS** (research handoff, structural-strength flag).
