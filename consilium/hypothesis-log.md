@@ -703,6 +703,40 @@ created: 2026-06-17
 
 > **Round-3 scouted but NOT laddered:** DMC (dynamic Markov compression) — adaptive bit-level, table-free, but CTW/PPM dominate its ratio in the literature; subsumed by H-45. Full neural (NNCP/cmix/RWKV) re-confirmed disqualified (speed/RAM) per the round-2 note — H-46 is the realizable logistic-mixing slice. PSTs (probabilistic suffix trees) ≈ bounded-order CTW; subsumed by H-45.
 
+### H-49..H-51 — NON-SUBSUMABLE structural transforms (round 4; crystallises Gotcha #11 into a predictive gate; research agent 7aae20fd)
+
+> **The Gotcha #11 predictive gate (apply to ANY candidate in ~30 s BEFORE building a spike).** A strong BWT+rANS backend already models order-N byte context + runs + suffix-grouped contexts within each stream. A pre-transform is therefore **SUBSUMED** (will measure ~0, do NOT spike) iff it only *reorders or locally-deltas bytes within one stream the backend already sees* — this is why DoubleDelta (H-41 NO-GO), MTF, and dict+RLE-of-an-already-low-card-stream (H-48 marginal −2.3%) all lost.
+>
+> A transform is **NON-SUBSUMABLE** (worth a charged spike) iff it requires AT LEAST ONE of:
+> - **(i) sub-byte field separation** — bits with *different statistics sharing the same bytes* (IEEE-754 sign/exp/mantissa; packed bitfields). A byte-symbol model cannot split co-located bits. ← H-40/H-38 decimal-float→scaled-int won here (−33.5% vs zstd).
+> - **(ii) cross-stream / cross-column information** — mutual information between *separate* columns the backend compresses independently. BWT groups suffix-contexts *within* one stream; it has no cross-column predictor.
+> - **(iii) real-number arithmetic over the semantic value interpretation** — wavelet / PCA / DCT / predictive residual computed on bytes-as-numbers. A symbol model cannot do linear algebra.
+>
+> Corollary — the SUBSUMED list (skip, save A's time): monotone byte permutations (MTF); local byte/bit deltas incl. **Gorilla/Chimp/Patas XOR-with-previous** (streaming delta family, same as DoubleDelta — and lit: Chimp x2.4 < ALP x4.3, does not beat zstd); Pseudodecimal/PDE (ALP's predecessor, ALP dominates it). All ceilings below are **lit estimates, not Cubrim measurements**; every helper named is a MANDATORY charged decoder branch.
+
+- **H-49 — cross-column correlation residual (Corra-class) [RANK #1: cleanest non-subsumed + composes with the PROVEN columnar win].**
+  - *Non-subsumable via (ii) cross-stream MI.* After MODE_COLUMNAR transpose, Cubrim compresses each column INDEPENDENTLY — all mutual information between correlated/derived columns is left on the table and is UNREACHABLE by per-column BWT+rANS. Real telemetry is full of it: **Backblaze `smart_N_raw` ↔ `smart_N_normalized` (a deterministic function → near-zero residual)**, OHLC bid↔ask↔high↔low, sensor temp↔voltage, city↔zip. Encode column B as residual `B − predict(A)` (linear fit or value→value map), feed the residual to bwt-rans.
+  - *Lit-estimate ceiling.* Corra (VLDB 2024, TUM) saves −53.7% (DMV zip), −58.3% (lineitem receiptdate), **−85.16% (Taxi total_amount)** *beyond* single-column encoding. Directly extends the H-29/H-30/H-31 telemetry win.
+  - *Charged helper (decoder branch).* per-correlated-pair predictor: which→which + coefficients / value-map + exception list. Small vs the savings; charge it. Competitive `min(independent, residual)` per column → regression-proof.
+  - *Refs.* Corra https://arxiv.org/abs/2403.17229 ; Lightweight Correlation-Aware Table Compression https://arxiv.org/html/2410.14066
+  - *Status:* PLANNED — **top handoff: pairs with MODE_COLUMNAR + ALP; biggest non-subsumed slack on the proven-win class.**
+
+- **H-50 — ALP-RD full real-double bit-split (arbitrary doubles, not just the decimal subset) [RANK #2].**
+  - *Non-subsumable via (i) sub-byte.* Extends H-38/H-40 (decimal subset) to ARBITRARY doubles (ML weights, scientific, computed values that are NOT clean decimals). ALP-RD splits each double bitwise into a **left** part (first 16 bits = sign + exponent + upper mantissa → dictionary-encoded, few distinct patterns) and a **right** part (low bits → bitpacked raw). The high-bit dictionary structure and low-bit noise share bytes — a byte-backend cannot separate them.
+  - *Lit-estimate ceiling.* ALP avg **×4.3** vs Patas ×2.1 / Chimp ×2.4; ALP beats Chimp128 on 27/30 datasets (ALP, SIGMOD 2024). Covers the float class H-38's decimal path leaves behind.
+  - *Charged helper (decoder branch).* left-parts dictionary + exception list. Charge both. Competitive with the decimal ALP path (`min(alp, alp_rd, raw)`).
+  - *Refs.* ALP / ALP-RD https://dl.acm.org/doi/10.1145/3626717 ; DuckDB writeup https://duckdb.org/science/alp/ ; code https://github.com/cwida/ALP
+  - *Status:* PLANNED.
+
+- **H-51 — reversible-arithmetic transform for scientific float-grid (integer wavelet / cross-field predictor) [RANK #3, narrower — gate on CUBR-0034 having a scientific-grid class].**
+  - *Non-subsumable via (iii) real arithmetic.* For ND smooth float grids (climate, simulation, scientific arrays), a reversible integer lifting wavelet (5/3) or a cross-field linear/CNN predictor → residual concentrates energy / removes spatial+inter-field redundancy that no byte-symbol model can compute. Categorically outside the backend's reach.
+  - *Lit-estimate ceiling.* Cross-field prediction +25% under error bounds (HPDC 2025 — NOTE: that result is lossy-bounded; the lossless slice is smaller, mark carefully); reversible integer wavelet ≈ CALIC lossless on continuous-tone grids. Overlaps H-44 (image) for 2D rasters.
+  - *Charged helper (decoder branch).* transform is in-place (lifting) → ~free; a cross-field predictor needs its coefficients charged. Needs grid dimensions (like H-44) → competitive width-gate.
+  - *Refs.* Advancing Scientific Data Compression via Cross-Field Prediction, HPDC 2025 https://dl.acm.org/doi/10.1145/3731545.3731592 ; reversible integer wavelet (JPEG2000 lossless / Lossless JPEG).
+  - *Status:* PLANNED (provisional — gated on the world-bench class table).
+
+> **Round-4 demoted (non-subsumable but lower slack / higher complexity — note, don't prioritise):** (d) struct-of-arrays for binary wire formats (protobuf/msgpack/parquet tensor) = "columnar for binary," an extension of MODE_COLUMNAR but needs a per-format parser (heavy helper) — follow-on, not top-3. (f) genomic: 2-bit packing is SUBSUMED (low-card → rANS already ≈2 bits/base); only **reference-delta** is non-subsumable (cross-file shared reference — legitimate form of the CLOSED H-18 dictionary, but narrow + needs aligner + shared reference) — note for a genomic-specific track only.
+
 ### H-47..H-48 — telemetry/columnar class-wide hardening (track 1: extend the PROVEN win; research agent 7aae20fd)
 
 > **Context (operator, track 1+4 parallel race).** H-29/H-30 PROVED the columnar field-split beats zstd-19 by −22% aggregate (beats gzip everywhere) — but on a **host-derived** corpus. Track 1 = harden that win to a **class-wide** claim on representative public real-world telemetry, and complete the per-column codec cascade so the win covers the whole telemetry schema, not just numeric CSV. Full acquisition plan + mechanism: `documentation/ephemeral/research/telemetry-classwide-corpus-plan.md`. The two CONFIRMED-weak classes (logs + small <64 KB) are a measured micro-efficiency ceiling — NOT revisited. Ceilings = lit estimate, not Cubrim measurement.
@@ -780,3 +814,12 @@ created: 2026-06-17
 - **STATUS:** MARGINAL (spike, no Rust). Research handoff (structural-strength flag).
 - **SPIKE (faithful; generated enum-heavy run-structured events.csv 455KB):** current-columnar 20285 vs dict+RLE 19812 (−2.3% only). Baseline current cubrim already −52.1% vs zstd (columnar). 4 enum cols dict+RLE'd.
 - **VERDICT MARGINAL** — BWT+geomix already clusters+codes low-cardinality columns near entropy; explicit dict+RLE mostly subsumed (same as H-41 DoubleDelta: dict+RLE/MTF win for Parquet/bzip2 only because they bit-pack; Cubrim entropy-codes). ~0 on real numeric-heavy telemetry. Not implemented. Added **Gotcha #11** (strong entropy backend subsumes delta-order/RLE/MTF pre-transforms — spike through the real backend). Reconsider only for a dedicated categorical/event-log class.
+
+---
+
+## H-49 — Cross-column correlation residual (Corra-class): NO-GO (not additive over temporal delta)
+
+- **STATUS:** NO-GO (spike, no Rust). CUBR-RESEARCH RANK#1 non-subsumable candidate.
+- **SPIKE (faithful, charged predictor; real wide telemetry forex OHLC + sensor + deterministic synth control; subtraction AND fitted-linear residual):** vs H-40 baseline — forex_tick 26315→26315/26361 = **0.998×**, forex_GBPJPY 1.00×, sensor 1.00×; deterministic control synth_corr (normalized=2·raw+13) 54505→41210 = **1.32×** best. NONE reach 1.5×.
+- **WHY:** cross-stream MI is non-subsumed in principle but NOT additive over Cubrim's existing temporal delta. (1) temporal corr dominates cross-column on smooth time-series (high[i]−high[i−1] < high−open); (2) OHLC/sensor relations are unit-coefficient → residual=intra-row spread, not crushed; fitted-linear helps only non-unit deterministic pairs (Backblaze/DMV — not the telemetry class), and even there 1.32× whole-file. Corra's −53..−85% are on non-temporal wide deterministic tables.
+- **VERDICT NO-GO** — refines Gotcha #11: "non-subsumed by the backend" ≠ "additive over the existing pipeline" (must beat what temporal delta ALREADY extracts). Fallback: **H-50 ALP-RD full double bit-split**, H-51 int-wavelet.
