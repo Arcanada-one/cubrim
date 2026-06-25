@@ -669,17 +669,24 @@ fn build_columnar_blob(data: &[u8], delim: u8, config: &EncodeConfig) -> Option<
     }
 
     let mut colmodes: Vec<u8> = Vec::with_capacity(ncols);
+    let mut col_scales: Vec<u8> = Vec::with_capacity(ncols);
     let mut emitted: Vec<Vec<u8>> = Vec::with_capacity(k.iter().sum());
     for cells in &col_cells {
-        match columnar_delta_encode(cells) {
-            Some(delta_fields) => {
-                colmodes.push(1);
-                emitted.extend(delta_fields);
-            }
-            None => {
-                colmodes.push(0);
-                emitted.extend(cells.iter().map(|c| c.to_vec()));
-            }
+        if let Some(delta_fields) = columnar_delta_encode(cells) {
+            // H-31: monotone canonical-integer column.
+            colmodes.push(1);
+            col_scales.push(0);
+            emitted.extend(delta_fields);
+        } else if let Some((delta_fields, scale)) = columnar_decimal_encode(cells) {
+            // H-40: canonical fixed-decimal column (e.g. prices) — reinterpret as a
+            // scaled integer and signed-delta it. Opens the scientific-float/CSV class.
+            colmodes.push(2);
+            col_scales.push(scale);
+            emitted.extend(delta_fields);
+        } else {
+            colmodes.push(0);
+            col_scales.push(0);
+            emitted.extend(cells.iter().map(|c| c.to_vec()));
         }
     }
     let colstream = emitted.join(&b'\n');
@@ -706,6 +713,7 @@ fn build_columnar_blob(data: &[u8], delim: u8, config: &EncodeConfig) -> Option<
     out.extend_from_slice(&(m as u32).to_be_bytes());
     out.extend_from_slice(&(ncols as u32).to_be_bytes());
     out.extend_from_slice(&colmodes);
+    out.extend_from_slice(&col_scales);
     out.extend_from_slice(&(kblob.len() as u32).to_be_bytes());
     out.extend_from_slice(&kblob);
     out.extend_from_slice(&(colblob.len() as u32).to_be_bytes());
@@ -748,6 +756,88 @@ fn columnar_delta_encode(cells: &[&[u8]]) -> Option<Vec<Vec<u8>>> {
     Some(out)
 }
 
+/// Number of fractional digits of a canonical fixed-decimal cell ("-?D+.D{scale}"),
+/// or None. Scale is the column-wide decimal precision.
+fn decimal_scale(cell: &[u8]) -> Option<usize> {
+    let dot = cell.iter().position(|&b| b == b'.')?;
+    let frac = &cell[dot + 1..];
+    if frac.is_empty() || !frac.iter().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(frac.len())
+}
+
+/// Scaled-integer value of a fixed-decimal cell at the given scale (sign·(int·10^scale
+/// + frac)). No canonical check — used on decode where the anchor is verbatim-original.
+fn fixed_decimal_value(cell: &[u8], scale: usize) -> Option<i64> {
+    let s = std::str::from_utf8(cell).ok()?;
+    let (neg, body) = match s.strip_prefix('-') {
+        Some(b) => (true, b),
+        None => (false, s),
+    };
+    let (ip, fp) = body.split_once('.')?;
+    if fp.len() != scale || ip.is_empty() || !ip.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let ipv: i64 = ip.parse().ok()?;
+    let fpv: i64 = if scale == 0 { 0 } else { fp.parse().ok()? };
+    let pow = 10i64.checked_pow(scale as u32)?;
+    let mag = ipv.checked_mul(pow)?.checked_add(fpv)?;
+    Some(if neg { -mag } else { mag })
+}
+
+/// Render a scaled integer back to its fixed-decimal string at `scale` digits.
+fn render_fixed_decimal(v: i64, scale: usize) -> String {
+    let neg = v < 0;
+    let a = (v as i128).unsigned_abs();
+    let pow = 10u128.pow(scale as u32);
+    let ip = a / pow;
+    let fp = a % pow;
+    format!(
+        "{}{}.{:0width$}",
+        if neg { "-" } else { "" },
+        ip,
+        fp,
+        width = scale
+    )
+}
+
+/// Parse a fixed-decimal cell to its scaled integer ONLY if it round-trips exactly
+/// (canonical form: no leading zeros in the integer part, exact frac-digit count, no '+').
+fn parse_fixed_decimal(cell: &[u8], scale: usize) -> Option<i64> {
+    let v = fixed_decimal_value(cell, scale)?;
+    if render_fixed_decimal(v, scale).as_bytes() == cell {
+        Some(v)
+    } else {
+        None
+    }
+}
+
+/// H-40 per-column fixed-decimal delta encode. Returns (delta fields, scale) iff every
+/// data cell is a canonical fixed-decimal with the SAME scale (1..=18) that round-trips
+/// exactly. Deltas are signed (decimal columns — prices — oscillate; no monotonic gate).
+fn columnar_decimal_encode(cells: &[&[u8]]) -> Option<(Vec<Vec<u8>>, u8)> {
+    if cells.len() < 3 {
+        return None;
+    }
+    let scale = decimal_scale(cells[1])?;
+    if scale == 0 || scale > 18 {
+        return None;
+    }
+    let vals: Vec<i64> = cells[1..]
+        .iter()
+        .map(|c| parse_fixed_decimal(c, scale))
+        .collect::<Option<_>>()?;
+    let mut out: Vec<Vec<u8>> = Vec::with_capacity(cells.len());
+    out.push(cells[0].to_vec()); // verbatim header / first value
+    out.push(cells[1].to_vec()); // verbatim anchor
+    for i in 1..vals.len() {
+        let d = vals[i].checked_sub(vals[i - 1])?;
+        out.push(d.to_string().into_bytes());
+    }
+    Some((out, scale as u8))
+}
+
 /// Try the columnar field-split transform over all candidate delimiters and return the
 /// smallest container, or `None` if the input is not a delimited table. The caller gates
 /// this on `data.len() > cube_size_limit` and competitively keeps it only when smaller.
@@ -779,8 +869,8 @@ fn read_u32(blob: &[u8], pos: usize) -> Result<u32, CubrimError> {
 /// Decode a MODE_COLUMNAR container (`build_columnar_blob`). Fail-closed.
 fn decode_columnar(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     // Header: MAGIC(4)+VERSION(1)+MODE_COLUMNAR(1)+orig_len(4)+delim(1)+ends_nl(1)
-    //         +n_rows(4)+n_cols(4) = 20, then colmodes(n_cols), then kblob_len(4)+kblob,
-    //         then colblob_len(4)+colblob.
+    //         +n_rows(4)+n_cols(4) = 20, then colmodes(n_cols), col_scales(n_cols),
+    //         then kblob_len(4)+kblob, then colblob_len(4)+colblob.
     if blob.len() < 20 {
         return Err(CubrimError::Decode("MODE_COLUMNAR container too short".into()));
     }
@@ -792,11 +882,12 @@ fn decode_columnar(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     if ncols == 0 || ncols > blob.len() {
         return Err(CubrimError::Decode("MODE_COLUMNAR: bad n_cols".into()));
     }
-    if 20 + ncols + 4 > blob.len() {
-        return Err(CubrimError::Decode("MODE_COLUMNAR: colmodes truncated".into()));
+    if 20 + 2 * ncols + 4 > blob.len() {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: colmodes/scales truncated".into()));
     }
-    let colmodes = &blob[20..20 + ncols];
-    let mut pos = 20 + ncols;
+    let colmodes = blob[20..20 + ncols].to_vec();
+    let col_scales = blob[20 + ncols..20 + 2 * ncols].to_vec();
+    let mut pos = 20 + 2 * ncols;
     let kblob_len = read_u32(blob, pos)? as usize;
     pos += 4;
     if pos + kblob_len + 4 > blob.len() {
@@ -845,6 +936,8 @@ fn decode_columnar(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         off += count_c;
         if mode == 1 {
             col_decoded.push(columnar_delta_decode(slice)?);
+        } else if mode == 2 {
+            col_decoded.push(columnar_decimal_decode(slice, col_scales[c])?);
         } else if mode == 0 {
             col_decoded.push(slice.iter().map(|f| f.to_vec()).collect());
         } else {
@@ -901,6 +994,36 @@ fn columnar_delta_decode(fields: &[&[u8]]) -> Result<Vec<Vec<u8>>, CubrimError> 
             .checked_add(d)
             .ok_or_else(|| CubrimError::Decode("MODE_COLUMNAR: delta overflow".into()))?;
         out.push(running.to_string().into_bytes());
+    }
+    Ok(out)
+}
+
+/// Reverse the H-40 fixed-decimal delta transform: first cell verbatim, second the
+/// verbatim decimal anchor, each later cell a signed delta of the scaled integer;
+/// re-render each at `scale` fractional digits. Fail-closed.
+fn columnar_decimal_decode(fields: &[&[u8]], scale: u8) -> Result<Vec<Vec<u8>>, CubrimError> {
+    if fields.len() < 3 {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: decimal column too short".into()));
+    }
+    let scale = scale as usize;
+    if scale == 0 || scale > 18 {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: bad decimal scale".into()));
+    }
+    let mut out: Vec<Vec<u8>> = Vec::with_capacity(fields.len());
+    out.push(fields[0].to_vec()); // verbatim header / first value
+    let mut running = fixed_decimal_value(fields[1], scale)
+        .ok_or_else(|| CubrimError::Decode("MODE_COLUMNAR: bad decimal anchor".into()))?;
+    out.push(fields[1].to_vec()); // verbatim anchor
+    for f in &fields[2..] {
+        let s = std::str::from_utf8(f)
+            .map_err(|_| CubrimError::Decode("MODE_COLUMNAR: non-utf8 decimal delta".into()))?;
+        let d: i64 = s
+            .parse()
+            .map_err(|_| CubrimError::Decode("MODE_COLUMNAR: bad decimal delta".into()))?;
+        running = running
+            .checked_add(d)
+            .ok_or_else(|| CubrimError::Decode("MODE_COLUMNAR: decimal delta overflow".into()))?;
+        out.push(render_fixed_decimal(running, scale).into_bytes());
     }
     Ok(out)
 }
@@ -6843,6 +6966,55 @@ mod tests {
         let ncols = read_u32(&blob, 16).unwrap() as usize;
         let colmodes = &blob[20..20 + ncols];
         assert!(colmodes.contains(&1), "a monotone column must be delta-coded");
+    }
+
+    #[test]
+    fn test_columnar_decimal_unit_canonical_and_round_trip() {
+        // Canonical fixed-decimals (consistent scale) → scaled-integer signed delta,
+        // exactly reversible (prices oscillate → signed deltas, no monotonic gate).
+        let cells: Vec<&[u8]> = vec![
+            b"price", b"1.30970000", b"1.30960000", b"1.31050000", b"1.30970000",
+        ];
+        let (enc, scale) = columnar_decimal_encode(&cells).expect("decimals must delta-code");
+        assert_eq!(scale, 8);
+        assert_eq!(enc[0], b"price");
+        assert_eq!(enc[1], b"1.30970000"); // anchor verbatim
+        assert_eq!(enc[2], b"-10000"); // 1.30960000 - 1.30970000 scaled
+        let dec = columnar_decimal_decode(
+            &enc.iter().map(|v| v.as_slice()).collect::<Vec<_>>(),
+            scale,
+        )
+        .expect("decimal decode");
+        assert_eq!(dec, cells.iter().map(|c| c.to_vec()).collect::<Vec<_>>());
+
+        // Negative values round-trip.
+        let neg: Vec<&[u8]> = vec![b"v", b"-0.50", b"0.00", b"-1.25"];
+        let (e2, s2) = columnar_decimal_encode(&neg).expect("signed decimals");
+        let d2 = columnar_decimal_decode(&e2.iter().map(|v| v.as_slice()).collect::<Vec<_>>(), s2)
+            .unwrap();
+        assert_eq!(d2, neg.iter().map(|c| c.to_vec()).collect::<Vec<_>>());
+
+        // Inconsistent scale → not decimal-coded (None).
+        let mixed: Vec<&[u8]> = vec![b"v", b"1.50", b"1.5", b"1.55"];
+        assert!(columnar_decimal_encode(&mixed).is_none(), "mixed scale must not decimal-code");
+        // Leading zero in integer part is non-canonical → None.
+        let lz: Vec<&[u8]> = vec![b"v", b"01.50", b"02.50", b"03.50"];
+        assert!(columnar_decimal_encode(&lz).is_none());
+        // Pure integers are NOT decimal (no '.') → None (handled by the integer path).
+        let ints: Vec<&[u8]> = vec![b"v", b"100", b"200", b"300"];
+        assert!(columnar_decimal_encode(&ints).is_none());
+    }
+
+    #[test]
+    fn test_columnar_decimal_engages_and_round_trips_on_float_csv() {
+        // synth_csv has a fixed-decimal price column → MODE_COLUMNAR with a mode-2 column.
+        let data = synth_csv(4000);
+        let blob = encode_with_config(&data, &csv_rail_cfg());
+        assert_eq!(blob[5], MODE_COLUMNAR);
+        assert_eq!(decode(&blob).unwrap(), data, "decimal-columnar round-trip");
+        let ncols = read_u32(&blob, 16).unwrap() as usize;
+        let colmodes = &blob[20..20 + ncols];
+        assert!(colmodes.contains(&2), "the price column must be decimal-coded (mode 2)");
     }
 
     #[test]

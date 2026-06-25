@@ -703,6 +703,25 @@ created: 2026-06-17
 
 > **Round-3 scouted but NOT laddered:** DMC (dynamic Markov compression) — adaptive bit-level, table-free, but CTW/PPM dominate its ratio in the literature; subsumed by H-45. Full neural (NNCP/cmix/RWKV) re-confirmed disqualified (speed/RAM) per the round-2 note — H-46 is the realizable logistic-mixing slice. PSTs (probabilistic suffix trees) ≈ bounded-order CTW; subsumed by H-45.
 
+### H-47..H-48 — telemetry/columnar class-wide hardening (track 1: extend the PROVEN win; research agent 7aae20fd)
+
+> **Context (operator, track 1+4 parallel race).** H-29/H-30 PROVED the columnar field-split beats zstd-19 by −22% aggregate (beats gzip everywhere) — but on a **host-derived** corpus. Track 1 = harden that win to a **class-wide** claim on representative public real-world telemetry, and complete the per-column codec cascade so the win covers the whole telemetry schema, not just numeric CSV. Full acquisition plan + mechanism: `documentation/ephemeral/research/telemetry-classwide-corpus-plan.md`. The two CONFIRMED-weak classes (logs + small <64 KB) are a measured micro-efficiency ceiling — NOT revisited. Ceilings = lit estimate, not Cubrim measurement.
+
+- **H-47 — world telemetry corpus for class-wide zstd-beat validation (track-1 corpus task, not a codec change).**
+  - *Goal.* Acquire ≥3 public telemetry sub-classes (wide numeric CSV / IoT sensor TS / financial tick / trip CSV / Prometheus metrics), DISJOINT from tuned + host class corpus, with provenance manifests (source URL + SHA), to prove the −22% columnar win is class-wide and not host-corpus overfit.
+  - *Why Cubrim should win (mechanism, corpus-independent).* Columnar transposition concentrates per-column self-similarity that the row-major byte stream scatters; BWT+geomix+rANS then code each column near its entropy, while zstd's window re-learns the field interleaving every record. Win condition = *per-column self-similarity > per-record byte self-similarity*, which holds for any regular-schema telemetry. Fair-comparison protocol: cubrim MODE_COLUMNAR vs zstd-19 on the SAME raw CSV/JSONL (do NOT hand zstd the transpose).
+  - *Lit-estimate ceiling.* dict+RLE 10–50× on low-card columns (BtrBlocks/Parquet); ALP float SOTA; confirmed −27..−31% vs zstd on host forex (H-29).
+  - *Architectural caveat (highest-risk design decision).* **MODE_COLUMNAR must transpose per-column GLOBALLY (Parquet-style column chunks), not per 64 KB row-block** — wide tables (Backblaze ~1–2 KB/row → ~30–60 rows/64 KB block) give too few per-column values for BWT runs under per-block transpose; the win would under-deliver as an implementation artefact, not a class limit.
+  - *Public sources.* Backblaze Drive Stats (HuggingFace/Kaggle/B2); Intel Berkeley Lab sensor (MIT CSAIL); CryptoDataDownload / Dukascopy tick; NYC TLC trip records (AWS Open Data); node_exporter Prometheus exposition. (URLs in the plan doc.)
+  - *Status:* PLANNED (corpus acquisition; A or a dedicated corpus task runs the spike — `--value-scheme bwt-rans`, NOT the bitpack CLI default).
+
+- **H-48 — low-cardinality categorical/enum column → dictionary + RLE cascade (HANDOFF to A; completes the telemetry cascade alongside ALP H-38).**
+  - *Why this is the strongest complementary structural class.* A's ALP (H-38) covers FLOAT columns; the telemetry schema also has **categorical/enum** columns (status, symbol, payment_type, drive model, log-level). Dictionary-encode each to a small int, then RLE → rANS. Cubrim's BWT+rANS already crushes long runs of small ints **by construction** — this is its structural strength, not a stretch. Together {timestamp=delta-of-delta, float=ALP, enum=dict+RLE, counter=FOR/PFOR} = the full BtrBlocks/Parquet two-stage cascade (column-aware encoding below the entropy coder).
+  - *Lit-estimate ceiling.* dictionary wins below ~50 k distinct/block; low-cardinality columns routinely 10–50× (BtrBlocks SIGMOD 2023, Parquet RLE_DICTIONARY, ClickHouse LowCardinality). Above ~50 k distinct the index width + dictionary size lose to a general codec → competitive-gate per column.
+  - *Mandatory gate (charged spike before Rust).* The dictionary (distinct-value table) is a MANDATORY transmitted decoder branch — charge it; the win is real only when `(dict table + RLE'd small-int index) < raw column through bwt-rans`. Spike on a real low-card column (Backblaze model/status, tick symbol) vs the bwt-rans baseline. Competitive `min(base, dict+rle)` per column → regression-proof.
+  - *Refs.* BtrBlocks SIGMOD 2023 https://www.cs.cit.tum.de/fileadmin/w00cfj/dis/papers/btrblocks.pdf ; ClickHouse compression https://clickhouse.com/resources/engineering/database-compression ; Parquet RLE_DICTIONARY.
+  - *Status:* PLANNED — **flagged PRIORITY handoff to A (CUBR-CONT)** to pair with the in-flight ALP H-38.
+
 ---
 
 ## H-31 — Monotonic-column first-order delta (stacks on H-30 columnar): GO
@@ -732,3 +751,14 @@ created: 2026-06-17
 - **SPIKES (faithful, all reverted byte-identical):** (1) optimal-parse+repcode LZ for small blocks → still mode-0 geomix, MODE_LZ ≥1238 LOSES to zstd 969; (2) columnar on small CSV → framing overhead, ≥3799 (probe 3702 still > zstd); (3) zstd --train dict cross-file → 970 vs 969 ZERO (dict dead at 18KB, helps only <1KB); (4) order-2 floor unreachable (static=table-cost, adaptive=unlearnable Gotcha #9).
 - **VERDICT NO-GO** — gap is repcode-LZ-parse + brotli order-2-literal + dictionary-cold-start, all micro-efficiency (research Lever 5 DEAD-structural). Mirrors H-36 logs + H-25l/26/27/28 general ceilings.
 - **CLASS-FINAL:** Cubrim WINS columnar/telemetry (−22.1% agg vs zstd, forex −40/−44%), beats gzip everywhere; logs + small-files are micro-efficiency ceilings, no remaining structural lever. OPERATOR DECISION: accept ceiling / brotli-class rewrite / domain mode.
+
+---
+
+## H-40 — Fixed-decimal column delta (ALP decimal-branch subset): GO, NEW-CLASS WIN
+
+- **STATUS:** GO, shipped inside MODE_COLUMNAR (column mode 2). External research #1 best-bet (Lever 1: decimal float → int delta).
+- **LEVER:** a columnar column of canonical fixed-decimals (consistent scale, e.g. forex `1.30970000`) → scaled-integer signed delta. Reversible (1 scale-byte/col, render==cell canonical check). H-31 covered integer cols; H-40 covers the decimal cols left as strings.
+- **SPIKE (faithful):** forex_tick columnar-str 44343 → +decimal-delta 34378 (−22.5%).
+- **MEASURED (class, --value-scheme bwt-rans, RT all):** forex_tick 36846→**26848** (zstd −39.9%→**−56.2%**), forex_usdchf 31207→**24881** (−43.8%→**−55.2%**), status_timeseries 20398→**11702** (−4.6%→**−45.3%**, float telemetry cols); class AGGREGATE 170654→**145634** vs zstd 219039 = −22.1%→**−33.5%** (beats), vs gzip −52.6%.
+- **ZERO-REGRESSION:** tuned 0.158273 byte-identical (RT 10/10), holdout 0.2390 byte-identical (RT 6/6); 238 tests green, clippy 0 new.
+- **VERDICT GO** — new-class hunt SUCCEEDED: Cubrim structurally crushes zstd on scientific/financial/sensor float columns. NEXT: **H-41 DoubleDelta** (research Lever 2) for fixed-interval timestamp/counter columns (variance-gated). Logs + tiny files remain at their ceilings.
