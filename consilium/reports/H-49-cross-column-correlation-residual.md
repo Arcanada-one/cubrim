@@ -82,3 +82,37 @@ not the raw column.** No Rust written; codec byte-identical. Next: H-50 (ALP-RD 
 bit-split) / H-51 (int-wavelet).
 
 **Code SHA:** spike on `bee0549` (codec untouched). Leaderboard untouched, NOT pushed.
+
+---
+
+## H-49-REBORN — measured on CORPUS 1 (non-temporal wide deterministic tables): STILL NO-GO
+
+The operator/RESEARCH supplied the RIGHT class (no temporal-delta competitor; redundancy
+spans many columns) — UCI Covertype (40 mutually-exclusive `Soil_Type` one-hots) and UCI
+Adult (`education ↔ education_num` exact 1:1 bijection). Faithful, charged, through the real
+cubrim bwt-rans rail (`probe_h49r` inline):
+
+| corpus | group lever | group saving | whole-file ×/baseline | gate |
+|---|---|---:|---:|---|
+| covtype (40 Soil one-hots → 1 cat) | 7426 → 5295 | **+28.7 %** (group) | **1.020×** | ❌ |
+| covtype (4 Wilderness → 1 cat) | 1588 → 834 | +47.5 % (group) | — | — |
+| adult (education_num derived from education, residual≡0) | 9993 → 5361 | net 4426 (map charged) | **1.052×** | ❌ |
+
+The cross-column MI is **real and non-subsumed by the byte model** — the one-hot collapse
+saves +28–47 % *on the group*, and the bijected column is eliminated entirely. **But the
+whole-file win is only 1.02×/1.05×** — the group saving is **2.0 %/5.0 % of the file**.
+
+## Verdict (H-49 + reborn): NO-GO, and the class is structurally closed for Cubrim
+
+The original objection generalises and is **confirmed on the right class**: cross-column
+mutual information is non-subsumed by the BYTE model but is **nearly subsumed by the
+per-column ENTROPY coder**. A strong rANS already compresses each correlated / sparse /
+redundant column near its own entropy, so explicit cross-column collapse recovers only the
+gap between independent-column coding and joint coding (~1.44 bits/row for one-hots; the
+whole redundant column for a bijection). That gap is a **tiny fraction of the compressed
+file (2–5 %)** — precisely because the redundant columns are low-entropy and already compress
+to near-nothing. The whole-file ≥1.5× gate needs the redundancy to dominate the *file*, but
+low-entropy redundant columns never do. This holds **regardless of class** (temporal
+telemetry OR non-temporal wide tables). Corra's −53..−85 % literature wins are measured
+against a **weak per-column baseline** (Parquet dictionary / bit-pack storage), not a strong
+entropy coder; against rANS the gap collapses to ~1.0–1.05× whole-file. No Rust written.
