@@ -845,3 +845,22 @@ created: 2026-06-17
 - **SPIKE (faithful, charged Gotcha #7; ALP-RD per-col best-R + 8-dict + exceptions; + byte-shuffle + transpose):** PRIMARY z-score zstd19=570610 — byte-shuffle 0.59×, transpose+shuffle 0.55×, ALP-RD charged 0.398× (exc 1.7%); CONTRAST best 0.60×. ALL sub-byte variants 1.7–2.5× LARGER than zstd on both arrays. cubrim(raw) already beats zstd −1.9% (no transform).
 - **WHY:** the doubles are LOW-PRECISION (source ~7 decimal digits ≈23-bit; z-score of low-precision inputs) → low mantissa NOT random → zstd/xz/cubrim entropy-code it (~21 bits/value); ALP-RD/shuffle bitpack right RAW (~50 bits/value) discarding that structure → net loss. "0% short-decimal" measured decimal-trick applicability, NOT mantissa randomness; the full-double slack is absent. ALP's lit ×4.3 is on full-entropy scientific doubles.
 - **VERDICT NO-GO** — refines Gotcha #11: "right=random→bitpack raw" is itself a subsumption trap on low-precision data. Next: **H-49-reborn on CORPUS 1** (covtype before adult).
+
+---
+
+## H-49-reborn — cross-column residual on CORPUS 1 (non-temporal wide tables): NO-GO (class closed)
+
+- **STATUS:** NO-GO (spike, no Rust). The RIGHT class for Corra (no temporal competitor; many redundant cols).
+- **MEASURED (faithful charged, real cubrim):** covtype 40 Soil one-hots 7426→5295 (+28.7% GROUP), 4 Wilderness 1588→834 (+47.5%); WHOLE-FILE 143124→140291 = **1.020×** (group=2.0% of file). adult education↔education_num exact bijection: pair 9993→5361 net 4426 (map charged), WHOLE-FILE 89152→84726 = **1.052×**. Both far below 1.5×.
+- **VERDICT NO-GO — cross-column class structurally closed:** cross-column MI is non-subsumed by the BYTE model (+28-47% on the group) but NEARLY-subsumed by the per-column ENTROPY coder — rANS already codes each redundant column near entropy, so collapse recovers only the independent-vs-joint gap = 2-5% of the file (redundant cols are low-entropy → tiny footprint). Holds REGARDLESS of class. Corra's lit −53..−85% is vs weak Parquet dict/bitpack, not rANS. Both round-4 levers (H-50 + H-49-reborn) NO-GO. Refined Gotcha #11.
+
+---
+
+## H-52 — VCF genotype-matrix PBWT transform: GO (spike, charged, non-subsumed)
+
+- **STATUS:** GO (spike-first, no Rust yet). Consilium round-3 RANK#1 new class (genomic VCF). First new-class GO since telemetry.
+- **CORPUS:** real 1000 Genomes Phase3 chr20 (2504 samples, 15MB BGZF prefix → raw VCF); baseline = zstd-19 on RAW VCF text (not .gz, per spike guidance).
+- **CHEAP GATE:** 4-bit GT pack 1.514× vs raw GT (≥1.2× → continue).
+- **LEVER (PBWT, Durbin 2014):** reorder haplotypes per variant by reversed-prefix; LD → long runs (avg 274). Permutation decoder-rebuilt (like BWT LF), NOT transmitted.
+- **MEASURED:** 3000var PBWT RLE zstd 38198 vs raw 132086 = **3.46×**; +charged multi-allelic exceptions (0.090% cells) = 50880 = **2.60× charged**. SUBSUMPTION CHECK (300var, cubrim, RT byte-exact): raw GT cubrim 15137 (1.07× vs zstd — byte-BWT misses it); PBWT cubrim 6498 = **2.33× smaller than cubrim's own BWT** → genuinely NON-SUBSUMED.
+- **VERDICT GO** — gate ≥1.5× cleared (2.60× charged); consilium −71% lit CONFIRMED by measurement (verified, not trusted). NEXT: Rust MODE_VCF/genotype-matrix value-scheme (PBWT+RLE+rANS, multi-allelic exceptions, competitive min, RT byte-exact, tuned/holdout byte-identical).
