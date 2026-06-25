@@ -25,7 +25,7 @@ use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_CHUNKED,
-    MODE_CUBE, MODE_LZ, MODE_RAW, VERSION,
+    MODE_COLUMNAR, MODE_CUBE, MODE_LZ, MODE_RAW, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -225,17 +225,25 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// size pick, so an input that does not benefit falls back byte-identically to the
 /// base encoding (zero regression). Single-block inputs skip the pre-pass entirely.
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
-    let base = encode_base(data, config);
-    // Whole-file LZ only helps when long-range repeats can cross a chunk boundary,
-    // i.e. when the input would otherwise be split into ≥2 blocks. Smaller inputs
-    // already get within-block LZ via the LzRans value-scheme, so skip the pre-pass.
+    let mut best = encode_base(data, config);
+    // Whole-file LZ (MODE_LZ) and columnar field-split (MODE_COLUMNAR) only help on
+    // inputs that span ≥2 chunk blocks. Gating both on the same >cube_size_limit
+    // threshold keeps every ≤64KB input byte-identical to v1 (the frozen leaderboard
+    // is untouched) while engaging the large-file specializations where they pay off.
+    // Each is a competitive size pick — kept only when strictly smaller — so neither
+    // can ever regress a file.
     if data.len() > config.cube_size_limit() {
         let lz = encode_lz_prepass(data, config);
-        if lz.len() < base.len() {
-            return lz;
+        if lz.len() < best.len() {
+            best = lz;
+        }
+        if let Some(col) = encode_columnar(data, config) {
+            if col.len() < best.len() {
+                best = col;
+            }
         }
     }
-    base
+    best
 }
 
 /// Base encoder (single-block cube/raw, or MODE_CHUNKED for large inputs). This is
@@ -582,6 +590,203 @@ fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     out
 }
 
+/// Candidate field delimiters tried for the columnar transform, in no particular order
+/// (the smallest resulting blob wins competitively).
+const COLUMNAR_DELIMS: [u8; 4] = [b',', b'\t', b';', b'|'];
+/// A columnar attempt needs enough rows for column-clustering to amortize the per-column
+/// model setup; below this the transform never pays (matches the H-29 probe: tiny tables
+/// do not flip). Inputs reaching `encode_columnar` are already >64KB.
+const COLUMNAR_MIN_ROWS: usize = 16;
+
+/// Field counts per row for a given delimiter, plus the modal count and its row-fraction.
+/// `rows` are the '\n'-split parts of the input. Returns (k_per_row, modal_cols, fraction).
+fn columnar_field_stats(rows: &[&[u8]], delim: u8) -> (Vec<usize>, usize, f64) {
+    let k: Vec<usize> = rows
+        .iter()
+        .map(|r| r.iter().filter(|&&b| b == delim).count() + 1)
+        .collect();
+    // Modal field count (most common k). Tables have a rigidly constant column count;
+    // this is what distinguishes real CSV/TSV from prose or JSON-lines (variable counts).
+    let mut freq: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for &kr in &k {
+        *freq.entry(kr).or_insert(0) += 1;
+    }
+    let (modal, modal_n) = freq
+        .iter()
+        .max_by_key(|&(_, &n)| n)
+        .map(|(&c, &n)| (c, n))
+        .unwrap_or((1, 0));
+    let frac = if k.is_empty() {
+        0.0
+    } else {
+        modal_n as f64 / k.len() as f64
+    };
+    (k, modal, frac)
+}
+
+/// Build a MODE_COLUMNAR container for one delimiter, or `None` if the input does not
+/// look like a delimited table for that delimiter (cheap gate before the nested encode).
+///
+/// Transform (fully reversible): split into rows by '\n', each row into fields by
+/// `delim`, then emit column-major (all field-0s, then all field-1s, …) so a column's
+/// values cluster. Field boundaries are kept as '\n' separators (fields contain no
+/// '\n'); a per-row field-count side stream restores the ragged row layout exactly.
+fn build_columnar_blob(data: &[u8], delim: u8, config: &EncodeConfig) -> Option<Vec<u8>> {
+    let rows: Vec<&[u8]> = data.split(|&b| b == b'\n').collect();
+    if rows.len() < COLUMNAR_MIN_ROWS {
+        return None;
+    }
+    let (k, modal, frac) = columnar_field_stats(&rows, delim);
+    // Require a genuine table: ≥2 columns and a dominant constant column count.
+    if modal < 2 || frac < 0.9 {
+        return None;
+    }
+    let m = rows.len();
+    let ncols = *k.iter().max().unwrap_or(&1);
+
+    // Column-major flat field list: for each column c, every row that has a field c
+    // (in row order). fields[r] is recomputed per row to avoid holding all slices.
+    let mut col_fields: Vec<&[u8]> = Vec::with_capacity(k.iter().sum());
+    for c in 0..ncols {
+        for (r, &row) in rows.iter().enumerate() {
+            if k[r] > c {
+                // c-th field of this row (split is cheap; rows are short).
+                let field = row.split(|&b| b == delim).nth(c).unwrap_or(b"");
+                col_fields.push(field);
+            }
+        }
+    }
+    let colstream = col_fields.join(&b'\n');
+
+    // Per-row field-count side stream (LEB128). Constant for true tables → compresses
+    // to a few bytes through the nested encoder.
+    let mut kbytes = Vec::with_capacity(m);
+    for &kr in &k {
+        lz_varint_write(&mut kbytes, kr);
+    }
+
+    // Nested-encode both streams via the non-LZ base path (chunked if >64KB). encode_base
+    // never re-attempts MODE_LZ/MODE_COLUMNAR, so there is no recursion.
+    let kblob = encode_base(&kbytes, config);
+    let colblob = encode_base(&colstream, config);
+
+    let mut out = Vec::with_capacity(22 + kblob.len() + colblob.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_COLUMNAR);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.push(delim);
+    out.extend_from_slice(&(m as u32).to_be_bytes());
+    out.extend_from_slice(&(ncols as u32).to_be_bytes());
+    out.extend_from_slice(&(kblob.len() as u32).to_be_bytes());
+    out.extend_from_slice(&kblob);
+    out.extend_from_slice(&(colblob.len() as u32).to_be_bytes());
+    out.extend_from_slice(&colblob);
+    Some(out)
+}
+
+/// Try the columnar field-split transform over all candidate delimiters and return the
+/// smallest container, or `None` if the input is not a delimited table. The caller gates
+/// this on `data.len() > cube_size_limit` and competitively keeps it only when smaller.
+fn encode_columnar(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    let mut best: Option<Vec<u8>> = None;
+    for &delim in &COLUMNAR_DELIMS {
+        if let Some(blob) = build_columnar_blob(data, delim, config) {
+            if best.as_ref().is_none_or(|b| blob.len() < b.len()) {
+                best = Some(blob);
+            }
+        }
+    }
+    best
+}
+
+/// Bounds-checked big-endian u32 read at `pos`. Fail-closed on truncation.
+fn read_u32(blob: &[u8], pos: usize) -> Result<u32, CubrimError> {
+    if pos + 4 > blob.len() {
+        return Err(CubrimError::Decode("u32 read out of bounds".into()));
+    }
+    Ok(u32::from_be_bytes([
+        blob[pos],
+        blob[pos + 1],
+        blob[pos + 2],
+        blob[pos + 3],
+    ]))
+}
+
+/// Decode a MODE_COLUMNAR container (`build_columnar_blob`). Fail-closed.
+fn decode_columnar(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    // Header: MAGIC(4)+VERSION(1)+MODE_COLUMNAR(1)+orig_len(4)+delim(1)+n_rows(4)
+    //         +n_cols(4)+kblob_len(4) = 23, then kblob, then colblob_len(4)+colblob.
+    const COL_HEADER_FIXED: usize = 23;
+    if blob.len() < COL_HEADER_FIXED + 4 {
+        return Err(CubrimError::Decode("MODE_COLUMNAR container too short".into()));
+    }
+    let orig_len = read_u32(blob, 6)? as usize;
+    let delim = blob[10];
+    let m = read_u32(blob, 11)? as usize;
+    let ncols = read_u32(blob, 15)? as usize;
+    let kblob_len = read_u32(blob, 19)? as usize;
+    let mut pos = COL_HEADER_FIXED;
+    if pos + kblob_len + 4 > blob.len() {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: kblob truncated".into()));
+    }
+    let kbytes = decode(&blob[pos..pos + kblob_len])?;
+    pos += kblob_len;
+    let colblob_len = read_u32(blob, pos)? as usize;
+    pos += 4;
+    if pos + colblob_len > blob.len() {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: colblob truncated".into()));
+    }
+    let colstream = decode(&blob[pos..pos + colblob_len])?;
+
+    // Parse the per-row field counts (LEB128) and validate against the header.
+    let mut k = Vec::with_capacity(m);
+    let mut kp = 0usize;
+    for _ in 0..m {
+        k.push(lz_varint_read(&kbytes, &mut kp)?);
+    }
+    if kp != kbytes.len() {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: trailing field-count bytes".into()));
+    }
+    let total_fields: usize = k.iter().sum();
+    // n_cols must equal the max field count the encoder wrote (defends the c-loop bound).
+    if k.iter().max().copied().unwrap_or(0) != ncols {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: n_cols mismatch".into()));
+    }
+
+    // Split the column-major stream into its flat field list (fields contain no '\n').
+    let flat: Vec<&[u8]> = colstream.split(|&b| b == b'\n').collect();
+    if flat.len() != total_fields {
+        return Err(CubrimError::Decode(format!(
+            "MODE_COLUMNAR: field count mismatch (got {}, expected {total_fields})",
+            flat.len()
+        )));
+    }
+
+    // Re-interleave column-major → per-row fields, in the exact emission order.
+    let mut row_fields: Vec<Vec<&[u8]>> = (0..m).map(|r| Vec::with_capacity(k[r])).collect();
+    let mut idx = 0usize;
+    for c in 0..ncols {
+        for r in 0..m {
+            if k[r] > c {
+                row_fields[r].push(flat[idx]);
+                idx += 1;
+            }
+        }
+    }
+
+    // Rebuild rows (join fields by delim) then the file (join rows by '\n').
+    let rows: Vec<Vec<u8>> = row_fields.iter().map(|f| f.join(&delim)).collect();
+    let out = rows.join(&b'\n');
+    if out.len() != orig_len {
+        return Err(CubrimError::Decode(format!(
+            "MODE_COLUMNAR: reconstructed {} bytes, expected {orig_len}",
+            out.len()
+        )));
+    }
+    Ok(out)
+}
+
 /// Encode `data` as a whole-file LZ container (MODE_LZ, H-25d). The entire input is
 /// LZ77-tokenized over a full-file window FIRST; the literal residue is encoded
 /// through the normal pipeline (`encode_base`, itself possibly MODE_CHUNKED) and the
@@ -845,6 +1050,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_LZ {
             return decode_lz_prepass(blob);
+        }
+        if blob[5] == MODE_COLUMNAR {
+            return decode_columnar(blob);
         }
     }
 
@@ -6345,6 +6553,152 @@ mod tests {
             lz.len(),
             chunked.len()
         );
+    }
+
+    // ---- H-29 MODE_COLUMNAR (class-C columnar field-split) ----
+
+    /// Deterministic synthetic telemetry CSV ≥64KB: header + rows
+    /// "id,epoch_ts,symbol,price,flag" with REALISTIC columnar structure — monotone id,
+    /// monotone timestamp, low-cardinality symbol/flag, slowly-drifting price. This is
+    /// the shape (slowly-varying columns) where column-major reordering clusters values
+    /// and beats row-order, matching the real forex/status corpus.
+    fn synth_csv(n_rows: usize) -> Vec<u8> {
+        let mut state: u64 = 0x1234_5678_9ABC_DEF0;
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+        let syms = ["EURUSD", "GBPUSD", "USDJPY", "AUDCAD"];
+        let flags = ["OK", "OK", "OK", "WARN"]; // mostly OK
+        let mut ts: u64 = 1_357_113_600;
+        let mut price: i64 = 130_970; // 4-decimal fixed point, drifts slowly
+        let mut sym = 0usize;
+        let mut out = Vec::new();
+        out.extend_from_slice(b"id,ts,symbol,price,flag\n");
+        for i in 0..n_rows {
+            ts += 60 + nxt(3) as u64; // near-constant 60s step
+            price += nxt(7) as i64 - 3; // small ±drift
+            if nxt(50) == 0 {
+                sym = nxt(syms.len()); // symbol changes rarely
+            }
+            let s = format!(
+                "{i},{ts},{},{}.{:04},{}\n",
+                syms[sym],
+                price / 10000,
+                (price % 10000).unsigned_abs(),
+                flags[nxt(flags.len())],
+            );
+            out.extend_from_slice(s.as_bytes());
+        }
+        out
+    }
+
+    /// Config engaging the competitive value-scheme rail (matches bench `--value-scheme
+    /// bwt-rans`), the path under which columnar clustering actually pays.
+    fn csv_rail_cfg() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::BwtRans,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    #[test]
+    fn test_mode_columnar_round_trips_and_shrinks_on_csv() {
+        let data = synth_csv(4000); // ≫64KB
+        assert!(data.len() > 65536, "fixture must exceed the single-block ceiling");
+        let cfg = csv_rail_cfg();
+        let blob = encode_with_config(&data, &cfg);
+        assert_eq!(decode(&blob).unwrap(), data, "MODE_COLUMNAR round-trip must be exact");
+        assert_eq!(blob[5], MODE_COLUMNAR, "structured CSV must select the columnar container");
+        // It must beat the plain base (non-columnar) encoding — that is why it was chosen.
+        let base = encode_base(&data, &cfg);
+        assert!(
+            blob.len() < base.len(),
+            "columnar {} not smaller than base {}",
+            blob.len(),
+            base.len()
+        );
+    }
+
+    #[test]
+    fn test_columnar_round_trip_ragged_and_edge_cases() {
+        // Ragged rows, empty fields, embedded delimiter-of-another-kind, no trailing
+        // newline, a blank line, and a final '\n' variant — all must round-trip exactly.
+        let mut bodies: Vec<Vec<u8>> = Vec::new();
+        let base = "a,b,c\n1,2,3\n4,,6\n7,8\n,,\n9,10,11,12\n".repeat(3000);
+        bodies.push(base.clone().into_bytes()); // ends with '\n'
+        let mut no_nl = base.clone().into_bytes();
+        no_nl.pop(); // strip trailing '\n'
+        bodies.push(no_nl);
+        // TSV variant
+        bodies.push("x\ty\tz\n1\t2\t3\n4\t5\t6\n".repeat(3000).into_bytes());
+        for data in bodies {
+            if data.len() <= 65536 {
+                continue;
+            }
+            let blob = encode_with_config(&data, &EncodeConfig::v1_default());
+            assert_eq!(decode(&blob).unwrap(), data, "ragged columnar round-trip");
+        }
+    }
+
+    #[test]
+    fn test_columnar_not_selected_on_non_tabular() {
+        // A >64KB non-tabular input (prose, no consistent delimiter table) must fall back
+        // byte-identically to the base/LZ encoding — columnar never engages.
+        let data = "the quick brown fox jumps over the lazy dog and then keeps going. "
+            .repeat(2000)
+            .into_bytes();
+        assert!(data.len() > 65536);
+        let blob = encode_with_config(&data, &EncodeConfig::v1_default());
+        assert_ne!(blob[5], MODE_COLUMNAR, "prose must not select columnar");
+        assert_eq!(decode(&blob).unwrap(), data);
+    }
+
+    #[test]
+    fn test_columnar_property_random_tables() {
+        // Random delimited tables (random delimiter, row/column counts, ragged) → exact.
+        let mut state: u64 = 0xDEAD_BEEF_0BAD_F00D;
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+        let delims = [b',', b'\t', b';', b'|'];
+        for _ in 0..20 {
+            let delim = delims[nxt(delims.len())];
+            let ncol = 2 + nxt(6);
+            let mut data = Vec::new();
+            // enough rows to exceed 64KB
+            while data.len() <= 70000 {
+                let fields = 1 + nxt(ncol); // ragged
+                for f in 0..fields {
+                    if f > 0 {
+                        data.push(delim);
+                    }
+                    for _ in 0..nxt(8) {
+                        // field bytes: avoid '\n' and the delimiter
+                        let mut c = 33 + nxt(90);
+                        if c as u8 == b'\n' || c as u8 == delim {
+                            c = b'A' as usize;
+                        }
+                        data.push(c as u8);
+                    }
+                }
+                data.push(b'\n');
+            }
+            let blob = encode_with_config(&data, &EncodeConfig::v1_default());
+            assert_eq!(decode(&blob).unwrap(), data, "random table round-trip (delim {delim})");
+        }
+    }
+
+    #[test]
+    fn test_columnar_truncated_no_panic() {
+        let data = synth_csv(4000);
+        let blob = encode_with_config(&data, &csv_rail_cfg());
+        assert_eq!(blob[5], MODE_COLUMNAR);
+        // Every truncation must error cleanly, never panic.
+        for cut in (6..blob.len()).step_by(257) {
+            let _ = decode(&blob[..cut]); // Result; must not panic
+        }
     }
 
     #[test]

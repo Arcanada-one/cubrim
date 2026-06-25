@@ -55,6 +55,18 @@ pub const MODE_CHUNKED: u8 = 2;
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_LZ 1B][orig_len 4B][n_tokens 4B][n_matches 4B]
 ///       [lit_blob_len 4B][lit_blob …][token streams …].
 pub const MODE_LZ: u8 = 3;
+/// Columnar field-split container (H-29, class-C specialization). For record-structured
+/// text (CSV / TSV / delimited telemetry), the input is split into rows (by '\n') and
+/// fields (by a detected delimiter), then re-serialized column-major so each column's
+/// values cluster — dramatically improving BWT-run quality and entropy coding on
+/// telemetry/columnar data. Fully reversible (field boundaries kept as separators, a
+/// per-row field-count side stream restores the row layout). Emitted only when strictly
+/// smaller than every other candidate (competitive size pick) AND only attempted on
+/// inputs larger than the single-block ceiling, so all ≤64KB inputs are byte-identical
+/// to v1 (zero regression on the frozen leaderboard).
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_COLUMNAR 1B][orig_len 4B][delim 1B][n_rows 4B]
+///       [n_cols 4B][kblob_len 4B][kblob …][colblob_len 4B][colblob …].
+pub const MODE_COLUMNAR: u8 = 4;
 
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;

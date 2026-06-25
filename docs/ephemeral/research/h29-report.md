@@ -78,3 +78,39 @@ evolution pipeline. The class is NOT a ceiling: columnar alone already turns agg
 parity into clear per-file zstd wins on the columnar half.
 
 Artefacts: `code/bench/gen_class_corpus.sh`, `probe_h29_columnar.py`, `h29-report.md`.
+
+---
+
+## H-29 IMPLEMENTATION — MODE_COLUMNAR shipped (codec change)
+
+Implemented `MODE_COLUMNAR` (container mode byte 4): byte-exact reversible field-split.
+Encode (`build_columnar_blob`/`encode_columnar`): split rows by `\n`, fields by a
+detected delimiter (tries `, \t ; |`, keeps smallest), emit column-major; per-row
+field-count side stream (LEB128) + the column-major byte stream are each nested-encoded
+via `encode_base`. Decode (`decode_columnar`): reverse exactly, fail-closed. Wired into
+`encode_with_config` as a competitive candidate `min(base, lz, columnar)` **gated on
+`data.len() > cube_size_limit` (64KB)** + a tabular detector (≥16 rows, ≥2 cols, ≥90%
+rows share the modal field count → excludes prose / JSON-lines). This gate makes every
+≤64KB input byte-identical to v1 (frozen leaderboard untouched).
+
+**Tests:** +5 (`test_mode_columnar_round_trips_and_shrinks_on_csv`, ragged/edge-cases,
+not-selected-on-non-tabular, property random tables, truncated-no-panic). Full suite
+**234 green** (220 lib + 14 integration, 0 failed); clippy 0 new warnings.
+
+**Zero-regression VERIFIED:** tuned 10-file **0.158273 byte-identical** (18523/117032,
+per-file = champion, RT 10/10); holdout **0.2390 byte-identical** (48255, RT 6/6 — config.json 66KB attempted columnar but tabular-gate rejected the JSON; data.csv 17KB <64KB untouched).
+
+**Class corpus result (cubrim `--value-scheme bwt-rans`, RT PASS all):**
+
+| file | before | **after** | vs zstd | mode |
+|---|---:|---:|---:|---|
+| forex_tick.csv | 58741 | **44397** | −4.2% → **−27.6% WIN** | columnar |
+| forex_usdchf.csv | 55274 | **38514** | −0.5% → **−30.7% WIN** | columnar |
+| status_timeseries.csv | 22889 | **20769** | +7.1% → **−2.9% WIN (flipped)** | columnar |
+| **AGGREGATE** | 219107 | **185883** | **+0.03% → −15.1% (beats zstd)** | −39.5% vs gzip |
+
+MODE_COLUMNAR flips the columnar sub-class to crush zstd by 27–31% and moves the WHOLE
+class aggregate from a zstd tie to a decisive −15.1% zstd win. zstd-wins 3/9 → 4/9. The
+remaining losses are the LOG files (journal +5.8%, toolchain +9.4%, dpkg +8.0%) and two
+tiny <64KB files — the next levers are **H-31 (timestamp/monotonic-column delta, stacks
+on columnar)** then **H-36 (CLP-style log-template split)**. The class is NOT a ceiling.
