@@ -713,3 +713,12 @@ created: 2026-06-17
 - **MEASURED (class, --value-scheme bwt-rans, RT all):** forex_tick 44397→**36846** (zstd −27.6%→**−39.9%**), forex_usdchf 38514→**31207** (−30.7%→**−43.8%**), status 20769→**20398** (−2.9%→**−4.6%**); class AGGREGATE 185883→**170654** vs zstd 219039 = −15.1%→**−22.1%** (beats), vs gzip −44.5%. zstd-wins 4/9.
 - **ZERO-REGRESSION:** tuned 0.158273 byte-identical (RT 10/10), holdout 0.2390 byte-identical (RT 6/6); 236 tests green, clippy 0 new.
 - **VERDICT GO** — deepens telemetry sub-class to −22% under zstd. HONEST: does NOT flip the LOG files (not column-uniform; columnar never engages). NEXT: **H-36 CLP-style log-template split** for journal/toolchain/dpkg. Class not a ceiling.
+
+---
+
+## H-36 — CLP-style log-template / variable split: NO-GO (spike gate not met)
+
+- **STATUS:** NO-GO. Mandatory Python-spike gate (≥1.5× over zstd-19 on real syslog BEFORE Rust) NOT cleared — no parser written.
+- **SPIKE (probe_h36_log_template.py, faithful real-codec, charged Gotcha #6):** template-dict + template-id stream + columnar variable blob (H-31 delta on monotone cols) + timestamp-delta stream, each compressed by real cubrim bwt-rans. Corpus: H-29 class real logs.
+- **MEASURED vs zstd-19 (best of CLP / CLP+ts):** journal.log (real syslog) 14507 vs 18688 = **1.29×**; toolchain 26274 vs 27548 = 1.05×; dpkg 7094 vs 6764 = 0.95× (loses); app_orchestrate 15749 vs 23218 = 1.47×. NONE reach 1.5×.
+- **VERDICT NO-GO** under the gate. Honest nuance: CLP beats zstd on 3/4 logs (1.05–1.47×) — a MODE_LOG would flip journal/toolchain/app to wins — but misses the 1.5× Rust-justification bar and dpkg loses. journal residual = template-dict 5367B + high-entropy variables 7040B (pids/addresses, data-determined). OPERATOR DECISION: hold 1.5× gate (ceiling) vs relax to "beat zstd" (parser justified for 1.0–1.47×).
