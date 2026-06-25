@@ -772,3 +772,11 @@ created: 2026-06-17
 - **WHY:** fixed-interval single-delta = constant stream; rANS/BWT already code it to ~0; delta-of-delta adds noise → worse. DoubleDelta subsumed by a strong entropy coder (BWT⊃MTF analogue); Gorilla/ClickHouse win it only in bit-packing without an entropy stage.
 - **BONUS:** current codec (H-31+H-40) ALREADY crushes the class — prometheus 32821 vs zstd 58354 (−43.8%), sensor 11821 vs zstd 47801 (−75.3%), RT byte-exact. Fixed-interval won WITHOUT DoubleDelta.
 - **VERDICT NO-GO** — honest subsumption. NEXT: **H-48 enum dictionary→RLE→rANS** (research handoff, structural-strength flag).
+
+---
+
+## H-48 — Enum dictionary→RLE→rANS: MARGINAL (subsumed by BWT+geomix)
+
+- **STATUS:** MARGINAL (spike, no Rust). Research handoff (structural-strength flag).
+- **SPIKE (faithful; generated enum-heavy run-structured events.csv 455KB):** current-columnar 20285 vs dict+RLE 19812 (−2.3% only). Baseline current cubrim already −52.1% vs zstd (columnar). 4 enum cols dict+RLE'd.
+- **VERDICT MARGINAL** — BWT+geomix already clusters+codes low-cardinality columns near entropy; explicit dict+RLE mostly subsumed (same as H-41 DoubleDelta: dict+RLE/MTF win for Parquet/bzip2 only because they bit-pack; Cubrim entropy-codes). ~0 on real numeric-heavy telemetry. Not implemented. Added **Gotcha #11** (strong entropy backend subsumes delta-order/RLE/MTF pre-transforms — spike through the real backend). Reconsider only for a dedicated categorical/event-log class.

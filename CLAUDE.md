@@ -53,11 +53,11 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 
 ## Tech Stack
 
-> **Research-first.** Phase 0 is algorithm design on the consilium — no production code until the rulebook stabilizes. Prototyping in Python (fast iteration on hypotheses, NumPy for cube math) is acceptable in `docs/ephemeral/research/`.
+> **Research-first.** Phase 0 is algorithm design on the consilium — no production code until the rulebook stabilizes. Prototyping in Python (fast iteration on hypotheses, NumPy for cube math) is acceptable in `documentation/ephemeral/research/`.
 
 - **Default implementation language:** Rust — bit-level packing, deterministic memory layout, and compression throughput favour it (consistent with Disk Arcana / PaxBeach in the ecosystem). Final choice is a consilium deliverable.
-- **Prototyping:** Python 3 + NumPy (cube construction, gap-distance experiments, entropy measurement) — `docs/ephemeral/research/` only.
-- **Benchmark corpus:** curated test datasets (synthetic + real) under `docs/ephemeral/research/`; compression-ratio + round-trip-fidelity are the headline metrics.
+- **Prototyping:** Python 3 + NumPy (cube construction, gap-distance experiments, entropy measurement) — `documentation/ephemeral/research/` only.
+- **Benchmark corpus:** curated test datasets (synthetic + real) under `documentation/ephemeral/research/`; compression-ratio + round-trip-fidelity are the headline metrics.
 
 ## Build Commands
 
@@ -71,11 +71,11 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 
 ## 📖 Algorithm Disclosure (operator decision 2026-06-18 — supersedes the 2026-06-17 secrecy constraint)
 
-**The archiver algorithm is now PUBLICLY DISCLOSABLE.** The operator decided on 2026-06-18 to explain the mechanism openly — including an educational, step-by-step visualisation of the pipeline on `cubrim.com` (the `/algorithm` page). The earlier "STRICTLY SECRET" constraint (operator decision 2026-06-17) is **retired**. Public surfaces (`cubrim.com`, `docs/`, OG tags, the arcanada.ai listing, marketing) MAY describe and illustrate the real mechanism: the N-dimensional cube, the φ (mixed-radix) coordinate mapping, the per-axis distance map, RLE of that map, and the value-stream coding (bitpack / RLE-codes / Huffman entropy).
+**The archiver algorithm is now PUBLICLY DISCLOSABLE.** The operator decided on 2026-06-18 to explain the mechanism openly — including an educational, step-by-step visualisation of the pipeline on `cubrim.com` (the `/algorithm` page). The earlier "STRICTLY SECRET" constraint (operator decision 2026-06-17) is **retired**. Public surfaces (`cubrim.com`, `documentation/`, OG tags, the arcanada.ai listing, marketing) MAY describe and illustrate the real mechanism: the N-dimensional cube, the φ (mixed-radix) coordinate mapping, the per-axis distance map, RLE of that map, and the value-stream coding (bitpack / RLE-codes / Huffman entropy).
 
 **Accuracy supersedes secrecy.** The only remaining hard rule for the disclosed mechanism is *truthfulness*: any public description MUST match the actual code (`code/cubrim-rs/src/`), not an invented or aspirational version. Read the real pipeline (`codec.rs` encode comment block, `phi.rs`, `cube.rs`, `distance_map.rs`, `rle.rs`, `bitpack.rs`, `huffman.rs`) before writing public content about how it works. Real measured numbers only — never estimated ratios in prose.
 
-**The secrecy grep gate is retired** — `docs/` and public pages no longer need to be mechanism-free. (Disclosure is reversible only in policy, not in fact: once published, treat the mechanism as public knowledge.)
+**The secrecy grep gate is retired** — `documentation/` and public pages no longer need to be mechanism-free. (Disclosure is reversible only in policy, not in fact: once published, treat the mechanism as public knowledge.)
 
 ## Conventions
 
@@ -99,6 +99,7 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 8. **Gotcha #7 generalises to the cross-file-offset domain: a pre-LZ transform that REDUCES the count of distinct offsets cannot beat what LZ already pays for that structure — charge the relocated information end-to-end.** The LZ offset stream looks like a "data-determined floor" (~15 bits × ~64K distinct cross-file offsets on a mixed tarball), tempting a transform — cross-file dedup, long-range reorder, dictionary-index — to shrink the offset *count* before the matcher. Two charged sub-results (H-26) close the class: (a) a generic reorder / grid-dictionary that codes a match as a source-bucket index LOSES once the **within-bucket precision** (`log2 W` per match — the decoder still needs the exact source byte) is charged (srctree x1.5, multiversion x1.6–2.0); the bucket-index stream cheapens exactly as the within-bucket stream inflates. (b) CDC **exact-dedup** — the one form that escapes within-offset (whole-chunk copies, position-invariant chunk-ids, boundaries re-derivable) — passed the offset-only charged model but LOST end-to-end: removing **67 % of multiversion's bytes** (the exact-dup mass) changed the real cubrim output by only **201 B** (64175→63974), because that mass was already coded near-free by LZ matches + the repeat-offset cache. The phantom came from pricing the dup mass at the *average* 13 bits/match when its real cost was ≈0.6 bits/match. Root cause = information conservation again: a transform that removes distinct offsets must re-transmit that information (within-bucket stream, or residual + chunk-ref stream), and LZ was already at the floor. Lesson: never accept an offset-reducing transform on an offset-only size model; charge it END-TO-END (residual through the real codec + every ref/flag/boundary stream). The mixed/near-duplicate gap to zstd is parse/FSE micro-efficiency, NOT a missing structural transform.
 9. **The order-1 conditional-entropy probe (Gotcha #3) is an ASYMPTOTIC floor — it omits the online LEARNING cost, so for any context-model candidate charge a REAL adaptive predictor, and beware high-cardinality contexts on short streams.** H(X_t|ctx) is what a coder reaches *with full knowledge of the conditional distribution*; a real online range coder must LEARN that distribution as it goes, paying near-uniform bits until each context cell is populated. When the context alphabet × symbol alphabet (cell count) is large relative to the stream length, the learning cost exceeds the conditional-entropy saving and the context model LOSES to order-0. Measured (H-27, contexting the LZ offset byte-split on the previous byte): ideal H1 said −9 % (srctree) / −21 % (multiversion), but a real adaptive KT order-1 coder over the 256-symbol byte alphabet (256×256 cells, only 18 K–70 K symbols) came in −4.5 % / −6.3 % WORSE than order-0; the static-table variant was deader still (+50–126 KB of per-context freq tables, ~256 contexts × ~256 nonzero syms for near-uniform offset bytes). The only contexts cheap enough to learn (offset-code bucket | prev-bucket / | match-len class) carried ≤3 % even in the ideal. Lesson: gate context models on (a) a real online-predictor simulation, not H(X|ctx), and (b) a cell-count ÷ stream-length sanity check — ~1 obs/cell cannot learn. zstd avoids this by contexting a SMALL adaptive FSE offset-code table + repcodes, not a 256-way byte order-1; Cubrim already has both (byte-split ≈ FSE per H-25k, rep cache).
 10. **The LZ literal RESIDUE is the high-entropy leftover after an optimal parse — its order-2+ ideal entropy is an OVERFIT MIRAGE, and it is already at its order-0 floor (= zstd's own literal model). Do not context-model it.** After a cost-optimal LZ parse takes the structured/repetitive bytes as matches, the bytes left as literals are precisely the ones LZ could not match — high-entropy residue with no learnable high-order structure. Its ideal H2/H3 collapses (Gotcha #9 sparse-context overfit: each high-order context appears ~once so it "predicts" its single occurrence), but a real adaptive coder cannot realise it. Measured (H-28, MODE_LZ literal streams on srctree.tar 42 K lits / multiversion.bin 16 K lits): ideal H3 said −90 % vs H0, but real adaptive o2/o3 were +15–28 % WORSE than o0 (0.005–0.029 obs/cell — each context seen ~once); best charged real model (table-free adaptive o0/o1) saved only 1–2 % of the literal block = 0.1–0.4 % of file = ≤6 % of the zstd gap, nearly all of it just the avoided order-0 table. The literal block is only 14–18 % of MODE_LZ output anyway (the match/token block is 82–86 % and at the offset-entropy floor — Gotcha #8/#9), AND the live `lit_kind` rail already tried context-mixing (nested BWT+geomix) and order-1 and they LOST to order-0. zstd codes literals order-0 too (Huffman literals; FSE only for sequences). Lesson: never attack the LZ literal residue with PPM/context-mixing — both its order-0 floor and the dominant match block are data-determined; the residual gap to zstd is FSE/parse micro-efficiency, not a missing literal model.
+11. **A strong rANS/BWT entropy backend SUBSUMES simple pre-transforms (delta-of-delta, dictionary→RLE, MTF) that win only in a bit-packing context with no entropy coder — spike the transform THROUGH the real backend, never against a bit-packed strawman.** Gorilla DoubleDelta, Parquet dict+RLE, and bzip2 MTF are real wins *because their backends bit-pack* (storing a repeated constant costs bits/value). Cubrim already entropy-codes with rANS/geomix after BWT, which crushes a constant/low-cardinality stream to ~0 — so the extra transform adds nothing and often *hurts* (it perturbs the column-major stream and raises entropy). Measured: (H-41) on a fixed-interval timestamp column (delta stddev/mean = 0.00, DoubleDelta's best case) delta-of-delta was +6.8 %/+12.9 % WORSE than single-delta through the cubrim rail; the single-delta path already wins the fixed-interval metric class −44 %/−75 % vs zstd. (H-48) dict→RLE on a maximally enum-heavy run-structured CSV gained only −2.3 % over the existing BWT+geomix columnar path (already −52 % vs zstd), i.e. mostly subsumed, ~0 on real numeric-heavy telemetry. Lesson: for a delta-order / RLE / MTF idea, the win must clear the bar *after* the entropy backend, on a faithful spike; the structural levers that DO transfer are the ones that change the INFORMATION (columnar reorder so a column's values cluster — H-30; integer/decimal delta that shrinks the value magnitude — H-31/H-40), not the ones that merely re-encode what the entropy coder already handles. The recurring tell: «this transform wins for Gorilla/Parquet/bzip2» is necessary but NOT sufficient — those tools lack Cubrim's entropy stage.
 
 ## Datarim Workflow
 
@@ -115,19 +116,19 @@ This project uses [Datarim](https://datarim.club) for structured task execution.
 
 ## Documentation Map
 
-Docs follow the Diátaxis taxonomy — `docs/{tutorials,how-to,reference,explanation}/` (mandate: `skills/diataxis-docs/SKILL.md`).
+Docs follow the Diátaxis taxonomy — `documentation/{tutorials,how-to,reference,explanation}/` (mandate: `skills/diataxis-documentation/SKILL.md`).
 
 | Document | Purpose |
 |----------|---------|
 | `consilium/founding-brief.md` | Verbatim operator brief that founded the project |
 | `consilium/` | Algorithm rulebook drafts, hypothesis log, council verdicts |
-| `docs/explanation/` | Why the cube model — background, mathematical context, design rationale |
-| `docs/reference/` | Algorithm reference: cube schema, distance-map encoding, bit-format spec |
-| `docs/how-to/` | Task recipes: run a benchmark, add a test corpus, reproduce a ratio |
-| `docs/tutorials/` | Newcomer walkthrough once the archiver exists |
-| `docs/ephemeral/plans/` | Implementation plans (transient) |
-| `docs/ephemeral/research/` | Prototypes, math surveys, benchmark experiments (transient) |
-| `docs/ephemeral/reviews/` | QA reports and reviews (transient) |
+| `documentation/explanation/` | Why the cube model — background, mathematical context, design rationale |
+| `documentation/reference/` | Algorithm reference: cube schema, distance-map encoding, bit-format spec |
+| `documentation/how-to/` | Task recipes: run a benchmark, add a test corpus, reproduce a ratio |
+| `documentation/tutorials/` | Newcomer walkthrough once the archiver exists |
+| `documentation/ephemeral/plans/` | Implementation plans (transient) |
+| `documentation/ephemeral/research/` | Prototypes, math surveys, benchmark experiments (transient) |
+| `documentation/ephemeral/reviews/` | QA reports and reviews (transient) |
 
 ## Key Files
 
