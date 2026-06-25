@@ -631,8 +631,21 @@ fn columnar_field_stats(rows: &[&[u8]], delim: u8) -> (Vec<usize>, usize, f64) {
 /// `delim`, then emit column-major (all field-0s, then all field-1s, …) so a column's
 /// values cluster. Field boundaries are kept as '\n' separators (fields contain no
 /// '\n'); a per-row field-count side stream restores the ragged row layout exactly.
+///
+/// H-31: a column whose data cells (all but the optional row-0 header) are canonical
+/// non-decreasing integers (epoch timestamps / ids / counters) is delta-coded — first
+/// cell verbatim, second cell as the anchor, the rest as signed first-order deltas. This
+/// is exact (canonical render `v.to_string() == cell` is required, so re-rendering is
+/// byte-identical) and zero learning cost; per-column mode flags restore it on decode.
 fn build_columnar_blob(data: &[u8], delim: u8, config: &EncodeConfig) -> Option<Vec<u8>> {
-    let rows: Vec<&[u8]> = data.split(|&b| b == b'\n').collect();
+    // A trailing '\n' produces an empty final split element whose empty field would
+    // poison column-0 delta detection (a non-integer cell). Strip it and record the
+    // flag so the row layout is restored exactly on decode.
+    let ends_nl = data.last() == Some(&b'\n');
+    let mut rows: Vec<&[u8]> = data.split(|&b| b == b'\n').collect();
+    if ends_nl {
+        rows.pop();
+    }
     if rows.len() < COLUMNAR_MIN_ROWS {
         return None;
     }
@@ -644,19 +657,32 @@ fn build_columnar_blob(data: &[u8], delim: u8, config: &EncodeConfig) -> Option<
     let m = rows.len();
     let ncols = *k.iter().max().unwrap_or(&1);
 
-    // Column-major flat field list: for each column c, every row that has a field c
-    // (in row order). fields[r] is recomputed per row to avoid holding all slices.
-    let mut col_fields: Vec<&[u8]> = Vec::with_capacity(k.iter().sum());
-    for c in 0..ncols {
-        for (r, &row) in rows.iter().enumerate() {
-            if k[r] > c {
-                // c-th field of this row (split is cheap; rows are short).
-                let field = row.split(|&b| b == delim).nth(c).unwrap_or(b"");
-                col_fields.push(field);
+    // Collect each column's cells (column-major), then per column decide raw vs delta.
+    let mut col_cells: Vec<Vec<&[u8]>> = vec![Vec::new(); ncols];
+    for &row in &rows {
+        for (c, field) in row.split(|&b| b == delim).enumerate() {
+            // split yields exactly k[r] fields ≤ ncols; guard defensively.
+            if c < ncols {
+                col_cells[c].push(field);
             }
         }
     }
-    let colstream = col_fields.join(&b'\n');
+
+    let mut colmodes: Vec<u8> = Vec::with_capacity(ncols);
+    let mut emitted: Vec<Vec<u8>> = Vec::with_capacity(k.iter().sum());
+    for cells in &col_cells {
+        match columnar_delta_encode(cells) {
+            Some(delta_fields) => {
+                colmodes.push(1);
+                emitted.extend(delta_fields);
+            }
+            None => {
+                colmodes.push(0);
+                emitted.extend(cells.iter().map(|c| c.to_vec()));
+            }
+        }
+    }
+    let colstream = emitted.join(&b'\n');
 
     // Per-row field-count side stream (LEB128). Constant for true tables → compresses
     // to a few bytes through the nested encoder.
@@ -670,18 +696,55 @@ fn build_columnar_blob(data: &[u8], delim: u8, config: &EncodeConfig) -> Option<
     let kblob = encode_base(&kbytes, config);
     let colblob = encode_base(&colstream, config);
 
-    let mut out = Vec::with_capacity(22 + kblob.len() + colblob.len());
+    let mut out = Vec::with_capacity(23 + ncols + kblob.len() + colblob.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
     out.push(MODE_COLUMNAR);
     out.extend_from_slice(&(data.len() as u32).to_be_bytes());
     out.push(delim);
+    out.push(ends_nl as u8);
     out.extend_from_slice(&(m as u32).to_be_bytes());
     out.extend_from_slice(&(ncols as u32).to_be_bytes());
+    out.extend_from_slice(&colmodes);
     out.extend_from_slice(&(kblob.len() as u32).to_be_bytes());
     out.extend_from_slice(&kblob);
     out.extend_from_slice(&(colblob.len() as u32).to_be_bytes());
     out.extend_from_slice(&colblob);
+    Some(out)
+}
+
+/// Parse a cell as a canonical decimal i64 (exact round-trip render). Rejects leading
+/// zeros / '+' signs / non-numeric so the delta transform stays byte-exact.
+fn canonical_i64(cell: &[u8]) -> Option<i64> {
+    let s = std::str::from_utf8(cell).ok()?;
+    let v: i64 = s.parse().ok()?;
+    if v.to_string().as_bytes() == cell {
+        Some(v)
+    } else {
+        None
+    }
+}
+
+/// H-31 per-column delta encode. Returns the delta-coded field list, or `None` if the
+/// column is not a canonical non-decreasing integer column (so it stays raw). The first
+/// cell is kept verbatim (may be a text header), the second is the verbatim anchor, and
+/// each later cell becomes its signed delta from the previous.
+fn columnar_delta_encode(cells: &[&[u8]]) -> Option<Vec<Vec<u8>>> {
+    if cells.len() < 3 {
+        return None;
+    }
+    let vals: Vec<i64> = cells[1..].iter().map(|c| canonical_i64(c)).collect::<Option<_>>()?;
+    // Non-decreasing only (timestamps/ids/counters); keeps deltas small + sign-stable.
+    if vals.windows(2).any(|w| w[1] < w[0]) {
+        return None;
+    }
+    let mut out: Vec<Vec<u8>> = Vec::with_capacity(cells.len());
+    out.push(cells[0].to_vec()); // verbatim (header or first value)
+    out.push(cells[1].to_vec()); // verbatim anchor
+    for i in 1..vals.len() {
+        let d = vals[i].checked_sub(vals[i - 1])?;
+        out.push(d.to_string().into_bytes());
+    }
     Some(out)
 }
 
@@ -715,18 +778,27 @@ fn read_u32(blob: &[u8], pos: usize) -> Result<u32, CubrimError> {
 
 /// Decode a MODE_COLUMNAR container (`build_columnar_blob`). Fail-closed.
 fn decode_columnar(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
-    // Header: MAGIC(4)+VERSION(1)+MODE_COLUMNAR(1)+orig_len(4)+delim(1)+n_rows(4)
-    //         +n_cols(4)+kblob_len(4) = 23, then kblob, then colblob_len(4)+colblob.
-    const COL_HEADER_FIXED: usize = 23;
-    if blob.len() < COL_HEADER_FIXED + 4 {
+    // Header: MAGIC(4)+VERSION(1)+MODE_COLUMNAR(1)+orig_len(4)+delim(1)+ends_nl(1)
+    //         +n_rows(4)+n_cols(4) = 20, then colmodes(n_cols), then kblob_len(4)+kblob,
+    //         then colblob_len(4)+colblob.
+    if blob.len() < 20 {
         return Err(CubrimError::Decode("MODE_COLUMNAR container too short".into()));
     }
     let orig_len = read_u32(blob, 6)? as usize;
     let delim = blob[10];
-    let m = read_u32(blob, 11)? as usize;
-    let ncols = read_u32(blob, 15)? as usize;
-    let kblob_len = read_u32(blob, 19)? as usize;
-    let mut pos = COL_HEADER_FIXED;
+    let ends_nl = blob[11] != 0;
+    let m = read_u32(blob, 12)? as usize;
+    let ncols = read_u32(blob, 16)? as usize;
+    if ncols == 0 || ncols > blob.len() {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: bad n_cols".into()));
+    }
+    if 20 + ncols + 4 > blob.len() {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: colmodes truncated".into()));
+    }
+    let colmodes = &blob[20..20 + ncols];
+    let mut pos = 20 + ncols;
+    let kblob_len = read_u32(blob, pos)? as usize;
+    pos += 4;
     if pos + kblob_len + 4 > blob.len() {
         return Err(CubrimError::Decode("MODE_COLUMNAR: kblob truncated".into()));
     }
@@ -763,26 +835,72 @@ fn decode_columnar(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         )));
     }
 
+    // Walk the flat list column by column (column-major), reversing the H-31 delta
+    // transform where colmodes[c] == 1, then re-interleave into per-row fields.
+    let mut col_decoded: Vec<Vec<Vec<u8>>> = Vec::with_capacity(ncols);
+    let mut off = 0usize;
+    for (c, &mode) in colmodes.iter().enumerate() {
+        let count_c = (0..m).filter(|&r| k[r] > c).count();
+        let slice = &flat[off..off + count_c];
+        off += count_c;
+        if mode == 1 {
+            col_decoded.push(columnar_delta_decode(slice)?);
+        } else if mode == 0 {
+            col_decoded.push(slice.iter().map(|f| f.to_vec()).collect());
+        } else {
+            return Err(CubrimError::Decode(format!("MODE_COLUMNAR: bad col mode {mode}")));
+        }
+    }
+
     // Re-interleave column-major → per-row fields, in the exact emission order.
     let mut row_fields: Vec<Vec<&[u8]>> = (0..m).map(|r| Vec::with_capacity(k[r])).collect();
-    let mut idx = 0usize;
+    let mut col_pos = vec![0usize; ncols];
     for c in 0..ncols {
         for r in 0..m {
             if k[r] > c {
-                row_fields[r].push(flat[idx]);
-                idx += 1;
+                row_fields[r].push(&col_decoded[c][col_pos[c]]);
+                col_pos[c] += 1;
             }
         }
     }
 
-    // Rebuild rows (join fields by delim) then the file (join rows by '\n').
+    // Rebuild rows (join fields by delim) then the file (join rows by '\n'); restore a
+    // stripped trailing newline.
     let rows: Vec<Vec<u8>> = row_fields.iter().map(|f| f.join(&delim)).collect();
-    let out = rows.join(&b'\n');
+    let mut out = rows.join(&b'\n');
+    if ends_nl {
+        out.push(b'\n');
+    }
     if out.len() != orig_len {
         return Err(CubrimError::Decode(format!(
             "MODE_COLUMNAR: reconstructed {} bytes, expected {orig_len}",
             out.len()
         )));
+    }
+    Ok(out)
+}
+
+/// Reverse the H-31 per-column delta transform: first cell verbatim, second is the
+/// integer anchor, each later cell is a signed delta from the running value. Fail-closed.
+fn columnar_delta_decode(fields: &[&[u8]]) -> Result<Vec<Vec<u8>>, CubrimError> {
+    if fields.len() < 3 {
+        return Err(CubrimError::Decode("MODE_COLUMNAR: delta column too short".into()));
+    }
+    let mut out: Vec<Vec<u8>> = Vec::with_capacity(fields.len());
+    out.push(fields[0].to_vec()); // verbatim header / first value
+    let mut running = canonical_i64(fields[1])
+        .ok_or_else(|| CubrimError::Decode("MODE_COLUMNAR: bad delta anchor".into()))?;
+    out.push(fields[1].to_vec()); // verbatim anchor
+    for f in &fields[2..] {
+        let s = std::str::from_utf8(f)
+            .map_err(|_| CubrimError::Decode("MODE_COLUMNAR: non-utf8 delta".into()))?;
+        let d: i64 = s
+            .parse()
+            .map_err(|_| CubrimError::Decode("MODE_COLUMNAR: bad delta value".into()))?;
+        running = running
+            .checked_add(d)
+            .ok_or_else(|| CubrimError::Decode("MODE_COLUMNAR: delta overflow".into()))?;
+        out.push(running.to_string().into_bytes());
     }
     Ok(out)
 }
@@ -1919,7 +2037,7 @@ pub const ORDER2_DEFAULT_MIN_CTX: u16 = 128;
 // at best ≈0.626 aggregate, compared to Option A best 0.592215 and T4 baseline 0.587240.
 // Both options are worse than T4 — the NO-GO is real from two independent wire designs.
 // The Option B builders are removed; the measured numbers are recorded in:
-//   docs/ephemeral/research/CUBR-0027-bench.json  § option_b_summary
+//   documentation/ephemeral/research/CUBR-0027-bench.json  § option_b_summary
 //
 // To re-derive Option B: drop the Order1 arm in order2_build_context_tables and the
 // order1_map lookup in the encoder/size functions below.
@@ -6691,6 +6809,43 @@ mod tests {
     }
 
     #[test]
+    fn test_columnar_delta_unit_canonical_and_round_trip() {
+        // Monotonic canonical integers → delta-coded and exactly reversible.
+        let cells: Vec<&[u8]> = vec![b"ts", b"1000", b"1060", b"1120", b"1120", b"9999"];
+        let enc = columnar_delta_encode(&cells).expect("monotonic ints must delta-code");
+        assert_eq!(enc[0], b"ts"); // header verbatim
+        assert_eq!(enc[1], b"1000"); // anchor verbatim
+        assert_eq!(enc[2], b"60"); // first delta
+        let dec = columnar_delta_decode(&enc.iter().map(|v| v.as_slice()).collect::<Vec<_>>())
+            .expect("delta decode");
+        assert_eq!(dec, cells.iter().map(|c| c.to_vec()).collect::<Vec<_>>());
+
+        // Leading-zero value is NOT canonical → column stays raw (None).
+        let lz: Vec<&[u8]> = vec![b"h", b"007", b"008", b"009"];
+        assert!(columnar_delta_encode(&lz).is_none(), "leading zeros must not delta-code");
+        // Non-decreasing required: a decrease forces raw.
+        let dec_seq: Vec<&[u8]> = vec![b"h", b"5", b"4", b"6"];
+        assert!(columnar_delta_encode(&dec_seq).is_none(), "non-monotonic must not delta-code");
+        // Non-integer data forces raw.
+        let txt: Vec<&[u8]> = vec![b"h", b"a", b"b", b"c"];
+        assert!(columnar_delta_encode(&txt).is_none());
+    }
+
+    #[test]
+    fn test_columnar_delta_shrinks_monotonic_csv() {
+        // synth_csv has a monotone id and a monotone epoch ts column → the delta variant
+        // must engage and the columnar container must round-trip exactly.
+        let data = synth_csv(4000);
+        let blob = encode_with_config(&data, &csv_rail_cfg());
+        assert_eq!(blob[5], MODE_COLUMNAR);
+        assert_eq!(decode(&blob).unwrap(), data, "delta-columnar round-trip");
+        // At least one column flagged delta (colmodes live at offset 20..20+ncols).
+        let ncols = read_u32(&blob, 16).unwrap() as usize;
+        let colmodes = &blob[20..20 + ncols];
+        assert!(colmodes.contains(&1), "a monotone column must be delta-coded");
+    }
+
+    #[test]
     fn test_columnar_truncated_no_panic() {
         let data = synth_csv(4000);
         let blob = encode_with_config(&data, &csv_rail_cfg());
@@ -8435,7 +8590,7 @@ mod tests {
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
             format!(
-                "{}/../../docs/ephemeral/research/corpus",
+                "{}/../../documentation/ephemeral/research/corpus",
                 env!("CARGO_MANIFEST_DIR")
             )
         });
@@ -8535,7 +8690,7 @@ mod tests {
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
             format!(
-                "{}/../../docs/ephemeral/research/corpus",
+                "{}/../../documentation/ephemeral/research/corpus",
                 env!("CARGO_MANIFEST_DIR")
             )
         });
@@ -8574,7 +8729,7 @@ mod tests {
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
             format!(
-                "{}/../../docs/ephemeral/research/corpus",
+                "{}/../../documentation/ephemeral/research/corpus",
                 env!("CARGO_MANIFEST_DIR")
             )
         });
@@ -8721,7 +8876,7 @@ mod tests {
         // decoder MUST recover every file. Round-trip is non-negotiable (Gotcha).
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -8752,7 +8907,7 @@ mod tests {
         // set can NEVER be larger than the BwtEntropy leader on any corpus file.
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -8865,7 +9020,7 @@ mod tests {
         // file. Round-trip is non-negotiable (Gotcha).
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -8894,7 +9049,7 @@ mod tests {
         // NEVER be larger than the BwtEntropy leader on any corpus file.
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -9014,7 +9169,7 @@ mod tests {
         // every file. Round-trip is non-negotiable (Gotcha).
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -9042,7 +9197,7 @@ mod tests {
         // Competitive (Gotcha #4): can NEVER be larger than the BwtEntropy leader.
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -9159,7 +9314,7 @@ mod tests {
         // file. Round-trip is non-negotiable (Gotcha).
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -9187,7 +9342,7 @@ mod tests {
         // Competitive (Gotcha #4): can NEVER be larger than the BwtEntropy leader.
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
