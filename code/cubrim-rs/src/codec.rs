@@ -25,7 +25,7 @@ use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_CHUNKED,
-    MODE_COLUMNAR, MODE_CUBE, MODE_LZ, MODE_RAW, VERSION,
+    MODE_COLUMNAR, MODE_CUBE, MODE_LZ, MODE_RAW, MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -226,6 +226,16 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// base encoding (zero regression). Single-block inputs skip the pre-pass entirely.
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let mut best = encode_base(data, config);
+    // H-52: a detected VCF is handled by the specialized PBWT genotype-matrix container,
+    // which always beats the whole-file LZ / columnar-CSV competitors on this data — so
+    // short-circuit them (they are as slow as base and never win here). Still competitive
+    // against base (min), so a degenerate VCF cannot regress.
+    if let Some(vcf) = encode_vcf(data, config) {
+        if vcf.len() < best.len() {
+            best = vcf;
+        }
+        return best;
+    }
     // Whole-file LZ (MODE_LZ) and columnar field-split (MODE_COLUMNAR) only help on
     // inputs that span ≥2 chunk blocks. Gating both on the same >cube_size_limit
     // threshold keeps every ≤64KB input byte-identical to v1 (the frozen leaderboard
@@ -1028,6 +1038,275 @@ fn columnar_decimal_decode(fields: &[&[u8]], scale: u8) -> Result<Vec<Vec<u8>>, 
     Ok(out)
 }
 
+// ---- H-52 VCF genotype-matrix PBWT container ----
+
+/// PBWT forward (Durbin 2014). `cols[k]` holds the `m` binary alleles (0/1) at variant `k`.
+/// Returns the flat run-length varint stream: for each variant, the alleles in the current
+/// haplotype permutation form runs (alternating from allele 0) whose lengths sum to `m`. The
+/// permutation is NOT emitted — it is rebuilt identically by the decoder.
+fn pbwt_encode(cols: &[Vec<u8>], m: usize) -> Vec<u8> {
+    let mut ppa: Vec<u32> = (0..m as u32).collect();
+    let mut rle = Vec::new();
+    let mut a0: Vec<u32> = Vec::with_capacity(m);
+    let mut a1: Vec<u32> = Vec::with_capacity(m);
+    for col in cols {
+        let mut cur = 0u8; // current run's allele, starting at 0
+        let mut run = 0usize;
+        a0.clear();
+        a1.clear();
+        for &p in &ppa {
+            let allele = col[p as usize];
+            if allele == cur {
+                run += 1;
+            } else {
+                lz_varint_write(&mut rle, run);
+                cur ^= 1; // binary: alternate
+                run = 1;
+            }
+            if allele == 0 {
+                a0.push(p);
+            } else {
+                a1.push(p);
+            }
+        }
+        lz_varint_write(&mut rle, run); // final run
+        ppa.clear();
+        ppa.extend_from_slice(&a0);
+        ppa.extend_from_slice(&a1);
+    }
+    rle
+}
+
+/// PBWT reverse: reconstruct `cols[k][hap]` from the run-length stream, rebuilding the
+/// permutation step by step exactly as the encoder did. Fail-closed.
+fn pbwt_decode(rle: &[u8], m: usize, n: usize) -> Result<Vec<Vec<u8>>, CubrimError> {
+    let mut pos = 0usize;
+    let mut ppa: Vec<u32> = (0..m as u32).collect();
+    let mut cols: Vec<Vec<u8>> = Vec::with_capacity(n);
+    let mut a0: Vec<u32> = Vec::with_capacity(m);
+    let mut a1: Vec<u32> = Vec::with_capacity(m);
+    for _ in 0..n {
+        // Read alternating run-lengths (from allele 0) until they sum to m.
+        let mut in_order: Vec<u8> = Vec::with_capacity(m);
+        let mut cur = 0u8;
+        let mut sum = 0usize;
+        while sum < m {
+            let run = lz_varint_read(rle, &mut pos)?;
+            if run > m - sum {
+                return Err(CubrimError::Decode("MODE_VCF: PBWT run overflows column".into()));
+            }
+            in_order.resize(in_order.len() + run, cur);
+            sum += run;
+            cur ^= 1;
+        }
+        let mut out_col = vec![0u8; m];
+        a0.clear();
+        a1.clear();
+        for (i, &p) in ppa.iter().enumerate() {
+            let allele = in_order[i];
+            out_col[p as usize] = allele;
+            if allele == 0 {
+                a0.push(p);
+            } else {
+                a1.push(p);
+            }
+        }
+        cols.push(out_col);
+        ppa.clear();
+        ppa.extend_from_slice(&a0);
+        ppa.extend_from_slice(&a1);
+    }
+    Ok(cols)
+}
+
+/// Encode a detected VCF (PBWT genotype-matrix container, MODE_VCF). Returns `None` for any
+/// input that is not a `GT`-only phased VCF the transform can reconstruct byte-exactly — the
+/// caller then falls back to the base encoding (regression-proof; non-VCF inputs pay only the
+/// cheap prefix check).
+fn encode_vcf(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    if !data.starts_with(b"##fileformat=VCF") {
+        return None;
+    }
+    let ends_nl = data.last() == Some(&b'\n');
+    let mut lines: Vec<&[u8]> = data.split(|&b| b == b'\n').collect();
+    if ends_nl {
+        lines.pop();
+    }
+    let chrom_idx = lines.iter().position(|l| l.starts_with(b"#CHROM"))?;
+    let data_rows = &lines[chrom_idx + 1..];
+    if data_rows.is_empty() {
+        return None;
+    }
+    let n_chrom_fields = lines[chrom_idx].iter().filter(|&&b| b == b'\t').count() + 1;
+    if n_chrom_fields < 10 {
+        return None; // need FORMAT + ≥1 sample column
+    }
+    let n_samples = n_chrom_fields - 9;
+    let n_var = data_rows.len();
+    let m = 2 * n_samples;
+
+    let mut cols: Vec<Vec<u8>> = vec![vec![0u8; m]; n_var];
+    let mut exceptions: Vec<u8> = Vec::new();
+    let mut n_exc: u32 = 0;
+    let mut fixed_text: Vec<u8> = Vec::new();
+    for (v, row) in data_rows.iter().enumerate() {
+        let fields: Vec<&[u8]> = row.split(|&b| b == b'\t').collect();
+        if fields.len() != 9 + n_samples || fields[8] != b"GT" {
+            return None;
+        }
+        if v > 0 {
+            fixed_text.push(b'\n');
+        }
+        for (i, f) in fields.iter().take(9).enumerate() {
+            if i > 0 {
+                fixed_text.push(b'\t');
+            }
+            fixed_text.extend_from_slice(f);
+        }
+        for (s, &g) in fields[9..].iter().enumerate() {
+            // Canonical biallelic phased "X|Y" with X,Y ∈ {0,1} → PBWT; else an exception.
+            if g.len() == 3
+                && g[1] == b'|'
+                && (g[0] == b'0' || g[0] == b'1')
+                && (g[2] == b'0' || g[2] == b'1')
+            {
+                cols[v][2 * s] = u8::from(g[0] == b'1');
+                cols[v][2 * s + 1] = u8::from(g[2] == b'1');
+            } else {
+                lz_varint_write(&mut exceptions, v);
+                lz_varint_write(&mut exceptions, s);
+                lz_varint_write(&mut exceptions, g.len());
+                exceptions.extend_from_slice(g);
+                n_exc += 1;
+                // cols stay 0|0 placeholder; the decoder overwrites from the exception.
+            }
+        }
+    }
+
+    let rle = pbwt_encode(&cols, m);
+    let preamble = lines[..=chrom_idx].join(&b'\n');
+
+    let pre_blob = encode_base(&preamble, config);
+    let fixed_blob = encode_base(&fixed_text, config);
+    let rle_blob = encode_base(&rle, config);
+    let exc_blob = encode_base(&exceptions, config);
+
+    let mut out = Vec::with_capacity(28 + pre_blob.len() + fixed_blob.len() + rle_blob.len() + exc_blob.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_VCF);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.push(ends_nl as u8);
+    out.extend_from_slice(&(n_var as u32).to_be_bytes());
+    out.extend_from_slice(&(n_samples as u32).to_be_bytes());
+    out.extend_from_slice(&n_exc.to_be_bytes());
+    for blob in [&pre_blob, &fixed_blob, &rle_blob, &exc_blob] {
+        out.extend_from_slice(&(blob.len() as u32).to_be_bytes());
+        out.extend_from_slice(blob);
+    }
+    Some(out)
+}
+
+/// Decode a MODE_VCF container (`encode_vcf`). Fail-closed.
+fn decode_vcf(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    // Header: MAGIC(4)+VERSION(1)+MODE_VCF(1)+orig_len(4)+ends_nl(1)+n_var(4)+n_samp(4)+n_exc(4)=23.
+    const VCF_HEADER: usize = 23;
+    if blob.len() < VCF_HEADER {
+        return Err(CubrimError::Decode("MODE_VCF container too short".into()));
+    }
+    let orig_len = read_u32(blob, 6)? as usize;
+    let ends_nl = blob[10] != 0;
+    let n_var = read_u32(blob, 11)? as usize;
+    let n_samples = read_u32(blob, 15)? as usize;
+    let n_exc = read_u32(blob, 19)? as usize;
+    let m = 2usize.checked_mul(n_samples).ok_or_else(|| {
+        CubrimError::Decode("MODE_VCF: n_samples overflow".into())
+    })?;
+
+    let mut pos = VCF_HEADER;
+    let read_blob = |pos: &mut usize| -> Result<Vec<u8>, CubrimError> {
+        let len = read_u32(blob, *pos)? as usize;
+        *pos += 4;
+        if *pos + len > blob.len() {
+            return Err(CubrimError::Decode("MODE_VCF: sub-blob truncated".into()));
+        }
+        let out = decode(&blob[*pos..*pos + len])?;
+        *pos += len;
+        Ok(out)
+    };
+    let preamble = read_blob(&mut pos)?;
+    let fixed_text = read_blob(&mut pos)?;
+    let rle = read_blob(&mut pos)?;
+    let exc_bytes = read_blob(&mut pos)?;
+
+    // Fixed 9-field prefixes, one per variant row.
+    let fixed_rows: Vec<&[u8]> = if fixed_text.is_empty() {
+        Vec::new()
+    } else {
+        fixed_text.split(|&b| b == b'\n').collect()
+    };
+    if fixed_rows.len() != n_var {
+        return Err(CubrimError::Decode("MODE_VCF: fixed-row count mismatch".into()));
+    }
+
+    // PBWT reverse → per-variant binary haplotype columns.
+    let cols = pbwt_decode(&rle, m, n_var)?;
+
+    // Exceptions grouped by variant: (sample, literal).
+    let mut exc_by_var: std::collections::HashMap<usize, Vec<(usize, Vec<u8>)>> =
+        std::collections::HashMap::new();
+    let mut ep = 0usize;
+    for _ in 0..n_exc {
+        let v = lz_varint_read(&exc_bytes, &mut ep)?;
+        let s = lz_varint_read(&exc_bytes, &mut ep)?;
+        let glen = lz_varint_read(&exc_bytes, &mut ep)?;
+        if ep + glen > exc_bytes.len() {
+            return Err(CubrimError::Decode("MODE_VCF: exception literal truncated".into()));
+        }
+        let lit = exc_bytes[ep..ep + glen].to_vec();
+        ep += glen;
+        if v >= n_var || s >= n_samples {
+            return Err(CubrimError::Decode("MODE_VCF: exception index out of range".into()));
+        }
+        exc_by_var.entry(v).or_default().push((s, lit));
+    }
+
+    // Rebuild the file: preamble + data rows.
+    let mut out = Vec::with_capacity(orig_len);
+    out.extend_from_slice(&preamble);
+    for v in 0..n_var {
+        out.push(b'\n');
+        out.extend_from_slice(fixed_rows[v]);
+        // Render genotypes "X|Y" from the binary matrix.
+        let mut gts: Vec<Vec<u8>> = (0..n_samples)
+            .map(|s| {
+                let a = if cols[v][2 * s] == 1 { b'1' } else { b'0' };
+                let b = if cols[v][2 * s + 1] == 1 { b'1' } else { b'0' };
+                vec![a, b'|', b]
+            })
+            .collect();
+        if let Some(list) = exc_by_var.get(&v) {
+            for (s, lit) in list {
+                gts[*s] = lit.clone();
+            }
+        }
+        for g in &gts {
+            out.push(b'\t');
+            out.extend_from_slice(g);
+        }
+    }
+    if ends_nl {
+        out.push(b'\n');
+    }
+    if out.len() != orig_len {
+        return Err(CubrimError::Decode(format!(
+            "MODE_VCF: reconstructed {} bytes, expected {orig_len}",
+            out.len()
+        )));
+    }
+    Ok(out)
+}
+
 /// Encode `data` as a whole-file LZ container (MODE_LZ, H-25d). The entire input is
 /// LZ77-tokenized over a full-file window FIRST; the literal residue is encoded
 /// through the normal pipeline (`encode_base`, itself possibly MODE_CHUNKED) and the
@@ -1294,6 +1573,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_COLUMNAR {
             return decode_columnar(blob);
+        }
+        if blob[5] == MODE_VCF {
+            return decode_vcf(blob);
         }
     }
 
@@ -7025,6 +7307,141 @@ mod tests {
         // Every truncation must error cleanly, never panic.
         for cut in (6..blob.len()).step_by(257) {
             let _ = decode(&blob[..cut]); // Result; must not panic
+        }
+    }
+
+    // ---- H-52 MODE_VCF (genotype-matrix PBWT) ----
+
+    /// Deterministic synthetic VCF with REALISTIC linkage: each of the 2·n_samp haplotypes
+    /// descends from one of K founder haplotypes (rare per-cell mutation), so adjacent variants
+    /// are correlated — the structure PBWT exploits. Mostly "0|0"; optional multi-allelic /
+    /// missing / unphased exception cells.
+    fn synth_vcf(n_var: usize, n_samp: usize, with_exceptions: bool) -> Vec<u8> {
+        let mut state: u64 = 0x5DEECE66D ^ (n_var as u64).wrapping_mul(2654435761);
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+        let k_founders = 6.min(2 * n_samp).max(1);
+        // founders[f][v] = allele of founder f at variant v (sparse: ~12% of variants carry alt)
+        let founders: Vec<Vec<u8>> = (0..k_founders)
+            .map(|_| (0..n_var).map(|_| u8::from(nxt(100) < 12 && nxt(2) == 0)).collect())
+            .collect();
+        // each haplotype copies a founder (rare mutation)
+        let m = 2 * n_samp;
+        let hap_founder: Vec<usize> = (0..m).map(|_| nxt(k_founders)).collect();
+        let mut hap: Vec<Vec<u8>> = vec![vec![0u8; n_var]; m];
+        for (h, hf) in hap_founder.iter().enumerate() {
+            for v in 0..n_var {
+                let mut a = founders[*hf][v];
+                if nxt(100) == 0 {
+                    a ^= 1; // rare mutation
+                }
+                hap[h][v] = a;
+            }
+        }
+        let mut out = Vec::new();
+        out.extend_from_slice(b"##fileformat=VCFv4.2\n");
+        out.extend_from_slice(b"##source=synth\n");
+        out.extend_from_slice(b"##FORMAT=<ID=GT,Number=1,Type=String>\n");
+        out.extend_from_slice(b"#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT");
+        for s in 0..n_samp {
+            out.extend_from_slice(format!("\tS{s}").as_bytes());
+        }
+        let mut pos = 60000usize;
+        for v in 0..n_var {
+            pos += 1 + nxt(50);
+            out.extend_from_slice(format!("\n20\t{pos}\t.\tG\tA\t100\tPASS\tNS={n_samp}\tGT").as_bytes());
+            for s in 0..n_samp {
+                out.push(b'\t');
+                if with_exceptions && nxt(400) == 0 {
+                    let e: &[u8] = match nxt(3) {
+                        0 => b"2|0",
+                        1 => b".|.",
+                        _ => b"1/1",
+                    };
+                    out.extend_from_slice(e);
+                } else {
+                    let a = if hap[2 * s][v] == 1 { b'1' } else { b'0' };
+                    let b = if hap[2 * s + 1][v] == 1 { b'1' } else { b'0' };
+                    out.extend_from_slice(&[a, b'|', b]);
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn test_pbwt_round_trips_random_binary_matrix() {
+        let mut state: u64 = 0xA1B2C3D4E5F60718;
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+        for _ in 0..20 {
+            let m = 2 + nxt(40);
+            let n = 1 + nxt(30);
+            let cols: Vec<Vec<u8>> = (0..n)
+                .map(|_| (0..m).map(|_| (nxt(4) == 0) as u8).collect())
+                .collect();
+            let rle = pbwt_encode(&cols, m);
+            let back = pbwt_decode(&rle, m, n).expect("pbwt decode");
+            assert_eq!(back, cols, "PBWT round-trip (m={m} n={n})");
+        }
+    }
+
+    #[test]
+    fn test_mode_vcf_round_trips_and_shrinks() {
+        let data = synth_vcf(300, 200, true);
+        let blob = encode_with_config(&data, &csv_rail_cfg());
+        assert_eq!(decode(&blob).unwrap(), data, "MODE_VCF round-trip must be byte-exact");
+        assert_eq!(blob[5], MODE_VCF, "a sparse phased VCF must select MODE_VCF");
+        let base = encode_base(&data, &csv_rail_cfg());
+        assert!(blob.len() < base.len(), "MODE_VCF {} not smaller than base {}", blob.len(), base.len());
+    }
+
+    #[test]
+    fn test_mode_vcf_round_trip_edge_cases() {
+        // No trailing newline; exceptions present; single sample; many exceptions.
+        let mut a = synth_vcf(120, 64, true);
+        if a.last() == Some(&b'\n') {
+            a.pop();
+        }
+        let mut cases = vec![a, synth_vcf(80, 1, true), synth_vcf(200, 50, false)];
+        // A VCF whose genotypes are ALL exceptions (no canonical cell).
+        let mut allexc = Vec::new();
+        allexc.extend_from_slice(b"##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tA\tB\n");
+        for v in 0..40 {
+            allexc.extend_from_slice(format!("20\t{}\t.\tG\tA\t.\t.\t.\tGT\t./.\t2|3\n", 100 + v).as_bytes());
+        }
+        cases.push(allexc);
+        for data in cases {
+            let blob = encode_with_config(&data, &csv_rail_cfg());
+            assert_eq!(decode(&blob).unwrap(), data, "MODE_VCF edge round-trip");
+        }
+    }
+
+    #[test]
+    fn test_vcf_not_selected_on_non_vcf() {
+        // Text that is not a VCF must never select MODE_VCF and must round-trip.
+        let data = synth_csv(4000); // a CSV
+        let blob = encode_with_config(&data, &csv_rail_cfg());
+        assert_ne!(blob[5], MODE_VCF, "non-VCF must not select MODE_VCF");
+        assert_eq!(decode(&blob).unwrap(), data);
+        // A file that merely starts with '#' but is not a VCF.
+        let nv = b"##notvcf\nhello world\n".repeat(50);
+        let blob2 = encode_with_config(&nv, &csv_rail_cfg());
+        assert_ne!(blob2[5], MODE_VCF);
+        assert_eq!(decode(&blob2).unwrap(), nv);
+    }
+
+    #[test]
+    fn test_vcf_truncated_no_panic() {
+        let data = synth_vcf(150, 100, true);
+        let blob = encode_with_config(&data, &csv_rail_cfg());
+        assert_eq!(blob[5], MODE_VCF);
+        for cut in (6..blob.len()).step_by(251) {
+            let _ = decode(&blob[..cut]); // must not panic
         }
     }
 

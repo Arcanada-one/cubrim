@@ -67,6 +67,18 @@ pub const MODE_LZ: u8 = 3;
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_COLUMNAR 1B][orig_len 4B][delim 1B][n_rows 4B]
 ///       [n_cols 4B][kblob_len 4B][kblob …][colblob_len 4B][colblob …].
 pub const MODE_COLUMNAR: u8 = 4;
+/// VCF genotype-matrix container (H-52, genomic class). For a detected VCF (`##fileformat=VCF`
+/// preamble + `#CHROM…` header + `GT`-only genotype rows), the genotype matrix is transformed
+/// by PBWT (Positional BWT, Durbin 2014): haplotypes are reordered per variant by their
+/// reversed-prefix match so linkage disequilibrium yields long allele-column runs (RLE'd).
+/// The permutation is rebuilt incrementally by the decoder (like BWT's LF-mapping), so it is
+/// NOT transmitted — a structural win unreachable by a per-byte backend. Multi-allelic /
+/// unphased / missing cells are a charged exception list. Emitted only when strictly smaller
+/// than the base encoding (competitive) AND only on detected VCF input, so every non-VCF
+/// input (the whole tuned/holdout corpus) is byte-identical to v1.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_VCF 1B][orig_len 4B][ends_nl 1B][n_var 4B][n_samp 4B]
+///       [n_exc 4B] then 4 length-prefixed sub-blobs: preamble, fixed-fields, PBWT-RLE, exceptions.
+pub const MODE_VCF: u8 = 5;
 
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;

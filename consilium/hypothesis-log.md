@@ -864,3 +864,14 @@ created: 2026-06-17
 - **LEVER (PBWT, Durbin 2014):** reorder haplotypes per variant by reversed-prefix; LD → long runs (avg 274). Permutation decoder-rebuilt (like BWT LF), NOT transmitted.
 - **MEASURED:** 3000var PBWT RLE zstd 38198 vs raw 132086 = **3.46×**; +charged multi-allelic exceptions (0.090% cells) = 50880 = **2.60× charged**. SUBSUMPTION CHECK (300var, cubrim, RT byte-exact): raw GT cubrim 15137 (1.07× vs zstd — byte-BWT misses it); PBWT cubrim 6498 = **2.33× smaller than cubrim's own BWT** → genuinely NON-SUBSUMED.
 - **VERDICT GO** — gate ≥1.5× cleared (2.60× charged); consilium −71% lit CONFIRMED by measurement (verified, not trusted). NEXT: Rust MODE_VCF/genotype-matrix value-scheme (PBWT+RLE+rANS, multi-allelic exceptions, competitive min, RT byte-exact, tuned/holdout byte-identical).
+
+---
+
+## H-52-IMPL — MODE_VCF shipped: GO (genotype-matrix PBWT, first new-class win since telemetry)
+
+- **STATUS:** GO, shipped (container mode 5). Greenlit after the spike GO.
+- **BUILT:** pbwt_encode/decode (Durbin PBWT, permutation decoder-rebuilt, alternating-run RLE) + encode_vcf/decode_vcf (detect ##fileformat=VCF; split preamble/fixed-9/PBWT-RLE/exception-list; canonical X|Y biallelic phased, rest charged exceptions). Competitive min(base,vcf) + LZ/columnar short-circuit on detected VCF; non-VCF pays only prefix check.
+- **TESTS:** +5 (pbwt RT, vcf shrinks, edge incl all-exception/no-nl/single-sample, not-on-non-vcf, truncated); 229 lib + integration green; clippy 0 new.
+- **ZERO-REGRESSION:** tuned 0.158273 + holdout 0.2390 byte-identical (RT 10/10 + 6/6); VCF only on detected input.
+- **MEASURED (real 1000G chr20, RT byte-exact):** 400var×2504 19931 vs zstd 34010 = **−41.4%**; 1000var×2504 39020 vs zstd 72178 = **−45.9%** (vs gzip −63/−69%). Win grows with linkage toward spike 2.60× (−62%) at 3000var.
+- **VERDICT GO** — first new-class structural win since telemetry; non-subsumed (2.33× vs cubrim's own BWT, spike). Follow-up: base-floor geomix slow on big VCF; genotype bit-packing memory opt.
