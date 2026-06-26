@@ -86,3 +86,54 @@ with ≥1 more real scan. Leaderboard untouched, NOT pushed.
 
 **Artefacts:** `documentation/ephemeral/research/probe_h53_lidar_morton.py` (+ real
 KITTI scan `kitti.bin` 000007).
+
+---
+
+## H-54-IMPL — MODE_BINFLOAT shipped (binary float-array SoA + reversible delta)
+
+**Status:** GO, shipped (container mode 6). Greenlit after the spike GO; generalisation
+hardened on 5 real KITTI scans first (operator condition).
+
+**Generalisation (before Rust).** Found 4 more real point clouds. The win is **class-
+bound**, not universal — it needs a spatially-smooth row order (consecutive points close):
+
+| corpus | source | order (median consec. dist) | x vs zstd-19 |
+|---|---|---|---|
+| 5× KITTI Velodyne | azureology + kuixu + darylclimb | tight (0.03–0.04 m) | **1.46 / 1.50 / 1.56 / 1.57 / 1.62** (mean 1.54, 4/5 ≥1.5) |
+| nuScenes LIDAR_TOP | mmdet3d demo | loose (0.53 m, re-ordered) | 1.03 |
+| ScanNet / SUN RGB-D | mmdet3d demo | indoor RGB-D, no scan order | 1.06 / 1.00 |
+
+Honest scope: Cubrim crushes zstd-19 only on **raw spinning-LiDAR in native firing
+order**; cross-sensor clouds without that order get ~parity. The delta lever is an
+ordering property of the input, not of "binary floats" in general.
+
+**Built.** `MODE_BINFLOAT=6` (header.rs) + `encode_binfloat`/`decode_binfloat` (codec.rs):
+AoS→SoA split at an auto-picked record width (order-0 proxy over candidates {12,16,20,24,
+28,32}), each column competitively coded raw or reversible wrapping-uint32 delta of the
+float bit pattern (1-byte per-column mode flag), each column nested through the full
+LZ/columnar/base competition (`encode_with_config_inner(.., try_binfloat=false)` — the LZ
+pass is what entropy-codes the delta streams; `encode_base` alone bitpacks them raw).
+Activation gate: `len > 64KB` ∧ `len % 4 == 0` ∧ ≥75 % of sampled float32 are plausible
+(finite, |v| in a sane band) — a performance guard; **ratio safety is the competitive
+`min(base, binfloat, lz, columnar)`**, not the gate.
+
+**Regression-proofing (measured, not assumed).** The first cut short-circuited LZ/columnar
+when binfloat engaged — this **regressed** SUN RGB-D (702039 → 739956, LZ codes it better).
+Fixed by competing binfloat *alongside* LZ/columnar via `min()`: SUN RGB-D now selects
+MODE_LZ at 702039 (= pre-binfloat, byte-exact), all 8 clouds ≤ pre-binfloat output.
+
+**Tests:** +6 (delta-column reversibility, RT+shrink, widths 16/20/24 + ragged tail,
+not-selected-on-text/incompressible, property random float-arrays, truncated-no-panic);
+**235 lib + 14 integration green**; clippy 0 new.
+
+**Invariants (critical):** tuned 0.158273 **byte-identical** (RT 10/10), holdout 0.2390
+**byte-identical** (RT 6/6) — binfloat is gated >64KB and the plausibility check rejects
+config.json (JSON text), so the frozen leaderboard is untouched.
+
+**Verdict GO** — first binary-input class; structural win on raw spinning-LiDAR
+(mean 1.54× vs zstd-19, lossless, RT byte-exact), regression-proof on every tested cloud,
+zero leaderboard movement. Perf follow-up: file-level LZ runs on big plausible-float files
+(~12–29 s/scan) since the short-circuit was removed for safety. NOT pushed.
+
+**Artefacts:** `codec.rs` MODE_BINFLOAT + `header.rs` + 6 tests;
+`documentation/ephemeral/research/probe_h54_binfloat_generalize.py` + `h54-binfloat-bench.json`.

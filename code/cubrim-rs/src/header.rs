@@ -80,6 +80,22 @@ pub const MODE_COLUMNAR: u8 = 4;
 ///       [n_exc 4B] then 4 length-prefixed sub-blobs: preamble, fixed-fields, PBWT-RLE, exceptions.
 pub const MODE_VCF: u8 = 5;
 
+/// Binary float-array container (H-54, point-cloud / binary-float class). For a detected
+/// fixed-width little-endian float32 record stream (e.g. a raw LiDAR `.bin`: N points ×
+/// {x,y,z,…} float32, array-of-structs), the records are split column-major (struct-of-
+/// arrays) and each column is competitively coded raw or as a reversible wrapping-uint32
+/// delta of the float bit pattern. Spatially-smooth row order (a raw spinning-LiDAR firing
+/// sweep) makes consecutive coordinate bits nearly equal, so the delta column collapses;
+/// attribute columns (reflectance) that do not benefit stay raw (per-column mode flag).
+/// This is the telemetry-columnar lever (AoS→SoA + integer delta) transplanted to a binary
+/// float input the cube/BWT/LZ path cannot reach. Emitted only when strictly smaller than
+/// the base encoding (competitive min) AND only on detected plausible-float input gated
+/// >cube_size_limit, so every non-matching input (the whole tuned/holdout corpus) is
+/// byte-identical to v1.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_BINFLOAT 1B][orig_len 4B][rec_width 1B][n_cols 1B]
+///       [col_modes n_cols B][tail_len 1B][tail bytes] then n_cols length-prefixed sub-blobs.
+pub const MODE_BINFLOAT: u8 = 6;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).

@@ -24,8 +24,8 @@ use crate::cube::build_cube_with_params;
 use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
-    parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_CHUNKED,
-    MODE_COLUMNAR, MODE_CUBE, MODE_LZ, MODE_RAW, MODE_VCF, VERSION,
+    parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BINFLOAT,
+    MODE_CHUNKED, MODE_COLUMNAR, MODE_CUBE, MODE_LZ, MODE_RAW, MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -225,6 +225,14 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// size pick, so an input that does not benefit falls back byte-identically to the
 /// base encoding (zero regression). Single-block inputs skip the pre-pass entirely.
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    encode_with_config_inner(data, config, true)
+}
+
+/// Inner encoder. `try_binfloat` is false when called recursively to encode one column of a
+/// MODE_BINFLOAT container, which prevents binfloat→binfloat recursion while still giving each
+/// column the full LZ / columnar / base competition (that competition — chiefly the LZ
+/// pre-pass — is what compresses the delta streams; encode_base alone bitpacks them raw).
+fn encode_with_config_inner(data: &[u8], config: &EncodeConfig, try_binfloat: bool) -> Vec<u8> {
     let mut best = encode_base(data, config);
     // H-52: a detected VCF is handled by the specialized PBWT genotype-matrix container,
     // which always beats the whole-file LZ / columnar-CSV competitors on this data — so
@@ -243,6 +251,18 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     // Each is a competitive size pick — kept only when strictly smaller — so neither
     // can ever regress a file.
     if data.len() > config.cube_size_limit() {
+        // H-54: a detected binary float-array (point cloud / telemetry .bin) is handled by the
+        // column-major reversible-delta container. It competes via min() alongside (not instead
+        // of) the LZ / columnar competitors — short-circuiting them on the broad plausible-float
+        // gate would regress a misdetected out-of-class file the LZ path codes better. Keeping
+        // all three competitive makes binfloat strictly regression-proof.
+        if try_binfloat {
+            if let Some(bf) = encode_binfloat(data, config) {
+                if bf.len() < best.len() {
+                    best = bf;
+                }
+            }
+        }
         let lz = encode_lz_prepass(data, config);
         if lz.len() < best.len() {
             best = lz;
@@ -1307,6 +1327,258 @@ fn decode_vcf(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     Ok(out)
 }
 
+/// Shannon order-0 cost of a byte slice, in bytes (cheap proxy for "how well will the
+/// backend compress this column?"). Used only to pick the record width and per-column
+/// raw-vs-delta mode; round-trip correctness never depends on it.
+fn order0_cost_bytes(bytes: &[u8]) -> f64 {
+    if bytes.is_empty() {
+        return 0.0;
+    }
+    let mut hist = [0u32; 256];
+    for &b in bytes {
+        hist[b as usize] += 1;
+    }
+    let n = bytes.len() as f64;
+    let mut bits = 0.0f64;
+    for &c in hist.iter() {
+        if c > 0 {
+            let p = c as f64 / n;
+            bits -= c as f64 * p.log2();
+        }
+    }
+    bits / 8.0
+}
+
+/// Column byte-stream for record-column `c` (the 4 little-endian bytes of float `c`), in
+/// record order, optionally wrapping-uint32 delta'd. `m` = record count, `width` = bytes
+/// per record. The stream is exactly `4*m` bytes. Reversible: see `binfloat_undelta_col`.
+fn binfloat_col_stream(data: &[u8], m: usize, width: usize, c: usize, delta: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 * m);
+    let mut prev: u32 = 0;
+    for r in 0..m {
+        let off = r * width + c * 4;
+        let v = u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]);
+        let stored = if delta { v.wrapping_sub(prev) } else { v };
+        out.extend_from_slice(&stored.to_le_bytes());
+        prev = v;
+    }
+    out
+}
+
+/// Inverse of `binfloat_col_stream` for a delta column: prefix-sum the wrapping deltas back
+/// to the original uint32 values. `stream` is `4*m` little-endian bytes.
+fn binfloat_undelta_col(stream: &[u8], m: usize) -> Vec<u32> {
+    let mut out = Vec::with_capacity(m);
+    let mut acc: u32 = 0;
+    for r in 0..m {
+        let d = u32::from_le_bytes([
+            stream[4 * r],
+            stream[4 * r + 1],
+            stream[4 * r + 2],
+            stream[4 * r + 3],
+        ]);
+        acc = acc.wrapping_add(d);
+        out.push(acc);
+    }
+    out
+}
+
+/// Fraction of sampled float32 values that are "plausible" point-cloud/telemetry numbers:
+/// finite and either zero or |v| in a sane magnitude band. Filters text / random / generic
+/// binary (whose float reinterpretation is dominated by wild exponents) so the (slow) base
+/// encoder is not run on data the binfloat transform cannot help. Ratio safety comes from
+/// the competitive min(), not this gate — this is purely a performance guard.
+fn binfloat_plausible_fraction(data: &[u8], width: usize) -> f64 {
+    let m = data.len() / width;
+    if m == 0 {
+        return 0.0;
+    }
+    let step = (m / 4096).max(1);
+    let (mut ok, mut tot) = (0usize, 0usize);
+    let n_cols = width / 4;
+    let mut r = 0;
+    while r < m {
+        for c in 0..n_cols {
+            let off = r * width + c * 4;
+            let v = f32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]);
+            tot += 1;
+            let a = v.abs();
+            if v.is_finite() && (v == 0.0 || (1e-6..1e6).contains(&a)) {
+                ok += 1;
+            }
+        }
+        r += step;
+    }
+    if tot == 0 {
+        0.0
+    } else {
+        ok as f64 / tot as f64
+    }
+}
+
+/// Encode a detected fixed-width binary float-array (MODE_BINFLOAT, H-54). Returns `None` for
+/// any input that is not a plausible float record stream — the caller falls back to the base
+/// encoding (regression-proof; non-matching inputs pay only the cheap plausibility check).
+/// The record width is auto-picked from a small candidate set by an order-0 cost proxy; each
+/// column is competitively coded raw or reversible-delta. The whole container competes via
+/// min() at the call site, so a wrong width/mode pick can never regress a file.
+fn encode_binfloat(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    let len = data.len();
+    // Gate: must be a non-trivial float32 stream. The >cube_size_limit gate keeps every
+    // ≤64KB input (the frozen leaderboard) byte-identical to v1, matching MODE_LZ/COLUMNAR.
+    if len <= config.cube_size_limit() || !len.is_multiple_of(4) {
+        return None;
+    }
+    // Candidate record widths (bytes/record). 16=KITTI xyz+refl, 20=nuScenes x,y,z,i,ring,
+    // 24=xyzrgb. Only widths that evenly divide the input and clear the plausibility gate.
+    const CAND_WIDTHS: [usize; 6] = [12, 16, 20, 24, 28, 32];
+    let mut best_w: Option<usize> = None;
+    let mut best_proxy = f64::INFINITY;
+    for &w in CAND_WIDTHS.iter() {
+        if !len.is_multiple_of(w) {
+            continue;
+        }
+        if binfloat_plausible_fraction(data, w) < 0.75 {
+            continue;
+        }
+        let m = len / w;
+        let n_cols = w / 4;
+        let mut proxy = 0.0f64;
+        for c in 0..n_cols {
+            let raw = binfloat_col_stream(data, m, w, c, false);
+            let del = binfloat_col_stream(data, m, w, c, true);
+            proxy += order0_cost_bytes(&raw).min(order0_cost_bytes(&del));
+        }
+        if proxy < best_proxy {
+            best_proxy = proxy;
+            best_w = Some(w);
+        }
+    }
+    let width = best_w?;
+    let m = len / width;
+    let n_cols = width / 4;
+    let tail = &data[m * width..]; // always empty when len % width == 0, but kept for safety
+    if n_cols > 255 || tail.len() > 255 {
+        return None;
+    }
+
+    // Per-column: competitively encode raw vs reversible-delta through the base pipeline,
+    // keep the smaller, record the mode flag (0=raw, 1=delta).
+    let mut col_modes: Vec<u8> = Vec::with_capacity(n_cols);
+    let mut col_blobs: Vec<Vec<u8>> = Vec::with_capacity(n_cols);
+    for c in 0..n_cols {
+        let raw_blob =
+            encode_with_config_inner(&binfloat_col_stream(data, m, width, c, false), config, false);
+        let del_blob =
+            encode_with_config_inner(&binfloat_col_stream(data, m, width, c, true), config, false);
+        if del_blob.len() < raw_blob.len() {
+            col_modes.push(1);
+            col_blobs.push(del_blob);
+        } else {
+            col_modes.push(0);
+            col_blobs.push(raw_blob);
+        }
+    }
+
+    let mut out = Vec::with_capacity(12 + n_cols + tail.len() + col_blobs.iter().map(|b| b.len() + 4).sum::<usize>());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_BINFLOAT);
+    out.extend_from_slice(&(len as u32).to_be_bytes());
+    out.push(width as u8);
+    out.push(n_cols as u8);
+    out.extend_from_slice(&col_modes);
+    out.push(tail.len() as u8);
+    out.extend_from_slice(tail);
+    for blob in &col_blobs {
+        out.extend_from_slice(&(blob.len() as u32).to_be_bytes());
+        out.extend_from_slice(blob);
+    }
+    Some(out)
+}
+
+/// Decode a MODE_BINFLOAT container (`encode_binfloat`). Fail-closed.
+fn decode_binfloat(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    // Header: MAGIC(4)+VERSION(1)+MODE_BINFLOAT(1)+orig_len(4)+rec_width(1)+n_cols(1) = 12.
+    const BF_FIXED: usize = 12;
+    if blob.len() < BF_FIXED {
+        return Err(CubrimError::Decode("MODE_BINFLOAT container too short".into()));
+    }
+    let orig_len = read_u32(blob, 6)? as usize;
+    let width = blob[10] as usize;
+    let n_cols = blob[11] as usize;
+    if width == 0 || !width.is_multiple_of(4) || n_cols != width / 4 {
+        return Err(CubrimError::Decode("MODE_BINFLOAT: bad record width".into()));
+    }
+    let mut pos = BF_FIXED;
+    if pos + n_cols >= blob.len() {
+        return Err(CubrimError::Decode("MODE_BINFLOAT: col_modes truncated".into()));
+    }
+    let col_modes = blob[pos..pos + n_cols].to_vec();
+    pos += n_cols;
+    let tail_len = blob[pos] as usize;
+    pos += 1;
+    if pos + tail_len > blob.len() {
+        return Err(CubrimError::Decode("MODE_BINFLOAT: tail truncated".into()));
+    }
+    let tail = blob[pos..pos + tail_len].to_vec();
+    pos += tail_len;
+
+    if orig_len < tail_len || !(orig_len - tail_len).is_multiple_of(width) {
+        return Err(CubrimError::Decode("MODE_BINFLOAT: orig_len inconsistent".into()));
+    }
+    let m = (orig_len - tail_len) / width;
+
+    // Decode each column to its m uint32 values (undelta if flagged).
+    let mut cols: Vec<Vec<u32>> = Vec::with_capacity(n_cols);
+    for &mode in &col_modes {
+        if mode > 1 {
+            return Err(CubrimError::Decode(format!("MODE_BINFLOAT: bad col mode {mode}")));
+        }
+        let blen = read_u32(blob, pos)? as usize;
+        pos += 4;
+        if pos + blen > blob.len() {
+            return Err(CubrimError::Decode("MODE_BINFLOAT: col sub-blob truncated".into()));
+        }
+        let stream = decode(&blob[pos..pos + blen])?;
+        pos += blen;
+        if stream.len() != 4 * m {
+            return Err(CubrimError::Decode("MODE_BINFLOAT: column length mismatch".into()));
+        }
+        let vals = if mode == 1 {
+            binfloat_undelta_col(&stream, m)
+        } else {
+            (0..m)
+                .map(|r| {
+                    u32::from_le_bytes([
+                        stream[4 * r],
+                        stream[4 * r + 1],
+                        stream[4 * r + 2],
+                        stream[4 * r + 3],
+                    ])
+                })
+                .collect()
+        };
+        cols.push(vals);
+    }
+
+    // Re-interleave struct-of-arrays back to array-of-structs.
+    let mut out = Vec::with_capacity(orig_len);
+    for r in 0..m {
+        for col in &cols {
+            out.extend_from_slice(&col[r].to_le_bytes());
+        }
+    }
+    out.extend_from_slice(&tail);
+    if out.len() != orig_len {
+        return Err(CubrimError::Decode(format!(
+            "MODE_BINFLOAT: reconstructed {} bytes, expected {orig_len}",
+            out.len()
+        )));
+    }
+    Ok(out)
+}
+
 /// Encode `data` as a whole-file LZ container (MODE_LZ, H-25d). The entire input is
 /// LZ77-tokenized over a full-file window FIRST; the literal residue is encoded
 /// through the normal pipeline (`encode_base`, itself possibly MODE_CHUNKED) and the
@@ -1576,6 +1848,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_VCF {
             return decode_vcf(blob);
+        }
+        if blob[5] == MODE_BINFLOAT {
+            return decode_binfloat(blob);
         }
     }
 
@@ -7441,6 +7716,137 @@ mod tests {
         let blob = encode_with_config(&data, &csv_rail_cfg());
         assert_eq!(blob[5], MODE_VCF);
         for cut in (6..blob.len()).step_by(251) {
+            let _ = decode(&blob[..cut]); // must not panic
+        }
+    }
+
+    /// Synthesize a binary float-array point cloud: `n_points` records of `width/4`
+    /// columns. Coordinate columns are smooth random walks (consecutive float bit
+    /// patterns nearly equal → the reversible delta column collapses, so MODE_BINFLOAT
+    /// is selected); the last column is a low-range attribute. Deterministic LCG.
+    fn synth_pointcloud(n_points: usize, width: usize) -> Vec<u8> {
+        let n_cols = width / 4;
+        let mut state: u64 = 0x1234_5678_9ABC_DEF0;
+        let mut nxt = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 33) as u32
+        };
+        let mut pos = vec![0.0f32; n_cols];
+        let mut out = Vec::with_capacity(n_points * width);
+        for _ in 0..n_points {
+            for (c, p) in pos.iter_mut().enumerate() {
+                if c + 1 == n_cols {
+                    // attribute column: small bounded value
+                    *p = (nxt() % 256) as f32 / 255.0;
+                } else {
+                    let step = ((nxt() % 2001) as i32 - 1000) as f32 * 0.001;
+                    *p += step;
+                }
+                out.extend_from_slice(&p.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn test_binfloat_col_delta_is_reversible() {
+        // The wrapping-uint32 delta of a column must prefix-sum back byte-exact, for any
+        // bit pattern (incl. large jumps that wrap).
+        let data = synth_pointcloud(500, 16);
+        let m = data.len() / 16;
+        for c in 0..4 {
+            let stream = binfloat_col_stream(&data, m, 16, c, true);
+            let back = binfloat_undelta_col(&stream, m);
+            let orig: Vec<u32> = (0..m)
+                .map(|r| {
+                    let o = r * 16 + c * 4;
+                    u32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]])
+                })
+                .collect();
+            assert_eq!(back, orig, "delta column {c} not reversible");
+        }
+    }
+
+    #[test]
+    fn test_mode_binfloat_round_trips_and_shrinks() {
+        let data = synth_pointcloud(6000, 16); // 96000 B ≫ 64KB
+        assert!(data.len() > 65536);
+        let blob = encode_with_config(&data, &csv_rail_cfg());
+        assert_eq!(blob[5], MODE_BINFLOAT, "smooth point cloud must select MODE_BINFLOAT");
+        assert_eq!(decode(&blob).unwrap(), data, "MODE_BINFLOAT round-trip must be byte-exact");
+        let base = encode_base(&data, &csv_rail_cfg());
+        assert!(
+            blob.len() < base.len(),
+            "MODE_BINFLOAT {} not smaller than base {}",
+            blob.len(),
+            base.len()
+        );
+    }
+
+    #[test]
+    fn test_binfloat_round_trip_various_widths_and_tail() {
+        // Different record widths (16/20/24) and a stream with a non-record-aligned tail
+        // (len not a multiple of any candidate width path still round-trips via fallback).
+        for &w in &[16usize, 20, 24] {
+            let data = synth_pointcloud(5000, w);
+            let blob = encode_with_config(&data, &csv_rail_cfg());
+            assert_eq!(decode(&blob).unwrap(), data, "binfloat width {w} round-trip");
+        }
+        // Trailing partial record: append a few bytes so len % width != 0 for the natural
+        // width; the encoder either picks another width or falls back — either way exact.
+        let mut ragged = synth_pointcloud(5000, 16);
+        ragged.extend_from_slice(&[0xAB, 0xCD, 0xEF]);
+        let blob = encode_with_config(&ragged, &csv_rail_cfg());
+        assert_eq!(decode(&blob).unwrap(), ragged, "ragged-tail round-trip");
+    }
+
+    #[test]
+    fn test_binfloat_not_selected_on_text_or_incompressible() {
+        // A >64KB text/CSV must NOT select MODE_BINFLOAT (plausibility gate) and round-trips.
+        let csv = synth_csv(6000);
+        let blob = encode_with_config(&csv, &csv_rail_cfg());
+        assert_ne!(blob[5], MODE_BINFLOAT, "text must not select MODE_BINFLOAT");
+        assert_eq!(decode(&blob).unwrap(), csv);
+        // High-entropy random >64KB: binfloat must never regress (competitive min keeps base).
+        let mut state: u64 = 0xDEAD_BEEF_F00D_1234;
+        let rnd: Vec<u8> = (0..80_000)
+            .map(|_| {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                (state >> 33) as u8
+            })
+            .collect();
+        let blob2 = encode_with_config(&rnd, &csv_rail_cfg());
+        let base2 = encode_base(&rnd, &csv_rail_cfg());
+        assert!(blob2.len() <= base2.len(), "random input must not regress vs base");
+        assert_eq!(decode(&blob2).unwrap(), rnd);
+    }
+
+    #[test]
+    fn test_binfloat_property_random_float_arrays() {
+        // Correctness regardless of compressibility: random float arrays of assorted widths
+        // round-trip byte-exact (the container is lossless even when it is not selected).
+        let mut state: u64 = 0x0F1E_2D3C_4B5A_6978;
+        let mut nxt = |m: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as usize) % m
+        };
+        for _ in 0..12 {
+            let w = [12, 16, 20, 24][nxt(4)];
+            let n = 70_000 / w + nxt(2000);
+            let data: Vec<u8> = (0..n * w)
+                .map(|_| (nxt(256)) as u8)
+                .collect();
+            let blob = encode_with_config(&data, &csv_rail_cfg());
+            assert_eq!(decode(&blob).unwrap(), data, "random float-array w={w} n={n} round-trip");
+        }
+    }
+
+    #[test]
+    fn test_binfloat_truncated_no_panic() {
+        let data = synth_pointcloud(6000, 16);
+        let blob = encode_with_config(&data, &csv_rail_cfg());
+        assert_eq!(blob[5], MODE_BINFLOAT);
+        for cut in (6..blob.len()).step_by(257) {
             let _ = decode(&blob[..cut]); // must not panic
         }
     }

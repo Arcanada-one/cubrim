@@ -1,0 +1,102 @@
+{
+  "hypothesis": "H-54-IMPL MODE_BINFLOAT",
+  "code_sha": "13f1e858b637e4d102a140e4ae1aedcc4480d5ca-dirty",
+  "baseline": "zstd-19 on raw .bin",
+  "gate": "x>=1.5 vs zstd-19 (lossless)",
+  "kitti_class": {
+    "n": 5,
+    "pass_count": 4,
+    "mean_x": 1.5408,
+    "min_x": 1.4558,
+    "max_x": 1.6152
+  },
+  "cross_sensor_note": "nuScenes/ScanNet/SUN-RGBD lack tight scan order; binfloat competitive but does not beat zstd (regression-proof: never worse than pre-binfloat codec)",
+  "invariants": {
+    "tuned": "0.158273 byte-identical",
+    "holdout": "0.2390 byte-identical",
+    "tests": "235 lib +14 integration green",
+    "clippy": "0 new"
+  },
+  "rows": [
+    {
+      "file": "kitti.bin",
+      "desc": "KITTI Velodyne (azureology 000007)",
+      "input": 1843776,
+      "zstd19": 905645,
+      "cubrim": 577217,
+      "mode": 6,
+      "x_vs_zstd": 1.569,
+      "rt": true
+    },
+    {
+      "file": "kitti0.bin",
+      "desc": "KITTI (kuixu 000000)",
+      "input": 1846144,
+      "zstd19": 904083,
+      "cubrim": 621029,
+      "mode": 6,
+      "x_vs_zstd": 1.4558,
+      "rt": true
+    },
+    {
+      "file": "kitti1.bin",
+      "desc": "KITTI (kuixu 000001)",
+      "input": 1924288,
+      "zstd19": 962634,
+      "cubrim": 640668,
+      "mode": 6,
+      "x_vs_zstd": 1.5025,
+      "rt": true
+    },
+    {
+      "file": "kitti2.bin",
+      "desc": "KITTI (kuixu 000002)",
+      "input": 2030256,
+      "zstd19": 971981,
+      "cubrim": 622397,
+      "mode": 6,
+      "x_vs_zstd": 1.5617,
+      "rt": true
+    },
+    {
+      "file": "kitti114.bin",
+      "desc": "KITTI (darylclimb 000114)",
+      "input": 1920032,
+      "zstd19": 939075,
+      "cubrim": 581386,
+      "mode": 6,
+      "x_vs_zstd": 1.6152,
+      "rt": true
+    },
+    {
+      "file": "nuscenes.bin",
+      "desc": "nuScenes LIDAR_TOP (mmdet3d demo)",
+      "input": 693760,
+      "zstd19": 372788,
+      "cubrim": 361937,
+      "mode": 6,
+      "x_vs_zstd": 1.03,
+      "rt": true
+    },
+    {
+      "file": "scannet.bin",
+      "desc": "ScanNet RGB-D (mmdet3d demo)",
+      "input": 976416,
+      "zstd19": 633334,
+      "cubrim": 595820,
+      "mode": 6,
+      "x_vs_zstd": 1.063,
+      "rt": true
+    },
+    {
+      "file": "sunrgbd.bin",
+      "desc": "SUN RGB-D (mmdet3d demo)",
+      "input": 1200000,
+      "zstd19": 699472,
+      "cubrim": 702039,
+      "mode": 3,
+      "x_vs_zstd": 0.9963,
+      "rt": true
+    }
+  ]
+}
