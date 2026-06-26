@@ -904,3 +904,15 @@ created: 2026-06-17
 - **TESTS:** +6 (delta reversibility, RT+shrink, widths 16/20/24+ragged tail, not-selected-on-text/incompressible, property random float-arrays, truncated-no-panic); 235 lib + 14 integration green; clippy 0 new.
 - **INVARIANTS:** tuned 0.158273 BYTE-IDENTICAL (RT 10/10), holdout 0.2390 BYTE-IDENTICAL (RT 6/6) — gated >64KB + plausibility rejects config.json JSON, leaderboard untouched.
 - **VERDICT GO** — first BINARY-input class; structural win on raw spinning-LiDAR (mean 1.54× vs zstd-19, lossless, RT byte-exact), regression-proof on every tested cloud, zero leaderboard movement. Perf follow-up: file-level LZ runs on big plausible-float files (~12–29 s/scan) after short-circuit removal. NOT pushed.
+
+---
+
+## H-55 — High-Dimensional Embeddings (PQ / manifold): NO-GO (lossless) + H-54 IoT generalisation
+
+- **STATUS:** NO-GO (spike, no Rust). Consilium RANK-after-H-54; lit ceiling 2× vs zstd chair-flagged UNVERIFIED — now resolved as LOSSY-only.
+- **CORPORA (real):** SIFT siftsmall base 10000×128 f32 (values are exact uint8 ints — descriptors, NOT dense embeddings); GloVe glove-wiki-gigaword-50 50000×50 f32 (dense full-entropy — genuine manifold case); UCI household-power 200000×7 f32 (IoT, H-54 check). Baseline zstd-19 raw f32, gate ≥1.5× lossless through REAL cubrim.
+- **MEASURED SIFT** (zstd 1136220): best lossless uint8-recast **1.22×** (values are bytes); uint8 SoA+delta 1.00× (delta HURTS, vectors unordered); **PQ lossless (codes+integer residual+codebook, m∈{8,16,32} k=256, RT-verified) 0.85/0.94/0.88× — WORSE than zstd**.
+- **MEASURED GloVe** (zstd 7205158, ratio 0.72): SoA 1.00×, byteplane 0.85×, bit-delta(H-54) 0.84× — every lossless transform ≤1.0×; full-entropy mantissas are the floor.
+- **VERDICT NO-GO (lossless ≥1.5×):** information conservation (Gotcha #7/#8/#11) — the manifold/PQ redundancy is real but extractable ONLY LOSSILY (PQ = approximate ANN index). Lossless must transmit the residual the lossy code drops, and (measured) it carries the entropy back → PQ-lossless WORSE than zstd. Consilium "2× vs zstd" = lossy/ANN number, chair's UNVERIFIED flag correct. Per-vector delta hurts (raw vector order not manifold-smooth — clustering is vector-geometry, not byte adjacency).
+- **H-54 GENERALISATION CONFIRMED on IoT sensor float:** real UCI household-power array (200k×7 f32, 28B/rec, temporal) → cubrim MODE_BINFLOAT (mode 6) 858512 vs zstd-19 1230120 = **1.432×**, RT byte-exact. Temporal smoothness collapses bit-delta as chair predicted ("structurally identical to H-54"); shipped codec partially covers IoT-sensor-float with ZERO new code. Below 1.5× but real regression-proof win. H-54 does NOT engage on SIFT/GloVe (record widths 512/200B outside {12,16,20,24,28,32}; bit-delta hurts unordered vectors anyway).
+- **NEXT:** embeddings class closed (lossless ceiling = entropy floor; only ≥1.5× path is lossy PQ = different product). Optional future: push H-54 IoT past 1.5× via per-channel decimal/integer delta (H-40 lever) on binary float — small extension, not a new class. Codec byte-identical (spike only), tuned/holdout untouched by construction. Leaderboard untouched, NOT pushed.
