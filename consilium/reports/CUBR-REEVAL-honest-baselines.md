@@ -11,7 +11,29 @@ Tools: `/home/dev/.codec-venv` (laspy 2.7 + lazrs, pysam 0.24), xz 5.4.5, 7z PPM
 
 ---
 
-## 1. LiDAR (H-54 MODE_BINFLOAT) — DECISIVE: **RECLASSIFY** (loses to domain LAZ as shipped)
+## 1. LiDAR (H-54 MODE_BINFLOAT) — ⚠️ CORRECTED: HOLDS vs LAZ (the −14% loss was MY config error)
+
+> **CORRECTION (2026-06-26, found during the backend spike).** The verdict below
+> ("LAZ wins 1.144×") was measured with Cubrim's **default** value-scheme (BitpackFixed),
+> NOT the champion `bwt-rans` config the project uses for every leaderboard number — the
+> exact config-mismatch trap caught for VCF, which I missed here. Re-measured with
+> `--value-scheme bwt-rans` (RT byte-exact, mode 0x06, all 5 scans):
+>
+> | scan | Cubrim (bwt-rans) | LAZ | verdict |
+> |---|---|---|---|
+> | kitti.bin | 492925 | 495640 | Cubrim +0.6% |
+> | kitti0 | 532566 | 538348 | Cubrim +1.1% |
+> | kitti1 | 539755 | 561343 | Cubrim +4.0% |
+> | kitti2 | 537982 | 561887 | Cubrim +4.4% |
+> | kitti114 | 486654 | 503371 | Cubrim +3.4% |
+> | **aggregate** | **2589882** | **2660589** | **Cubrim BEATS LAZ 1.027×** |
+>
+> **Corrected verdict: H-54 LiDAR HOLDS — Cubrim marginally beats the domain codec LAZ
+> (1.027× aggregate, all 5 scans) AND beats every universal codec.** The default-config
+> number (577217) below was the artifact. The backend headroom (transform+ppmd 427933 =
+> 1.16× over LAZ) remains the upgrade target (see CUBR-backend-strengthening-spike.md).
+
+### (original, default-config measurement — superseded by the correction above)
 
 Corpus: 5 real KITTI Velodyne scans. LAZ written via laspy+lazrs at scale 1 mm
 (**verified value-lossless** on all 4 channels x,y,z,reflectance — KITTI sensor accuracy
@@ -100,7 +122,7 @@ Parquet measurement.
 
 | hypothesis | old claim | honest re-verdict |
 |---|---|---|
-| **H-54 LiDAR** | 1.54× vs zstd (GO) | **RECLASSIFY** — beats generic universal, but shipped codec **loses to domain LAZ −14%**; transform+ppmd would beat LAZ (gap = weak backend) |
+| **H-54 LiDAR** | 1.54× vs zstd (GO) | **HOLDS (corrected)** — with champion config beats domain LAZ **1.027×** (5 scans) + all universal; my −14% "loss" was a default-config error. Backend headroom: transform+ppmd 1.16× over LAZ |
 | **H-52 VCF** | −41..−46% vs zstd (GO) | **HOLDS** — beats BGZF 3.3–4.1× + xz/ppmd 1.4–1.7×; PBWT = genomic-SOTA family |
 | **H-29/31/40 Telemetry** | −53.6% vs zstd (GO) | **HOLDS** — beats strongest universal (xz/ppmd/brotli) −31..−46% |
 

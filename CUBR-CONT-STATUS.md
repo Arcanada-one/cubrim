@@ -345,3 +345,13 @@ Telemetry re-eval HOLDS: forex_tick26848/usdchf24881/status11702 beat strongest 
 ZERO codec change (re-measurement only): codec.rs byte-identical, tuned/holdout untouched by construction
 artefacts: consilium/reports/CUBR-REEVAL-honest-baselines.md; hypothesis-log CUBR-REEVAL
 STOP clean: honest re-validation done -- VCF+telemetry HOLD vs honest baselines, LiDAR RECLASSIFIED (beats generic, loses to domain LAZ; transform+strong-backend would beat LAZ -> backend is the gap). Honesty over wins. NOT pushed; operator next
+start CUBR-BACKEND-SPIKE PPMd-class entropy backend (consilium unanimous Option A) SPIKE-FIRST 2026-06-26T18:00:00Z
+LiDAR per-column diag (kitti.bin): ppmd6 beats cub-bwt-rans 1.152x/col; transform+ppmd 427933 < LAZ 495640 (1.16x) = target margin
+CONFIG-MISMATCH CORRECTION (3rd trap): re-eval "LiDAR loses LAZ -14%" used DEFAULT BitpackFixed(577217); champion bwt-rans all 5 scans BEAT LAZ, AGG 2589882 vs 2660589 = 1.027x CUBRIM BEATS LAZ RT byte-exact. LiDAR HOLDS vs domain; backend turns +2.7% into ~+16%
+GENERAL-DATA universal prize: ppmd beats Cubrim-champion EVERY holdout file (c_header1.31x config1.32x prose1.18x rust1.15x exe1.11x csv1.08x) -> PPMd-class scheme moves rank 5/8->2-3
+SIMPLE-MODEL INSUFFICIENT: naive pos-aware adaptive o1/o2/o3=251K/323K/367K WORSE than bwt-rans 166816 (learning-cost Gotcha#9); margin needs genuine PPMd escape+SEE+blending multi-day, no shortcut
+VCF BGZF honesty (chair resolved): BGZF=gzip-blocked weak, 3.3-4.1x inflated; honest 1.42-1.67x vs xz/ppmd (PBWT+bwt-rans beats ppmd-on-raw); VCF backend NOT bottleneck; telemetry wins via transform. backend upgrade = LiDAR+universal, neutral-pos VCF/telemetry
+VERDICT go-to-plan CUBR-BACKEND-SPIKE: real margin (LiDAR1.16x general1.08-1.32x) materialised by reference PPMd, unreachable by simple order-N. Plan: new value-scheme ppmd byte13 (PPMd var.H o4-6 escape C/D+SEE, deterministic integer range coder), competitive min (tuned/holdout preserved by construction), RT byte-exact, applies value-stream+MODE_BINFLOAT cols+MODE_VCF subblobs. Multi-day, plan-not-rush. Fallback Option C harden-telemetry only if build cant realise margin
+ZERO codec change (spike only): codec.rs byte-identical, tuned/holdout untouched; also CORRECTED re-eval LiDAR verdict (config-mismatch) in CUBR-REEVAL report
+artefacts: consilium/reports/CUBR-backend-strengthening-spike.md + CUBR-REEVAL correction; hypothesis-log CUBR-BACKEND-SPIKE
+STOP clean: backend-spike GO-to-plan (PPMd-class margin real+proven, simple-model insufficient, multi-day genuine PPMd); LiDAR re-verdict CORRECTED (beats LAZ 1.027x champion config, my -14% was config error); operator review integration plan before multi-day build. NOT pushed
