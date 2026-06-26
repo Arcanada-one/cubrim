@@ -875,3 +875,20 @@ created: 2026-06-17
 - **ZERO-REGRESSION:** tuned 0.158273 + holdout 0.2390 byte-identical (RT 10/10 + 6/6); VCF only on detected input.
 - **MEASURED (real 1000G chr20, RT byte-exact):** 400var×2504 19931 vs zstd 34010 = **−41.4%**; 1000var×2504 39020 vs zstd 72178 = **−45.9%** (vs gzip −63/−69%). Win grows with linkage toward spike 2.60× (−62%) at 3000var.
 - **VERDICT GO** — first new-class structural win since telemetry; non-subsumed (2.33× vs cubrim's own BWT, spike). Follow-up: base-floor geomix slow on big VCF; genotype bit-packing memory opt.
+
+---
+
+## H-53 — LiDAR point-cloud Morton-order: NO-GO (Morton counterproductive)
+
+- **STATUS:** NO-GO (spike, no Rust). Assigned consilium round-LiDAR RANK#2. Honest signal up front (chair): class MAY be NO-GO, ceiling 1.2–1.3× without a full predictor.
+- **CORPUS:** 1 real KITTI Velodyne scan (azureology/kitti-velo2cam 000007.bin, 115236 pts × 4 float32 = 1843776 B). Baseline = zstd-19 raw .bin = 905642 (gate < 597724). Cubrim is LOSSLESS; quantize→uint16 is LOSSY = lower bound only.
+- **MEASURED (faithful, RT-verified):** MORTON vs NATIVE (xyz wrapping-uint32 delta, zstd-19) native 484118 / **morton 566004 = morton/native 1.169 (+17% WORSE)**; lossy control also worse with Morton (323497 native → 371922 morton).
+- **VERDICT NO-GO** — Morton-sort is +17% worse than the native Velodyne scan order in BOTH lossy and lossless paths. The sensor's native order (laser-ring azimuth sweep) is already more 3D-local than a Z-order curve; Morton scatters consecutive points across power-of-two boundaries and DESTROYS run structure. Cube / space-filling-curve locality is counterproductive for LiDAR. Confirms consilium honest signal + brief failure-mode #1; fresh data point that a reorder only wins when it adds information the backend can't reach — here it removes reachable locality.
+
+---
+
+## H-54 — binary float-array SoA + reversible integer delta (LiDAR spin-off): spike-GO (1 scan)
+
+- **STATUS:** spike-GO (no Rust yet). Surfaced while closing H-53 Morton. The telemetry-columnar lever family (H-30 AoS→SoA reorder + H-31 per-column integer delta) transplanted to a BINARY float-array input class.
+- **MEASURED (real KITTI scan, LOSSLESS, wrapping-uint32 delta round-trips byte-exact; reflectance kept RAW — delta on refl HURTS 70028→181018):** zstd backend xyz 484118 + refl 70028 = 554146 = **1.634×**; xz 462960 = **1.956×**; **real cubrim default scheme 494823 + 71749 = 566572 = 1.599× (RT byte-exact), PASS the 1.5× gate**. Within-scan thirds 1.50/1.75/1.81×.
+- **VERDICT spike-GO (conditional)** — clears 1.5× lossless through the real backend on a NEW input class (binary IEEE-float point cloud/array) Cubrim cannot currently ingest (scope flagged at H-50). Caveats: only 1 real scan (2nd source needs auth); the win is "SoA + delta", a known structural transform — Cubrim beats raw-zstd because zstd doesn't reorder the .bin (same legitimate framing as the shipped telemetry mode). NEXT (H-54-IMPL next run, spike→IMPL split like H-29/H-52): binary float-array container mode (detect fixed-width float record stream → SoA split → per-column reversible delta vs raw, attributes raw → competitive min + mode byte → RT/property tests, tuned/holdout byte-identical); strengthen with ≥1 more real scan first.
