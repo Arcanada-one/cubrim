@@ -336,3 +336,12 @@ H-54 GENERALISATION CONFIRMED IoT sensor float: real UCI household-power 200k x7
 ZERO-REGRESSION trivially: codec.rs byte-identical (spike only, no shipped code), tuned 0.158273 + holdout 0.2390 byte-identical by construction
 artefacts: documentation/ephemeral/research/probe_h55_embeddings.py; consilium/reports/H-55-high-dim-embeddings.md; hypothesis-log H-55
 STOP clean: H-55 embeddings honest NO-GO (lossless ceiling = entropy floor, PQ/manifold lossy-only); H-54 confirmed generalises to IoT-sensor-float 1.432x (mode6, zero new code); leaderboard untouched, NOT pushed; monitor/operator next class
+start CUBR-REEVAL methodology re-validation (operator+consilium: zstd-19 = weak strawman, re-measure GO vs domain LAZ/BGZF + strong universal xz/ppmd/brotli) 2026-06-26T16:30:00Z
+LiDAR DECISIVE: 5 KITTI scans, LAZ@1mm laspy+lazrs verified VALUE-LOSSLESS (sensor ~2cm, ndiff=0 all 4 ch); AGG LAZ 2660589 vs Cubrim-binfloat 3042697 = LAZ WINS 1.144x (every scan -10..-14%); Cubrim DOES beat all generic (zstd905645/xz704996/ppmd746163/brotli812029 > Cubrim577217)
+LiDAR SUBSUMPTION-FIX: H-54 transform(SoA+delta)+ppmd=425736 BEATS LAZ 495640 by 1.16x -> transform NOT subsumed; shipped loses ONLY bc Cubrim backend weaker than ppmd/xz on delta-of-float (consilium flaw#2 confirmed for this stream)
+VERDICT-REEVAL H-54 LiDAR = RECLASSIFY: "1.54x vs zstd" weak-baseline artifact for shipped-vs-domain; beats generic universal, LOSES to domain LAZ -14%; transform real (gated by backend). Code stays (correct/regression-proof/beats-generic), claim corrected
+VCF re-eval HOLDS: Cubrim bwt-rans (default BitpackFixed=92332 config-mismatch trap caught) s400=19931/s1000=39020 beats BGZF(domain)3.3-4.1x, xz1.42-1.52x, ppmd1.49-1.68x; PBWT=genomic-SOTA family. survives
+Telemetry re-eval HOLDS: forex_tick26848/usdchf24881/status11702 beat strongest universal xz/ppmd/brotli -31..-46% (was -53.6% vs zstd); via Cubrim's OWN backend. Parquet not benched (no pyarrow) follow-up
+ZERO codec change (re-measurement only): codec.rs byte-identical, tuned/holdout untouched by construction
+artefacts: consilium/reports/CUBR-REEVAL-honest-baselines.md; hypothesis-log CUBR-REEVAL
+STOP clean: honest re-validation done -- VCF+telemetry HOLD vs honest baselines, LiDAR RECLASSIFIED (beats generic, loses to domain LAZ; transform+strong-backend would beat LAZ -> backend is the gap). Honesty over wins. NOT pushed; operator next
