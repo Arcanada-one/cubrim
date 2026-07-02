@@ -20,7 +20,7 @@
 //   Branch D: block-length header u32 — only needed for L > 65536
 //   Assertion: 4 branches == 4 cost terms.
 //
-// Outputs: docs/ephemeral/research/CUBR-0031-bench.json
+// Outputs: documentation/ephemeral/research/CUBR-0031-bench.json
 
 use cubrim::{decode, encode_with_config, EncodeConfig, ValueScheme};
 use std::fs;
@@ -28,7 +28,7 @@ use std::fs;
 // Corpus dir resolves portably relative to the crate (override: CUBRIM_CORPUS_DIR).
 fn corpus_dir() -> String {
     std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-        format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
     })
 }
 
@@ -410,7 +410,7 @@ fn bench_cubr0031_large_block() {
         .unwrap() // code/
         .parent()
         .unwrap() // Projects/Cubrim/
-        .join("docs/ephemeral/research");
+        .join("documentation/ephemeral/research");
     let json_path = out_dir.join("CUBR-0031-bench.json");
     fs::write(&json_path, &json).unwrap_or_else(|e| {
         eprintln!("Warning: could not write {}: {e}", json_path.display());

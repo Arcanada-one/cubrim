@@ -24,8 +24,9 @@ use crate::cube::build_cube_with_params;
 use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
-    parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BINFLOAT,
-    MODE_CHUNKED, MODE_COLUMNAR, MODE_CUBE, MODE_LZ, MODE_RAW, MODE_VCF, VERSION,
+    parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
+    MODE_BINFLOAT, MODE_CHUNKED, MODE_COLUMNAR, MODE_CUBE, MODE_LZ, MODE_MED16, MODE_RAW, MODE_SOA,
+    MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -225,14 +226,19 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// size pick, so an input that does not benefit falls back byte-identically to the
 /// base encoding (zero regression). Single-block inputs skip the pre-pass entirely.
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
-    encode_with_config_inner(data, config, true)
+    encode_with_config_inner(data, config, true, true)
 }
 
 /// Inner encoder. `try_binfloat` is false when called recursively to encode one column of a
 /// MODE_BINFLOAT container, which prevents binfloat→binfloat recursion while still giving each
 /// column the full LZ / columnar / base competition (that competition — chiefly the LZ
 /// pre-pass — is what compresses the delta streams; encode_base alone bitpacks them raw).
-fn encode_with_config_inner(data: &[u8], config: &EncodeConfig, try_binfloat: bool) -> Vec<u8> {
+fn encode_with_config_inner(
+    data: &[u8],
+    config: &EncodeConfig,
+    try_binfloat: bool,
+    try_lz: bool,
+) -> Vec<u8> {
     let mut best = encode_base(data, config);
     // H-52: a detected VCF is handled by the specialized PBWT genotype-matrix container,
     // which always beats the whole-file LZ / columnar-CSV competitors on this data — so
@@ -251,29 +257,120 @@ fn encode_with_config_inner(data: &[u8], config: &EncodeConfig, try_binfloat: bo
     // Each is a competitive size pick — kept only when strictly smaller — so neither
     // can ever regress a file.
     if data.len() > config.cube_size_limit() {
-        // H-54: a detected binary float-array (point cloud / telemetry .bin) is handled by the
-        // column-major reversible-delta container. It competes via min() alongside (not instead
-        // of) the LZ / columnar competitors — short-circuiting them on the broad plausible-float
-        // gate would regress a misdetected out-of-class file the LZ path codes better. Keeping
-        // all three competitive makes binfloat strictly regression-proof.
-        if try_binfloat {
-            if let Some(bf) = encode_binfloat(data, config) {
-                if bf.len() < best.len() {
-                    best = bf;
+        // The whole-file LZ + columnar pre-passes have a largely single-threaded parse/DP
+        // phase that would otherwise stall the pipeline; run them on ONE background thread
+        // so that phase overlaps the block-parallel type-transform encodes on the main
+        // thread. A single background thread (rather than one per candidate) keeps thread
+        // oversubscription bounded — each candidate already saturates the cores with its own
+        // block-parallel encode, and fanning every candidate out separately measurably hurts
+        // under load. This is a pure scheduling change: the emitted blob is still the exact
+        // competitive minimum, so output is byte-identical to a serial run. Nested transform
+        // encodes pass try_lz=false and never reach here.
+        std::thread::scope(|scope| {
+            let lz_handle = if try_lz {
+                Some(scope.spawn(|| {
+                    let lz = encode_lz_prepass(data, config);
+                    let col = encode_columnar(data, config);
+                    (lz, col)
+                }))
+            } else {
+                None
+            };
+
+            // H-54 / QUEUE#1: the type-gated transforms (binfloat float-array, MED16 16-bit
+            // medical, BCJ x86, SoA struct-of-arrays) are each a competitive min() candidate —
+            // kept only when strictly smaller, so every non-matching input is byte-identical.
+            // `try_binfloat` doubles as the heavy-transform recursion guard (nested calls pass
+            // false). The detectors return None cheaply when their structure is absent.
+            if try_binfloat {
+                if let Some(bf) = encode_binfloat(data, config) {
+                    if bf.len() < best.len() {
+                        best = bf;
+                    }
+                }
+                if let Some(m) = encode_med16(data, config) {
+                    if m.len() < best.len() {
+                        best = m;
+                    }
+                }
+                if let Some(b) = encode_bcj(data, config) {
+                    if b.len() < best.len() {
+                        best = b;
+                    }
+                }
+                if let Some(s) = encode_soa(data, config) {
+                    if s.len() < best.len() {
+                        best = s;
+                    }
                 }
             }
-        }
-        let lz = encode_lz_prepass(data, config);
-        if lz.len() < best.len() {
-            best = lz;
-        }
-        if let Some(col) = encode_columnar(data, config) {
-            if col.len() < best.len() {
-                best = col;
+
+            if let Some(h) = lz_handle {
+                let (lz, col) = h.join().expect("lz/columnar pre-pass thread panicked");
+                if lz.len() < best.len() {
+                    best = lz;
+                }
+                if let Some(col) = col {
+                    if col.len() < best.len() {
+                        best = col;
+                    }
+                }
             }
-        }
+        });
     }
     best
+}
+
+/// Build the value stream for the rANS-family value schemes and return it tagged with the
+/// winning scheme (so the header records the winner). Runs the full consolidated
+/// competition (Gotcha #4) — BWT+rANS, BWT+Huffman, order-1 Huffman, order-2 rANS,
+/// adaptive, context-mix, geomix, LZ+rANS — and keeps the strictly-smaller candidate, so
+/// ties resolve to the earlier-listed scheme (stable, deterministic). Requesting any
+/// family member therefore emits the per-block minimum and can never regress another.
+///
+/// Called exactly once per block: `encode_base` reuses the result for both the raw-vs-cube
+/// size decision and the emitted output (previously the competition ran twice per block).
+fn encode_rans_family_value_stream(seq_codes: &[usize], n_distinct: usize) -> (ValueScheme, Vec<u8>) {
+    let rans_bytes = bwt_rans_encode(seq_codes, n_distinct);
+    let bwt_huff_bytes = bwt_entropy_encode(seq_codes, n_distinct);
+    let t4_bytes_val = context_huffman_encode(seq_codes, n_distinct);
+    let order2_bytes = bwt_order2_rans_encode(seq_codes, n_distinct);
+    let adaptive_bytes = bwt_adaptive_encode(seq_codes, n_distinct);
+    let ctxmix_bytes = bwt_ctxmix_encode(seq_codes, n_distinct);
+    let geomix_bytes = bwt_geomix_encode(seq_codes, n_distinct);
+    let lz_bytes = lz_rans_encode(seq_codes, n_distinct);
+
+    let mut winner_scheme = ValueScheme::BwtRans;
+    let mut encoded_values = rans_bytes;
+    if bwt_huff_bytes.len() < encoded_values.len() {
+        winner_scheme = ValueScheme::BwtEntropy;
+        encoded_values = bwt_huff_bytes;
+    }
+    if t4_bytes_val.len() < encoded_values.len() {
+        winner_scheme = ValueScheme::EntropyContext;
+        encoded_values = t4_bytes_val;
+    }
+    if order2_bytes.len() < encoded_values.len() {
+        winner_scheme = ValueScheme::Order2Rans;
+        encoded_values = order2_bytes;
+    }
+    if adaptive_bytes.len() < encoded_values.len() {
+        winner_scheme = ValueScheme::BwtAdaptive;
+        encoded_values = adaptive_bytes;
+    }
+    if ctxmix_bytes.len() < encoded_values.len() {
+        winner_scheme = ValueScheme::BwtContextMix;
+        encoded_values = ctxmix_bytes;
+    }
+    if geomix_bytes.len() < encoded_values.len() {
+        winner_scheme = ValueScheme::BwtGeoMix;
+        encoded_values = geomix_bytes;
+    }
+    if lz_bytes.len() < encoded_values.len() {
+        winner_scheme = ValueScheme::LzRans;
+        encoded_values = lz_bytes;
+    }
+    (winner_scheme, encoded_values)
 }
 
 /// Base encoder (single-block cube/raw, or MODE_CHUNKED for large inputs). This is
@@ -372,8 +469,29 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         idx_to_code
     };
 
-    // Step 5: R7 decision — compare cube encoded size vs raw-store output size
+    // Step 5: R7 decision — compare cube encoded size vs raw-store output size.
+    //
+    // Perf: the rANS-family value schemes build an expensive competitive stream (BWT + 8
+    // entropy coders per block). That stream is byte-identical to what Step 7 emits, so it
+    // is computed ONCE here and reused for both the size decision and the output. Prior to
+    // this the full competition ran twice per block — once inside estimate_cube_size (via
+    // the `*_size` helpers, each of which encodes) and once in Step 7 — doubling encode
+    // cost. Output is unchanged (the size decision still uses the exact winner length).
     let axis_gap_counts: Vec<usize> = axis_gaps.iter().map(|g| g.len()).collect();
+    let rans_family = matches!(
+        value_scheme,
+        ValueScheme::BwtRans
+            | ValueScheme::Order2Rans
+            | ValueScheme::BwtAdaptive
+            | ValueScheme::BwtContextMix
+            | ValueScheme::BwtGeoMix
+            | ValueScheme::LzRans
+    );
+    let precomputed_values: Option<(ValueScheme, Vec<u8>)> = if rans_family {
+        Some(encode_rans_family_value_stream(&seq_codes, inverse_dict.len()))
+    } else {
+        None
+    };
     let cube_state = CubeHeaderState {
         n,
         b,
@@ -386,14 +504,26 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         inverse_dict: &inverse_dict,
         axis_gap_counts: &axis_gap_counts,
     };
-    let cube_size = estimate_cube_size(
-        &cube_state,
-        &axis_gaps,
-        gap_scheme,
-        value_scheme,
-        &seq_codes,
-        config.min_ctx_count,
-    );
+    let cube_size = if let Some((_, ref vals)) = precomputed_values {
+        // Value stream already built; size header + gaps directly (both cheap). This is
+        // exactly what estimate_cube_size would compute for this scheme, minus the
+        // redundant re-encode of the value stream.
+        let hdr_size = serialize_cube_header(&cube_state).len();
+        let gap_total: usize = match gap_scheme {
+            GapScheme::RleU16 => axis_gaps.iter().map(|g| rle_size(g)).sum(),
+            GapScheme::PackedNibble => axis_gaps.iter().map(|g| packed_nibble_size(g)).sum(),
+        };
+        hdr_size + gap_total + vals.len()
+    } else {
+        estimate_cube_size(
+            &cube_state,
+            &axis_gaps,
+            gap_scheme,
+            value_scheme,
+            &seq_codes,
+            config.min_ctx_count,
+        )
+    };
     let raw_output_size = serialize_raw_header(n, b, l).len() + l;
 
     if cube_size >= raw_output_size {
@@ -503,48 +633,10 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             //   BwtGeoMix (11)    — BWT + geometric o2/o1/o0 mixing     (H-24)
             //   LzRans (12)       — LZ77 + rANS (non-BWT match model)   (H-25)
             // Decode is header-driven, so the winner's byte is all the decoder needs.
-            let n_distinct = inverse_dict.len();
-            let rans_bytes = bwt_rans_encode(&seq_codes, n_distinct);
-            let bwt_huff_bytes = bwt_entropy_encode(&seq_codes, n_distinct);
-            let t4_bytes_val = context_huffman_encode(&seq_codes, n_distinct);
-            let order2_bytes = bwt_order2_rans_encode(&seq_codes, n_distinct);
-            let adaptive_bytes = bwt_adaptive_encode(&seq_codes, n_distinct);
-            let ctxmix_bytes = bwt_ctxmix_encode(&seq_codes, n_distinct);
-            let geomix_bytes = bwt_geomix_encode(&seq_codes, n_distinct);
-            let lz_bytes = lz_rans_encode(&seq_codes, n_distinct);
-
-            // Start from BwtRans and keep the strictly-smaller candidate, so ties
-            // resolve to the earlier-listed scheme (stable, deterministic).
-            let mut winner_scheme = ValueScheme::BwtRans;
-            let mut encoded_values = rans_bytes;
-            if bwt_huff_bytes.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::BwtEntropy;
-                encoded_values = bwt_huff_bytes;
-            }
-            if t4_bytes_val.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::EntropyContext;
-                encoded_values = t4_bytes_val;
-            }
-            if order2_bytes.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::Order2Rans;
-                encoded_values = order2_bytes;
-            }
-            if adaptive_bytes.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::BwtAdaptive;
-                encoded_values = adaptive_bytes;
-            }
-            if ctxmix_bytes.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::BwtContextMix;
-                encoded_values = ctxmix_bytes;
-            }
-            if geomix_bytes.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::BwtGeoMix;
-                encoded_values = geomix_bytes;
-            }
-            if lz_bytes.len() < encoded_values.len() {
-                winner_scheme = ValueScheme::LzRans;
-                encoded_values = lz_bytes;
-            }
+            // The competitive value stream was already built for the raw-vs-cube size
+            // decision (Step 5); reuse it here instead of re-running the 8-coder set.
+            let (winner_scheme, encoded_values) = precomputed_values
+                .expect("rANS-family value stream is precomputed before the size decision");
 
             let winner_cube_state = CubeHeaderState {
                 n,
@@ -603,21 +695,89 @@ fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let block_size = chunk_block_size(config);
     debug_assert!(block_size >= 1, "chunk block size must be positive");
 
-    let n_blocks = data.len().div_ceil(block_size);
+    let blocks: Vec<&[u8]> = data.chunks(block_size).collect();
+    let n_blocks = blocks.len();
     let mut out = Vec::with_capacity(data.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
     out.push(MODE_CHUNKED);
     out.extend_from_slice(&(n_blocks as u32).to_be_bytes());
 
-    for block in data.chunks(block_size) {
-        // Blocks are ≤ block_size ≤ cube_size_limit, so they never need the LZ
-        // pre-pass — call the base encoder directly (no nested MODE_LZ attempt).
-        let sub_blob = encode_base(block, config);
+    // Blocks are independently encoded (each ≤ block_size ≤ cube_size_limit, so none
+    // needs the LZ pre-pass — call the base encoder directly). They carry no shared
+    // state, so they are encoded in parallel across the machine's cores with a shared
+    // atomic work-stealing cursor for load balance (block cost varies with the winning
+    // value-scheme). The output is reassembled in strict block order, so the wire format
+    // — and therefore the round-trip — is byte-identical to a serial encode.
+    let sub_blobs: Vec<Vec<u8>> = encode_blocks_parallel(&blocks, config);
+
+    for sub_blob in &sub_blobs {
         out.extend_from_slice(&(sub_blob.len() as u32).to_be_bytes());
-        out.extend_from_slice(&sub_blob);
+        out.extend_from_slice(sub_blob);
     }
     out
+}
+
+/// Encode independent blocks in parallel, returning the sub-blobs in block order.
+///
+/// Uses scoped OS threads (std-only, no external runtime) with an `AtomicUsize`
+/// work-stealing cursor so faster threads pick up more blocks when block costs are
+/// uneven. Determinism is preserved: each block's sub-blob depends only on that block's
+/// bytes + `config`, and results are re-sorted into block order before return.
+fn encode_blocks_parallel(blocks: &[&[u8]], config: &EncodeConfig) -> Vec<Vec<u8>> {
+    let n_blocks = blocks.len();
+    if n_blocks == 0 {
+        return Vec::new();
+    }
+    // Single block, or parallelism disabled: encode serially (avoids thread setup cost
+    // and keeps nested candidate encodes — which already saturate the pool — cheap).
+    let max_threads = std::env::var("CUBR_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n >= 1)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        });
+    let n_threads = max_threads.min(n_blocks);
+    if n_threads <= 1 {
+        // Serial fallback: encode on the calling thread with the fast sweep enabled, then
+        // restore the prior flag so unrelated later work on this thread is unaffected.
+        let prev = GEOMIX_FAST_SWEEP.with(|f| f.replace(true));
+        let out: Vec<Vec<u8>> = blocks.iter().map(|b| encode_base(b, config)).collect();
+        GEOMIX_FAST_SWEEP.with(|f| f.set(prev));
+        return out;
+    }
+
+    let cursor = std::sync::atomic::AtomicUsize::new(0);
+    let cursor_ref = &cursor;
+    let mut collected: Vec<(usize, Vec<u8>)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..n_threads)
+            .map(|_| {
+                scope.spawn(move || {
+                    // Fresh worker thread: big-file blocks use the trimmed geomix sweep.
+                    GEOMIX_FAST_SWEEP.with(|f| f.set(true));
+                    let mut local: Vec<(usize, Vec<u8>)> = Vec::new();
+                    loop {
+                        let i = cursor_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if i >= n_blocks {
+                            break;
+                        }
+                        local.push((i, encode_base(blocks[i], config)));
+                    }
+                    local
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("block-encode thread panicked"))
+            .collect()
+    });
+    // Reassemble strict block order (threads complete out of order).
+    collected.sort_by_key(|(i, _)| *i);
+    collected.into_iter().map(|(_, blob)| blob).collect()
 }
 
 /// Candidate field delimiters tried for the columnar transform, in no particular order
@@ -875,7 +1035,7 @@ fn encode_columnar(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     let mut best: Option<Vec<u8>> = None;
     for &delim in &COLUMNAR_DELIMS {
         if let Some(blob) = build_columnar_blob(data, delim, config) {
-            if best.as_ref().is_none_or(|b| blob.len() < b.len()) {
+            if best.as_ref().map_or(true, |b| blob.len() < b.len()) {
                 best = Some(blob);
             }
         }
@@ -1426,7 +1586,7 @@ fn encode_binfloat(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     let len = data.len();
     // Gate: must be a non-trivial float32 stream. The >cube_size_limit gate keeps every
     // ≤64KB input (the frozen leaderboard) byte-identical to v1, matching MODE_LZ/COLUMNAR.
-    if len <= config.cube_size_limit() || !len.is_multiple_of(4) {
+    if len <= config.cube_size_limit() || len % 4 != 0 {
         return None;
     }
     // Candidate record widths (bytes/record). 16=KITTI xyz+refl, 20=nuScenes x,y,z,i,ring,
@@ -1435,7 +1595,7 @@ fn encode_binfloat(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     let mut best_w: Option<usize> = None;
     let mut best_proxy = f64::INFINITY;
     for &w in CAND_WIDTHS.iter() {
-        if !len.is_multiple_of(w) {
+        if len % w != 0 {
             continue;
         }
         if binfloat_plausible_fraction(data, w) < 0.75 {
@@ -1468,9 +1628,9 @@ fn encode_binfloat(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     let mut col_blobs: Vec<Vec<u8>> = Vec::with_capacity(n_cols);
     for c in 0..n_cols {
         let raw_blob =
-            encode_with_config_inner(&binfloat_col_stream(data, m, width, c, false), config, false);
+            encode_with_config_inner(&binfloat_col_stream(data, m, width, c, false), config, false, true);
         let del_blob =
-            encode_with_config_inner(&binfloat_col_stream(data, m, width, c, true), config, false);
+            encode_with_config_inner(&binfloat_col_stream(data, m, width, c, true), config, false, true);
         if del_blob.len() < raw_blob.len() {
             col_modes.push(1);
             col_blobs.push(del_blob);
@@ -1507,7 +1667,7 @@ fn decode_binfloat(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let orig_len = read_u32(blob, 6)? as usize;
     let width = blob[10] as usize;
     let n_cols = blob[11] as usize;
-    if width == 0 || !width.is_multiple_of(4) || n_cols != width / 4 {
+    if width == 0 || width % 4 != 0 || n_cols != width / 4 {
         return Err(CubrimError::Decode("MODE_BINFLOAT: bad record width".into()));
     }
     let mut pos = BF_FIXED;
@@ -1524,7 +1684,7 @@ fn decode_binfloat(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let tail = blob[pos..pos + tail_len].to_vec();
     pos += tail_len;
 
-    if orig_len < tail_len || !(orig_len - tail_len).is_multiple_of(width) {
+    if orig_len < tail_len || (orig_len - tail_len) % width != 0 {
         return Err(CubrimError::Decode("MODE_BINFLOAT: orig_len inconsistent".into()));
     }
     let m = (orig_len - tail_len) / width;
@@ -1832,6 +1992,408 @@ fn decode_chunked(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 ///
 /// Deterministic decode from header alone — no out-of-band state.
 /// Corrupt input raises CubrimError (never silent garbage).
+// ============================================================================
+// CUBR-0001 QUEUE#1 — three validated type-gated transforms (competitive min).
+// Each: encode_xxx (gate → detect → reversible transform → nested base encode →
+// self-describing wire blob) + decode_xxx (fail-closed, bounds-checked, recursive
+// decode of the nested blob → inverse transform). All emit byte-identical output
+// on non-matching inputs because encode_with_config_inner keeps them only when
+// strictly smaller than base.
+// ============================================================================
+
+// ---- MODE_MED16 (H-60/H-63): 16-bit grayscale image MED predictor ----
+
+/// JPEG-LS / LOCO-I MED predictor over u16 samples (median of left `a`, up `b`, gradient a+b-c).
+fn med16_predict(a: u16, b: u16, c: u16) -> u16 {
+    let (mn, mx) = if a < b { (a, b) } else { (b, a) };
+    if c >= mx {
+        mn
+    } else if c <= mn {
+        mx
+    } else {
+        a.wrapping_add(b).wrapping_sub(c)
+    }
+}
+
+fn med16_forward(samples: &[u16], w: usize) -> Vec<u16> {
+    let n = samples.len();
+    let mut out = vec![0u16; n];
+    for i in 0..n {
+        let x = i % w;
+        let a = if x > 0 { samples[i - 1] } else { 0 };
+        let b = if i >= w { samples[i - w] } else { 0 };
+        let c = if i >= w && x > 0 { samples[i - w - 1] } else { 0 };
+        out[i] = samples[i].wrapping_sub(med16_predict(a, b, c));
+    }
+    out
+}
+
+fn med16_inverse(res: &[u16], w: usize) -> Vec<u16> {
+    let n = res.len();
+    let mut rec = vec![0u16; n];
+    for i in 0..n {
+        let x = i % w;
+        let a = if x > 0 { rec[i - 1] } else { 0 };
+        let b = if i >= w { rec[i - w] } else { 0 };
+        let c = if i >= w && x > 0 { rec[i - w - 1] } else { 0 };
+        rec[i] = res[i].wrapping_add(med16_predict(a, b, c));
+    }
+    rec
+}
+
+/// Auto-detect the raster row width (in samples) by the minimum average vertical-abs-diff
+/// (a sample at column x, row y correlates most with the same column one row up). Returns the
+/// width minimising the lag-w L1 distance over a bounded prefix. A wrong width is harmless —
+/// the competitive min() simply won't select MODE_MED16.
+fn med16_detect_width(samples: &[u16]) -> Option<usize> {
+    let n = samples.len();
+    if n < 8192 {
+        return None;
+    }
+    let sample_n = n.min(1 << 13); // ≤8K samples probed (perf: bounds the O(wmax*sample_n) search)
+    let wmax = (n / 8).min(4096);
+    if wmax < 32 {
+        return None;
+    }
+    let mut costs: Vec<u64> = Vec::with_capacity(wmax - 31);
+    let mut best_w = 0usize;
+    let mut best_cost = u64::MAX;
+    for w in 32..=wmax {
+        let mut cost = 0u64;
+        let mut i = w;
+        while i < sample_n {
+            cost += (samples[i] as i32 - samples[i - w] as i32).unsigned_abs() as u64;
+            i += 1;
+        }
+        let cnt = (sample_n - w) as u64;
+        let avg = cost / cnt.max(1);
+        costs.push(avg);
+        if avg < best_cost {
+            best_cost = avg;
+            best_w = w;
+        }
+    }
+    if best_w == 0 {
+        return None;
+    }
+    // Confidence gate: a real 2-D raster has a SHARP vertical-period dip — the best width's
+    // avg vertical-diff is well below the median across widths. Non-image input (text, exe,
+    // random) has a flat cost curve, so we skip it here (cheaply, before the nested encode).
+    costs.sort_unstable();
+    let median = costs[costs.len() / 2];
+    if best_cost.saturating_mul(100) < median.saturating_mul(80) {
+        Some(best_w)
+    } else {
+        None
+    }
+}
+
+fn encode_med16(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    let len = data.len();
+    if len <= config.cube_size_limit() || len < 2 {
+        return None;
+    }
+    let n_samp = len / 2;
+    let tail_byte = len % 2; // 0 or 1 (odd trailing byte kept verbatim)
+    let samples: Vec<u16> = (0..n_samp)
+        .map(|i| u16::from_le_bytes([data[2 * i], data[2 * i + 1]]))
+        .collect();
+    let w = med16_detect_width(&samples)?;
+    if w == 0 || w > 65535 {
+        return None;
+    }
+    let res = med16_forward(&samples, w);
+    let mut resid = Vec::with_capacity(len);
+    for &r in &res {
+        resid.extend_from_slice(&r.to_le_bytes());
+    }
+    if tail_byte == 1 {
+        resid.push(data[len - 1]);
+    }
+    let nested = encode_with_config_inner(&resid, config, false, false);
+    let mut out = Vec::with_capacity(13 + nested.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_MED16);
+    out.extend_from_slice(&(len as u32).to_be_bytes());
+    out.extend_from_slice(&(w as u16).to_be_bytes());
+    out.push(tail_byte as u8);
+    out.extend_from_slice(&nested);
+    Some(out)
+}
+
+fn decode_med16(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    const FIXED: usize = 13; // MAGIC4 + VER1 + MODE1 + orig4 + width2 + tail1
+    if blob.len() < FIXED {
+        return Err(CubrimError::Decode("MODE_MED16 container too short".into()));
+    }
+    let orig_len = read_u32(blob, 6)? as usize;
+    let w = u16::from_be_bytes([blob[10], blob[11]]) as usize;
+    let tail_byte = blob[12] as usize;
+    if w == 0 || tail_byte > 1 || orig_len < tail_byte {
+        return Err(CubrimError::Decode("MODE_MED16: bad params".into()));
+    }
+    let resid = decode(&blob[FIXED..])?;
+    if resid.len() != orig_len {
+        return Err(CubrimError::Decode("MODE_MED16: nested length mismatch".into()));
+    }
+    if (orig_len - tail_byte) % 2 != 0 {
+        return Err(CubrimError::Decode("MODE_MED16: body not 16-bit aligned".into()));
+    }
+    let n_samp = (orig_len - tail_byte) / 2;
+    let res: Vec<u16> = (0..n_samp)
+        .map(|i| u16::from_le_bytes([resid[2 * i], resid[2 * i + 1]]))
+        .collect();
+    let rec = med16_inverse(&res, w);
+    let mut out = Vec::with_capacity(orig_len);
+    for &s in &rec {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    if tail_byte == 1 {
+        out.push(resid[orig_len - 1]);
+    }
+    if out.len() != orig_len {
+        return Err(CubrimError::Decode("MODE_MED16: reconstruct length mismatch".into()));
+    }
+    Ok(out)
+}
+
+// ---- MODE_BCJ (H-45/H-57): arch-matched branch-conversion filter for executables ----
+
+/// x86 E8/E9 (CALL/JMP near) rel↔abs filter. Non-overlapping skip-5; opcode byte never
+/// modified ⇒ identical trigger positions on encode/decode ⇒ reversible.
+fn bcj_x86(buf: &mut [u8], encode: bool) {
+    let n = buf.len();
+    let mut i = 0usize;
+    while i + 5 <= n {
+        if buf[i] == 0xE8 || buf[i] == 0xE9 {
+            let src = u32::from_le_bytes([buf[i + 1], buf[i + 2], buf[i + 3], buf[i + 4]]);
+            let pos = (i as u32).wrapping_add(5);
+            let dst = if encode {
+                src.wrapping_add(pos)
+            } else {
+                src.wrapping_sub(pos)
+            };
+            let b = dst.to_le_bytes();
+            buf[i + 1] = b[0];
+            buf[i + 2] = b[1];
+            buf[i + 3] = b[2];
+            buf[i + 4] = b[3];
+            i += 5;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// ARM64 BL (branch-link) rel↔abs filter. 4-byte aligned; top-6 opcode bits (0x25) preserved.
+fn bcj_arm64(buf: &mut [u8], encode: bool) {
+    let n = buf.len();
+    let mut pos = 0usize;
+    while pos + 4 <= n {
+        let instr = u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]);
+        if (instr >> 26) == 0x25 {
+            let src = instr & 0x03FF_FFFF;
+            let pc = (pos as u32) >> 2;
+            let dst = if encode {
+                src.wrapping_add(pc)
+            } else {
+                src.wrapping_sub(pc)
+            } & 0x03FF_FFFF;
+            let ni = 0x9400_0000u32 | dst;
+            let b = ni.to_le_bytes();
+            buf[pos] = b[0];
+            buf[pos + 1] = b[1];
+            buf[pos + 2] = b[2];
+            buf[pos + 3] = b[3];
+        }
+        pos += 4;
+    }
+}
+
+/// Detect an ELF/PE executable and its architecture. Returns 1 = x86/x86-64, 2 = ARM64.
+fn bcj_detect_arch(data: &[u8]) -> Option<u8> {
+    // ELF: 0x7F 'E' 'L' 'F', e_machine at offset 18 (u16 LE)
+    if data.len() >= 20 && data[0] == 0x7F && &data[1..4] == b"ELF" {
+        return match u16::from_le_bytes([data[18], data[19]]) {
+            0x03 | 0x3E => Some(1), // EM_386 / EM_X86_64
+            0xB7 => Some(2),        // EM_AARCH64
+            _ => None,
+        };
+    }
+    // PE: 'MZ', PE header offset at 0x3C, machine at PE+4 (u16 LE)
+    if data.len() >= 0x40 && data[0] == b'M' && data[1] == b'Z' {
+        let pe = u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
+        if pe + 6 <= data.len() && &data[pe..pe + 4] == b"PE\0\0" {
+            return match u16::from_le_bytes([data[pe + 4], data[pe + 5]]) {
+                0x014C | 0x8664 => Some(1), // I386 / AMD64
+                0xAA64 => Some(2),          // ARM64
+                _ => None,
+            };
+        }
+    }
+    None
+}
+
+fn encode_bcj(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    if data.len() <= config.cube_size_limit() {
+        return None;
+    }
+    let arch = bcj_detect_arch(data)?;
+    let mut filtered = data.to_vec();
+    match arch {
+        1 => bcj_x86(&mut filtered, true),
+        2 => bcj_arm64(&mut filtered, true),
+        _ => return None,
+    }
+    let nested = encode_with_config_inner(&filtered, config, false, false);
+    let mut out = Vec::with_capacity(11 + nested.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_BCJ);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.push(arch);
+    out.extend_from_slice(&nested);
+    Some(out)
+}
+
+fn decode_bcj(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    const FIXED: usize = 11; // MAGIC4 + VER1 + MODE1 + orig4 + arch1
+    if blob.len() < FIXED {
+        return Err(CubrimError::Decode("MODE_BCJ container too short".into()));
+    }
+    let orig_len = read_u32(blob, 6)? as usize;
+    let arch = blob[10];
+    let mut filtered = decode(&blob[FIXED..])?;
+    if filtered.len() != orig_len {
+        return Err(CubrimError::Decode("MODE_BCJ: nested length mismatch".into()));
+    }
+    match arch {
+        1 => bcj_x86(&mut filtered, false),
+        2 => bcj_arm64(&mut filtered, false),
+        _ => return Err(CubrimError::Decode(format!("MODE_BCJ: bad arch {arch}"))),
+    }
+    Ok(filtered)
+}
+
+// ---- MODE_SOA (H-40): byte-plane Structure-of-Arrays for fixed-width binary records ----
+
+fn soa_forward(data: &[u8], w: usize) -> Vec<u8> {
+    let n = data.len();
+    let nrec = n / w;
+    let body = nrec * w;
+    let mut out = vec![0u8; n];
+    for r in 0..nrec {
+        let base = r * w;
+        for p in 0..w {
+            out[p * nrec + r] = data[base + p];
+        }
+    }
+    out[body..].copy_from_slice(&data[body..]);
+    out
+}
+
+fn soa_inverse(data: &[u8], w: usize, orig_len: usize) -> Vec<u8> {
+    let nrec = orig_len / w;
+    let body = nrec * w;
+    let mut out = vec![0u8; orig_len];
+    for r in 0..nrec {
+        let base = r * w;
+        for p in 0..w {
+            out[base + p] = data[p * nrec + r];
+        }
+    }
+    out[body..].copy_from_slice(&data[body..]);
+    out
+}
+
+/// Detect a fixed record width by the minimum average lag-W L1 distance (records aligned at
+/// their true stride make each byte-column similar to the same column one record back). Prefers
+/// the smallest width within 3% of the best cost to lock onto the fundamental period, not a
+/// multiple. A wrong width is harmless — competitive min() won't select MODE_SOA.
+fn soa_detect_width(data: &[u8]) -> Option<usize> {
+    let n = data.len();
+    if n < 8192 {
+        return None;
+    }
+    let sample_n = n.min(1 << 18);
+    let mut costs = [u64::MAX; 65];
+    for w in 4..=64usize {
+        if n / w < 8 {
+            continue;
+        }
+        let mut cost = 0u64;
+        let mut i = w;
+        while i < sample_n {
+            cost += (data[i] as i32 - data[i - w] as i32).unsigned_abs() as u64;
+            i += 1;
+        }
+        let cnt = (sample_n - w) as u64;
+        costs[w] = cost / cnt.max(1);
+    }
+    let best = *costs.iter().min().unwrap();
+    if best == u64::MAX {
+        return None;
+    }
+    // Confidence gate: a fixed-width record stream has a SHARP lag-W dip at its stride, well
+    // below the median across widths. Flat cost (text/random) is rejected here before the
+    // nested encode. `costs[0..4]` are u64::MAX (skipped widths) — excluded from the median.
+    let mut valid: Vec<u64> = costs.iter().copied().filter(|&c| c != u64::MAX).collect();
+    if valid.is_empty() {
+        return None;
+    }
+    valid.sort_unstable();
+    let median = valid[valid.len() / 2];
+    if best.saturating_mul(100) >= median.saturating_mul(80) {
+        return None;
+    }
+    // smallest width within 3% of the minimum (fundamental period, not a harmonic)
+    let thresh = best + best / 33 + 1;
+    (4..=64).find(|&w| costs[w] <= thresh)
+}
+
+fn encode_soa(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    let len = data.len();
+    if len <= config.cube_size_limit() {
+        return None;
+    }
+    let w = soa_detect_width(data)?;
+    if w < 2 || w > 65535 || len / w < 8 {
+        return None;
+    }
+    let transformed = soa_forward(data, w);
+    let nested = encode_with_config_inner(&transformed, config, false, false);
+    let mut out = Vec::with_capacity(12 + nested.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_SOA);
+    out.extend_from_slice(&(len as u32).to_be_bytes());
+    out.extend_from_slice(&(w as u16).to_be_bytes());
+    out.extend_from_slice(&nested);
+    Some(out)
+}
+
+fn decode_soa(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    const FIXED: usize = 12; // MAGIC4 + VER1 + MODE1 + orig4 + width2
+    if blob.len() < FIXED {
+        return Err(CubrimError::Decode("MODE_SOA container too short".into()));
+    }
+    let orig_len = read_u32(blob, 6)? as usize;
+    let w = u16::from_be_bytes([blob[10], blob[11]]) as usize;
+    if w < 2 || orig_len / w < 1 {
+        return Err(CubrimError::Decode("MODE_SOA: bad width".into()));
+    }
+    let transformed = decode(&blob[FIXED..])?;
+    if transformed.len() != orig_len {
+        return Err(CubrimError::Decode("MODE_SOA: nested length mismatch".into()));
+    }
+    let out = soa_inverse(&transformed, w, orig_len);
+    if out.len() != orig_len {
+        return Err(CubrimError::Decode("MODE_SOA: reconstruct length mismatch".into()));
+    }
+    Ok(out)
+}
+
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     // Container modes are detected before parse_header (which only knows the
     // single-block modes 0/1): MODE_CHUNKED wraps independent sub-blobs; MODE_LZ
@@ -1851,6 +2413,15 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_BINFLOAT {
             return decode_binfloat(blob);
+        }
+        if blob[5] == MODE_MED16 {
+            return decode_med16(blob);
+        }
+        if blob[5] == MODE_BCJ {
+            return decode_bcj(blob);
+        }
+        if blob[5] == MODE_SOA {
+            return decode_soa(blob);
         }
     }
 
@@ -5713,6 +6284,37 @@ fn gm_mix_decode(payload: &[u8], count: usize, a: usize, inc: u32, lr: f64, ln: 
     out
 }
 
+thread_local! {
+    /// Set true by the multi-block parallel encoder for its worker threads, so big-file
+    /// blocks use the trimmed geomix sweep (fast, near-identical ratio — the chosen combo
+    /// is serialized so decode is unaffected). Standalone ≤64KB single-block encodes (the
+    /// frozen leaderboard) leave it false and keep the exhaustive sweep for byte-identical
+    /// output.
+    static GEOMIX_FAST_SWEEP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The single geomix combo used by the trimmed (fast) sweep. Empirically the dominant
+/// winner across the big-file corpus (inc=32, lr_idx=0); measured byte-identical on x-ray
+/// and within +0.017% on mr vs the full 4-combo sweep, at ~2× the speed.
+const GM_FAST_COMBO: (u32, usize) = (32, 0);
+
+/// The (inc, lr_idx) combos the geomix encoder sweeps. Full sweep is GM_INCS × GM_LRS; the
+/// block-parallel worker thread-local narrows it to the single dominant combo on the
+/// big-file (chunked) path. The chosen combo is always serialized in the block header, so
+/// narrowing the sweep is purely an encoder-side speed knob — decode is unaffected.
+fn gm_sweep_combos() -> Vec<(u32, usize)> {
+    if GEOMIX_FAST_SWEEP.with(|f| f.get()) {
+        return vec![GM_FAST_COMBO];
+    }
+    let mut v = Vec::with_capacity(GM_INCS.len() * GM_LRS.len());
+    for &inc in &GM_INCS {
+        for li in 0..GM_LRS.len() {
+            v.push((inc, li));
+        }
+    }
+    v
+}
+
 /// Encode the value-code stream with BWT + geometric context-mixing. The encoder sweeps
 /// GM_INCS × GM_LRS and keeps the smallest payload.
 /// Wire: [primary u16][inc u8][lr_idx u8][rc_len u32][rc].
@@ -5726,15 +6328,15 @@ pub(crate) fn bwt_geomix_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u
 
     if a > 0 && !bwt_out.is_empty() {
         let ln = gm_ln_table(CM_RESCALE + 128);
-        for &inc in &GM_INCS {
-            for (li, &lr) in GM_LRS.iter().enumerate() {
-                let p = gm_mix_encode(&bwt_out, a, inc, lr, &ln);
-                if !have || p.len() < best_payload.len() {
-                    best_payload = p;
-                    best_inc = inc;
-                    best_lr_idx = li as u8;
-                    have = true;
-                }
+        let sweep = gm_sweep_combos();
+        for &(inc, li) in &sweep {
+            let lr = GM_LRS[li];
+            let p = gm_mix_encode(&bwt_out, a, inc, lr, &ln);
+            if !have || p.len() < best_payload.len() {
+                best_payload = p;
+                best_inc = inc;
+                best_lr_idx = li as u8;
+                have = true;
             }
         }
     }
@@ -8244,7 +8846,7 @@ mod tests {
         // Use a pattern with exactly 2 distinct values to minimize W (W=1 bit).
         // 500 bytes > HEADER_OVERHEAD_BOUND=320, < 65536 -> eligible for cube.
         let data: Vec<u8> = (0..500)
-            .map(|i: usize| if i.is_multiple_of(10) { 0x01 } else { 0x00 })
+            .map(|i: usize| if i % 10 == 0 { 0x01 } else { 0x00 })
             .collect();
 
         let blob = encode(&data);

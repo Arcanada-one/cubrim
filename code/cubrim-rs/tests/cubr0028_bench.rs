@@ -1,7 +1,7 @@
 // CUBR-0028 bench: BWT (ValueScheme::BwtEntropy, scheme byte 6) vs T4 aggregate.
 // Run: cargo test --test cubr0028_bench -- --nocapture 2>/dev/null
 //
-// Outputs CUBR-0028-bench.json to docs/ephemeral/research/.
+// Outputs CUBR-0028-bench.json to documentation/ephemeral/research/.
 
 use cubrim::{decode, encode_with_config, EncodeConfig, ValueScheme};
 use std::fs;
@@ -9,7 +9,7 @@ use std::fs;
 // Corpus dir resolves portably relative to the crate (override: CUBRIM_CORPUS_DIR).
 fn corpus_dir() -> String {
     std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-        format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
     })
 }
 const CORPUS_TOTAL: usize = 51456;
@@ -217,7 +217,7 @@ fn bench_cubr0028_bwt_aggregate() {
         );
     }
 
-    // Emit JSON summary to docs/ephemeral/research/
+    // Emit JSON summary to documentation/ephemeral/research/
     let code_sha = {
         let output = std::process::Command::new("git")
             .args(["rev-parse", "HEAD"])
@@ -267,7 +267,7 @@ fn bench_cubr0028_bwt_aggregate() {
         .unwrap() // code/
         .parent()
         .unwrap() // Projects/Cubrim/
-        .join("docs/ephemeral/research");
+        .join("documentation/ephemeral/research");
     let json_path = out_dir.join("CUBR-0028-bench.json");
     fs::write(&json_path, &json).unwrap_or_else(|e| {
         eprintln!("Warning: could not write {}: {e}", json_path.display());

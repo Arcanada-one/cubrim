@@ -60,7 +60,7 @@ pub fn rle_decode(data: &[u8]) -> Result<Vec<usize>, CubrimError> {
         return Ok(vec![]);
     }
 
-    if !data.len().is_multiple_of(PAIR_SIZE) {
+    if data.len() % PAIR_SIZE != 0 {
         return Err(CubrimError::Decode(format!(
             "RLE data length {} is not a multiple of PAIR_SIZE={}. \
              Corrupt or truncated stream.",

@@ -96,6 +96,30 @@ pub const MODE_VCF: u8 = 5;
 ///       [col_modes n_cols B][tail_len 1B][tail bytes] then n_cols length-prefixed sub-blobs.
 pub const MODE_BINFLOAT: u8 = 6;
 
+/// 16-bit grayscale image MED predictor (H-60 x-ray / H-63 MR-DICOM). For a detected 16-bit
+/// raster (little-endian u16 samples, row width auto-detected by min vertical-abs-diff), each
+/// sample is replaced by its JPEG-LS/LOCO-I MED residual (median of left/up + gradient),
+/// which the 1-D cube/BWT pipeline cannot reach. Emitted only when strictly smaller than base
+/// (competitive min), gated >cube_size_limit — every non-image input stays byte-identical.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_MED16 1B][orig_len 4B][width_px 2B BE][tail_byte 1B]
+///       then a length-implicit nested sub-blob (the MED residual, decodes to orig_len bytes).
+pub const MODE_MED16: u8 = 7;
+
+/// BCJ branch-conversion filter for executables (H-45 x86 / H-57 ARM64). A detected ELF/PE
+/// binary has its arch-matched relative CALL/JMP operands (x86 E8/E9; ARM64 BL) rewritten to
+/// absolute so repeated targets become byte-identical, then coded via the base pipeline.
+/// Arch is matched to the ELF e_machine / PE machine field; mismatched filters are never
+/// applied. Competitive min, gated >cube_size_limit — non-exe input stays byte-identical.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_BCJ 1B][orig_len 4B][arch 1B] then nested sub-blob.
+pub const MODE_BCJ: u8 = 8;
+
+/// Byte-plane Structure-of-Arrays de-interleave for fixed-width binary records (H-40, sao
+/// star catalog). A detected fixed record width W (min lag-W abs-diff) is transposed so every
+/// record's byte-offset-p bytes are contiguous, grouping smoothly-varying columns into runs
+/// the backend captures. Tail (< W) kept verbatim. Competitive min, gated >cube_size_limit.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_SOA 1B][orig_len 4B][width 2B BE] then nested sub-blob.
+pub const MODE_SOA: u8 = 9;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).

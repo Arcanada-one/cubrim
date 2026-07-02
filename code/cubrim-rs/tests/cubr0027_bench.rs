@@ -1,7 +1,7 @@
 // CUBR-0027 aggregate bench: Option A (3-level) vs Option B (2-level) sweep.
 // Run: cargo test --test cubr0027_bench -- --nocapture 2>/dev/null
 //
-// Outputs CUBR-0027-bench.json to docs/ephemeral/research/.
+// Outputs CUBR-0027-bench.json to documentation/ephemeral/research/.
 
 use cubrim::{decode, encode_with_config, EncodeConfig, ValueScheme};
 use std::fs;
@@ -9,7 +9,7 @@ use std::fs;
 // Corpus dir resolves portably relative to the crate (override: CUBRIM_CORPUS_DIR).
 fn corpus_dir() -> String {
     std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-        format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
     })
 }
 const CORPUS_TOTAL: usize = 51456;
