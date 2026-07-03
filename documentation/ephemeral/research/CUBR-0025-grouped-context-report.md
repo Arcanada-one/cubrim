@@ -163,6 +163,6 @@ Phase B (Rust implementation) is **SKIPPED**. AC-4 is **n/a**.
 
 ---
 
-*Probe: `docs/ephemeral/research/cubr_0025_grouped_context_probe.py`*  
-*Bench JSON: `docs/ephemeral/research/CUBR-0025-bench.json`*  
+*Probe: `documentation/ephemeral/research/cubr_0025_grouped_context_probe.py`*  
+*Bench JSON: `documentation/ephemeral/research/CUBR-0025-bench.json`*  
 *T4 Python twin: the **clamped whole-pipeline T4 aggregate is 30217 B / 0.587240**, matching the real Rust encoder and the CUBR-0023 archive. The pure-context-Huffman Python twin diverges absolutely per cube-file (e.g., text twin 6059 B vs actual 5705 B, +6.2%); it is used only for the within-model grouped/T4 ratio, where the absolute offset cancels. It is NOT byte-exact against the Rust encoder on a per-file basis.*

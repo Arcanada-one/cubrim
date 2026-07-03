@@ -26,7 +26,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-MANIFEST="${CORPUS_MANIFEST:-$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json}"
+MANIFEST="${CORPUS_MANIFEST:-$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json}"
 PROBE_PY="$SCRIPT_DIR/probe-entropy.py"
 
 CANDIDATE_SCRIPT=""

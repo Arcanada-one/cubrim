@@ -15,7 +15,7 @@
 # Must be run as root (or with sudo) on a Debian/Ubuntu host.
 #
 # Kill switch: after provisioning, use systemctl stop cubrim-loop.timer
-# and the runbook at docs/how-to/stop-the-cubrim-cluster.md.
+# and the runbook at documentation/how-to/stop-the-cubrim-cluster.md.
 
 set -euo pipefail
 
@@ -200,7 +200,7 @@ main() {
         log "  2. cp code/cluster/infra/.env.example code/cluster/infra/.env"
         log "     # then fill in real API keys"
         log "  3. docker compose -f code/cluster/infra/docker-compose.yml up -d"
-        log "  See: docs/how-to/provision-cubrim-cluster-host.md for the full runbook."
+        log "  See: documentation/how-to/provision-cubrim-cluster-host.md for the full runbook."
     fi
 }
 

@@ -5,7 +5,7 @@ compression-research cluster on a fresh AX41 dedicated host. Execute the
 steps in order. Steps that require operator keyboard interaction are marked
 **(interactive)**.
 
-Related: `docs/how-to/stop-the-cubrim-cluster.md` — the kill switch.
+Related: `documentation/how-to/stop-the-cubrim-cluster.md` — the kill switch.
 
 ---
 
@@ -215,7 +215,7 @@ ssh root@${HOST} "tail -5 /opt/cubrim/repo/datarim/cubrim-run-log.jsonl | jq ."
 # Check leaderboard
 ssh root@${HOST} "python3 -c \"
 import json
-lb = json.load(open('/opt/cubrim/repo/docs/leaderboard/cubrim-leaderboard.json'))
+lb = json.load(open('/opt/cubrim/repo/documentation/leaderboard/cubrim-leaderboard.json'))
 print('Current best:', lb['current_best']['aggregate'])
 print('Win target:  ', lb['win_target']['gzip_aggregate'])
 \""
@@ -235,4 +235,4 @@ ssh root@${HOST} bash -c '
 ```
 
 Full kill-switch procedure including emergency options:
-`docs/how-to/stop-the-cubrim-cluster.md`
+`documentation/how-to/stop-the-cubrim-cluster.md`

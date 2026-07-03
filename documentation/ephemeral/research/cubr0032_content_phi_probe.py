@@ -33,7 +33,7 @@ Self-check: assert n_cost_terms == DECODER_BRANCHES.
 import os
 import json
 
-CORPUS_DIR = "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus"
+CORPUS_DIR = "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus"
 B = 256
 AXIS_CAP = 256  # axis-1 (occurrence rank) capacity before spill
 CORPUS_TOTAL = 51456

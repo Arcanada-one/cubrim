@@ -7,7 +7,7 @@ corpus: synthetic-fixed-seed
 ---
 
 > 🔒 **СЕКРЕТНО — внутренний артефакт.** Результаты замеров Cubrim-прототипа.
-> Живёт ТОЛЬКО в `docs/ephemeral/research/` (приватный репо). Механизм НЕ публикуется.
+> Живёт ТОЛЬКО в `documentation/ephemeral/research/` (приватный репо). Механизм НЕ публикуется.
 
 # Cubrim v1 Python Prototype — First Measurements
 

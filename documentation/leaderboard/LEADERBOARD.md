@@ -50,5 +50,5 @@ Beat gzip -9 aggregate on the frozen 10-file corpus.
 10 files, 117032 raw bytes total. Manifest SHA256: `8e6cf6a743d0ff58f7666484...`
 
 ---
-_This file is auto-generated from `docs/leaderboard/cubrim-leaderboard.json`._
+_This file is auto-generated from `documentation/leaderboard/cubrim-leaderboard.json`._
 _Do not edit manually — run `gen-leaderboard-md.sh` to regenerate._

@@ -95,9 +95,9 @@ than the sparsity buys.
 
 ## Artifacts
 
-- docs/ephemeral/research/CUBR-0032-consilium-brief.md — vendor brief
+- documentation/ephemeral/research/CUBR-0032-consilium-brief.md — vendor brief
 - datarim/pub-consilium/CUBR-0032/draft-A-claude.md — vendor A verdict
 - datarim/pub-consilium/CUBR-0032/draft-C-cursor.md — vendor C verdict
 - datarim/pub-consilium/CUBR-0032/run-log.jsonl — provenance + degradation
-- docs/ephemeral/research/cubr0032_content_phi_probe.py — deterministic arbiter
-- docs/ephemeral/research/cubr0032-content-phi-verdict.json — measured numbers
+- documentation/ephemeral/research/cubr0032_content_phi_probe.py — deterministic arbiter
+- documentation/ephemeral/research/cubr0032-content-phi-verdict.json — measured numbers

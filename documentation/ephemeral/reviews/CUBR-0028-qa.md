@@ -129,6 +129,6 @@ lossless implementation whose model and encoder share code. Recommend proceeding
 `/dr-compliance`.
 
 ## Files created
-- `docs/ephemeral/reviews/CUBR-0028-qa.md` (this report)
+- `documentation/ephemeral/reviews/CUBR-0028-qa.md` (this report)
 
 (Throwaway `tests/qa_cubr0028_fallback.rs` was created to verify competitive fallback, then removed; `CUBR-0028-bench.json` was regenerated in place by the bench test run — same content, current code_sha.)

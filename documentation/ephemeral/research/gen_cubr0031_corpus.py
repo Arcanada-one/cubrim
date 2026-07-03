@@ -2,7 +2,7 @@
 """
 CUBR-0031 — Block-bound run-heavy corpus generator.
 
-Generates docs/ephemeral/research/corpus/block_bound_runs.bin:
+Generates documentation/ephemeral/research/corpus/block_bound_runs.bin:
   L = exactly 65536 bytes  (== cube_size_limit = B*B = 256*256)
   seed = 8003
 

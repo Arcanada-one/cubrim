@@ -2,7 +2,7 @@
 
 **Generated:** 2026-06-18
 **Python:** 3.14.4  **NumPy:** 2.4.4
-**Corpus manifest:** `docs/ephemeral/research/corpus/manifest.json`
+**Corpus manifest:** `documentation/ephemeral/research/corpus/manifest.json`
 **Manifest SHA-256:** `4ee979f3bba94589feaa892949bcf92750e7e1b1cb1f1a2aa6c36dab6c5426b3`
 
 ## Methodology

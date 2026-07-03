@@ -1,7 +1,7 @@
 """
 Holdout robustness benchmark — Cubrim vs gzip-9 vs zstd-19.
 
-Runs the frozen holdout corpus (docs/ephemeral/research/holdout/) through:
+Runs the frozen holdout corpus (documentation/ephemeral/research/holdout/) through:
   - Cubrim `compress` (competitive rail) with --value-scheme bwt-rans, and also
     --value-scheme bwt-geomix (the current champion scheme), round-trip verified
     byte-exact (sha256) per file;
@@ -32,9 +32,9 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _PROJECT = _HERE.parent.parent
-HOLDOUT_DIR = _PROJECT / "docs" / "ephemeral" / "research" / "holdout"
+HOLDOUT_DIR = _PROJECT / "documentation" / "ephemeral" / "research" / "holdout"
 MANIFEST = HOLDOUT_DIR / "manifest.json"
-RESEARCH_DIR = _PROJECT / "docs" / "ephemeral" / "research"
+RESEARCH_DIR = _PROJECT / "documentation" / "ephemeral" / "research"
 CUBRIM_BIN = _PROJECT / "code" / "cubrim-rs" / "target" / "release" / "cubrim"
 
 SCHEMES = ["bwt-rans", "bwt-geomix"]

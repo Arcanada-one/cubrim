@@ -1,6 +1,6 @@
 # CUBR-0014 Entropy Value-Scheme Measurement Report
 
-> PRIVATE — internal research artefact. Lives only in `docs/ephemeral/research/`.
+> PRIVATE — internal research artefact. Lives only in `documentation/ephemeral/research/`.
 > The algorithm mechanism is strictly secret — this file must not reach public surfaces.
 
 ## Environment

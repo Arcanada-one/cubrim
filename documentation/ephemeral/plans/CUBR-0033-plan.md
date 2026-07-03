@@ -129,7 +129,7 @@ the autonomy carve-out already covers).
 3. Secrets placement: a gitignored host env-file under the cluster work dir (or Vault if
    the host gets a Vault agent — fallback is the env-file). Never in compose, never
    committed.
-4. A `docs/how-to/provision-cubrim-cluster-host.md` runbook section: the exact operator
+4. A `documentation/how-to/provision-cubrim-cluster-host.md` runbook section: the exact operator
    steps (SSH target, `bootstrap-host.sh` invocation, the one interactive
    `claude auth login`, where to drop `infra/.env`).
 
@@ -207,7 +207,7 @@ named blocker:** an unverified tool-calling model makes its worker inert.
    `infra/bakeoff-worker-b.result.json`. **Distinct weights from Worker A
    (qwen3-coder:free) is a hard requirement** (consilium voice independence).
    **DeepSeek-free is the pinned fallback** if the bake-off is inconclusive.
-3. A short `docs/how-to/verify-free-model-tool-calling.md`.
+3. A short `documentation/how-to/verify-free-model-tool-calling.md`.
 
 ### Reuse vs new
 - **Reuse:** none directly (tool-calling verification is new); the fixture/sentinel
@@ -252,7 +252,7 @@ named blocker:** an unverified tool-calling model makes its worker inert.
    write NO-GO to the leaderboard, return non-zero. Emits a run-log line for every gate
    result (Law 5).
 3. **Corpus manifest freeze + hash anchor.** `gate-corpus-hash.sh` reads
-   `docs/ephemeral/research/corpus/manifest.json` (already present; lists each file's
+   `documentation/ephemeral/research/corpus/manifest.json` (already present; lists each file's
    `sha256`, `size_bytes`), recomputes each corpus file's sha256, and asserts both the
    per-file hashes **and** a frozen manifest-level sha256 anchor match a committed
    baseline (`gate/corpus-baseline.sha256`). Any drift → fail (Gotcha #1 anti-tamper).
@@ -361,7 +361,7 @@ operator-gated), AC-9 (win condition is an explicit measured metric).
 **Verifies: V-AC-6, V-AC-9.**
 
 ### Deliverables
-1. `docs/leaderboard/cubrim-leaderboard.json` (git-tracked, orchestrator-committed) —
+1. `documentation/leaderboard/cubrim-leaderboard.json` (git-tracked, orchestrator-committed) —
    reuses the `CUBR-0028-bench.json` shape (`code_sha`, `aggregate`, per-file deltas,
    `verdict`) extended per design §E.1: `schema_version`, `win_target`
    (`gzip_aggregate: 0.30`, `xz_aggregate: 0.30`), `current_best`
@@ -370,7 +370,7 @@ operator-gated), AC-9 (win condition is an explicit measured metric).
    after the round-trip proof** (never record an unverified result) and carries
    `corpus_manifest_sha256` (anti-tamper provenance), `vs_gzip`/`vs_xz` (gap to win
    target — AC-9), `merged`, and `run_log_ref` (Law 5).
-2. `docs/leaderboard/gen-leaderboard-md.sh` → `docs/leaderboard/LEADERBOARD.md` — a
+2. `documentation/leaderboard/gen-leaderboard-md.sh` → `documentation/leaderboard/LEADERBOARD.md` — a
    Markdown table regenerated from the JSON each iteration (autonomous, reversible).
 3. `infra/promote-to-cubrim-com.sh` — the **operator-gated batch** promotion command
    (do-stage deliverable): renders the leaderboard to the cubrim.com site surface and
@@ -460,7 +460,7 @@ merge/leaderboard write traces to a run-log entry). **Verifies: V-AC-8.**
 1. **Kill switch (single documented control):** `systemctl stop cubrim-loop.timer
    cubrim-loop.service` + a `cubrim-loop stop` wrapper that also stops worker
    containers — halts the loop cleanly mid-phase; the STATE doc preserves the resume
-   point. Documented in the kill-switch runbook (`docs/how-to/stop-the-cubrim-cluster.md`).
+   point. Documented in the kill-switch runbook (`documentation/how-to/stop-the-cubrim-cluster.md`).
    Termination affects **only** the cluster (the trader is on a different host; `main`
    is left at its last green state) — Law 4 terminability.
 2. **Audit trail (Law 5):** every container uniquely labelled (`cubrim-orchestrator`,
@@ -521,7 +521,7 @@ behind the AC-5 rail). Rollback is therefore mostly "stop + remove additive file
   leaderboard `current_best` is reset to the prior record (the leaderboard is an
   append-only JSON — revert the offending append commit).
 - **Corpus tamper suspicion:** `gate-corpus-hash.sh` is the detector; restore the corpus
-  from `git checkout docs/ephemeral/research/corpus/` (the files are git-tracked) and
+  from `git checkout documentation/ephemeral/research/corpus/` (the files are git-tracked) and
   re-anchor `gate/corpus-baseline.sha256`.
 
 ---
@@ -614,10 +614,10 @@ behind the AC-5 rail). Rollback is therefore mostly "stop + remove additive file
 
 ## Phase 6 (docs) — Documentation to update (dr-plan Phase 6)
 
-- `docs/how-to/provision-cubrim-cluster-host.md` (P1) — operator provisioning steps.
-- `docs/how-to/verify-free-model-tool-calling.md` (P3).
-- `docs/how-to/stop-the-cubrim-cluster.md` (P8) — kill-switch runbook.
-- `docs/reference/cubrim-leaderboard-schema.md` (P6) — the leaderboard JSON schema.
+- `documentation/how-to/provision-cubrim-cluster-host.md` (P1) — operator provisioning steps.
+- `documentation/how-to/verify-free-model-tool-calling.md` (P3).
+- `documentation/how-to/stop-the-cubrim-cluster.md` (P8) — kill-switch runbook.
+- `documentation/reference/cubrim-leaderboard-schema.md` (P6) — the leaderboard JSON schema.
 - `documentation/runbooks/multi-vendor-agent-cluster.md` (ecosystem) — cross-link the
   Cubrim cluster as a consumer of the runbook's conventions.
 - `CUBR-AUTONOMOUS-STATE.md` (repo root, P7) — created + documented in CLAUDE.md Key Files.

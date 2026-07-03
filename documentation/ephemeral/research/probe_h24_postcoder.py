@@ -20,7 +20,7 @@ import math
 from collections import Counter
 from pathlib import Path
 
-CORPUS = Path("docs/ephemeral/research/corpus")
+CORPUS = Path("documentation/ephemeral/research/corpus")
 # cube-mode files only (raw-mode files don't run the value coder)
 CUBE_FILES = ["sparse_clustered", "text", "log_like", "binary_mixed", "block_bound_runs"]
 ORIG = {"sparse_clustered": 2048, "text": 16384, "log_like": 16384,

@@ -15,7 +15,7 @@ set -euo pipefail
 GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$GATE_DIR/../../.." && pwd)"
 RUST_DIR="$REPO_ROOT/code/cubrim-rs"
-MANIFEST="$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json"
+MANIFEST="$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json"
 CUBRIM_BIN="$RUST_DIR/target/release/cubrim"
 
 die() { echo "gate-roundtrip: ERROR: $*" >&2; exit 2; }
@@ -46,7 +46,7 @@ while IFS= read -r entry; do
 
     # Resolve path portably
     if [ ! -f "$path" ]; then
-        path="$REPO_ROOT/docs/ephemeral/research/corpus/$(basename "$path")"
+        path="$REPO_ROOT/documentation/ephemeral/research/corpus/$(basename "$path")"
     fi
 
     if [ ! -f "$path" ]; then

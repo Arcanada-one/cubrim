@@ -282,7 +282,7 @@ STATE
 
 # ── Test 16: provision runbook references the kill switch ─────────────────────
 @test "provision-cubrim-cluster-host.md cross-links the stop runbook" {
-    RUNBOOK="$REPO_ROOT/docs/how-to/provision-cubrim-cluster-host.md"
+    RUNBOOK="$REPO_ROOT/documentation/how-to/provision-cubrim-cluster-host.md"
     [ -f "$RUNBOOK" ]
     grep -q "stop-the-cubrim-cluster" "$RUNBOOK"
 }

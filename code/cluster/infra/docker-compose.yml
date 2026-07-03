@@ -12,7 +12,7 @@
 #   total claimed : 5.5 / 14 GB  (fits on 6-core AX41, leaves headroom)
 #
 # Law 5 identity: every container carries cubrim-role + cubrim-host labels.
-# Kill switch: see docs/how-to/stop-the-cubrim-cluster.md
+# Kill switch: see documentation/how-to/stop-the-cubrim-cluster.md
 #
 # Bring up:   docker compose up -d
 # Bring down: docker compose down

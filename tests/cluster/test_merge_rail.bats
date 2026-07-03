@@ -12,8 +12,8 @@
 
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
 GATE_DIR="$REPO_ROOT/code/cluster/gate"
-LEADERBOARD="$REPO_ROOT/docs/leaderboard/cubrim-leaderboard.json"
-MANIFEST="$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json"
+LEADERBOARD="$REPO_ROOT/documentation/leaderboard/cubrim-leaderboard.json"
+MANIFEST="$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json"
 CUBRIM_BIN="$REPO_ROOT/code/cubrim-rs/target/release/cubrim"
 FIXTURE_DIR="$BATS_TEST_DIRNAME/fixtures"
 
@@ -100,7 +100,7 @@ with open('$TAMPERED_BASELINE', 'w') as f:
 set -euo pipefail
 GATE_DIR="PLACEHOLDER_GATE_DIR"
 REPO_ROOT="$(cd "$GATE_DIR/../../.." && pwd)"
-MANIFEST="$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json"
+MANIFEST="$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json"
 BASELINE="PLACEHOLDER_WRONG_BASELINE"
 die() { echo "gate-corpus-hash: ERROR: $*" >&2; exit 1; }
 [ -f "$MANIFEST" ] || die "manifest not found: $MANIFEST"
@@ -181,7 +181,7 @@ while IFS= read -r entry; do
     name="$(echo "$entry" | jq -r '.name')"
     expected="$(echo "$entry" | jq -r '.sha256')"
     path="$(echo "$entry" | jq -r '.path')"
-    [ -f "$path" ] || path="$REPO_ROOT/docs/ephemeral/research/corpus/$(basename "$path")"
+    [ -f "$path" ] || path="$REPO_ROOT/documentation/ephemeral/research/corpus/$(basename "$path")"
     [ -f "$path" ] || { echo "gate-corpus-hash: FAIL $name — file missing" >&2; FAIL=1; continue; }
     actual="$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$path")"
     if [ "$actual" != "$expected" ]; then
@@ -253,7 +253,7 @@ EOF
 set -euo pipefail
 GATE_DIR="PLACEHOLDER_GATE_DIR"
 REPO_ROOT="$(cd "$GATE_DIR/../../.." && pwd)"
-MANIFEST="$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json"
+MANIFEST="$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json"
 CUBRIM_BIN="PLACEHOLDER_MOCK"
 command -v jq >/dev/null 2>&1 || { echo "jq required" >&2; exit 2; }
 [ -f "$MANIFEST" ] || { echo "manifest missing" >&2; exit 2; }
@@ -263,7 +263,7 @@ TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 while IFS= read -r entry; do
     name="$(echo "$entry" | jq -r '.name')"
     path="$(echo "$entry" | jq -r '.path')"
-    [ -f "$path" ] || path="$REPO_ROOT/docs/ephemeral/research/corpus/$(basename "$path")"
+    [ -f "$path" ] || path="$REPO_ROOT/documentation/ephemeral/research/corpus/$(basename "$path")"
     [ -f "$path" ] || { echo "FAIL $name missing" >&2; FAIL=1; continue; }
     compressed="$TMPD/${name}.cubrim"
     decompressed="$TMPD/${name}.dec"
@@ -356,7 +356,7 @@ set -euo pipefail
 GATE_DIR="PLACEHOLDER_GATE_DIR"
 REPO_ROOT="$(cd "$GATE_DIR/../../.." && pwd)"
 LEADERBOARD="PLACEHOLDER_LEADERBOARD"
-MANIFEST="$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json"
+MANIFEST="$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json"
 CUBRIM_BIN="$REPO_ROOT/code/cubrim-rs/target/release/cubrim"
 command -v jq >/dev/null 2>&1 || { echo "jq required" >&2; exit 2; }
 FAIL=0
@@ -375,7 +375,7 @@ while IFS= read -r entry; do
     name="$(echo "$entry" | jq -r '.name')"
     path="$(echo "$entry" | jq -r '.path')"
     size_bytes="$(echo "$entry" | jq -r '.size_bytes')"
-    [ -f "$path" ] || path="$REPO_ROOT/docs/ephemeral/research/corpus/$(basename "$path")"
+    [ -f "$path" ] || path="$REPO_ROOT/documentation/ephemeral/research/corpus/$(basename "$path")"
     [ -f "$path" ] || { echo "SKIP $name" >&2; continue; }
     compressed="$TMPD/${name}.cubrim"
     "$CUBRIM_BIN" compress "$path" "$compressed" 2>/dev/null || { FAIL=1; continue; }
@@ -472,11 +472,11 @@ print('Gate order: OK')
     # compare against main's real baseline (0.299337 on the 10-file corpus),
     # not the tampered working-tree copy.
     #
-    # The gate reads via: git show main:docs/leaderboard/cubrim-leaderboard.json
+    # The gate reads via: git show main:documentation/leaderboard/cubrim-leaderboard.json
     # so the branch's working-tree file is never consulted for the baseline.
 
     # Temporarily tamper the working-tree leaderboard
-    REAL_LEADERBOARD="$REPO_ROOT/docs/leaderboard/cubrim-leaderboard.json"
+    REAL_LEADERBOARD="$REPO_ROOT/documentation/leaderboard/cubrim-leaderboard.json"
     BACKUP="$TMPDIR_TEST/leaderboard-backup.json"
     cp "$REAL_LEADERBOARD" "$BACKUP"
 
@@ -515,7 +515,7 @@ with open('$TMPDIR_TEST/tamper-bench.json', 'w') as f:
     # gate (a) reports reading from main/bootstrap (not the working-tree values)
     # and (b) still passes on the current binary against the real per-file baselines.
 
-    REAL_LEADERBOARD="$REPO_ROOT/docs/leaderboard/cubrim-leaderboard.json"
+    REAL_LEADERBOARD="$REPO_ROOT/documentation/leaderboard/cubrim-leaderboard.json"
     BACKUP="$TMPDIR_TEST/leaderboard-backup-comp.json"
     cp "$REAL_LEADERBOARD" "$BACKUP"
 
@@ -586,10 +586,10 @@ print(f'10-file aggregate baseline OK: {baseline:.6f}')
     # Copy the WORKING-TREE repo (not a git clone of HEAD) so the test exercises
     # the current gate scripts, then point the clone's main away from the leaderboard.
     SCRATCH="$TMPDIR_TEST/scratch"
-    mkdir -p "$SCRATCH/code/cluster/gate" "$SCRATCH/code/bench" "$SCRATCH/docs/ephemeral/research/corpus"
+    mkdir -p "$SCRATCH/code/cluster/gate" "$SCRATCH/code/bench" "$SCRATCH/documentation/ephemeral/research/corpus"
     cp "$GATE_DIR"/*.sh "$GATE_DIR"/*.sha256 "$SCRATCH/code/cluster/gate/"
     cp "$REPO_ROOT/code/bench/run_bench.py" "$SCRATCH/code/bench/" 2>/dev/null || true
-    cp "$MANIFEST" "$SCRATCH/docs/ephemeral/research/corpus/"
+    cp "$MANIFEST" "$SCRATCH/documentation/ephemeral/research/corpus/"
     # Make it a git repo with NO leaderboard on main → gate falls back to pinned baseline
     git -C "$SCRATCH" init -q
     git -C "$SCRATCH" -c user.email=t@t -c user.name=t add -A

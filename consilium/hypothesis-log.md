@@ -939,3 +939,150 @@ created: 2026-06-17
 - **SIMPLE MODEL INSUFFICIENT (cost reality):** naive pos-aware adaptive order-1/2/3 = 251K/323K/367K on xyz0_delta, WORSE than bwt-rans 166816 (learning-cost wall, Gotcha #9). Margin needs genuine PPMd (escape C/D + SEE + order blending), multi-day — no shortcut.
 - **VCF BGZF honesty (chair suspicion resolved):** BGZF=htslib gzip-blocked (weak); 3.3-4.1× inflated. Honest strong-bar margin 1.42-1.67× vs xz/ppmd (Cubrim PBWT+bwt-rans beats even ppmd-on-raw). VCF backend NOT bottleneck. Telemetry wins via transform (1.84× vs ppmd). So backend upgrade = LiDAR + general-universal, neutral-positive on VCF/telemetry.
 - **VERDICT GO-to-plan:** real margin (LiDAR 1.16×, general 1.08-1.32×) materialised by reference PPMd, unreachable by simple order-N. New value-scheme `ppmd` (byte 13, PPMd var.H order-4..6 escape C/D + SEE, deterministic integer range coder) behind competitive min (tuned/holdout preserved by construction), RT byte-exact, applies to value stream + MODE_BINFLOAT columns + MODE_VCF sub-blobs. Verify post-build: LiDAR decisive, holdout moves, telemetry held, world rank. Fallback Option C (harden telemetry) only if build can't realise margin. Report: consilium/reports/CUBR-backend-strengthening-spike.md
+
+---
+
+## CUBR-REVALIDATE — config-mismatch audit (H-29..H-55) + round-4 corpora vs STRONG universals
+
+- **TASK 1 — config-mismatch audit (full table: `consilium/reports/CUBR-REVALIDATE-config-mismatch.md`).** Re-checked every H-29..H-55 NO-GO/neutral verdict for the BitpackFixed-default vs champion-bwt-rans trap by reading each spike's actual codec invocation. **Result: no focus NO-GO is a config-mismatch false-negative.** H-36/H-39/H-41/H-49/H-50 probes all pin `--value-scheme bwt-rans`; H-48/H-51/H-53 are config-independent relative/subsumption tests. **Directional key:** default is the WEAKER backend, so config-mismatch can only HIDE a win (false under-performance on POSITIVE hypotheses) — never create a false subsumption NO-GO (Gotcha #11: a stronger backend subsumes a pre-transform MORE, so champion only deepens H-41/H-48/H-49/H-51). All three real traps were positive hypotheses (H-52 VCF default 92332→19931; H-54 LiDAR default 577217→2589882-beats-LAZ; LiDAR re-eval), already caught. Standing rule reinforced: the danger zone is positive hypotheses on default, not subsumption NO-GOs.
+- **TASK 2 — round-4 corpora re-measured on champion vs strongest universal (min xz-9e/PPMd/brotli-q11), NOT zstd (`consilium/reports/CUBR-round4-strong-baseline.md`; RT byte-exact all 4):**
+  - **covtype_cartographic.csv (non-temporal wide one-hot): Cubrim WINS strongest universal 1.251×** (143124 vs PPMd 179022 / xz 182116 / brotli 181868). The win is the **base champion** (columnar+bwt-rans), NOT the failed H-49-reborn transform → covtype-class (non-temporal wide categorical/one-hot tables) joins telemetry+VCF as a class the SHIPPED codec already beats strong universals on. NEW honest data point.
+  - **adult_census.csv: mixed** — Cubrim 89152 beats xz/brotli/zstd ~23% but LOSES to PPMd 81761 by 8.3% (high-order text model on categorical strings).
+  - **CORPUS 2 supercond raw/zscore f64: entropy floor** — Cubrim ≈ xz (raw 525738 vs 502616) / ≈ brotli (zscore 559742 vs 556763); PPMd catastrophic on binary floats. **H-50 ALP-RD NO-GO HOLDS vs strong universals too** (low-precision derived doubles → no sub-byte slack; ALP's ×4.3 is for full-entropy scientific doubles, absent here).
+- **NET:** verdicts hold under the honest strong-universal bar; new finding = covtype/non-temporal-wide-categorical is a base-codec win class. Codec untouched, NOT pushed. Champion bwt-rans pinned throughout; RT byte-exact verified.
+- **CLASS-CONFIRM (n=3, added same run):** poker_hand.csv (pure-categorical wide, real UCI) Cubrim champion **1.130× vs strongest universal** (205929 vs PPMd 232634; xz/brotli/zstd −25..−27%), RT byte-exact. So **non-temporal wide LOW-cardinality categorical/one-hot tables = a Cubrim base-codec WIN class (covtype 1.25×, poker 1.13×, both pure), zero new code** — joins telemetry + VCF. Boundary sharpened: adult LOSES to PPMd only via its high-cardinality TEXT columns (occupation/country) → exactly the gap CUBR-BACKEND-SPIKE (PPMd-class backend, GO-to-plan) targets. Provenance: poker UCI id 158 sha256 c8ba978c9c0e1f1b. Report updated: consilium/reports/CUBR-round4-strong-baseline.md.
+
+---
+
+## H-45/H-37 — BCJ x86 filter (exe): GRID STEP 1 — false-NO-GO→GO(exe) FLIP CONFIRMED, methodology validated
+
+- **METHOD:** per-type grid (CUBR-METHODOLOGY-per-type-grid.md), champion `--value-scheme bwt-rans`, RT byte-exact. A=cub(raw), B=cub(BCJ), L=min(xz-9e/PPMd/brotli-q11). self-gain=(A−B)/A. Reversible x86 E8/E9 rel↔abs filter (non-overlapping skip-5, self-RT verified). Real Silesia+system exe slices (640KB, provenance+SHA in report). Spike only, codec.rs untouched, NOT pushed.
+- **MEASURED (RT byte-exact all):** ooffice (PE32 x86 dense) A 322674 → **B 288710 = self-gain +10.53%**, L=ppmd 292159, **B/L 0.988 (BEATS leader)** → **GO(exe)**. libc (ELF-64 PIC dense) A 288357 → B 282706 = **+1.96%**, L=xz 267384, B/L 1.057 → **GO(self-only)** (real non-subsumed gain, doesn't overtake xz; PIC=fewer direct E8). mozilla (tar code-sparse slice) −0.47% → NO-GO(slice).
+- **VECTOR VERDICT:** `H-45 BCJ: GO{exe·PE-dense} · GO-self-only{exe·ELF-PIC} · NO-GO{code-sparse}`. Non-subsumed on EVERY dense-code exe (both > +1.5% floor) — the old global-NO-GO was a mixed-corpus artifact (mozilla-style code-sparse −0.47% drowned the ooffice +10.5%). Type-gated (detect PE/ELF machine; byte-identical elsewhere) → SHIPS for exe.
+- **METHODOLOGY VALIDATION: PASS** — the grid produced the predicted false-NO-GO→GO(exe) flip. Full per-type re-eval greenlit. NEXT (STEP 2+): H-39 image 2D predictor (MED/Paeth), H-40 binary field-split, H-41 text backend, then remaining NO-GO/MARGINAL cells per grid. Productionization (when GO'd): real LZMA 0x00/0xFF mask + arch-detect + competitive min(raw,bcj). Report: consilium/reports/H-45-BCJ-exe-grid.md.
+
+---
+
+## H-39 — 2D spatial predictor (image): GRID STEP 2 — false-NO-GO→GO(image·continuous-tone) FLIP CONFIRMED
+
+- **METHOD:** per-type grid, champion bwt-rans, RT byte-exact. A=cub(raw px), B=cub(predictor-residual), L=min(xz-9e/ppmd/brotli-q11). Reversible predictors (self-RT asserted). Real corpus: Canterbury ptt5 (bilevel 1728×2376, XOR-up) + Kodak kodim23 (RGB 768×512, JPEG-LS MED; PNG→raw via zlib decoder). Provenance+SHA in report. Spike only, codec.rs untouched, NOT pushed.
+- **MEASURED (RT byte-exact):** kodim23 RGB MED A 640443 → **B 483598 = self-gain +24.49%**, L=xz 629320, **B/L 0.768 (BEATS leader by 30%; ppmd 654328, brotli 634857)** → **GO(image·continuous-tone)**. ptt5 bilevel XOR-up A 44825 → B 45814 = **−2.21%** → NO-GO (subsumed: cubrim BWT/LZ already has the vertical fax correlation).
+- **VECTOR VERDICT:** `H-39 2D-predictor: GO{image·continuous-tone} · NO-GO{image·bilevel}`. MED = real non-subsumed 2D structure invisible to the 1-D byte pipeline (+24.49% ≫ 1.5% floor); without it cubrim trailed every universal, with it leads by 24-26%. Type-gated (raster w/ geometry; byte-identical elsewhere) → SHIPS for continuous-tone image. HONEST scope: gate is vs strong UNIVERSALS (won decisively); MED≈basic image codec, dedicated JPEG-LS/FFV1/JXL would still lead (same framing as telemetry/VCF general-archiver wins).
+- **METHODOLOGY VALIDATION: 2nd PASS** — image flips false-NO-GO→GO; a global verdict would have muddied +24.49%(continuous) with −2.21%(bilevel). NEXT (STEP 3): H-40 binary field-split (sao/kennedy.xls), then H-41 text backend. Productionization: geometry-detect + per-channel MED/Paeth competitive min + RGB→YCoCg-R color transform (separate H). Report: consilium/reports/H-39-image-2dpredictor-grid.md.
+
+---
+
+## H-40-byteplane — binary field-split / byte-plane (SoA): GRID STEP 3 — GO{binary·fixed-width} · NO-GO{xls/doc}
+
+- **NOTE:** byte-plane/SoA de-interleave for the BINARY type (methodology STEP 3) — distinct from shipped telemetry H-40 (decimal-float→int delta). champion bwt-rans, RT byte-exact, subsumption-control (A vs B same backend). Real corpus: Silesia sao (star catalog, record width 28 = 7251944/258998 exact) + Canterbury kennedy.xls (BIFF). Provenance+SHA in report. Spike only, codec.rs untouched, NOT pushed.
+- **MEASURED sao_700k (RT byte-exact):** raw A=cub 484866 (L=xz 439112). byte-plane **W=28 (true record): B 459034 = self-gain +5.33%**, B/L 1.045, **closes 56% of A→L gap → GO(binary·fixed-width)** (gate2 ≥50%). W=14 −0.85%, W=7 −11.32% → gain SHARPLY peaked at real record width (SoA alignment, not noise).
+- **MEASURED kennedy.xls (RT byte-exact):** raw A=cub 52874 (≈xz 51868; ppmd 138741 catastrophic). byte-plane **W=8: B 103924 = self-gain −96.55%** (B/L 2.004) → **NO-GO** — BIFF is variable-record, de-interleave destroys it; cubrim already ≈xz with no transform.
+- **VECTOR VERDICT:** `H-40 byte-plane/SoA: GO{binary·fixed-width-records} · NO-GO{binary·structured-doc/database·xls} · NO-GO{misaligned-width}`. Non-subsumed real gain (+5.33%) ONLY at the true record stride; needs width detection. Type-gated (engage on confident fixed-width stride + competitive min; byte-identical else) → SHIPS for fixed-width binary records. Same family as shipped MODE_BINFLOAT (H-54), extended to integer/mixed records. HONEST: weaker GO than H-45/H-39 (closes 56% gap, doesn't overtake xz).
+- **METHODOLOGY VALIDATION: 3rd PASS** — grid split binary into GO{fixed-width +5.33%} vs NO-GO{xls −96.55%}; a mixed-binary global verdict would have buried the sao win. NEXT (STEP 4): H-41 text backend (text-only, ppmd gap), then remaining NO-GO/MARGINAL cells per grid. Report: consilium/reports/H-40-binary-fieldsplit-grid.md.
+
+---
+
+## H-41 — text type: GRID STEP 4 — NO-GO(transform), lever = PPMd-class backend (gap quantified)
+
+- **METHOD:** per-type grid, champion bwt-rans, RT byte-exact. Text has NO reversible structural transform (redundancy = high-order context, a backend property — Gotcha #11). Cell measures A=cub(raw text) vs L=strongest universal across real prose (Canterbury alice29/lcet10/plrabn12 + Silesia dickens 1MB slice). Provenance+SHA in report. Measurement only, codec.rs untouched, NOT pushed.
+- **MEASURED (RT byte-exact, cub/L = cub/ppmd):** alice29 1.275, lcet10 1.310, plrabn12 1.322, dickens_1mb 1.318; **AGG(text) cub 661175 vs min-universal = 1.314** (cubrim ~31% behind PPMd on prose; also trails xz ~1.02-1.06×). PPMd (order-4..6+SEE) = text SOTA among universals.
+- **VECTOR VERDICT:** `H-41 text: NO-GO(transform) · LEVER=backend`. The ~1.31× text gap to PPMd is real but NOT addressable by a type-gated transform — it is a backend-strength deficit. Fix = PPMd-class entropy backend (CUBR-BACKEND-SPIKE: GO-to-plan, value-scheme `ppmd`), targeting ~−24% to reach PPMd parity. This cell is the grid's honest negative space: exe/image/binary flip via transforms (H-45/H-39/H-40), text does not — its lever is orthogonal.
+- **GRID STATUS after 4 steps:** GO(exe·BCJ, beats leader), GO(image·MED, beats leader +30%), GO(binary·fixed-width SoA, closes 56% gap), text→backend(PPMd, GO-to-plan). NEXT: remaining NO-GO/MARGINAL cells per grid (database type beyond xls; re-confirm existing GO classes per-type). Report: consilium/reports/H-41-text-backend-grid.md.
+
+---
+
+## H-42 — code & database types: GRID STEP 5 — both NO-GO(transform), backend-lever (grid complete 6/6)
+
+- **METHOD:** per-type grid, champion bwt-rans, RT byte-exact. code=backend-gap (cub vs universals, no transform); database=byte-plane SoA spike (like sao H-40). Real corpus: Canterbury grammar.lsp/fields.c/cp.html + repo cubrim_src.rs (533K); Silesia osdb 1MB. Provenance+SHA in report. Spike only, codec.rs untouched, NOT pushed.
+- **MEASURED code (RT byte-exact, cub/L):** grammar.lsp 1.281, fields.c 1.254, cp.html 1.200, cubrim_src.rs 1.135; **AGG(code) cub 116042 = 1.145** (trails ppmd/brotli; gap shrinks on larger files). No reversible structural transform → **NO-GO(code·transform)·LEVER=backend** (same as text).
+- **MEASURED database osdb (RT byte-exact):** raw A=cub 341396 (L=ppmd 266614, cubrim 28% behind). byte-plane **W=4: B 540911 = self-gain −58.44%** (B/L 2.029), W=8/100/200 also catastrophic → **NO-GO(database·transform)·LEVER=backend**. osdb is variable-record text-heavy DB dump, NOT fixed-width like sao → confirms binary-SoA GO is record-structure-gated, not "database type" generally.
+- **GRID COMPLETE 6/6 TYPES.** Transform GO: exe(BCJ), image·continuous-tone(MED), binary·fixed-width(SoA). Backend-lever NO-GO: text, code, database (all → PPMd-class backend, CUBR-BACKEND-SPIKE GO-to-plan). Summary: consilium/reports/CUBR-per-type-grid-summary.md. NEXT: search new classes/hypotheses from literature per grid-from-the-start rule.
+
+---
+
+## H-43 — colour decorrelation (sub-green) before MED, image·RGB: GO — stacks on H-39 MED
+
+- **METHOD:** per-type grid (image·RGB), champion bwt-rans, RT byte-exact. Reversible WebP-lossless sub-green (R'=(R−G)&255, B'=(B−G)&255, exact mod 256) then per-channel MED. Real Kodak kodim23 768×512×3. Spike only, codec.rs untouched, NOT pushed.
+- **MEASURED (RT byte-exact):** A=cub_raw 640443. sub-green only 596328 (+6.89%). **sub-green+MED 453327 = self-gain +29.22%** vs MED-only 483598 (+24.49%) → **incremental −6.26% over MED** (> +1.5% floor → NOT subsumed). B/L = 453327/xz629320 = **0.720 (beats strong leader by 39%**, up from MED-only 30%).
+- **VECTOR VERDICT:** `H-43 colour(sub-green): GO{image·RGB}, stacks on MED`. Real additive inter-channel-decorrelation lever; image-RGB-only (byte-identical elsewhere). Strengthens the image GO +24.49%→+29.22%, leader-beat 30%→39%. Ships with MED behind image detector + competitive min. Image·RGB pipeline: detect geometry → sub-green → per-channel MED → bwt-rans. Next colour lever: YCoCg-R (9-bit chroma), Paeth+per-row selection. Report: consilium/reports/H-43-color-transform-image-grid.md.
+
+---
+
+## H-56 — YCoCg-R (reversible 9-bit chroma) colour transform before MED, image·RGB: GO (best-in-class, marginal over sub-green)
+
+- **METHOD:** per-type grid (image·RGB), champion bwt-rans, RT byte-exact. Reversible YCoCg-R (Co=R−B; t=B+(Co>>1); Cg=G−t; Y=t+(Cg>>1)), planar per-plane MED, 9-bit chroma serialised honestly (lo byte-planes + near-constant hi-bit bitplanes appended raw and CHARGED). Real Kodak kodim23 768×512×3. Spike only, codec.rs untouched (SHA 422726d), NOT pushed.
+- **MEASURED (RT byte-exact):** raw 1179648 → blob 1277952 (+8.3% pre-comp). A=cub_raw 640443. **B=cub_YCoCg-R+MED 446338 = self-gain +30.31%**; B/L = 446338/xz629320 = **0.709 (beats strong leader by 41%)**. vs shipped sub-green+MED 453327 (+29.22%): incremental **−1.54%** (+1.09 pp) — at the +1.5% floor.
+- **VECTOR VERDICT:** `H-56 YCoCg-R: GO{image·RGB} — best-in-class +30.31%, leader-beat 41%, but incremental over sub-green is marginal (1.54%, at floor)`. Real non-subsumed win vs raw; 9-bit-chroma complexity buys only ~1.5% over the far-simpler sub-green (H-43). Ship behind competitive min(raw, subgreen+MED, YCoCg-R+MED) + id byte (encoder picks per image); type-gated to RGB raster. **Mac orchestrator must add /evolution card + deploy (card-publishing Mac-side this cycle).** Report: consilium/reports/H-56-ycocg-r-image-grid.md.
+
+---
+
+## H-57 — arch-specific BCJ for exe (ARM64 BL): GO{exe·ARM64}, arch-match MANDATORY (control proves it)
+
+- **METHOD:** per-type grid (exe sub-types), champion bwt-rans, RT byte-exact. ARM64 BL filter ((instr>>26)==0x25, imm26 ± word-pc mod 2^26, reversible). Control: x86 E8/E9 filter on the SAME ARM64 binary. Real ARM64 ELF: ripgrep 14.1.1 `rg` (aarch64, GitHub release), dense .text 640KB slice. Spike only, codec.rs untouched (SHA 422726d), NOT pushed.
+- **MEASURED (RT byte-exact):** A=cub_raw 92994. **B=cub_ARM64-BCJ 81622 = self-gain +12.23%**, B/L(plain xz 72476)=1.126, closes **55% of A→L gap → GO(exe·ARM64)**. **CONTROL x86-filter-on-ARM64 = −19.24%** (catastrophic → arch-specificity proven). xz cross-check: xz 72476 → xz--arm64 59892 = +17.36% (lever real; BL-only captures most, ADRP would close rest). Honest: xz--arm64 59892 beats cubrim+BCJ 81622 → residual = bwt-rans backend weaker than LZMA2 (same as text/code), NOT transform failure.
+- **VECTOR VERDICT:** `H-57 arch-BCJ: GO{exe·ARM64} · NO-GO{x86-filter-on-ARM64 control}`. Generalises H-45 across arches: BCJ GO per-arch when filter matches ELF e_machine (x86 +10.53%, ARM64 +12.23%), HARMFUL when mismatched (−19.24%). Ship: detect e_machine → matching filter (E8E9 / BL+ADRP / RISC-V/PPC variants) behind competitive min + id byte; byte-identical on non-exe. RISC-V/PPC deferred (need real corpora). Mac orchestrator publishes /evolution card. Report: consilium/reports/H-57-arch-bcj-exe-grid.md.
+
+---
+
+## H-58 — per-channel decimal/integer delta (H-40 lever) on binary float IoT: NO-GO (decimal lever is CSV-text-only)
+
+- **METHOD:** per-type grid (binary·IoT-float), champion bwt-rans, RT byte-exact lossless f32. SoA per channel; competitive decimal-int-delta (lossless: ints=round(v·10^s)+raw-f32 exception list) vs bit-delta (H-54). Transform inverses asserted ==raw. Real UCI household-power f32 (25k×7=700KB; 2.8MB hit MODE_BINFLOAT+LZ slow path). Spike only, codec.rs untouched (SHA 422726d), NOT pushed.
+- **MEASURED (RT byte-exact):** A=cub_raw 105871 (= shipped MODE_BINFLOAT). manual H-54 bit-delta blob 114727 (−8.36%), manual H-58 dec-delta blob 114731 (−8.37%). **dec-delta used 0/7 channels** — none passed the strict lossless f32 decimal round-trip. zstd 181463/xz 150932/ppmd 138325/brotli 161458; **A vs zstd 1.714×** (already >1.5× on this slice; H-55's 1.432× was the 200k slice).
+- **VECTOR VERDICT:** `H-58 decimal-delta on f32 binary: NO-GO{IoT-float·lossless}`. Two lessons: (1) the **decimal/ALP lever (H-40) is CSV-TEXT-specific** — f32 quantisation breaks exact decimal representability so a lossless decimal-int-delta needs >2% exceptions → never engages (0/7). (2) Manual SoA+delta pre-transform is **redundant & −8% worse** than cubrim's built-in MODE_BINFLOAT (already self-applied). Lever to push IoT-float further = PPMd-class backend / MODE_BINFLOAT parse tuning, NOT a decimal pre-transform. Mac orchestrator publishes /evolution card (NO-GO). Report: consilium/reports/H-58-iot-float-decimal-delta-grid.md.
+
+---
+
+## H-59 — PNG-style per-row adaptive filter selection (Paeth et al.), image·RGB: NO-GO (≈MED, no gain)
+
+- **METHOD:** per-type grid (image·RGB), champion bwt-rans, RT byte-exact. Per scanline pick best of {none,sub,up,avg,Paeth} by PNG min-sum-abs-residual; filter_byte+residuals/row, reversible (asserted). Variants: PNG on raw, PNG after sub-green. Real Kodak kodim23. Spike only, codec.rs untouched (SHA 422726d), NOT pushed.
+- **MEASURED (RT byte-exact):** A=cub_raw 640443. **PNG per-row 479939 (+25.06%)** ≈ MED-only 483598 (+24.49%); filters avg×267/up×134/Paeth×109/sub×1/none×1. **sub-green+PNG 454201 (+29.08%)** WORSE than sub-green+MED 453327 (+29.22%). Best shipped YCoCg-R+MED 446338 (+30.31%) beats all PNG variants.
+- **VECTOR VERDICT:** `H-59 PNG per-row: NO-GO{image·RGB}` — competitive with but does not beat MED (±0.8% on raw, −0.19% after colour); a single strong 2D predictor (MED) already captures what per-row filter-switching offers. Adds per-row state + filter byte/row for no net gain. Shipped image champion unchanged (YCoCg-R+MED +30.31% / sub-green+MED +29.22%). Mac orchestrator publishes /evolution card (NO-GO). Report: consilium/reports/H-59-paeth-perrow-image-grid.md.
+
+---
+
+## H-60 — MED16 on 16-bit medical grayscale (world-bench weakest class image): GO, beats strong leader
+
+- **WHY:** CUBR-0036 world-bench image = cubrim's weakest type (+38.4% vs ppmd); real drivers are MEDICAL grayscale (mr +44%, x-ray +36%), NOT the Kodak RGB of H-39/43/56. Extends the validated MED 2D lever to 16-bit grayscale. (Small-file +200-300% gaps = raw-store micro-efficiency, H-39 NO-GO.)
+- **METHOD:** per-type grid (image·16-bit), champion bwt-rans, RT byte-exact. x-ray decoded 1900x2230 16-bit LE (header 0x076c=1900 + autocorr stride 3800B confirm). 16-bit MED (median left/up + gradient), residual mod 65536; variants 2-byte-LE vs hi/lo byte-plane split. Real Silesia x-ray pixel region (320 rows x 1900 x 16-bit = 1216000B). Spike only, codec.rs untouched (SHA 422726d), NOT pushed.
+- **MEASURED (RT byte-exact, cubRT True):** A=cub_raw 586005 (behind ppmd 559713, A/L 1.047). **B=cub_MED16_LE 528903 = self-gain +9.74%, B/L 0.945 (BEATS ppmd by 5.5%)**. split variant 594377 (−1.43%, worse — LE residual > byte-plane). xz 623392/ppmd 559713/brotli 667787.
+- **VECTOR VERDICT:** `H-60 MED16: GO{image·16-bit-grayscale}`. Flips the world-bench's weakest class from behind-ppmd to leading-ppmd; the +38.4% image gap is a MISSING-TRANSFORM gap (shipped codec lacks MED), not backend. Image is now transform-GO across 8-bit RGB (H-39/43/56) AND 16-bit grayscale. Ship: geometry-detect + per-depth MED + competitive min(raw,MED-LE) + id byte; byte-identical non-image. mr/DICOM geometry deferred (parse header). Mac publishes /evolution card. Report: consilium/reports/H-60-med16-medical-image-grid.md.
+
+---
+
+## H-61 — PPMd-class / context-mixing backend (shared lever of text/code/database): GO-to-PLAN (multi-day, projected −20%)
+
+- **METHOD:** backend-lever spike, champion config, no codec change. Per file: cubrim-champion (bwt-rans, measured) vs bzip2 (BWT+Huffman) vs PPMd (7z genuine) vs order-2/3 conditional-entropy ceiling. Real text/code/database (Canterbury alice29/lcet10/fields.c + repo cubrim_src.rs + Silesia osdb + sao-with-SoA). Spike only, codec.rs untouched, NOT pushed.
+- **MEASURED (real bytes):** alice29 cub 49707 / bzip2 43202 / ppmd 38986 / H3-ideal 33782 (cub/ppmd 1.275, cub bpc 2.615 vs ppmd 2.051). lcet10 1.310, fields.c 1.234, cubrim_src.rs 1.135, osdb 1.281. **cubrim LOSES to bzip2 too** on all (−13..−15%). sao (SoA-transform applied) cub 459034 ≈ ppmd 464306 (0.989) → backend NOT bottleneck where a transform fires.
+- **VECTOR VERDICT:** `H-61 backend: GO-to-PLAN{text·code·database + exe/binary residual}`. Lever real & large (~1.27–1.31× to PPMd; projected −20%: alice −21.6%, lcet −23.7%, osdb −21.9%, code −11.9% → rank ~7→2-3), lifts whole leaderboard. NOT a one-spike ship: genuine PPMd (order-4..6+escape C/D+SEE+blending) = multi-day Rust; simple order-N = measured NO-GO (Gotcha #9, CUBR-BACKEND-SPIKE). OPERATOR decision on build. value-scheme ppmd (byte 13) behind competitive min. **BONUS: cubrim<bzip2 → cheaper intermediate lever = larger BWT block (>64KB) + stronger post-BWT coder (~−13%) before the full PPMd build.** Mac publishes /evolution card. Report: consilium/reports/H-61-ppmd-backend-lever.md.
+
+---
+
+## H-62 — larger BWT block (cheaper backend lever): GO-to-PLAN — cubrim<bzip2 gap is PURELY block size
+
+- **METHOD:** backend block-size spike, champion config, no codec change. Probe block-size sensitivity via bz2.compress(level 1..9 = BWT block 100KB..900KB) vs cubrim-champion (bwt-rans, 64KB blocks, measured) vs ppmd. Real text/code/database (alice29/lcet10/cubrim_src.rs/osdb). Spike only, codec.rs untouched, NOT pushed.
+- **MEASURED (real bytes):** **cubrim@64KB BEATS bz2@100KB on cubrim_src.rs (103161<108910) and osdb (341396<393872)** → cubrim's rANS+geomix coder is STRONGER than bzip2 Huffman per-block; loses aggregate ONLY due to 64KB cap vs bzip2's 600-900KB. bz2 block 100→900KB recovers: lcet −13.7%, osdb −23.6%, cubrim_src −14.2%, alice −5.6%. cubrim@64KB sits below even bz2's smallest block.
+- **VECTOR VERDICT:** `H-62 larger BWT block: GO-to-PLAN{text·code·database}`. The cubrim<bzip2 gap is ENTIRELY the 64KB BWT block ceiling (u16 index), NOT the coder. Fix = u16→u32 BWT index + lift 64KB MODE_CHUNKED cap (moderate arch change, NOT multi-day PPMd). Projection ~−12% (alice −13.1%, lcet −14.8%, code −9.4%, osdb −11.9%), makes cubrim BEAT bzip2 outright, half the distance to ppmd. STACKS with H-61 PPMd → ppmd-parity+. Highest ROI:effort of the backend program — do BEFORE full PPMd. Caveat (Gotcha #6): bigger block → O(n log n) SA encode cost compounds the >64KB perf flag; build must address BWT/SA perf. Mac publishes /evolution card. Report: consilium/reports/H-62-bwt-blocksize-lever.md.
+
+---
+
+## H-63 — MED16 on MR/DICOM (generalise H-60 across medical modalities): GO, beats ppmd by 10.9%
+
+- **METHOD:** per-type grid (image·MR-16bit), champion bwt-rans, RT byte-exact. Geometry from DICOM header (implicit VR LE, no preamble): Rows=512 Cols=512 BitsAllocated=16 Samples=1, PixelData@9092, 19 frames. 16-bit MED (median left/up+gradient), residual mod 65536; 2-byte-LE vs hi/lo split. Real Silesia mr pixel region (512x1024 16-bit = 1048576B, 2 MRI frames). Spike only, codec.rs untouched (SHA 422726d), NOT pushed.
+- **MEASURED (RT byte-exact, cubRT True):** A=cub_raw 236732 (behind ppmd 226983, A/L 1.043). **B=cub_MED16_LE 202330 = self-gain +14.53%, B/L 0.891 (BEATS ppmd by 10.9%)**. split 241377 (−1.96%, worse — LE > byte-plane, consistent w/ H-60). xz 262308/ppmd 226983/brotli 266844.
+- **VECTOR VERDICT:** `H-63 MED16·MR/DICOM: GO{image·MR-16bit}`. MED16 GENERALISES across medical modalities — x-ray +9.74% (beats ppmd 5.5%, H-60) AND MR +14.53% (beats ppmd 10.9%) with the SAME predictor; only geometry detection is per-format (DICOM parse / custom header / autocorr). Image type now transform-GO across 8-bit RGB (H-39/43/56) + 16-bit grayscale x-ray (H-60) + 16-bit DICOM MR (H-63); the +38.4% world-bench image gap fully addressable by MED + geometry-detect layer. Mac publishes /evolution card. Report: consilium/reports/H-63-med16-mr-dicom-image-grid.md.
+
+---
+
+## H-64 — RISC-V BCJ (JAL): GO-self-only, arch-BCJ family COMPLETE (arch-match re-confirmed)
+
+- **METHOD:** per-type grid (exe·RISC-V), champion bwt-rans, RT byte-exact. RISC-V JAL filter ((word&0x7F)==0x6F, 21-bit imm unscramble ± byte-pos mod 2^21, opcode+rd unchanged → reversible). Controls: ARM64 BL + x86 E8/E9 filters on the SAME RISC-V binary. Real Alpine busybox-static riscv64 (RV64GC), dense .text 640KB slice. Spike only, codec.rs untouched (SHA 422726d), NOT pushed.
+- **MEASURED (RT byte-exact):** A=cub_raw 444042. **B=cub_RISCV-BCJ 435268 = self-gain +1.98%** (>1.5% floor), B/L(ppmd 421442)=1.033 (behind, closes 38.8% gap <50% → gate-2 fail). **CONTROLS: ARM64-filter −0.98%, x86-filter −1.44%** (wrong-arch hurts → arch-specificity re-confirmed). xz 422532/ppmd 421442/brotli 435183.
+- **VECTOR VERDICT:** `H-64 RISC-V BCJ: GO-self-only{exe·RISC-V·JAL}`. Arch-BCJ family COMPLETE: x86 GO +10.5% (beats leader, H-45), ARM64 GO +12.2% (closes 55%, H-57), RISC-V GO-self-only +1.98% (JAL-only, doesn't beat leader). Small gain because (1) JAL-only — AUIPC (dominant RV PC-rel lever) unimplemented; (2) PIE binary → sparse direct JAL (same as PIC libc H-57 +1.96%). Ship: detect e_machine → matching filter (E8E9/BL+ADRP/JAL+AUIPC) competitive min. RISC-V needs AUIPC for leader-beating gain. Mac publishes /evolution card. Report: consilium/reports/H-64-riscv-bcj-exe-grid.md.
+
+---
+
+## H-65 — BWT block-size model on TEXT (deepen H-62): GO-to-PLAN, but −5…−13% (Rust prototype needed) + hard ceiling below ppmd
+
+- **METHOD:** BWT block-size model, no codec change. numpy prefix-doubling SA (verified on "banana"); order-2 conditional entropy of the BWT output (cubrim post-BWT coder proxy) at block 64K/256K/512K/1M/whole; +4B u32 index/block (Gotcha #6); calibrated vs real cub64K; bzip2-9/ppmd anchors. Real text: alice29/lcet10/dickens_1mb/webster_1mb (webster cub64K=258255 measured). Model/analysis only, codec.rs untouched, NOT pushed.
+- **MEASURED (o2 model, 64K→whole block gain):** alice −0.35%, lcet −4.9%, dickens −6.7%, webster −1.2%. Calibration: cub64K ≈ bz2@100K on text (lcet 126476≈124819) → cubrim's TEXT coder ≈ bzip2-class (NOT stronger, unlike code/db in H-62). **HARD CEILING: order-2 BWT whole-file entropy stays ABOVE ppmd on ALL files** (alice 42888>38986, lcet 112124>96553, dickens 284218>235007, webster 233778>193394).
+- **VECTOR VERDICT:** `H-65 block-size on text: GO-to-PLAN{text}, projected −5…−13% (Rust prototype needed to pin), does NOT reach ppmd`. Honest correction to H-62: −12%/beats-bzip2 was code/database-specific; on TEXT cubrim's coder is bzip2-class so real gain brackets −5% (order-2 model) to −13% (bzip2-analog) — a Rust u16→u32 block prototype is needed to pin it. u32 index cost negligible. **CRITICAL: BWT+order-2 fundamentally can't reach ppmd on text (hard ceiling) → block-size is a cheap intermediate; the dominant TEXT lever is H-61 genuine PPMd.** Bonus: cubrim undershoots order-2 ideal by 8-13% → stronger post-BWT coder is a separate cheap lever. Do stacked: u32-block first, PPMd second. Mac publishes /evolution card. Report: consilium/reports/H-65-bwt-blocksize-text-model.md.

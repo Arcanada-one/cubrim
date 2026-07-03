@@ -4,7 +4,7 @@
 **Code SHA:** `794148d85631bc0e2f351e2178d3ab7e7911e137` (main, merged T4 PR)  
 **Branch:** `feat/cubr-0023-rle-prepass`  
 **Corpus manifest SHA-256:** `cdd613090c7a8b908a6850902554e06d23b8578c7b136bb24ff7fb9fb8fcea94`  
-**Probe script:** `docs/ephemeral/research/cubr_0023_rle_probe.py`  
+**Probe script:** `documentation/ephemeral/research/cubr_0023_rle_probe.py`  
 **T4 actuals source:** `CUBR-0017-bench.json` (code SHA `734d540`, same Rust logic as `794148d`)
 
 ---

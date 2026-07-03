@@ -11,7 +11,7 @@ algorithm-bound. No Rust required.
 import hashlib, os, sys
 from pathlib import Path
 
-CORPUS = Path("docs/ephemeral/research/corpus")
+CORPUS = Path("documentation/ephemeral/research/corpus")
 FILES = ["sparse_clustered","dense","text","log_like","binary_mixed",
          "random_high","sparse_small","both_sparse_16","both_sparse_24",
          "block_bound_runs"]

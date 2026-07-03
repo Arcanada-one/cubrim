@@ -7,7 +7,7 @@ Extends CUBR-0029 P2 probe with:
   (b) Extended corpus (original 7 files + 2 new both-axis-sparse files)
   (c) Honest aggregate computation and GO/NO-GO gate on the extended corpus
 
-Corpus: /Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/
+Corpus: /Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/
 N=2, B=256, cube_volume=256^2=65536
 
 T4 baseline (7 original files): aggregate=0.587240, T4_TOTAL_BYTES=30217, CORPUS_TOTAL=51456

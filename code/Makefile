@@ -21,4 +21,4 @@ benchmark: venv
 clean:
 	rm -rf $(VENV) __pycache__ cubrim_proto/__pycache__ tests/__pycache__ \
 	       *.pyc cubrim_proto/*.pyc tests/*.pyc \
-	       docs/ephemeral/research/corpus/
+	       documentation/ephemeral/research/corpus/

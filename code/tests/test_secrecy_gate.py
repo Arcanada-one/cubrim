@@ -4,7 +4,7 @@ Secrecy gate test — AC-7 / V-AC-5.
 Binds the secrecy gate to the pytest green-bar contract.
 
 Rule (task-description § Секретность): public Diataxis surface
-  docs/{tutorials,how-to,reference,explanation}/ and README*
+  documentation/{tutorials,how-to,reference,explanation}/ and README*
 must contain zero mechanism-disclosure terms. The grep returns
 exit code 1 (no matches) = gate passes; exit code 0 (matches found)
 = gate fails (mechanism leaked).
@@ -25,10 +25,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _PUBLIC_DIRS = [
-    "docs/tutorials",
-    "docs/how-to",
-    "docs/reference",
-    "docs/explanation",
+    "documentation/tutorials",
+    "documentation/how-to",
+    "documentation/reference",
+    "documentation/explanation",
 ]
 
 _PATTERN = (

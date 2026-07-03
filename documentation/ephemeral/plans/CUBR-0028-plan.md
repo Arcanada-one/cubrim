@@ -26,7 +26,7 @@ code_sha_at_plan: 15b0ba6
 ### Problem
 The value-stream optimum for the 7-file corpus is **T4 (order-1 per-code Huffman,
 i-order)** at **aggregate ratio 0.587240** (verified: `sum(actual_t4_bytes)=30217 /
-sum(size_bytes)=51456` from `docs/ephemeral/research/corpus/manifest.json`). Three
+sum(size_bytes)=51456` from `documentation/ephemeral/research/corpus/manifest.json`). Three
 prior axes that stayed within the order-1-key context-depth dimension all returned
 NO-GO at implementation:
 
@@ -64,7 +64,7 @@ decoder branch).
 ## Architecture Impact
 
 - **Scope:** research artefacts only, all under
-  `/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/`. No change to
+  `/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/`. No change to
   `code/cubrim-rs/` unless a probe returns GO.
 - **Reused infrastructure (do NOT rebuild):**
   - `code/bench/entropy_traversal_probe.py` — canonical order-1 conditional-entropy
@@ -101,8 +101,8 @@ branch MUST carry a cost term. The contract for each axis's `size_model_*()`:
 
 > All steps are `/dr-do` work. This plan only specifies them. Each probe ≤ ~100 LoC,
 > reuses the bench template, writes its report to
-> `docs/ephemeral/research/CUBR-0028-<axis>-probe-report.md` and a machine row to
-> `docs/ephemeral/research/CUBR-0028-<axis>-probe.json` carrying `code_sha`
+> `documentation/ephemeral/research/CUBR-0028-<axis>-probe-report.md` and a machine row to
+> `documentation/ephemeral/research/CUBR-0028-<axis>-probe.json` carrying `code_sha`
 > (`git rev-parse HEAD`) per the Cubrim "bench results carry their code SHA" rule.
 
 ### Sequencing rationale (probe-first ordering)
@@ -132,7 +132,7 @@ effort on a likely NO-GO:
    reachable by **adding** sparse inputs to the corpus — which **changes the baseline**
    and breaks the 0.587240 comparison. The plan does NOT silently mutate the corpus.
    If `/dr-do` wants to exercise this axis it MUST use a **separate, clearly-labelled
-   corpus** (`docs/ephemeral/research/corpus-sparse/`) and report per-file deltas only,
+   corpus** (`documentation/ephemeral/research/corpus-sparse/`) and report per-file deltas only,
    never fold the result into the 7-file aggregate. Most likely outcome: documented
    NO-GO on the canonical corpus (consistent with Gotcha #1), with the sparse-corpus
    experiment as an optional Class-B follow-up rather than a GO.
@@ -167,7 +167,7 @@ effort on a likely NO-GO:
   is byte-trivial → contributes ~0% → NO-GO on the aggregate. Report the actual
   distance-map byte count per file as evidence.
 - Optional sparse experiment: ONLY if `/dr-do` builds
-  `docs/ephemeral/research/corpus-sparse/` with ≥1 ρ<0.3 input and a `manifest.json`
+  `documentation/ephemeral/research/corpus-sparse/` with ≥1 ρ<0.3 input and a `manifest.json`
   of its own. Report **per-file** ratio deltas on that separate corpus; do NOT compute
   a cross-corpus aggregate against 0.587240 (Gotcha #1 — the comparison would be
   invalid). This branch produces a labelled side-finding, not a GO against T4.
@@ -180,7 +180,7 @@ effort on a likely NO-GO:
   with a fully-charged size model) → proceed to a Rust implementation step under
   `code/cubrim-rs/` with a lossless round-trip test (Step 5).
 - If **all three** are NO-GO → the deliverable is a documented NO-GO at
-  `docs/ephemeral/research/CUBR-0028-verdict.md` + follow-up proposals filed as Class B
+  `documentation/ephemeral/research/CUBR-0028-verdict.md` + follow-up proposals filed as Class B
   in the CUBR-0028 reflection. **No Rust is written, no dangling code** (wish 4).
 
 ### Step 5 — Rust implementation (ONLY on a GO; otherwise skipped entirely)
@@ -206,18 +206,18 @@ wish 3 `measurement`, wish 4 `static`.
 
 ## Rollback Strategy
 
-Trivial — all artefacts are transient research files under `docs/ephemeral/`, no
+Trivial — all artefacts are transient research files under `documentation/ephemeral/`, no
 production surface, no migration.
 
 - **Probes / reports only (NO-GO path):** `git -C /Users/ug/arcanada/Projects/Cubrim
-  checkout -- docs/ephemeral/research/ code/bench/` or simply delete the new
-  `code/bench/*_probe.py` and `docs/ephemeral/research/CUBR-0028-*` files. Nothing is
+  checkout -- documentation/ephemeral/research/ code/bench/` or simply delete the new
+  `code/bench/*_probe.py` and `documentation/ephemeral/research/CUBR-0028-*` files. Nothing is
   shipped, nothing deployed.
 - **Rust step (GO path only):** all work on a feature branch
   `feat/cubr-0028-<axis>`; rollback = `git checkout main` (branch never merged until
   round-trip + real-aggregate gate pass). No DB, no schema, no deploy to revert.
 - **Sparse-corpus experiment (axis 1):** lives in its own
-  `docs/ephemeral/research/corpus-sparse/` dir; delete the dir to roll back — the
+  `documentation/ephemeral/research/corpus-sparse/` dir; delete the dir to roll back — the
   canonical 7-file corpus and the 0.587240 baseline are never touched.
 
 ## Validation Checklist

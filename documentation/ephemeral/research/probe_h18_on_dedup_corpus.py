@@ -6,7 +6,7 @@ the frozen-corpus NO-GO."""
 import hashlib, sys
 from pathlib import Path
 
-CORPUS = Path("docs/ephemeral/research/dedup-corpus")
+CORPUS = Path("documentation/ephemeral/research/dedup-corpus")
 FILES = ["v1","v2","v3","v4","doc_a","doc_b","unique"]
 GEAR = [(i*2654435761) & 0xFFFFFFFFFFFFFFFF for i in range(256)]
 

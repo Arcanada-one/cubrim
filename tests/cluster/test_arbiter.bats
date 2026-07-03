@@ -11,7 +11,7 @@
 
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
 ARBITER_DIR="$REPO_ROOT/consilium/arbiter"
-MANIFEST="$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json"
+MANIFEST="$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json"
 
 setup() {
     TMPDIR_TEST="$(mktemp -d)"
@@ -63,7 +63,7 @@ entry = next(e for e in m if e['name'] == 'sparse_clustered')
 import os
 path = entry['path']
 if not os.path.exists(path):
-    path = '$REPO_ROOT/docs/ephemeral/research/corpus/sparse_clustered.bin'
+    path = '$REPO_ROOT/documentation/ephemeral/research/corpus/sparse_clustered.bin'
 data = bytearray(open(path, 'rb').read())
 random.seed(42)
 random.shuffle(data)

@@ -1,6 +1,6 @@
 # CUBR-0012 Compression Report
 
-> PRIVATE — internal research artefact. Lives only in docs/ephemeral/research/.
+> PRIVATE — internal research artefact. Lives only in documentation/ephemeral/research/.
 > Algorithm mechanism is strictly secret — this file must not reach public surfaces.
 
 ## Environment

@@ -9,20 +9,20 @@
     "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
     "zstd": "*** Zstandard CLI (64-bit) v1.5.5, by Yann Collet ***",
     "gzip": "gzip 1.12",
-    "code_sha": "48e28b7bc0f1c6de498d6d74a0d2c21adacd45d4-dirty",
-    "timestamp": "2026-06-23T17:52:09Z"
+    "code_sha": "13f1e858b637e4d102a140e4ae1aedcc4480d5ca-dirty",
+    "timestamp": "2026-06-26T01:02:43Z"
   },
   "round_trip_all": "PASS",
   "totals": {
     "input_bytes": 201935,
-    "cubrim_bwt-rans_bytes": 105284,
-    "cubrim_bwt-geomix_bytes": 105284,
+    "cubrim_bwt-rans_bytes": 48255,
+    "cubrim_bwt-geomix_bytes": 48255,
     "gzip_bytes": 47638,
     "zstd_bytes": 44701
   },
   "aggregate": {
-    "cubrim_bwt-rans": 0.521376,
-    "cubrim_bwt-geomix": 0.521376,
+    "cubrim_bwt-rans": 0.238963,
+    "cubrim_bwt-geomix": 0.238963,
     "gzip": 0.235908,
     "zstd": 0.221363
   },
@@ -59,10 +59,10 @@
       "name": "config.json",
       "category": "json",
       "size_bytes": 66294,
-      "cubrim_bwt-rans_bytes": 66307,
-      "cubrim_bwt-rans_ratio": 1.000196,
-      "cubrim_bwt-geomix_bytes": 66307,
-      "cubrim_bwt-geomix_ratio": 1.000196,
+      "cubrim_bwt-rans_bytes": 9278,
+      "cubrim_bwt-rans_ratio": 0.139952,
+      "cubrim_bwt-geomix_bytes": 9278,
+      "cubrim_bwt-geomix_ratio": 0.139952,
       "gzip_bytes": 8839,
       "gzip_ratio": 0.13333,
       "zstd_bytes": 8335,

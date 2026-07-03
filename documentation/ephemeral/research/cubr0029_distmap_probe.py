@@ -5,7 +5,7 @@ CUBR-0029 P2 — Distance-map revisit probe.
 Measures per-file populated-density ρ for the 7-file corpus and decides
 whether the distance-map lever can clear the −2% GO gate.
 
-Corpus: /Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus/
+Corpus: /Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/
 N=2, B=256 (phi.py-default: coordinate (i % 256, i // 256))
 cube_volume = 256^2 = 65536
 
@@ -29,7 +29,7 @@ import os
 import struct
 import math
 
-CORPUS_DIR = "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus"
+CORPUS_DIR = "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus"
 B = 256
 N = 2
 CUBE_VOLUME = B ** N  # 65536

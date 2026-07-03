@@ -16,15 +16,15 @@ venv/
 .ipynb_checkpoints/
 
 # Benchmark corpora (large binaries — keep generators, not data)
-docs/ephemeral/research/corpus/
+documentation/ephemeral/research/corpus/
 *.bin
 *.cube
 
 # Transient bench outputs written by the gates / loop (regenerated each run)
-docs/ephemeral/research/gate-ratio-candidate-bench.json
-docs/ephemeral/research/gate-ratio-candidate-report.md
-docs/ephemeral/research/probe-*-bench.json
-docs/ephemeral/research/probe-*-report.md
+documentation/ephemeral/research/gate-ratio-candidate-bench.json
+documentation/ephemeral/research/gate-ratio-candidate-report.md
+documentation/ephemeral/research/probe-*-bench.json
+documentation/ephemeral/research/probe-*-report.md
 
 # Cluster secrets (never commit)
 code/cluster/*.env

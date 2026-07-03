@@ -17,7 +17,7 @@ Files:
 import os
 from pathlib import Path
 
-OUT = Path("docs/ephemeral/research/dedup-corpus")
+OUT = Path("documentation/ephemeral/research/dedup-corpus")
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Deterministic pseudo-content (no Math.random / Date — seeded LCG).

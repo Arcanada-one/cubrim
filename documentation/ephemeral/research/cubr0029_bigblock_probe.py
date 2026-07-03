@@ -28,7 +28,7 @@ import os
 import math
 import json
 
-CORPUS_DIR = "/Users/ug/arcanada/Projects/Cubrim/docs/ephemeral/research/corpus"
+CORPUS_DIR = "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus"
 B = 256
 N = 2
 CURRENT_CUBE_SIZE_LIMIT = B * B  # 65536

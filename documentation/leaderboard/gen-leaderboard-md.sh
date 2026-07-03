@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # gen-leaderboard-md.sh — Render cubrim-leaderboard.json → LEADERBOARD.md
 #
-# Reads docs/leaderboard/cubrim-leaderboard.json and generates
-# docs/leaderboard/LEADERBOARD.md as a deterministic Markdown table.
+# Reads documentation/leaderboard/cubrim-leaderboard.json and generates
+# documentation/leaderboard/LEADERBOARD.md as a deterministic Markdown table.
 # Run autonomously after each iteration that writes to the leaderboard.
 #
 # Usage: gen-leaderboard-md.sh [--json <path>] [--output <path>] [--dry-run]
@@ -113,7 +113,7 @@ lines.append("10 files, 117032 raw bytes total. Manifest SHA256: "
              f"`{best['corpus_manifest_sha256'][:24]}...`")
 lines.append("")
 lines.append("---")
-lines.append("_This file is auto-generated from `docs/leaderboard/cubrim-leaderboard.json`._")
+lines.append("_This file is auto-generated from `documentation/leaderboard/cubrim-leaderboard.json`._")
 lines.append("_Do not edit manually — run `gen-leaderboard-md.sh` to regenerate._")
 
 print("\n".join(lines))

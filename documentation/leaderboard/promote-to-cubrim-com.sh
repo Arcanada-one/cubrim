@@ -5,7 +5,7 @@
 # Deployment requires explicit operator action (run deploy.sh manually after review).
 #
 # Context:
-#   - The git-tracked leaderboard (docs/leaderboard/) accumulates per-iteration
+#   - The git-tracked leaderboard (documentation/leaderboard/) accumulates per-iteration
 #     GO results autonomously.
 #   - Promoting those results to the public cubrim.com site is an operator-gated
 #     batch step (AC-6 decision: public surface under human control).
@@ -66,8 +66,8 @@ echo "promote-to-cubrim-com: ━━━━━━━━━━━━━━━━━
 echo "OPERATOR-GATED: Review the following before proceeding."
 echo ""
 echo "Files to promote to cubrim.com:"
-echo "  docs/leaderboard/cubrim-leaderboard.json  → site leaderboard data"
-echo "  docs/leaderboard/LEADERBOARD.md           → rendered table"
+echo "  documentation/leaderboard/cubrim-leaderboard.json  → site leaderboard data"
+echo "  documentation/leaderboard/LEADERBOARD.md           → rendered table"
 echo ""
 echo "Current best: $(python3 -c "import json; lb=json.load(open('$JSON')); print(lb['current_best']['aggregate'])")"
 echo "GO runs: $(python3 -c "import json; lb=json.load(open('$JSON')); print(len([r for r in lb.get('runs',[]) if r.get('verdict')=='GO']))")"
@@ -83,8 +83,8 @@ echo "  # To deploy to cubrim.com (run from the cubrim repo root):"
 echo "  bash deploy.sh cubrim.com"
 echo ""
 echo "  # Or copy leaderboard files to the website content directory:"
-echo "  # cp docs/leaderboard/LEADERBOARD.md  <website-content-dir>/leaderboard.md"
-echo "  # cp docs/leaderboard/cubrim-leaderboard.json <website-content-dir>/leaderboard.json"
+echo "  # cp documentation/leaderboard/LEADERBOARD.md  <website-content-dir>/leaderboard.md"
+echo "  # cp documentation/leaderboard/cubrim-leaderboard.json <website-content-dir>/leaderboard.json"
 echo ""
 echo "This script will NOT execute the deploy. It is purely informational."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

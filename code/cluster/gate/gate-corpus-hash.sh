@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gate-corpus-hash.sh — Gate 1: assert corpus manifest and per-file hashes unchanged.
 #
-# Reads docs/ephemeral/research/corpus/manifest.json (frozen at cluster init),
+# Reads documentation/ephemeral/research/corpus/manifest.json (frozen at cluster init),
 # recomputes each corpus file's sha256, and asserts the manifest-level hash
 # matches the frozen baseline in gate/corpus-baseline.sha256.
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$GATE_DIR/../../.." && pwd)"
 
-MANIFEST="$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json"
+MANIFEST="$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json"
 BASELINE="$GATE_DIR/corpus-baseline.sha256"
 
 die() { echo "gate-corpus-hash: ERROR: $*" >&2; exit 2; }
@@ -55,7 +55,7 @@ while IFS= read -r entry; do
     # path in manifest is absolute; make portable across machines by resolving
     # relative to corpus dir when the absolute path doesn't exist
     if [ ! -f "$path" ]; then
-        rel_path="$REPO_ROOT/docs/ephemeral/research/corpus/$(basename "$path")"
+        rel_path="$REPO_ROOT/documentation/ephemeral/research/corpus/$(basename "$path")"
         if [ ! -f "$rel_path" ]; then
             echo "gate-corpus-hash: FAIL corpus file missing: $path" >&2
             FAIL=1

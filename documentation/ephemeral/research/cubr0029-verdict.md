@@ -128,7 +128,7 @@ prerequisite, not a present ratio lever. u16 primary_index is correct for L ≤ 
 | P3    | SA O(n) BWT/big-blocks | suffix-array-bwt-larger-blocks      | NO-GO   |
 
 Both P2 and P3 probes are honest NO-GO on the current corpus. No Rust codec
-branches created. Verdicts persist in `docs/ephemeral/research/` per the
+branches created. Verdicts persist in `documentation/ephemeral/research/` per the
 "hypotheses are logged, not lost" convention.
 
 **Next actions (operator-gated):**

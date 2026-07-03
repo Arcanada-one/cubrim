@@ -87,10 +87,10 @@ comparison). For n ≤ 65536 (corpus max 16384) this runs in <1ms.
 - `code/cubrim-rs/src/codec.rs` — BWT encode/decode/size functions + match arms
 - `code/cubrim-rs/src/main.rs` — CLI `--value-scheme bwt-entropy` support
 - `code/cubrim-rs/tests/cubr0028_bench.rs` — bench test (7-file corpus, verdict JSON)
-- `docs/ephemeral/research/CUBR-0028-bench.json` — machine-readable results
-- `docs/ephemeral/research/CUBR-0028-axis2-probe.json` — Python probe results
-- `docs/ephemeral/research/CUBR-0028-axis2-probe-report.md` — Python probe report
-- `docs/ephemeral/research/CUBR-0028-probe-results.md` — all-axes summary
+- `documentation/ephemeral/research/CUBR-0028-bench.json` — machine-readable results
+- `documentation/ephemeral/research/CUBR-0028-axis2-probe.json` — Python probe results
+- `documentation/ephemeral/research/CUBR-0028-axis2-probe-report.md` — Python probe report
+- `documentation/ephemeral/research/CUBR-0028-probe-results.md` — all-axes summary
 
 ## Follow-up Class B (backlog)
 

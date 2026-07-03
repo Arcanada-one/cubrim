@@ -3,12 +3,12 @@ Holdout corpus generator — Cubrim robustness study (CUBR-CONT).
 
 Builds a SEPARATE, diverse holdout corpus of REAL-WORLD files to test whether
 Cubrim's tuned-corpus parity with gzip generalises. This corpus is deliberately
-disjoint from the frozen leaderboard corpus (docs/ephemeral/research/corpus/);
+disjoint from the frozen leaderboard corpus (documentation/ephemeral/research/corpus/);
 nothing here touches or reads that manifest.
 
 Design:
   - Each entry copies REAL bytes from a stable source on this host and FREEZES
-    them into docs/ephemeral/research/holdout/. The frozen copies are committed,
+    them into documentation/ephemeral/research/holdout/. The frozen copies are committed,
     so the benchmark is reproducible from the corpus itself regardless of whether
     the original source paths still exist later.
   - One synthetic-but-realistic entry (a CSV) is generated deterministically when
@@ -29,7 +29,7 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _PROJECT = _HERE.parent.parent  # repo root
-HOLDOUT_DIR = _PROJECT / "docs" / "ephemeral" / "research" / "holdout"
+HOLDOUT_DIR = _PROJECT / "documentation" / "ephemeral" / "research" / "holdout"
 
 
 def sha256_of(data: bytes) -> str:

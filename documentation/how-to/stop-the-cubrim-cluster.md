@@ -85,7 +85,7 @@ grep '"event":"merge_rail_pass"' datarim/cubrim-run-log.jsonl | jq '{run_id,merg
 
 ## Win Condition
 
-The loop runs until `current_best.aggregate` in `docs/leaderboard/cubrim-leaderboard.json`
+The loop runs until `current_best.aggregate` in `documentation/leaderboard/cubrim-leaderboard.json`
 falls below `win_target.gzip_aggregate` (currently 0.159674). After that, the
 orchestrator shifts to defend-mode (lower iteration cadence, strict no-regression
 validation). The win condition is tracked in the leaderboard — check it with:
@@ -93,7 +93,7 @@ validation). The win condition is tracked in the leaderboard — check it with:
 ```bash
 python3 -c "
 import json
-lb = json.load(open('docs/leaderboard/cubrim-leaderboard.json'))
+lb = json.load(open('documentation/leaderboard/cubrim-leaderboard.json'))
 best = lb['current_best']['aggregate']
 target = lb['win_target']['gzip_aggregate']
 gap = best - target
@@ -152,5 +152,5 @@ the brain. See `documentation/mandates/autonomous-agents.md` § systemd PATH.
 
 - `CUBR-AUTONOMOUS-STATE.md` (repo root) — resume checkpoint STATE doc
 - `datarim/cubrim-run-log.jsonl` — append-only audit trail
-- `docs/leaderboard/cubrim-leaderboard.json` — machine-readable results
+- `documentation/leaderboard/cubrim-leaderboard.json` — machine-readable results
 - `code/cluster/gate/run-merge-rail.sh` — the AC-5 merge rail (Law 5 traceability)

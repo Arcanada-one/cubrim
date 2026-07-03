@@ -7,7 +7,7 @@ Runs:
   AC-4: per-file + aggregate compression ratio on locality corpus
 
 Writes results to:
-  docs/ephemeral/research/CUBR-0004-first-measurements.md
+  documentation/ephemeral/research/CUBR-0004-first-measurements.md
 
 Usage:
   python tests/benchmark.py
@@ -241,14 +241,14 @@ def run_benchmark():
     # -- Write research report --
     _write_research_report(results)
     print("\n[DONE] Research report written to "
-          "Projects/Cubrim/docs/ephemeral/research/CUBR-0004-first-measurements.md")
+          "Projects/Cubrim/documentation/ephemeral/research/CUBR-0004-first-measurements.md")
 
     return results
 
 
 def _write_research_report(results: dict):
     repo_root = Path(__file__).parent.parent.parent  # Projects/Cubrim/
-    out_path = repo_root / "docs" / "ephemeral" / "research" / "CUBR-0004-first-measurements.md"
+    out_path = repo_root / "documentation" / "ephemeral" / "research" / "CUBR-0004-first-measurements.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     ac2 = results["ac2_random_1mb"]
@@ -290,7 +290,7 @@ corpus: synthetic-fixed-seed
 ---
 
 > 🔒 **СЕКРЕТНО — внутренний артефакт.** Результаты замеров Cubrim-прототипа.
-> Живёт ТОЛЬКО в `docs/ephemeral/research/` (приватный репо). Механизм НЕ публикуется.
+> Живёт ТОЛЬКО в `documentation/ephemeral/research/` (приватный репо). Механизм НЕ публикуется.
 
 # Cubrim v1 Python Prototype — First Measurements
 

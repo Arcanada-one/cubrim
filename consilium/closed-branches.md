@@ -218,11 +218,11 @@ compressor on the concatenated stream (no explicit dict, no reference ids, no
 chunk-length table). H-18 / H-18b / H-18c.
 
 **Probe evidence (do FIRST, no Rust):**
-- `docs/ephemeral/research/probe_h18_crossfile_dedup.py` — frozen corpus:
+- `documentation/ephemeral/research/probe_h18_crossfile_dedup.py` — frozen corpus:
   cross-file redundant ratio 0.0137% (avg 64 B) / 0.000% (avg ≥128 B).
-- `docs/ephemeral/research/probe_h18_on_dedup_corpus.py` — redundant corpus:
+- `documentation/ephemeral/research/probe_h18_on_dedup_corpus.py` — redundant corpus:
   74.84% (validates the probe — same logic, opposite corpus).
-- `docs/ephemeral/research/probe_h18_sizemodel.py` — corpus-total size model on
+- `documentation/ephemeral/research/probe_h18_sizemodel.py` — corpus-total size model on
   the redundant corpus: gzip-on-concat 755 B beats CDC shared-dict 1102 B.
 
 **Provenance:** Operator dialogue 2026-06-22 (`_temp/addressator.txt`). The

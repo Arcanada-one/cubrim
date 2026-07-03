@@ -209,7 +209,7 @@ gate-corpus-hash.sh     # manifest sha256 == frozen baseline   (anti-tamper, rev
 
 - **corpus-hash** — the single most likely silent cheat is mutating the frozen
   corpus to inflate the aggregate (Gotcha #1). Reject any ratio measured against a
-  changed manifest. Anchor: `docs/ephemeral/research/corpus/manifest.json`.
+  changed manifest. Anchor: `documentation/ephemeral/research/corpus/manifest.json`.
 - **cargo-test + round-trip** — round-trip byte-exact on the **full** corpus is the
   absolute invariant (Constraint). A lossy compressor is a bug, never a trade-off.
 - **ratio strictly improves** — measured **only** on the frozen corpus, vs the
@@ -244,7 +244,7 @@ gate-corpus-hash.sh     # manifest sha256 == frozen baseline   (anti-tamper, rev
 
 ### E.1 Machine-readable leaderboard (git-tracked, autonomous write)
 
-`docs/leaderboard/cubrim-leaderboard.json` (git-tracked, committed by the
+`documentation/leaderboard/cubrim-leaderboard.json` (git-tracked, committed by the
 orchestrator). Each iteration appends one record — **only after the round-trip
 proof** (never record an unverified result):
 
@@ -280,7 +280,7 @@ feeds it directly.
 
 ### E.2 Human-readable view
 
-A generated `docs/leaderboard/LEADERBOARD.md` (Markdown table, regenerated from the
+A generated `documentation/leaderboard/LEADERBOARD.md` (Markdown table, regenerated from the
 JSON each iteration). This is the autonomous, git-tracked, **reversible** surface.
 
 ### E.3 Operator-gated batch promotion to cubrim.com (NON-NEGOTIABLE)
@@ -412,7 +412,7 @@ watchdog pattern; multi-vendor cluster runbook.
 (cgroup limits, `--env-file` secrets); claude-code-router config per worker;
 `gate-{corpus-hash,cargo-test,roundtrip,ratio,competitive}.sh` (the AC-5 rail);
 `cubrim-loop` driver + `cubrim-loop.service`/`cubrim-watchdog.timer`;
-`consilium/closed-branches.md` (the ledger); `docs/leaderboard/{cubrim-leaderboard.json,LEADERBOARD.md}`
+`consilium/closed-branches.md` (the ledger); `documentation/leaderboard/{cubrim-leaderboard.json,LEADERBOARD.md}`
 + generator; iteration consilium brief template (from `CUBR-0032-consilium-brief.md`);
 the operator batch-publish-to-cubrim.com command; the do-stage tool-calling
 verification recipe; the kill-switch runbook.
