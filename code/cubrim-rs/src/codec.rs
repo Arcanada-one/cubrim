@@ -101,12 +101,14 @@ fn estimate_cube_size(
         | ValueScheme::BwtAdaptive
         | ValueScheme::BwtContextMix
         | ValueScheme::BwtGeoMix
-        | ValueScheme::LzRans => {
+        | ValueScheme::LzRans
+        | ValueScheme::Cm => {
             // Competitive: every scheme in this family emits the same per-file minimum
             // over the full candidate set (BwtRans, BwtEntropy, EntropyContext,
-            // Order2Rans, BwtAdaptive, BwtContextMix, BwtGeoMix, LzRans) and writes the
-            // winner's scheme byte. Estimate with that same minimum so the raw-vs-cube
-            // decision matches the bytes the encoder will actually produce (Gotcha #4/#6).
+            // Order2Rans, BwtAdaptive, BwtContextMix, BwtGeoMix, LzRans, Cm) and writes
+            // the winner's scheme byte. Estimate with that same minimum so the
+            // raw-vs-cube decision matches the bytes the encoder will actually produce
+            // (Gotcha #4/#6).
             let n_distinct = state.inverse_dict.len();
             bwt_rans_size(seq_codes, n_distinct)
                 .min(bwt_entropy_size(seq_codes, n_distinct))
@@ -116,6 +118,7 @@ fn estimate_cube_size(
                 .min(bwt_ctxmix_size(seq_codes, n_distinct))
                 .min(bwt_geomix_size(seq_codes, n_distinct))
                 .min(lz_rans_size(seq_codes, n_distinct))
+                .min(cm_size(seq_codes, n_distinct))
         }
     };
 
@@ -339,6 +342,7 @@ fn encode_rans_family_value_stream(seq_codes: &[usize], n_distinct: usize) -> (V
     let ctxmix_bytes = bwt_ctxmix_encode(seq_codes, n_distinct);
     let geomix_bytes = bwt_geomix_encode(seq_codes, n_distinct);
     let lz_bytes = lz_rans_encode(seq_codes, n_distinct);
+    let cm_bytes = cm_encode(seq_codes, n_distinct);
 
     let mut winner_scheme = ValueScheme::BwtRans;
     let mut encoded_values = rans_bytes;
@@ -369,6 +373,10 @@ fn encode_rans_family_value_stream(seq_codes: &[usize], n_distinct: usize) -> (V
     if lz_bytes.len() < encoded_values.len() {
         winner_scheme = ValueScheme::LzRans;
         encoded_values = lz_bytes;
+    }
+    if cm_bytes.len() < encoded_values.len() {
+        winner_scheme = ValueScheme::Cm;
+        encoded_values = cm_bytes;
     }
     (winner_scheme, encoded_values)
 }
@@ -486,6 +494,7 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             | ValueScheme::BwtContextMix
             | ValueScheme::BwtGeoMix
             | ValueScheme::LzRans
+            | ValueScheme::Cm
     );
     let precomputed_values: Option<(ValueScheme, Vec<u8>)> = if rans_family {
         Some(encode_rans_family_value_stream(&seq_codes, inverse_dict.len()))
@@ -619,7 +628,8 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         | ValueScheme::BwtAdaptive
         | ValueScheme::BwtContextMix
         | ValueScheme::BwtGeoMix
-        | ValueScheme::LzRans => {
+        | ValueScheme::LzRans
+        | ValueScheme::Cm => {
             // Consolidated competitive selection (Gotcha #4). Any scheme in this family
             // request emits the smallest of the full candidate set and writes the
             // winner's scheme byte, so requesting any one of them can never regress
@@ -632,9 +642,10 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             //   BwtContextMix (10)— BWT + context-mixing range coding   (H-22)
             //   BwtGeoMix (11)    — BWT + geometric o2/o1/o0 mixing     (H-24)
             //   LzRans (12)       — LZ77 + rANS (non-BWT match model)   (H-25)
+            //   Cm (13)           — BWT + o3/o2/o1/o0 geometric CM (CUBR CM integration)
             // Decode is header-driven, so the winner's byte is all the decoder needs.
             // The competitive value stream was already built for the raw-vs-cube size
-            // decision (Step 5); reuse it here instead of re-running the 8-coder set.
+            // decision (Step 5); reuse it here instead of re-running the 9-coder set.
             let (winner_scheme, encoded_values) = precomputed_values
                 .expect("rANS-family value stream is precomputed before the size decision");
 
@@ -745,8 +756,10 @@ fn encode_blocks_parallel(blocks: &[&[u8]], config: &EncodeConfig) -> Vec<Vec<u8
         // Serial fallback: encode on the calling thread with the fast sweep enabled, then
         // restore the prior flag so unrelated later work on this thread is unaffected.
         let prev = GEOMIX_FAST_SWEEP.with(|f| f.replace(true));
+        let prev_cm = CM_FAST_SWEEP.with(|f| f.replace(true));
         let out: Vec<Vec<u8>> = blocks.iter().map(|b| encode_base(b, config)).collect();
         GEOMIX_FAST_SWEEP.with(|f| f.set(prev));
+        CM_FAST_SWEEP.with(|f| f.set(prev_cm));
         return out;
     }
 
@@ -756,8 +769,9 @@ fn encode_blocks_parallel(blocks: &[&[u8]], config: &EncodeConfig) -> Vec<Vec<u8
         let handles: Vec<_> = (0..n_threads)
             .map(|_| {
                 scope.spawn(move || {
-                    // Fresh worker thread: big-file blocks use the trimmed geomix sweep.
+                    // Fresh worker thread: big-file blocks use the trimmed geomix/cm sweep.
                     GEOMIX_FAST_SWEEP.with(|f| f.set(true));
+                    CM_FAST_SWEEP.with(|f| f.set(true));
                     let mut local: Vec<(usize, Vec<u8>)> = Vec::new();
                     loop {
                         let i = cursor_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2887,6 +2901,34 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 if code >= n_distinct {
                     return Err(CubrimError::Decode(format!(
                         "LzRans code {} at position {} >= n_distinct {}",
+                        code, i, n_distinct
+                    )));
+                }
+                if i < l {
+                    result[i] = inverse_dict[code] as u8;
+                }
+            }
+            result
+        }
+        ValueScheme::Cm => {
+            // BWT inverse + o3/o2/o1/o0 geometric context-mixing decode (CUBR CM
+            // integration, ported from the standalone research probe).
+            let n_distinct = inverse_dict.len();
+            let (seq_codes, _consumed) = cm_decode(blob, offset, count, n_distinct)?;
+
+            if seq_codes.len() != count {
+                return Err(CubrimError::Decode(format!(
+                    "Cm decoded {} codes but expected {} (count from header)",
+                    seq_codes.len(),
+                    count
+                )));
+            }
+
+            let mut result = vec![0u8; l];
+            for (i, &code) in seq_codes.iter().enumerate() {
+                if code >= n_distinct {
+                    return Err(CubrimError::Decode(format!(
+                        "Cm code {} at position {} >= n_distinct {}",
                         code, i, n_distinct
                     )));
                 }
@@ -6409,6 +6451,402 @@ pub(crate) fn bwt_geomix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
     bwt_geomix_encode(seq_codes, n_distinct).len()
 }
 
+// ─── Cm (CUBR CM integration): BWT + o3/o2/o1/o0 geometric context-mixing ─────
+//
+// Ported from the standalone research probe (`cmprobe_final.rs`, an lpaq-lite
+// byte-stream CM that measured 0.2262 on enwik8, RT=OK) into the codec's value-code
+// stream. The probe's core idea — mix several context orders in the log domain with
+// weights learned online — is exactly what BwtGeoMix (scheme 11, H-24) already does
+// for orders 2/1/0. The lift this scheme adds is a FOURTH model, order-3 (context =
+// the three preceding codes, hashed via a HashMap key like order-2 already is), which
+// the probe's order-0..4 byte-level mixer suggested as the next win once BWT has
+// exposed enough local structure for a 3-symbol context to be worth trusting.
+//
+// Architecture mirrors gm_predict/gm_update_weights/gm_mix_encode/gm_mix_decode
+// exactly (same CmCtx counters, same CmRangeEncoder/Decoder, same CM_MIX_TOTAL
+// quantization), generalized from 3 to 4 mixed models. Kept as an independent
+// cm4_* implementation (rather than generalizing gm_predict in place) so the
+// existing, already-shipped BwtGeoMix scheme is untouched — zero regression risk
+// to H-24's frozen behaviour.
+//
+// DETERMINISM: identical to H-24 — f64 used only for the mix weights and the
+// per-symbol blend, with only IEEE-754 +,−,*,/ (no fma, no transcendentals beyond
+// ln/exp evaluated identically on both sides from the same integer state), so
+// encode and decode produce bit-identical tables/weights on any IEEE-754 platform.
+
+/// Learning-rate table (indexed by the wire `lr_idx` byte) for the 4-model mix.
+const CM4_LRS: [f64; 2] = [0.01, 0.02];
+/// Model-increment candidates the encoder sweeps.
+const CM4_INCS: [u32; 2] = [16, 32];
+/// Weight clamp range [0, CM4_WCLAMP] — keeps a single model from dominating absurdly.
+const CM4_WCLAMP: f64 = 8.0;
+
+/// Fill the quantized mixed frequency table `q` (sum == CM_MIX_TOTAL) and the per-model
+/// log-prob arrays + posterior numerators `ex` (with returned normaliser Z) from the
+/// current integer model state (orders 3/2/1/0) and weights `w`. DETERMINISTIC:
+/// identical on both sides (does NOT depend on the symbol being coded).
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn cm4_predict(
+    fr3: &[u32],
+    t3: u32,
+    fr2: &[u32],
+    t2: u32,
+    fr1: &[u32],
+    t1: u32,
+    fr0: &[u32],
+    t0: u32,
+    w: &[f64; 4],
+    a: usize,
+    ln: &[f64],
+    lnp3: &mut [f64],
+    lnp2: &mut [f64],
+    lnp1: &mut [f64],
+    lnp0: &mut [f64],
+    ex: &mut [f64],
+    q: &mut [u32],
+) -> f64 {
+    let lt3 = ln[t3 as usize];
+    let lt2 = ln[t2 as usize];
+    let lt1 = ln[t1 as usize];
+    let lt0 = ln[t0 as usize];
+    let mut maxlog = f64::NEG_INFINITY;
+    for x in 0..a {
+        let l3 = ln[fr3[x] as usize] - lt3;
+        let l2 = ln[fr2[x] as usize] - lt2;
+        let l1 = ln[fr1[x] as usize] - lt1;
+        let l0 = ln[fr0[x] as usize] - lt0;
+        lnp3[x] = l3;
+        lnp2[x] = l2;
+        lnp1[x] = l1;
+        lnp0[x] = l0;
+        let lp = w[0] * l3 + w[1] * l2 + w[2] * l1 + w[3] * l0;
+        ex[x] = lp; // hold logp, convert after we know the max
+        if lp > maxlog {
+            maxlog = lp;
+        }
+    }
+    let mut z = 0.0f64;
+    for e in ex.iter_mut().take(a) {
+        *e = (*e - maxlog).exp();
+        z += *e;
+    }
+    // Quantize posterior ex/z to CM_MIX_TOTAL, floor at 1, reconcile on the max symbol.
+    let mut sum: u32 = 0;
+    let mut maxv: u32 = 0;
+    let mut maxi: usize = 0;
+    for x in 0..a {
+        let mut qv = ((ex[x] / z) * CM_MIX_TOTAL as f64 + 0.5) as u32;
+        if qv < 1 {
+            qv = 1;
+        }
+        q[x] = qv;
+        sum += qv;
+        if qv > maxv {
+            maxv = qv;
+            maxi = x;
+        }
+    }
+    if sum < CM_MIX_TOTAL {
+        q[maxi] += CM_MIX_TOTAL - sum;
+    } else if sum > CM_MIX_TOTAL {
+        let mut surplus = sum - CM_MIX_TOTAL;
+        while surplus > 0 {
+            let mut mi = 0usize;
+            let mut mv = 0u32;
+            for (x, &qx) in q.iter().enumerate().take(a) {
+                if qx > mv {
+                    mv = qx;
+                    mi = x;
+                }
+            }
+            let take = surplus.min(q[mi] - 1);
+            if take == 0 {
+                break;
+            }
+            q[mi] -= take;
+            surplus -= take;
+        }
+    }
+    z
+}
+
+/// Online weight update (gradient ascent on the geometric-mix log-likelihood) for the
+/// 4-model (o3/o2/o1/o0) mix. Uses the float posterior `ex/z` for E_q — identical on
+/// encode & decode since both reconstruct `ex`, `z`, and the lnp arrays from synced
+/// integer state.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn cm4_update_weights(
+    w: &mut [f64; 4],
+    lnp3: &[f64],
+    lnp2: &[f64],
+    lnp1: &[f64],
+    lnp0: &[f64],
+    ex: &[f64],
+    z: f64,
+    a: usize,
+    s: usize,
+    lr: f64,
+) {
+    let mut eq = [0.0f64; 4];
+    for x in 0..a {
+        let qx = ex[x] / z;
+        eq[0] += qx * lnp3[x];
+        eq[1] += qx * lnp2[x];
+        eq[2] += qx * lnp1[x];
+        eq[3] += qx * lnp0[x];
+    }
+    let gk = [
+        lnp3[s] - eq[0],
+        lnp2[s] - eq[1],
+        lnp1[s] - eq[2],
+        lnp0[s] - eq[3],
+    ];
+    for k in 0..4 {
+        w[k] = (w[k] + lr * gk[k]).clamp(0.0, CM4_WCLAMP);
+    }
+}
+
+/// Fetch-or-create a hashed high-order context (order-2 key = prev2*a+prev1, or
+/// order-3 key = (prev3*a+prev2)*a+prev1). Same technique gm_o2 already uses for
+/// order-2 — a HashMap bounds memory to contexts actually observed instead of
+/// allocating a^3 slots up front.
+#[inline]
+fn cm4_ctx(
+    map: &mut std::collections::HashMap<usize, CmCtx>,
+    key: usize,
+    a: usize,
+) -> &mut CmCtx {
+    map.entry(key).or_insert_with(|| CmCtx::new(a))
+}
+
+fn cm4_mix_encode(bwt_out: &[usize], a: usize, inc: u32, lr: f64, ln: &[f64]) -> Vec<u8> {
+    let mut o3: std::collections::HashMap<usize, CmCtx> = std::collections::HashMap::new();
+    let mut o2: std::collections::HashMap<usize, CmCtx> = std::collections::HashMap::new();
+    let mut o1: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
+    let mut o0 = CmCtx::new(a);
+    let mut w = [1.0f64, 1.0, 1.0, 1.0];
+    let mut lnp3 = vec![0.0f64; a];
+    let mut lnp2 = vec![0.0f64; a];
+    let mut lnp1 = vec![0.0f64; a];
+    let mut lnp0 = vec![0.0f64; a];
+    let mut ex = vec![0.0f64; a];
+    let mut q = vec![0u32; a];
+    let mut enc = CmRangeEncoder::new();
+    let mut prev3 = 0usize;
+    let mut prev2 = 0usize;
+    let mut prev1 = 0usize;
+    for &s in bwt_out {
+        let key3 = (prev3 * a + prev2) * a + prev1;
+        let key2 = prev2 * a + prev1;
+        let z = {
+            let c3 = cm4_ctx(&mut o3, key3, a);
+            let (f3, tt3) = (c3.freq.as_slice(), c3.total);
+            let c2 = cm4_ctx(&mut o2, key2, a);
+            let (f2, tt2) = (c2.freq.as_slice(), c2.total);
+            cm4_predict(
+                f3, tt3, f2, tt2, &o1[prev1].freq, o1[prev1].total, &o0.freq, o0.total,
+                &w, a, ln, &mut lnp3, &mut lnp2, &mut lnp1, &mut lnp0, &mut ex, &mut q,
+            )
+        };
+        let mut cum = 0u32;
+        for &f in &q[..s] {
+            cum += f;
+        }
+        enc.encode(cum, q[s], CM_MIX_TOTAL);
+        cm4_update_weights(&mut w, &lnp3, &lnp2, &lnp1, &lnp0, &ex, z, a, s, lr);
+        cm4_ctx(&mut o3, key3, a).update(s, inc);
+        cm4_ctx(&mut o2, key2, a).update(s, inc);
+        o1[prev1].update(s, inc);
+        o0.update(s, inc);
+        prev3 = prev2;
+        prev2 = prev1;
+        prev1 = s;
+    }
+    enc.finish()
+}
+
+fn cm4_mix_decode(payload: &[u8], count: usize, a: usize, inc: u32, lr: f64, ln: &[f64]) -> Vec<usize> {
+    let mut o3: std::collections::HashMap<usize, CmCtx> = std::collections::HashMap::new();
+    let mut o2: std::collections::HashMap<usize, CmCtx> = std::collections::HashMap::new();
+    let mut o1: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
+    let mut o0 = CmCtx::new(a);
+    let mut w = [1.0f64, 1.0, 1.0, 1.0];
+    let mut lnp3 = vec![0.0f64; a];
+    let mut lnp2 = vec![0.0f64; a];
+    let mut lnp1 = vec![0.0f64; a];
+    let mut lnp0 = vec![0.0f64; a];
+    let mut ex = vec![0.0f64; a];
+    let mut q = vec![0u32; a];
+    let mut dec = CmRangeDecoder::new(payload);
+    let mut out = Vec::with_capacity(count);
+    let mut prev3 = 0usize;
+    let mut prev2 = 0usize;
+    let mut prev1 = 0usize;
+    for _ in 0..count {
+        let key3 = (prev3 * a + prev2) * a + prev1;
+        let key2 = prev2 * a + prev1;
+        let z = {
+            let c3 = cm4_ctx(&mut o3, key3, a);
+            let (f3, tt3) = (c3.freq.as_slice(), c3.total);
+            let c2 = cm4_ctx(&mut o2, key2, a);
+            let (f2, tt2) = (c2.freq.as_slice(), c2.total);
+            cm4_predict(
+                f3, tt3, f2, tt2, &o1[prev1].freq, o1[prev1].total, &o0.freq, o0.total,
+                &w, a, ln, &mut lnp3, &mut lnp2, &mut lnp1, &mut lnp0, &mut ex, &mut q,
+            )
+        };
+        let dv = dec.get_freq(CM_MIX_TOTAL);
+        let mut cum = 0u32;
+        let mut s = 0usize;
+        for (i, &f) in q.iter().enumerate() {
+            if cum + f > dv {
+                s = i;
+                break;
+            }
+            cum += f;
+        }
+        dec.decode(cum, q[s], CM_MIX_TOTAL);
+        cm4_update_weights(&mut w, &lnp3, &lnp2, &lnp1, &lnp0, &ex, z, a, s, lr);
+        cm4_ctx(&mut o3, key3, a).update(s, inc);
+        cm4_ctx(&mut o2, key2, a).update(s, inc);
+        o1[prev1].update(s, inc);
+        o0.update(s, inc);
+        out.push(s);
+        prev3 = prev2;
+        prev2 = prev1;
+        prev1 = s;
+    }
+    out
+}
+
+thread_local! {
+    /// Set true by the multi-block parallel encoder for its worker threads, so big-file
+    /// blocks use the trimmed cm sweep (fast, near-identical ratio — the chosen combo
+    /// is serialized so decode is unaffected). Standalone ≤64KB single-block encodes
+    /// leave it false and keep the exhaustive sweep for byte-identical output.
+    static CM_FAST_SWEEP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The single cm combo used by the trimmed (fast) sweep — same dominant combo
+/// empirically found for the 3-model geomix (inc=32, lr_idx=0), reused here since the
+/// same range-coder/quantization scaffolding applies.
+const CM4_FAST_COMBO: (u32, usize) = (32, 0);
+
+/// The (inc, lr_idx) combos the cm encoder sweeps. Full sweep is CM4_INCS × CM4_LRS;
+/// the block-parallel worker thread-local narrows it to the single dominant combo on
+/// the big-file (chunked) path. The chosen combo is always serialized in the block
+/// header, so narrowing the sweep is purely an encoder-side speed knob — decode is
+/// unaffected.
+fn cm4_sweep_combos() -> Vec<(u32, usize)> {
+    if CM_FAST_SWEEP.with(|f| f.get()) {
+        return vec![CM4_FAST_COMBO];
+    }
+    let mut v = Vec::with_capacity(CM4_INCS.len() * CM4_LRS.len());
+    for &inc in &CM4_INCS {
+        for li in 0..CM4_LRS.len() {
+            v.push((inc, li));
+        }
+    }
+    v
+}
+
+/// Encode the value-code stream with BWT + o3/o2/o1/o0 geometric context-mixing
+/// (CUBR CM integration). The encoder sweeps CM4_INCS × CM4_LRS and keeps the
+/// smallest payload.
+/// Wire: [primary u16][inc u8][lr_idx u8][rc_len u32][rc].
+pub(crate) fn cm_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+    let (bwt_out, primary) = bwt_encode_codes(seq_codes);
+    let a = n_distinct;
+    let mut best_inc = CM4_INCS[0];
+    let mut best_lr_idx = 0u8;
+    let mut best_payload: Vec<u8> = Vec::new();
+    let mut have = false;
+
+    if a > 0 && !bwt_out.is_empty() {
+        let ln = gm_ln_table(CM_RESCALE + 128);
+        let sweep = cm4_sweep_combos();
+        for &(inc, li) in &sweep {
+            let lr = CM4_LRS[li];
+            let p = cm4_mix_encode(&bwt_out, a, inc, lr, &ln);
+            if !have || p.len() < best_payload.len() {
+                best_payload = p;
+                best_inc = inc;
+                best_lr_idx = li as u8;
+                have = true;
+            }
+        }
+    }
+
+    let mut out = Vec::with_capacity(8 + best_payload.len());
+    out.extend_from_slice(&primary.to_be_bytes());
+    out.push(best_inc as u8);
+    out.push(best_lr_idx);
+    out.extend_from_slice(&(best_payload.len() as u32).to_be_bytes());
+    out.extend_from_slice(&best_payload);
+    out
+}
+
+/// Decode the BWT + o3/o2/o1/o0 geometric context-mixing stream from blob at offset
+/// (CUBR CM integration).
+pub(crate) fn cm_decode(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if offset + 8 > blob.len() {
+        return Err(CubrimError::Decode("Cm: blob too short for header".into()));
+    }
+    let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
+    let inc = blob[offset + 2] as u32;
+    let lr_idx = blob[offset + 3] as usize;
+    let rc_len = u32::from_be_bytes([
+        blob[offset + 4],
+        blob[offset + 5],
+        blob[offset + 6],
+        blob[offset + 7],
+    ]) as usize;
+    let body = offset + 8;
+    if body + rc_len > blob.len() {
+        return Err(CubrimError::Decode(format!(
+            "Cm: payload truncated: need {rc_len}, have {}",
+            blob.len().saturating_sub(body)
+        )));
+    }
+    if inc == 0 {
+        return Err(CubrimError::Decode("Cm: inc must be ≥ 1".into()));
+    }
+    let payload = &blob[body..body + rc_len];
+
+    let bwt_out: Vec<usize> = if count == 0 || n_distinct == 0 {
+        vec![]
+    } else {
+        if lr_idx >= CM4_LRS.len() {
+            return Err(CubrimError::Decode("Cm: lr_idx out of range".into()));
+        }
+        let ln = gm_ln_table(CM_RESCALE + 128);
+        cm4_mix_decode(payload, count, n_distinct, inc, CM4_LRS[lr_idx], &ln)
+    };
+
+    let seq_codes = bwt_decode_codes(&bwt_out, primary, n_distinct)?;
+    if seq_codes.len() != count {
+        return Err(CubrimError::Decode(format!(
+            "Cm: decoded {} codes but expected {}",
+            seq_codes.len(),
+            count
+        )));
+    }
+    Ok((seq_codes, 8 + rc_len))
+}
+
+/// Estimate byte size of the BWT + o3/o2/o1/o0 geometric context-mixing stream
+/// (CUBR CM integration).
+pub(crate) fn cm_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+    cm_encode(seq_codes, n_distinct).len()
+}
+
 // ─── LzRans (H-25c): LZ77 match modeling + rANS, a NON-BWT value-stream class ─
 //
 // Motivation (holdout re-check): the entire gap to gzip/zstd on unseen data is
@@ -9678,7 +10116,10 @@ mod tests {
         // scheme byte 12 = LzRans (LZ77 + rANS, H-25)
         assert_eq!(ValueScheme::LzRans.scheme_byte(), 12u8);
         assert_eq!(ValueScheme::from_byte(12u8), Some(ValueScheme::LzRans));
-        assert_eq!(ValueScheme::from_byte(13u8), None);
+        // scheme byte 13 = Cm (o3/o2/o1/o0 geometric CM, CUBR CM integration)
+        assert_eq!(ValueScheme::Cm.scheme_byte(), 13u8);
+        assert_eq!(ValueScheme::from_byte(13u8), Some(ValueScheme::Cm));
+        assert_eq!(ValueScheme::from_byte(14u8), None);
     }
 
     // ── Step 5.2: Context-key derivation + sentinels ──────────────────────────
@@ -10986,6 +11427,151 @@ mod tests {
         let data: Vec<u8> = b"the quick brown fox jumps over "
             .iter().copied().cycle().take(8192).collect();
         let blob = encode_with_config(&data, &bwt_geomix_cfg());
+        for cut in (8..blob.len()).step_by(41) {
+            let _ = decode(&blob[..cut]); // must not panic
+        }
+    }
+
+    // ── CUBR CM integration: o3/o2/o1/o0 geometric context-mixing (scheme 13) tests ──
+
+    fn cm_cfg() -> EncodeConfig {
+        EncodeConfig {
+            value_scheme: ValueScheme::Cm,
+            ..EncodeConfig::v1_default()
+        }
+    }
+
+    #[test]
+    fn test_cm_scheme_byte_is_13() {
+        assert_eq!(ValueScheme::Cm.scheme_byte(), 13u8);
+        assert_eq!(ValueScheme::from_byte(13u8), Some(ValueScheme::Cm));
+    }
+
+    #[test]
+    fn test_cm_unit_round_trip() {
+        // Structured stream; exercise the 4-model mix back-end directly across the grid.
+        let a = 6usize;
+        let mut seq = Vec::new();
+        for _ in 0..500 {
+            seq.extend_from_slice(&[0, 0, 1, 0, 2, 0, 3, 0, 4, 5]);
+        }
+        let ln = gm_ln_table(CM_RESCALE + 128);
+        for inc in CM4_INCS {
+            for &lr in &CM4_LRS {
+                let enc = cm4_mix_encode(&seq, a, inc, lr, &ln);
+                let dec = cm4_mix_decode(&enc, seq.len(), a, inc, lr, &ln);
+                assert_eq!(dec, seq, "cm round-trip mismatch (inc={inc}, lr={lr})");
+            }
+        }
+    }
+
+    #[test]
+    fn test_cm_high_entropy_and_rescale() {
+        // 256 symbols, long stream → forces rescaling in all four models; the
+        // context-mix path must round-trip exactly (f64 determinism, log/exp).
+        let a = 256usize;
+        let seq: Vec<usize> = (0..40000).map(|i| ((i * 97 + 13) % 256) as usize).collect();
+        let ln = gm_ln_table(CM_RESCALE + 128);
+        for &lr in &CM4_LRS {
+            let enc = cm4_mix_encode(&seq, a, 16, lr, &ln);
+            let dec = cm4_mix_decode(&enc, seq.len(), a, 16, lr, &ln);
+            assert_eq!(dec, seq, "cm high-entropy/rescale mismatch (lr={lr})");
+        }
+    }
+
+    #[test]
+    fn test_cm_empty_and_singleton() {
+        let enc = cm_encode(&[], 0);
+        let (dec, _) = cm_decode(&enc, 0, 0, 0).unwrap();
+        assert!(dec.is_empty());
+        let seq = vec![0usize; 800];
+        let enc = cm_encode(&seq, 1);
+        let (dec, _) = cm_decode(&enc, 0, seq.len(), 1).unwrap();
+        assert_eq!(dec, seq);
+    }
+
+    #[test]
+    fn test_cm_corpus_round_trip_all_files() {
+        // Byte-exact round-trip on all 10 frozen corpus files. Scheme 7's competitive
+        // selection may emit scheme byte 13 (Cm); the decoder MUST recover every
+        // file. Round-trip is non-negotiable (Gotcha).
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        for cfg in [cm_cfg(), bwt_rans_cfg()] {
+            let mut ok = 0;
+            for name in &names {
+                let path = format!("{corpus_dir}/{name}.bin");
+                if let Ok(data) = fs::read(&path) {
+                    let blob = encode_with_config(&data, &cfg);
+                    let recovered = decode(&blob)
+                        .unwrap_or_else(|e| panic!("Cm decode failed for '{name}': {e:?}"));
+                    assert_eq!(recovered, data, "Cm round-trip FAILED for '{name}'");
+                    ok += 1;
+                }
+            }
+            assert_eq!(ok, 10, "Cm corpus round-trip: {ok}/10 files present and clean");
+        }
+    }
+
+    #[test]
+    fn test_cm_never_regresses_competition() {
+        // Competitive (Gotcha #4): can NEVER be larger than the BwtEntropy leader.
+        use std::fs;
+        let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        });
+        let names = [
+            "sparse_clustered", "dense", "text", "log_like",
+            "binary_mixed", "random_high", "sparse_small",
+            "both_sparse_16", "both_sparse_24", "block_bound_runs",
+        ];
+        let bwt_cfg = EncodeConfig {
+            value_scheme: ValueScheme::BwtEntropy,
+            ..EncodeConfig::v1_default()
+        };
+        for name in &names {
+            let path = format!("{corpus_dir}/{name}.bin");
+            if let Ok(data) = fs::read(&path) {
+                let cand = encode_with_config(&data, &cm_cfg());
+                let leader = encode_with_config(&data, &bwt_cfg);
+                assert!(
+                    cand.len() <= leader.len(),
+                    "Cm regressed '{name}': {} > bwt-entropy {}",
+                    cand.len(), leader.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_cm_property_random_inputs() {
+        let mut state: u64 = 0x243f6a8885a308d3;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        for trial in 0..40 {
+            let len = 321 + (next() as usize % 4000);
+            let alphabet = 1 + (next() as usize % 200);
+            let data: Vec<u8> = (0..len).map(|_| (next() as usize % alphabet) as u8).collect();
+            let blob = encode_with_config(&data, &cm_cfg());
+            let recovered = decode(&blob).expect("decode");
+            assert_eq!(recovered, data, "Cm property round-trip failed (trial {trial}, len {len}, alpha {alphabet})");
+        }
+    }
+
+    #[test]
+    fn test_cm_truncated_blob_errors_no_panic() {
+        let data: Vec<u8> = b"the quick brown fox jumps over "
+            .iter().copied().cycle().take(8192).collect();
+        let blob = encode_with_config(&data, &cm_cfg());
         for cut in (8..blob.len()).step_by(41) {
             let _ = decode(&blob[..cut]); // must not panic
         }
