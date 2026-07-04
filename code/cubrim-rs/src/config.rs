@@ -257,34 +257,6 @@ pub enum ValueScheme {
     ///
     /// Header byte = 12.
     LzRans,
-    /// BWT reorder + PROVEN context-mixing (CM), ported from the standalone research
-    /// probe (`cmprobe_final.rs`, enwik8 byte-stream ratio 0.2262) into the codec's
-    /// value-code stream (CUBR CM integration).
-    ///
-    /// Same BWT front-end as BwtRans (scheme 7). The entropy back-end transmits NO
-    /// frequency tables; the decoder rebuilds FOUR adaptive models symbol-by-symbol —
-    /// order-3 (key = (prev3,prev2,prev1), hashed to bound memory), order-2 (key =
-    /// (prev2,prev1)), order-1 (key = prev1) and order-0 — and blends their
-    /// predictions in the LOG domain (geometric mixing, same math as BwtGeoMix/H-24) —
-    /// p(s) ∝ ∏_k p_k(s)^{w_k}, renormalized over the alphabet — with four weights
-    /// learned online by gradient on the per-symbol log-loss. Extending the mix from
-    /// three orders (o2/o1/o0) to four (o3/o2/o1/o0) is the core lift the probe
-    /// demonstrated on raw bytes: the extra high-order context sharpens predictions on
-    /// structured/text runs once its context has enough count to be trusted, while the
-    /// lower orders keep covering cold contexts. A range coder is used (adaptive
-    /// forward coding, like H-21/H-22/H-24). The encoder sweeps a small (inc, lr) grid
-    /// and keeps the smallest payload. Competitive (Gotcha #4): produced only as a
-    /// winner of the scheme-7 selection, so it can never regress a file.
-    ///
-    /// Wire (after header + gap streams):
-    ///   [primary_index : u16 BE]     — 2 bytes; BWT primary index (≤ L ≤ 65536)
-    ///   [inc           : u8]         — model increment (effective alpha = 1/inc)
-    ///   [lr_idx        : u8]         — learning-rate index into CM4_LRS
-    ///   [rc_len        : u32 BE]     — range-coded payload length
-    ///   [rc payload    : bytes]      — carryless range-coder bytes
-    ///
-    /// Header byte = 13.
-    Cm,
 }
 
 impl GapScheme {
@@ -322,7 +294,6 @@ impl ValueScheme {
             ValueScheme::BwtContextMix => 10,
             ValueScheme::BwtGeoMix => 11,
             ValueScheme::LzRans => 12,
-            ValueScheme::Cm => 13,
         }
     }
 
@@ -341,7 +312,6 @@ impl ValueScheme {
             10 => Some(ValueScheme::BwtContextMix),
             11 => Some(ValueScheme::BwtGeoMix),
             12 => Some(ValueScheme::LzRans),
-            13 => Some(ValueScheme::Cm),
             _ => None,
         }
     }
@@ -494,13 +464,9 @@ mod tests {
             Some(ValueScheme::LzRans)
         );
         assert_eq!(
-            ValueScheme::from_byte(ValueScheme::Cm.scheme_byte()),
-            Some(ValueScheme::Cm)
-        );
-        assert_eq!(
-            ValueScheme::from_byte(14),
+            ValueScheme::from_byte(13),
             None,
-            "14 is not a valid value_scheme byte"
+            "13 is not a valid value_scheme byte"
         );
         assert_eq!(
             ValueScheme::from_byte(99),
@@ -519,14 +485,6 @@ mod tests {
         assert_eq!(ValueScheme::EntropyContext2.scheme_byte(), 5u8);
         assert_eq!(ValueScheme::BwtEntropy.scheme_byte(), 6u8);
         assert_eq!(ValueScheme::BwtRans.scheme_byte(), 7u8);
-    }
-
-    #[test]
-    fn test_cm_scheme_byte() {
-        // Cm = 13 is the new wire byte for CUBR CM integration; must not collide
-        // with any existing scheme (1..=12 already assigned).
-        assert_eq!(ValueScheme::Cm.scheme_byte(), 13u8);
-        assert_eq!(ValueScheme::from_byte(13u8), Some(ValueScheme::Cm));
     }
 
     #[test]
