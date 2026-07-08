@@ -8,13 +8,26 @@
 use std::env;
 use std::fs;
 use std::process;
+use std::time::Instant;
 
 use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
-fn usage() {
-    eprintln!("Usage:");
-    eprintln!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2|bwt-entropy|bwt-rans|order2-rans|bwt-adaptive|bwt-ctxmix|bwt-geomix|lz-rans] [--min-ctx-count N]");
-    eprintln!("  cubrim decompress <input> <output>");
+const VERSION_TEXT: &str = concat!(env!("CARGO_PKG_VERSION"), " (CUBR-0043)");
+
+fn print_usage() {
+    println!("Cubrim {VERSION_TEXT}");
+    println!();
+    println!("Usage:");
+    println!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2|bwt-entropy|bwt-rans|order2-rans|bwt-adaptive|bwt-ctxmix|bwt-geomix|lz-rans] [--min-ctx-count N]");
+    println!("  cubrim decompress <input> <output>");
+    println!();
+    println!("Options:");
+    println!("  -h, --help       Show this help text");
+    println!("  -V, --version    Print version and release provenance");
+}
+
+fn usage_error() -> ! {
+    print_usage();
     process::exit(1);
 }
 
@@ -54,25 +67,58 @@ fn cmd_compress(
     output: &str,
     config: &EncodeConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let started = Instant::now();
     let data = fs::read(input)?;
     let blob = encode_with_config(&data, config);
     fs::write(output, &blob)?;
-    eprintln!("compressed: {} bytes -> {} bytes", data.len(), blob.len());
+    let elapsed = started.elapsed();
+    let ratio = if data.is_empty() {
+        0.0
+    } else {
+        blob.len() as f64 / data.len() as f64
+    };
+    eprintln!(
+        "compressed: {} bytes -> {} bytes ratio={:.6} time_ms={}",
+        data.len(),
+        blob.len(),
+        ratio,
+        elapsed.as_millis()
+    );
     Ok(())
 }
 
 fn cmd_decompress(input: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let started = Instant::now();
     let blob = fs::read(input)?;
     let data = decode(&blob)?;
     fs::write(output, &data)?;
-    eprintln!("decompressed: {} bytes -> {} bytes", blob.len(), data.len());
+    let elapsed = started.elapsed();
+    eprintln!(
+        "decompressed: {} bytes -> {} bytes time_ms={}",
+        blob.len(),
+        data.len(),
+        elapsed.as_millis()
+    );
     Ok(())
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.len() == 2 {
+        match args[1].as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return;
+            }
+            "-V" | "--version" => {
+                println!("cubrim {VERSION_TEXT}");
+                return;
+            }
+            _ => {}
+        }
+    }
     if args.len() < 4 {
-        usage();
+        usage_error();
     }
 
     let subcmd = &args[1];
@@ -140,8 +186,7 @@ fn main() {
         "decompress" => cmd_decompress(input, output),
         _ => {
             eprintln!("Unknown subcommand: '{subcmd}'");
-            usage();
-            unreachable!()
+            usage_error();
         }
     };
 

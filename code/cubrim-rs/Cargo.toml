@@ -1,10 +1,13 @@
 [package]
 name = "cubrim"
-version = "0.1.0"
+version = "0.1.0-cubr0043"
 edition = "2021"
 description = "Cubrim archiver — lossless compression library and CLI"
 repository = "https://github.com/Arcanada-one/cubrim"
 license = "MIT"
+readme = "PROVENANCE.md"
+keywords = ["compression", "archiver", "lossless"]
+categories = ["compression", "command-line-utilities"]
 
 [[bin]]
 name = "cubrim"

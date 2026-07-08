@@ -120,6 +120,15 @@ pub const MODE_BCJ: u8 = 8;
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_SOA 1B][orig_len 4B][width 2B BE] then nested sub-blob.
 pub const MODE_SOA: u8 = 9;
 
+/// Context-mixing backend (CUBR-0043, NEW-01). A lpaq-lite byte predictor with order-0..6,
+/// word, and match contexts codes the raw byte stream directly via a range coder. It is a
+/// top-level backend, not a cube value-scheme: the outer dispatcher keeps it only when it
+/// strictly beats the current competitive minimum. Gated to large text-like inputs so binary
+/// type-specializations do not pay the CM probe cost.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_CM 1B][orig_len 8B BE][block_size 4B BE][n_blocks 4B BE]
+///       then n_blocks x ([comp_len 4B BE][raw_hash 8B BE]) followed by concatenated CM blocks.
+pub const MODE_CM: u8 = 10;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).
