@@ -1,5 +1,25 @@
 # Cubrim v1 Python Prototype
 
+## Rust CLI Archiver
+
+The Rust crate at `code/cubrim-rs` provides the release CLI:
+
+```sh
+cubrim compress input.bin input.cub
+cubrim decompress input.cub restored.bin
+cubrim a archive.cbr dir file.txt --force
+cubrim x archive.cbr -o restored
+cubrim l archive.cbr
+cubrim t archive.cbr
+```
+
+Full CLI, container, crypto, and release handoff docs live in:
+
+- `code/cubrim-rs/docs/cli.md`
+- `code/cubrim-rs/docs/cubrim-archive-format.md`
+- `code/cubrim-rs/docs/crypto.md`
+- `code/cubrim-rs/docs/release.md`
+
 Research prototype of the Cubrim compression algorithm, strictly tracing rulebook v1 (R1–R8).
 
 This is a **research instrument**, not production code. Its purpose:
