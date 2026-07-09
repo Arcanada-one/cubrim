@@ -41,3 +41,20 @@ tests/test_traceability.py       — AC-5: every module has a rule reference
 ## Stack
 
 Python 3.10+, NumPy, pytest. No C extensions. No zstd/LZMA in the encoder.
+
+## License
+
+Cubrim is no longer published under MIT for this release line.
+
+Non-commercial use is available under PolyForm Noncommercial License 1.0.0 with
+Cubrim-specific notices in `cubrim-rs/LICENSE`. Commercial use requires a
+separate Arcanada commercial license. The standard commercial target for this
+draft is USD 50 per year per named user seat or per installed computer/device.
+
+Commercial license draft: `cubrim-rs/LICENSE-COMMERCIAL.md`.
+
+Temporary canonical publication target: `https://cubrim.com/legal/cubrim-license`.
+Future canonical publication target: `https://legal.arcanada.ai/policies/cubrim/license/v1.0`.
+
+This licensing package is an engineering/legal-policy draft and should receive
+professional legal review before commercial enforcement.

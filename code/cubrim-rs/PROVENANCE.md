@@ -17,3 +17,15 @@ Benchmark evidence:
 The original benchmark source was not committed at measurement time. This P4
 release source preserves the benchmarked CM code and should be treated as the
 canonical clean source for future reproducible builds.
+
+## License
+
+Cubrim is licensed for non-commercial use under PolyForm Noncommercial License
+1.0.0 with Cubrim-specific notices in `LICENSE`.
+
+Commercial use requires a separate Arcanada commercial license. The draft
+commercial terms are in `LICENSE-COMMERCIAL.md`; the standard target is USD 50
+per year per named user seat or per installed computer/device.
+
+Temporary canonical publication target: `https://cubrim.com/legal/cubrim-license`.
+Future canonical publication target: `https://legal.arcanada.ai/policies/cubrim/license/v1.0`.

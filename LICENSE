@@ -1,0 +1,15 @@
+# Cubrim License
+
+The Cubrim Rust crate license is defined in `code/cubrim-rs/LICENSE`.
+
+Summary:
+
+- Non-commercial use is available under the PolyForm Noncommercial License
+  1.0.0, with Cubrim-specific notices in `code/cubrim-rs/LICENSE`.
+- Commercial use requires a separate paid commercial license. The draft terms
+  are in `code/cubrim-rs/LICENSE-COMMERCIAL.md`.
+- Temporary canonical publication target: `https://cubrim.com/legal/cubrim-license`.
+- Future canonical publication target: `https://legal.arcanada.ai/policies/cubrim/license/v1.0`.
+
+This repository-level file is a pointer for repository hosts. The Cargo package
+uses `code/cubrim-rs/LICENSE` as its `license-file`.
