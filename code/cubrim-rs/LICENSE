@@ -1,0 +1,76 @@
+# Cubrim Non-Commercial License Notice
+
+Policy ID: `legal.arcanada.ai/policies/cubrim/noncommercial/v1.0`
+Version: `1.0.0`
+Date: `2026-07-09`
+Project: `cubrim`
+Type: `license`
+Temporary canonical publication target: `https://cubrim.com/legal/cubrim-license`
+Future canonical publication target: `https://legal.arcanada.ai/policies/cubrim/license/v1.0`
+
+Copyright holder: Arcanada, unless a later signed commercial agreement or
+project-specific notice names a different rightsholder.
+
+Important notice: this file is an engineering/legal-policy draft for repository
+publication. It is not legal advice and should receive professional legal
+review before the operator relies on it for commercial enforcement.
+
+## English Primary Text
+
+Cubrim is made available for non-commercial use under the PolyForm
+Noncommercial License 1.0.0. The canonical public license text is published by
+the PolyForm Project at:
+
+https://polyformproject.org/licenses/noncommercial/1.0.0
+
+Required Notice: Copyright Arcanada. Cubrim commercial use requires a separate
+commercial license from Arcanada.
+
+For this Cubrim license package, "commercial use" means use by or for a
+for-profit company, paid service, revenue-generating product, internal business
+operation, client project, hosted service, paid consulting engagement, or other
+activity primarily intended to produce commercial advantage or monetary
+compensation. Commercial use is not granted by this non-commercial license.
+
+To use Cubrim commercially, obtain a paid commercial license under
+`LICENSE-COMMERCIAL.md` or another written agreement signed by Arcanada. The
+standard commercial target for this version is USD 50 per year per named user
+seat or per computer/device on which Cubrim is installed, whichever metric is
+used for the deployment.
+
+No trademark rights are granted by this notice. Prior copies that were actually
+received under an earlier MIT license may carry the rights granted by that
+earlier license for those earlier copies; this notice governs this licensed
+release and later releases that reference it.
+
+## Russian Translation
+
+Cubrim предоставляется для некоммерческого использования по лицензии PolyForm
+Noncommercial License 1.0.0. Канонический публичный текст лицензии опубликован
+проектом PolyForm:
+
+https://polyformproject.org/licenses/noncommercial/1.0.0
+
+Обязательное уведомление: Copyright Arcanada. Коммерческое использование
+Cubrim требует отдельной коммерческой лицензии от Arcanada.
+
+Для этого пакета лицензий Cubrim "коммерческое использование" означает
+использование компанией, работающей ради прибыли, платным сервисом,
+продуктом, приносящим доход, внутренним бизнес-процессом, клиентским
+проектом, хостинговым сервисом, платным консалтингом или иной деятельностью,
+основная цель которой состоит в получении коммерческого преимущества или
+денежного вознаграждения. Некоммерческая лицензия не предоставляет право на
+такое коммерческое использование.
+
+Для коммерческого использования Cubrim необходимо получить платную
+коммерческую лицензию по условиям `LICENSE-COMMERCIAL.md` или другого
+письменного соглашения, подписанного Arcanada. Стандартный коммерческий
+ориентир этой версии: 50 долларов США в год за именованное пользовательское
+место или за компьютер/устройство, на котором установлен Cubrim, в зависимости
+от выбранной метрики развертывания.
+
+Это уведомление не предоставляет прав на товарные знаки. Экземпляры, которые
+были фактически получены ранее по лицензии MIT, могут сохранять права,
+предоставленные той более ранней лицензией для тех более ранних экземпляров;
+это уведомление регулирует данный лицензируемый релиз и последующие релизы,
+которые на него ссылаются.
