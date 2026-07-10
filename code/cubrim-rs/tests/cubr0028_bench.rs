@@ -9,7 +9,10 @@ use std::fs;
 // Corpus dir resolves portably relative to the crate (override: CUBRIM_CORPUS_DIR).
 fn corpus_dir() -> String {
     std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-        format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        format!(
+            "{}/../../documentation/ephemeral/research/corpus",
+            env!("CARGO_MANIFEST_DIR")
+        )
     })
 }
 const CORPUS_TOTAL: usize = 51456;

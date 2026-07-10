@@ -5,6 +5,7 @@ datarim/
 /target/
 code/target/
 **/target/
+code/cubrim-rs/dist/
 **/*.rs.bk
 Cargo.lock
 

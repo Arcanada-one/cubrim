@@ -1,197 +1,145 @@
-// Cubrim CLI — compress / decompress subcommands.
-// R6: uses the library encode/decode API; no algorithm logic here.
-//
-// Usage:
-//   cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble]
-//   cubrim decompress <input> <output>
+#![forbid(unsafe_code)]
 
-use std::env;
-use std::fs;
+mod archive;
+mod cli;
+mod crypto;
+mod license;
+mod self_update;
+
 use std::process;
 use std::time::Instant;
 
-use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
-
-const VERSION_TEXT: &str = concat!(env!("CARGO_PKG_VERSION"), " (CUBR-0043)");
-
-fn print_usage() {
-    println!("Cubrim {VERSION_TEXT}");
-    println!();
-    println!("Usage:");
-    println!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2|bwt-entropy|bwt-rans|order2-rans|bwt-adaptive|bwt-ctxmix|bwt-geomix|lz-rans] [--min-ctx-count N]");
-    println!("  cubrim decompress <input> <output>");
-    println!();
-    println!("Options:");
-    println!("  -h, --help       Show this help text");
-    println!("  -V, --version    Print version and release provenance");
-}
-
-fn usage_error() -> ! {
-    print_usage();
-    process::exit(1);
-}
-
-fn parse_flag_u16(args: &[String], flag: &str) -> Option<u16> {
-    for i in 0..args.len().saturating_sub(1) {
-        if args[i] == flag {
-            if let Ok(v) = args[i + 1].parse::<u16>() {
-                return Some(v);
-            }
-        }
-    }
-    None
-}
-
-fn parse_flag_usize(args: &[String], flag: &str, default: usize) -> usize {
-    for i in 0..args.len().saturating_sub(1) {
-        if args[i] == flag {
-            if let Ok(v) = args[i + 1].parse::<usize>() {
-                return v;
-            }
-        }
-    }
-    default
-}
-
-fn parse_flag_str<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
-    for i in 0..args.len().saturating_sub(1) {
-        if args[i] == flag {
-            return Some(&args[i + 1]);
-        }
-    }
-    None
-}
-
-fn cmd_compress(
-    input: &str,
-    output: &str,
-    config: &EncodeConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let started = Instant::now();
-    let data = fs::read(input)?;
-    let blob = encode_with_config(&data, config);
-    fs::write(output, &blob)?;
-    let elapsed = started.elapsed();
-    let ratio = if data.is_empty() {
-        0.0
-    } else {
-        blob.len() as f64 / data.len() as f64
-    };
-    eprintln!(
-        "compressed: {} bytes -> {} bytes ratio={:.6} time_ms={}",
-        data.len(),
-        blob.len(),
-        ratio,
-        elapsed.as_millis()
-    );
-    Ok(())
-}
-
-fn cmd_decompress(input: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let started = Instant::now();
-    let blob = fs::read(input)?;
-    let data = decode(&blob)?;
-    fs::write(output, &data)?;
-    let elapsed = started.elapsed();
-    eprintln!(
-        "decompressed: {} bytes -> {} bytes time_ms={}",
-        blob.len(),
-        data.len(),
-        elapsed.as_millis()
-    );
-    Ok(())
-}
+use archive::{add_archive, extract_or_decompress, list_archive, test_archive};
+use clap::Parser;
+use cli::{Cli, Commands};
+use cubrim::{decode, encode_with_config};
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() == 2 {
-        match args[1].as_str() {
-            "-h" | "--help" => {
-                print_usage();
-                return;
-            }
-            "-V" | "--version" => {
-                println!("cubrim {VERSION_TEXT}");
-                return;
-            }
-            _ => {}
+    let cli = Cli::parse();
+    let result = run(cli);
+
+    if let Err(err) = result {
+        eprintln!("Error: {}", err.message);
+        process::exit(err.exit_code);
+    }
+}
+
+fn run(cli: Cli) -> Result<(), AppError> {
+    if cli.license {
+        return license::show_license();
+    }
+    let env_accept = std::env::var("CUBRIM_ACCEPT_LICENSE").ok().as_deref() == Some("1");
+    if cli.accept_license && cli.command.is_none() && !cli.update {
+        return license::accept_license_noninteractive();
+    }
+    if cli.update {
+        if cli.accept_license || env_accept {
+            license::accept_license_for_automation()?;
+        } else {
+            license::ensure_license_accepted()?;
         }
-    }
-    if args.len() < 4 {
-        usage_error();
+        return self_update::run_update();
     }
 
-    let subcmd = &args[1];
-    let input = &args[2];
-    let output = &args[3];
-    let extra_args = &args[4..];
+    if cli.accept_license || env_accept {
+        license::accept_license_for_automation()?;
+    } else {
+        license::ensure_license_accepted()?;
+    }
 
-    let result = match subcmd.as_str() {
-        "compress" => {
-            let mut config = EncodeConfig::v1_default();
-            config.raw_store_bound =
-                parse_flag_usize(extra_args, "--raw-store-bound", config.raw_store_bound);
-            config.b = parse_flag_usize(extra_args, "--b", config.b);
-            // --n: optional N override
-            if let Some(n_str) = parse_flag_str(extra_args, "--n") {
-                match n_str.parse::<usize>() {
-                    Ok(n) => config.n_override = Some(n),
-                    Err(_) => {
-                        eprintln!("Invalid --n value: {n_str}");
-                        process::exit(1);
-                    }
+    match cli.command {
+        Some(Commands::Compress(args)) => {
+            let started = Instant::now();
+            let data = std::fs::read(&args.input);
+            match data {
+                Ok(data) => {
+                    let config = args.encode_config();
+                    let blob = encode_with_config(&data, &config);
+                    std::fs::write(&args.output, &blob)
+                        .map(|_| {
+                            if !args.quiet {
+                                let ratio = if data.is_empty() {
+                                    0.0
+                                } else {
+                                    blob.len() as f64 / data.len() as f64
+                                };
+                                eprintln!(
+                                    "compressed: {} bytes -> {} bytes ratio={:.6} time_ms={}",
+                                    data.len(),
+                                    blob.len(),
+                                    ratio,
+                                    started.elapsed().as_millis()
+                                );
+                            }
+                        })
+                        .map_err(AppError::from)
                 }
+                Err(err) => Err(AppError::from(err)),
             }
-            // --gap-scheme: rle (default) or packed_nibble
-            if let Some(scheme_str) = parse_flag_str(extra_args, "--gap-scheme") {
-                config.gap_scheme = match scheme_str {
-                    "rle" | "rle_u16" => GapScheme::RleU16,
-                    "packed_nibble" => GapScheme::PackedNibble,
-                    other => {
-                        eprintln!("Unknown --gap-scheme: {other}. Use rle or packed_nibble.");
-                        process::exit(1);
-                    }
-                };
-            }
-            // --value-scheme: bitpack-fixed (default), rle-codes, entropy, entropy-context,
-            //   entropy-context-2, bwt-entropy
-            if let Some(vs_str) = parse_flag_str(extra_args, "--value-scheme") {
-                config.value_scheme = match vs_str {
-                    "bitpack-fixed" | "bitpack_fixed" => ValueScheme::BitpackFixed,
-                    "rle-codes" | "rle_codes" => ValueScheme::RleCodes,
-                    "entropy" => ValueScheme::Entropy,
-                    "entropy-context" | "entropy_context" => ValueScheme::EntropyContext,
-                    "entropy-context-2" | "entropy_context_2" => ValueScheme::EntropyContext2,
-                    "bwt-entropy" | "bwt_entropy" | "bwt" => ValueScheme::BwtEntropy,
-                    "bwt-rans" | "bwt_rans" | "rans" => ValueScheme::BwtRans,
-                    "order2-rans" | "order2_rans" | "bwt-order2-rans" => ValueScheme::Order2Rans,
-                    "bwt-adaptive" | "bwt_adaptive" | "adaptive" => ValueScheme::BwtAdaptive,
-                    "bwt-ctxmix" | "bwt_ctxmix" | "ctxmix" => ValueScheme::BwtContextMix,
-                    "bwt-geomix" | "bwt_geomix" | "geomix" => ValueScheme::BwtGeoMix,
-                    "lz-rans" | "lz_rans" | "lz" => ValueScheme::LzRans,
-                    other => {
-                        eprintln!("Unknown --value-scheme: {other}. Use bitpack-fixed, rle-codes, entropy, entropy-context, entropy-context-2, bwt-entropy, bwt-rans, order2-rans, bwt-adaptive, bwt-ctxmix, bwt-geomix, or lz-rans.");
-                        process::exit(1);
-                    }
-                };
-            }
-            // --min-ctx-count: minimum observation count for order-2 Huffman context tables.
-            // Only used when --value-scheme entropy-context-2 is set.
-            // Default = ORDER2_DEFAULT_MIN_CTX (128) when not specified.
-            if let Some(mcc) = parse_flag_u16(extra_args, "--min-ctx-count") {
-                config.min_ctx_count = Some(mcc);
-            }
-            cmd_compress(input, output, &config)
         }
-        "decompress" => cmd_decompress(input, output),
-        _ => {
-            eprintln!("Unknown subcommand: '{subcmd}'");
-            usage_error();
+        Some(Commands::Decompress(args)) => {
+            let started = Instant::now();
+            let blob = std::fs::read(&args.input);
+            match blob {
+                Ok(blob) => match decode(&blob) {
+                    Ok(data) => std::fs::write(&args.output, &data)
+                        .map(|_| {
+                            if !args.quiet {
+                                eprintln!(
+                                    "decompressed: {} bytes -> {} bytes time_ms={}",
+                                    blob.len(),
+                                    data.len(),
+                                    started.elapsed().as_millis()
+                                );
+                            }
+                        })
+                        .map_err(AppError::from),
+                    Err(err) => Err(AppError::integrity(err.to_string())),
+                },
+                Err(err) => Err(AppError::from(err)),
+            }
         }
-    };
+        Some(Commands::Add(args)) => add_archive(args),
+        Some(Commands::Extract(args)) => extract_or_decompress(args),
+        Some(Commands::List(args)) => list_archive(args),
+        Some(Commands::Test(args)) => test_archive(args),
+        None => Err(AppError::usage(
+            "no command supplied; run `cubrim --help` for usage",
+        )),
+    }
+}
 
-    if let Err(e) = result {
-        eprintln!("Error: {e}");
-        process::exit(1);
+#[derive(Debug)]
+pub struct AppError {
+    message: String,
+    exit_code: i32,
+}
+
+impl AppError {
+    pub fn usage(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            exit_code: 1,
+        }
+    }
+
+    pub fn integrity(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            exit_code: 2,
+        }
+    }
+
+    pub fn io(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            exit_code: 3,
+        }
+    }
+}
+
+impl From<std::io::Error> for AppError {
+    fn from(value: std::io::Error) -> Self {
+        Self::io(value.to_string())
     }
 }

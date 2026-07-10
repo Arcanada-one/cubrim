@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${1:-${ROOT}/target/release/cubrim}"
+VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "${ROOT}/Cargo.toml" | head -n1)"
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -14,13 +15,17 @@ die() {
 TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/cubrim-smoke.XXXXXX")"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
+export CUBRIM_ACCEPT_LICENSE=1
+export CUBRIM_STATE_DIR="${TMPDIR}/state"
+export CUBRIM_API_BASE_URL="http://127.0.0.1:9"
+
 "${BIN}" --help > "${TMPDIR}/help.txt"
 "${BIN}" --version > "${TMPDIR}/version.txt"
 
 grep -q 'Usage:' "${TMPDIR}/help.txt" || die "--help output missing Usage"
 grep -q 'compress' "${TMPDIR}/help.txt" || die "--help output missing compress"
 grep -q 'decompress' "${TMPDIR}/help.txt" || die "--help output missing decompress"
-grep -q 'CUBR-0043' "${TMPDIR}/version.txt" || die "--version output missing CUBR-0043"
+grep -q "${VERSION}" "${TMPDIR}/version.txt" || die "--version output missing ${VERSION}"
 
 for _ in $(seq 1 512); do
   printf 'CUBR CLI smoke test line with repeated text and numbers 0123456789\n'

@@ -28,7 +28,10 @@ use std::fs;
 // Corpus dir resolves portably relative to the crate (override: CUBRIM_CORPUS_DIR).
 fn corpus_dir() -> String {
     std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-        format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+        format!(
+            "{}/../../documentation/ephemeral/research/corpus",
+            env!("CARGO_MANIFEST_DIR")
+        )
     })
 }
 
@@ -138,9 +141,7 @@ fn bench_cubr0031_large_block() {
     println!("Step 1: Block-bound confirmation");
     let cube_size_limit: usize = 256 * 256; // 65536
     let ratio = NEW_FILE_SIZE as f64 / cube_size_limit as f64;
-    println!(
-        "  L = {NEW_FILE_SIZE}, cube_size_limit = {cube_size_limit}, L/limit = {ratio:.4}"
-    );
+    println!("  L = {NEW_FILE_SIZE}, cube_size_limit = {cube_size_limit}, L/limit = {ratio:.4}");
     assert_eq!(
         NEW_FILE_SIZE, cube_size_limit,
         "L must equal cube_size_limit exactly to enter cube/BWT mode"
@@ -151,8 +152,7 @@ fn bench_cubr0031_large_block() {
     // ── Step 2: Lossless round-trip on new fixture ────────────────────────────
     println!("Step 2: Lossless round-trip — {NEW_FILE}.bin");
     let new_path = format!("{}/{NEW_FILE}.bin", corpus_dir());
-    let new_data = fs::read(&new_path)
-        .unwrap_or_else(|e| panic!("Cannot read {new_path}: {e}"));
+    let new_data = fs::read(&new_path).unwrap_or_else(|e| panic!("Cannot read {new_path}: {e}"));
     assert_eq!(
         new_data.len(),
         NEW_FILE_SIZE,
@@ -163,8 +163,8 @@ fn bench_cubr0031_large_block() {
     let new_bwt_blob = encode_bwt(&new_data);
     let new_t4_blob = encode_t4(&new_data);
 
-    let recovered = decode(&new_bwt_blob)
-        .unwrap_or_else(|e| panic!("BWT decode failed for {NEW_FILE}: {e}"));
+    let recovered =
+        decode(&new_bwt_blob).unwrap_or_else(|e| panic!("BWT decode failed for {NEW_FILE}: {e}"));
     assert_eq!(
         recovered, new_data,
         "BWT round-trip FAILED for {NEW_FILE}: byte mismatch"
@@ -175,8 +175,8 @@ fn bench_cubr0031_large_block() {
         recovered.len()
     );
 
-    let t4_recovered = decode(&new_t4_blob)
-        .unwrap_or_else(|e| panic!("T4 decode failed for {NEW_FILE}: {e}"));
+    let t4_recovered =
+        decode(&new_t4_blob).unwrap_or_else(|e| panic!("T4 decode failed for {NEW_FILE}: {e}"));
     assert_eq!(
         t4_recovered, new_data,
         "T4 round-trip FAILED for {NEW_FILE}: byte mismatch"
@@ -214,8 +214,7 @@ fn bench_cubr0031_large_block() {
 
     for f in ORIGINAL_FILES {
         let path = format!("{}/{}.bin", corpus_dir(), f.name);
-        let data = fs::read(&path)
-            .unwrap_or_else(|e| panic!("Cannot read {path}: {e}"));
+        let data = fs::read(&path).unwrap_or_else(|e| panic!("Cannot read {path}: {e}"));
 
         let bwt_blob = encode_bwt(&data);
         let t4_blob = encode_t4(&data);
@@ -225,11 +224,13 @@ fn bench_cubr0031_large_block() {
             t4_blob.len(),
             f.t4_bytes,
             "T4 size mismatch for '{}': measured {} vs expected {}",
-            f.name, t4_blob.len(), f.t4_bytes
+            f.name,
+            t4_blob.len(),
+            f.t4_bytes
         );
 
-        let recovered = decode(&bwt_blob)
-            .unwrap_or_else(|e| panic!("BWT decode failed for '{}': {e}", f.name));
+        let recovered =
+            decode(&bwt_blob).unwrap_or_else(|e| panic!("BWT decode failed for '{}': {e}", f.name));
         assert_eq!(recovered, data, "BWT round-trip FAILED for '{}'", f.name);
 
         orig_bwt_total += bwt_blob.len();
@@ -253,12 +254,8 @@ fn bench_cubr0031_large_block() {
     let t4_agg = total_t4 as f64 / CORPUS_TOTAL as f64;
     let delta_vs_t4 = bwt_agg - t4_agg;
 
-    println!(
-        "  BWT total: {total_bwt}  aggregate: {bwt_agg:.6}"
-    );
-    println!(
-        "  T4  total: {total_t4}  aggregate: {t4_agg:.6}"
-    );
+    println!("  BWT total: {total_bwt}  aggregate: {bwt_agg:.6}");
+    println!("  T4  total: {total_t4}  aggregate: {t4_agg:.6}");
     println!("  delta BWT-T4: {delta_vs_t4:+.6}");
     println!("  GO threshold: {GO_THRESHOLD:.6}");
     println!();
@@ -276,7 +273,7 @@ fn bench_cubr0031_large_block() {
 
     let branch_count: usize = 4;
     let cost_terms: [(&str, usize); 4] = [
-        ("Branch A: BWT output stream", 0),          // already in BWT baseline
+        ("Branch A: BWT output stream", 0), // already in BWT baseline
         ("Branch B: u32 widening overhead", total_widening_overhead),
         ("Branch C: n_distinct header (unchanged)", 0),
         ("Branch D: block-length u32 header (L>65536 only)", 0),
@@ -286,7 +283,8 @@ fn bench_cubr0031_large_block() {
         cost_terms.len(),
         branch_count,
         "Gotcha #6: {} cost terms != {} branches",
-        cost_terms.len(), branch_count
+        cost_terms.len(),
+        branch_count
     );
     assert_eq!(
         cost_terms.len(),
@@ -302,7 +300,8 @@ fn bench_cubr0031_large_block() {
     );
     println!(
         "  Gotcha #6 self-check: {} cost terms == {} branches  PASS",
-        cost_terms.len(), DECODER_BRANCHES
+        cost_terms.len(),
+        DECODER_BRANCHES
     );
     println!();
 
@@ -325,10 +324,7 @@ fn bench_cubr0031_large_block() {
             println!(
                 "VERDICT: GO — BWT aggregate {bwt_agg:.6} beats GO threshold {GO_THRESHOLD:.6}"
             );
-            println!(
-                "  Margin: {:.6} below threshold",
-                GO_THRESHOLD - bwt_agg
-            );
+            println!("  Margin: {:.6} below threshold", GO_THRESHOLD - bwt_agg);
             println!("  u16->u32 widening + O(n) SA-IS JUSTIFIED — file a follow-up task.");
         }
         "PARTIAL" => {
@@ -354,9 +350,7 @@ fn bench_cubr0031_large_block() {
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output();
         match output {
-            Ok(o) if o.status.success() => {
-                String::from_utf8_lossy(&o.stdout).trim().to_string()
-            }
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
             _ => "unknown".to_string(),
         }
     };
