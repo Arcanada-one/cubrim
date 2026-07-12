@@ -22,8 +22,10 @@ fi
 [[ -f "${BIN_PATH}" ]] || { echo "missing built binary: ${BIN_PATH}" >&2; exit 1; }
 
 cp "${BIN_PATH}" "${STAGE}/"
-cp "${ROOT}/LICENSE" "${STAGE}/LICENSE"
-cp "${ROOT}/LICENSE-COMMERCIAL.md" "${STAGE}/LICENSE-COMMERCIAL.md"
+cp "${ROOT}/LICENSE-SHORT.txt" "${STAGE}/LICENSE.txt"
+if [[ -f "${ROOT}/LICENSE-COMMERCIAL.md" ]]; then
+  cp "${ROOT}/LICENSE-COMMERCIAL.md" "${STAGE}/LICENSE-COMMERCIAL.md"
+fi
 cp "${ROOT}/docs/cli.md" "${STAGE}/README.txt"
 
 ARCHIVE_PATH="${DIST_DIR}/${ASSET_BASE}.${EXT}"
