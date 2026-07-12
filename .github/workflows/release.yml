@@ -1,0 +1,99 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: linux
+            arch: x86_64
+            ext: tar.gz
+            build: cargo
+          - target: aarch64-unknown-linux-gnu
+            os: linux
+            arch: arm64
+            ext: tar.gz
+            build: cross
+          - target: x86_64-pc-windows-gnu
+            os: windows
+            arch: x86_64
+            ext: zip
+            build: cross
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Install cross
+        if: matrix.build == 'cross'
+        uses: taiki-e/install-action@cross
+
+      - name: Build native target
+        if: matrix.build == 'cargo'
+        working-directory: code/cubrim-rs
+        run: cargo build --release --target "${{ matrix.target }}"
+
+      - name: Build cross target
+        if: matrix.build == 'cross'
+        working-directory: code/cubrim-rs
+        run: cross build --release --target "${{ matrix.target }}"
+
+      - name: Package release asset
+        id: package
+        working-directory: code/cubrim-rs
+        run: |
+          asset_path="$(bash scripts/package-release.sh "${{ matrix.target }}" "${{ matrix.os }}" "${{ matrix.arch }}" "${{ matrix.ext }}")"
+          echo "asset_path=${asset_path}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.asset_path }}
+            ${{ steps.package.outputs.asset_path }}.sha256
+            ${{ steps.package.outputs.asset_path }}.size
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Prepare release bundle
+        run: |
+          mkdir -p release
+          find dist -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release/ \;
+          : > release/checksums.txt
+          for file in release/*.tar.gz release/*.zip; do
+            [[ -f "$file" ]] || continue
+            sha="$(sha256sum "$file" | awk '{print $1}')"
+            printf '%s  %s\n' "$sha" "$(basename "$file")" >> release/checksums.txt
+          done
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release/*.tar.gz
+            release/*.zip
+            release/checksums.txt
