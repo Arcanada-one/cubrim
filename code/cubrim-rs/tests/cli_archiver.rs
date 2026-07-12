@@ -23,6 +23,15 @@ fn cubrim() -> Command {
     command
 }
 
+#[cfg(unix)]
+fn xattr_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "com.test.marker"
+    } else {
+        "user.cubrim"
+    }
+}
+
 #[test]
 fn archive_directory_roundtrip_list_and_test() {
     let temp = tempdir().unwrap();
@@ -425,7 +434,7 @@ fn digest_tree(root: &PathBuf) -> Vec<(String, String)> {
 fn preserve_roundtrip_restores_symlink_hardlink_xattr_and_non_utf8_name() {
     use std::ffi::OsString;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
-    use std::os::unix::fs::{symlink, MetadataExt};
+    use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};
 
     let temp = tempdir().unwrap();
     let input = temp.path().join("input");
@@ -434,6 +443,8 @@ fn preserve_roundtrip_restores_symlink_hardlink_xattr_and_non_utf8_name() {
 
     let original = nested.join("original.bin");
     fs::write(&original, b"payload-1234\n").unwrap();
+    let original_mode = 0o755;
+    fs::set_permissions(&original, fs::Permissions::from_mode(original_mode)).unwrap();
 
     let hard = nested.join("hard.bin");
     fs::hard_link(&original, &hard).unwrap();
@@ -444,7 +455,7 @@ fn preserve_roundtrip_restores_symlink_hardlink_xattr_and_non_utf8_name() {
     let non_utf8 = nested.join(OsString::from_vec(b"name-\xff.bin".to_vec()));
     fs::write(&non_utf8, b"non-utf8\n").unwrap();
 
-    xattr::set(&original, OsString::from("user.cubrim"), b"xattr-value").unwrap();
+    xattr::set(&original, OsString::from(xattr_name()), b"xattr-value").unwrap();
 
     let archive = temp.path().join("archive.cbr");
     let output = temp.path().join("output");
@@ -483,13 +494,90 @@ fn preserve_roundtrip_restores_symlink_hardlink_xattr_and_non_utf8_name() {
     let restored_target = fs::read_link(&restored_link).unwrap();
     assert_eq!(restored_target.as_os_str().as_bytes(), b"original.bin");
 
-    let original_meta = fs::metadata(&restored_original).unwrap();
+    let original_meta = fs::metadata(&original).unwrap();
+    let restored_meta = fs::metadata(&restored_original).unwrap();
     let hard_meta = fs::metadata(&restored_hard).unwrap();
-    assert_eq!(original_meta.ino(), hard_meta.ino());
-    assert_eq!(original_meta.dev(), hard_meta.dev());
+    assert_eq!(restored_meta.permissions().mode() & 0o7777, original_mode);
+    assert_eq!(restored_meta.permissions().mode() & 0o7777, original_meta.permissions().mode() & 0o7777);
+    assert_eq!(restored_meta.ino(), hard_meta.ino());
+    assert_eq!(restored_meta.dev(), hard_meta.dev());
 
-    let restored_xattr = xattr::get(&restored_original, OsString::from("user.cubrim"))
+    let restored_xattr = xattr::get(&restored_original, OsString::from(xattr_name()))
         .unwrap()
         .unwrap();
     assert_eq!(restored_xattr, b"xattr-value");
+}
+
+#[cfg(unix)]
+#[test]
+fn no_preserve_opt_out_drops_mode_and_xattr() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempdir().unwrap();
+    let input = temp.path().join("input");
+    fs::create_dir_all(&input).unwrap();
+    let original = input.join("script.sh");
+    fs::write(&original, b"#!/bin/sh\necho hi\n").unwrap();
+    fs::set_permissions(&original, fs::Permissions::from_mode(0o755)).unwrap();
+    xattr::set(&original, xattr_name(), b"xattr-value").unwrap();
+
+    let archive = temp.path().join("archive.cbr");
+    let output = temp.path().join("output");
+
+    assert!(cubrim()
+        .args(["a"])
+        .arg(&archive)
+        .arg(&input)
+        .args(["--force", "--quiet", "--no-preserve"])
+        .status()
+        .unwrap()
+        .success());
+
+    assert!(cubrim()
+        .args(["x"])
+        .arg(&archive)
+        .args(["-o"])
+        .arg(&output)
+        .args(["--quiet", "--no-preserve"])
+        .status()
+        .unwrap()
+        .success());
+
+    let restored = output.join("input/script.sh");
+    assert_eq!(
+        fs::metadata(&restored).unwrap().permissions().mode() & 0o111,
+        0,
+        "opt-out should drop executable bits even if the exact rw mask follows umask"
+    );
+    assert_eq!(xattr::get(&restored, xattr_name()).unwrap(), None);
+}
+
+#[test]
+fn help_and_version_work_without_prior_license_acceptance_or_tty() {
+    let temp = tempdir().unwrap();
+    let bin = env!("CARGO_BIN_EXE_cubrim");
+
+    let version = Command::new(bin)
+        .env("CUBRIM_STATE_DIR", temp.path().join("state-version"))
+        .env_remove("CUBRIM_ACCEPT_LICENSE")
+        .env("CUBRIM_API_BASE_URL", "http://127.0.0.1:9")
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(version.status.success());
+    assert!(String::from_utf8(version.stdout).unwrap().contains(env!("CARGO_PKG_VERSION")));
+    assert!(version.stderr.is_empty());
+
+    let help = Command::new(bin)
+        .env("CUBRIM_STATE_DIR", temp.path().join("state-help"))
+        .env_remove("CUBRIM_ACCEPT_LICENSE")
+        .env("CUBRIM_API_BASE_URL", "http://127.0.0.1:9")
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    let stdout = String::from_utf8(help.stdout).unwrap();
+    assert!(stdout.contains("Cubrim .cbr archiver"));
+    assert!(stdout.contains("Usage: cubrim"));
+    assert!(help.stderr.is_empty());
 }

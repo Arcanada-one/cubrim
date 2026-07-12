@@ -50,7 +50,7 @@ the binary displays its embedded offline license summary.
 
 ## Archive Semantics
 
-With `--preserve`, Cubrim archives and restores:
+By default, Cubrim archives and restores:
 - regular files
 - directories, including empty directories
 - symlinks as symlinks
@@ -60,6 +60,9 @@ With `--preserve`, Cubrim archives and restores:
 - xattrs
 - Unicode filenames
 - non-UTF-8 path bytes on Unix
+
+Use `--no-preserve` on `a` / `x` / `e` / `d` to opt out of metadata restoration when
+you only want file bytes and topology.
 
 Extraction is fail-closed against:
 - path traversal in member paths

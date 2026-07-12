@@ -65,8 +65,16 @@ pub struct CommonArgs {
     pub quiet: bool,
     #[arg(from_global)]
     pub yes: bool,
-    #[arg(long, action = ArgAction::SetTrue)]
+    #[arg(long, action = ArgAction::SetTrue, help = "Preserve metadata attributes (default)")]
     pub preserve: bool,
+    #[arg(long = "no-preserve", action = ArgAction::SetTrue, help = "Do not preserve metadata attributes")]
+    pub no_preserve: bool,
+}
+
+impl CommonArgs {
+    pub fn preserve_attrs(&self) -> bool {
+        self.preserve || !self.no_preserve
+    }
 }
 
 #[derive(Debug, Args)]

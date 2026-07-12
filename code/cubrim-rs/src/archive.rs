@@ -72,7 +72,7 @@ pub fn add_archive(args: ArchiveAddArgs) -> Result<(), AppError> {
     }
 
     let password = resolve_password(&args.common.password, "Archive")?;
-    let entries = collect_entries(&args.paths, args.common.preserve)?;
+    let entries = collect_entries(&args.paths, args.common.preserve_attrs())?;
     let payload = serialize_entries_v2(&entries)?;
     let archive = wrap_payload(&payload, password.as_deref())?;
 
@@ -111,10 +111,12 @@ fn extract_archive_impl(args: ExtractArgs, flatten: bool) -> Result<(), AppError
     let out_dir = args.out_dir.unwrap_or_else(|| PathBuf::from("."));
     fs::create_dir_all(&out_dir)?;
 
+    let preserve = args.common.preserve_attrs();
+
     for entry in entries.iter().filter(|entry| entry.kind == KIND_DIR) {
         let target = target_path(&out_dir, entry, flatten)?;
         fs::create_dir_all(&target)?;
-        restore_metadata(&target, entry, args.common.preserve)?;
+        restore_metadata(&target, entry, preserve)?;
     }
 
     for entry in entries
@@ -139,7 +141,7 @@ fn extract_archive_impl(args: ExtractArgs, flatten: bool) -> Result<(), AppError
                 let data = decode(&entry.data).map_err(|err| AppError::integrity(err.to_string()))?;
                 verify_checksum(entry, &data)?;
                 fs::write(&target, data)?;
-                restore_metadata(&target, entry, args.common.preserve)?;
+                restore_metadata(&target, entry, preserve)?;
             }
             KIND_SYMLINK => {
                 let link_target = entry.link_target.as_ref().ok_or_else(|| {
@@ -150,7 +152,7 @@ fn extract_archive_impl(args: ExtractArgs, flatten: bool) -> Result<(), AppError
                 })?;
                 validate_symlink_target(&entry.path, link_target)?;
                 create_symlink(link_target, &target)?;
-                restore_metadata(&target, entry, args.common.preserve)?;
+                restore_metadata(&target, entry, preserve)?;
             }
             KIND_HARDLINK => {
                 let referent_rel = entry.link_target.as_ref().ok_or_else(|| {
