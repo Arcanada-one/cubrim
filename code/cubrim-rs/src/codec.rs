@@ -25,8 +25,8 @@ use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
-    MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_LZ, MODE_MED16, MODE_RAW,
-    MODE_SOA, MODE_VCF, VERSION,
+    MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_LARGEBWT, MODE_LZ,
+    MODE_MED16, MODE_RAW, MODE_SOA, MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -3164,6 +3164,148 @@ fn decode_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     Ok(out)
 }
 
+const LARGEBWT_HEADER_SIZE: usize = 22;
+const LARGEBWT_ENTRY_SIZE: usize = 20;
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn build_large_bwt_blob(data: &[u8], block_size: usize) -> Vec<u8> {
+    assert!(block_size > 0 && block_size <= u32::MAX as usize);
+    let blocks: Vec<&[u8]> = data.chunks(block_size).collect();
+    assert!(!blocks.is_empty() && blocks.len() <= u32::MAX as usize);
+
+    let mut entries = Vec::with_capacity(blocks.len());
+    let mut payloads = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        let codes: Vec<usize> = block.iter().map(|&b| b as usize).collect();
+        let (bwt, primary) = bwt_encode_codes_wide(&codes);
+        assert!(primary <= u32::MAX as usize);
+        let comp = rans_order1_encode(&bwt, 256);
+        assert!(comp.len() <= u32::MAX as usize);
+        entries.push((
+            block.len() as u32,
+            primary as u32,
+            comp.len() as u32,
+            cm_hash64(block),
+        ));
+        payloads.push(comp);
+    }
+
+    let payload_len: usize = payloads.iter().map(Vec::len).sum();
+    let mut out = Vec::with_capacity(
+        LARGEBWT_HEADER_SIZE + entries.len() * LARGEBWT_ENTRY_SIZE + payload_len,
+    );
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_LARGEBWT);
+    out.extend_from_slice(&(data.len() as u64).to_be_bytes());
+    out.extend_from_slice(&(block_size as u32).to_be_bytes());
+    out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    for &(raw_len, primary, comp_len, hash) in &entries {
+        out.extend_from_slice(&raw_len.to_be_bytes());
+        out.extend_from_slice(&primary.to_be_bytes());
+        out.extend_from_slice(&comp_len.to_be_bytes());
+        out.extend_from_slice(&hash.to_be_bytes());
+    }
+    for payload in payloads {
+        out.extend_from_slice(&payload);
+    }
+    out
+}
+
+fn decode_large_bwt(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    if blob.len() < LARGEBWT_HEADER_SIZE {
+        return Err(CubrimError::Decode(
+            "MODE_LARGEBWT container too short".into(),
+        ));
+    }
+    let orig_len_u64 = read_u64(blob, 6)?;
+    let orig_len = usize::try_from(orig_len_u64)
+        .map_err(|_| CubrimError::Decode("MODE_LARGEBWT orig_len exceeds usize".into()))?;
+    let block_size = read_u32(blob, 14)? as usize;
+    let n_blocks = read_u32(blob, 18)? as usize;
+    if orig_len == 0 || block_size == 0 || n_blocks == 0 {
+        return Err(CubrimError::Decode(
+            "MODE_LARGEBWT zero length, block size, or block count".into(),
+        ));
+    }
+    if n_blocks != orig_len.div_ceil(block_size) {
+        return Err(CubrimError::Decode(
+            "MODE_LARGEBWT block count mismatch".into(),
+        ));
+    }
+    let table_len = n_blocks
+        .checked_mul(LARGEBWT_ENTRY_SIZE)
+        .and_then(|n| LARGEBWT_HEADER_SIZE.checked_add(n))
+        .ok_or_else(|| CubrimError::Decode("MODE_LARGEBWT table length overflow".into()))?;
+    if table_len > blob.len() {
+        return Err(CubrimError::Decode(
+            "MODE_LARGEBWT block table truncated".into(),
+        ));
+    }
+
+    let mut entries = Vec::with_capacity(n_blocks);
+    let mut raw_total = 0usize;
+    let mut comp_total = 0usize;
+    for i in 0..n_blocks {
+        let p = LARGEBWT_HEADER_SIZE + i * LARGEBWT_ENTRY_SIZE;
+        let raw_len = read_u32(blob, p)? as usize;
+        let primary = read_u32(blob, p + 4)? as usize;
+        let comp_len = read_u32(blob, p + 8)? as usize;
+        let hash = read_u64(blob, p + 12)?;
+        if raw_len == 0 || raw_len > block_size || primary >= raw_len || comp_len == 0 {
+            return Err(CubrimError::Decode(format!(
+                "MODE_LARGEBWT invalid block {i} metadata"
+            )));
+        }
+        if i + 1 < n_blocks && raw_len != block_size {
+            return Err(CubrimError::Decode(format!(
+                "MODE_LARGEBWT short non-final block {i}"
+            )));
+        }
+        raw_total = raw_total
+            .checked_add(raw_len)
+            .ok_or_else(|| CubrimError::Decode("MODE_LARGEBWT raw length overflow".into()))?;
+        comp_total = comp_total
+            .checked_add(comp_len)
+            .ok_or_else(|| CubrimError::Decode("MODE_LARGEBWT payload length overflow".into()))?;
+        entries.push((raw_len, primary, comp_len, hash));
+    }
+    if raw_total != orig_len || table_len.checked_add(comp_total) != Some(blob.len()) {
+        return Err(CubrimError::Decode(
+            "MODE_LARGEBWT length totals mismatch".into(),
+        ));
+    }
+
+    let mut out = Vec::with_capacity(orig_len);
+    let mut off = table_len;
+    for (i, (raw_len, primary, comp_len, hash)) in entries.into_iter().enumerate() {
+        let end = off + comp_len;
+        let (bwt, consumed) = rans_order1_decode(&blob[off..end], 0, raw_len, 256)?;
+        if consumed != comp_len {
+            return Err(CubrimError::Decode(format!(
+                "MODE_LARGEBWT block {i} trailing payload"
+            )));
+        }
+        let codes = bwt_decode_codes_wide(&bwt, primary, 256)?;
+        let block: Vec<u8> = codes
+            .into_iter()
+            .map(|c| {
+                u8::try_from(c).map_err(|_| {
+                    CubrimError::Decode("MODE_LARGEBWT decoded symbol exceeds byte".into())
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        if cm_hash64(&block) != hash {
+            return Err(CubrimError::Decode(format!(
+                "MODE_LARGEBWT block {i} checksum mismatch"
+            )));
+        }
+        out.extend_from_slice(&block);
+        off = end;
+    }
+    Ok(out)
+}
+
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     // Container modes are detected before parse_header (which only knows the
     // single-block modes 0/1): MODE_CHUNKED wraps independent sub-blobs; MODE_LZ
@@ -3195,6 +3337,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_CM {
             return decode_cm(blob);
+        }
+        if blob[5] == MODE_LARGEBWT {
+            return decode_large_bwt(blob);
         }
     }
 
@@ -4886,13 +5031,13 @@ fn sais_rotation0_group_size(seq: &[usize]) -> usize {
 ///
 /// The primary index is the row in the sorted-rotation matrix that corresponds
 /// to the original sequence (the rotation starting at position 0). For exact
-/// inversion, every caller stores this value on the wire (2 bytes).
+/// inversion, callers serialize this value at the width defined by their container.
 ///
 /// Algorithm: O(n) SA-IS suffix array of the doubled stream. Output is
 /// byte-identical to the previous naive O(n² log n) rotation sort — see
-/// `test_sais_bwt_matches_naive`. The LF-mapping inverse (`bwt_decode_codes`)
-/// and the wire format (u16 `primary_index`) are unchanged.
-pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
+/// `test_sais_bwt_matches_naive`. Existing value schemes use checked u16 wrappers;
+/// FU-01's additive top-level container uses the wide primary index.
+fn bwt_encode_codes_wide(seq: &[usize]) -> (Vec<usize>, usize) {
     let n = seq.len();
     if n == 0 {
         return (vec![], 0);
@@ -4936,9 +5081,13 @@ pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
     let group_size = sais_rotation0_group_size(seq);
     let primary = pos0 - (group_size - 1);
 
-    // Safety: cube mode is only reached when l <= cube_size_limit() = b*b = 65536,
-    // so primary < l <= 65536 <= u16::MAX. If the chunk/cube ceiling is ever raised
-    // above 65536, revisit this cast (and the BWT wire format).
+    (bwt_out, primary)
+}
+
+/// Existing v1 BWT wrapper. Every current value-scheme wire stores a two-byte primary
+/// index, so this checked narrowing preserves the format while the wide core serves FU-01.
+pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
+    let (bwt_out, primary) = bwt_encode_codes_wide(seq);
     debug_assert!(
         primary <= u16::MAX as usize,
         "primary_index {primary} exceeds u16::MAX; cube/chunk ceiling may have been raised above 65536 without updating BWT wire format"
@@ -4953,16 +5102,15 @@ pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
 ///   2. Build the LF map: for each rank r in bwt_out, LF(r) = position of the
 ///      r-th occurrence of symbol bwt_out[r] in first_col.
 ///   3. Walk back n steps starting from primary_index to recover the sequence.
-pub(crate) fn bwt_decode_codes(
+fn bwt_decode_codes_wide(
     bwt_out: &[usize],
-    primary: u16,
+    primary: usize,
     n_distinct: usize,
 ) -> Result<Vec<usize>, CubrimError> {
     let n = bwt_out.len();
     if n == 0 {
         return Ok(vec![]);
     }
-    let primary = primary as usize;
     if primary >= n {
         return Err(CubrimError::Decode(format!(
             "BWT primary_index {primary} out of range [0, {n})"
@@ -5008,6 +5156,15 @@ pub(crate) fn bwt_decode_codes(
         cur = lf[cur];
     }
     Ok(result)
+}
+
+/// Existing v1 BWT wrapper matching the two-byte primary-index wire.
+pub(crate) fn bwt_decode_codes(
+    bwt_out: &[usize],
+    primary: u16,
+    n_distinct: usize,
+) -> Result<Vec<usize>, CubrimError> {
+    bwt_decode_codes_wide(bwt_out, primary as usize, n_distinct)
 }
 
 /// Encode the value-code stream with BWT + T4 (order-1 context Huffman).
@@ -8757,6 +8914,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_bwt_wide_round_trip_across_u16_length_boundary() {
+        for len in [65_535usize, 65_536, 65_537] {
+            let seq: Vec<usize> = (0..len)
+                .map(|i| ((i.wrapping_mul(37)) ^ (i >> 7)) & 0xFF)
+                .collect();
+            let (bwt, primary) = bwt_encode_codes_wide(&seq);
+            assert!(primary < len);
+            assert_eq!(bwt_decode_codes_wide(&bwt, primary, 256).unwrap(), seq);
+        }
+    }
+
+    #[test]
+    fn test_bwt_u16_wrapper_matches_wide_core() {
+        let seq: Vec<usize> = (0..65_536).map(|i| (i * 29) & 0xFF).collect();
+        let (wide_bwt, wide_primary) = bwt_encode_codes_wide(&seq);
+        let (v1_bwt, v1_primary) = bwt_encode_codes(&seq);
+        assert_eq!(v1_bwt, wide_bwt);
+        assert_eq!(v1_primary as usize, wide_primary);
+    }
+
     // -------------------------------------------------------------------------
     // H-25 LzRans (LZ77 + rANS) — scheme byte 12
     // -------------------------------------------------------------------------
@@ -8914,6 +9092,70 @@ mod tests {
             decode(&corrupt).is_err(),
             "MODE_CM checksum must reject corrupt payload"
         );
+    }
+
+    #[test]
+    fn test_large_bwt_multi_block_round_trip() {
+        let data: Vec<u8> = (0..140_000usize)
+            .map(|i| (((i * 31) ^ (i >> 5)) & 0x7f) as u8)
+            .collect();
+        let blob = build_large_bwt_blob(&data, 65_537);
+        assert_eq!(blob[5], MODE_LARGEBWT);
+        assert_eq!(decode(&blob).unwrap(), data);
+    }
+
+    #[test]
+    fn test_large_bwt_rejects_malformed_metadata_and_hash() {
+        let data = b"large bwt validation fixture ".repeat(3000);
+        let blob = build_large_bwt_blob(&data, 65_537);
+
+        assert!(decode(&blob[..LARGEBWT_HEADER_SIZE - 1]).is_err());
+
+        let mut zero_blocks = blob.clone();
+        zero_blocks[18..22].copy_from_slice(&0u32.to_be_bytes());
+        assert!(decode(&zero_blocks).is_err());
+
+        let mut bad_primary = blob.clone();
+        let raw_len = read_u32(&bad_primary, LARGEBWT_HEADER_SIZE).unwrap();
+        bad_primary[LARGEBWT_HEADER_SIZE + 4..LARGEBWT_HEADER_SIZE + 8]
+            .copy_from_slice(&raw_len.to_be_bytes());
+        assert!(decode(&bad_primary).is_err());
+
+        let mut bad_comp_len = blob.clone();
+        let comp_len = read_u32(&bad_comp_len, LARGEBWT_HEADER_SIZE + 8).unwrap();
+        bad_comp_len[LARGEBWT_HEADER_SIZE + 8..LARGEBWT_HEADER_SIZE + 12]
+            .copy_from_slice(&comp_len.wrapping_add(1).to_be_bytes());
+        assert!(decode(&bad_comp_len).is_err());
+
+        let mut bad_hash = blob;
+        bad_hash[LARGEBWT_HEADER_SIZE + 12] ^= 0x01;
+        assert!(decode(&bad_hash).is_err());
+    }
+
+    #[test]
+    #[ignore = "FU-01 heavy spike runs sequentially on dev-ai"]
+    fn test_fu01_large_bwt_spike() {
+        let paths = std::env::var("CUBR_FU01_FILES")
+            .expect("CUBR_FU01_FILES must contain colon-separated corpus paths");
+        for path in paths.split(':').filter(|p| !p.is_empty()) {
+            let data = std::fs::read(path).expect("read FU-01 corpus file");
+            for block_size in [256 * 1024usize, 1024 * 1024] {
+                let started = std::time::Instant::now();
+                let blob = build_large_bwt_blob(&data, block_size);
+                let elapsed_ms = started.elapsed().as_millis();
+                let restored = decode(&blob).expect("MODE_LARGEBWT decode");
+                assert_eq!(restored, data, "FU-01 byte-exact round trip for {path}");
+                println!(
+                    "FU01 path={} block_size={} orig={} comp={} ratio={:.15} time_ms={} rt=OK cmp=0",
+                    path,
+                    block_size,
+                    data.len(),
+                    blob.len(),
+                    blob.len() as f64 / data.len() as f64,
+                    elapsed_ms
+                );
+            }
+        }
     }
 
     #[test]

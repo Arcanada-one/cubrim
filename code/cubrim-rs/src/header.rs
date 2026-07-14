@@ -130,6 +130,14 @@ pub const MODE_SOA: u8 = 9;
 ///       then n_blocks x ([comp_len 4B BE][raw_hash 8B BE]) followed by concatenated CM blocks.
 pub const MODE_CM: u8 = 10;
 
+/// Large-block raw-byte BWT + order-1 rANS candidate (FU-01). This additive top-level
+/// mode uses u32 primary indexes without changing any existing v1 value-scheme wire.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_LARGEBWT 1B][orig_len 8B BE]
+///       [block_size 4B BE][n_blocks 4B BE]
+///       n_blocks x [raw_len 4B][primary 4B][comp_len 4B][raw_hash64 8B]
+///       followed by concatenated rANS payloads.
+pub const MODE_LARGEBWT: u8 = 11;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).
