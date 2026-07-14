@@ -109,7 +109,8 @@ pub const MODE_MED16: u8 = 7;
 /// binary has its arch-matched relative CALL/JMP operands (x86 E8/E9; ARM64 BL) rewritten to
 /// absolute so repeated targets become byte-identical, then coded via the base pipeline.
 /// Arch is matched to the ELF e_machine / PE machine field; mismatched filters are never
-/// applied. Competitive min, gated >cube_size_limit — non-exe input stays byte-identical.
+/// applied. Competitive min; small files participate only after strict ELF/PE architecture
+/// detection, so non-executable inputs stay byte-identical.
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_BCJ 1B][orig_len 4B][arch 1B] then nested sub-blob.
 pub const MODE_BCJ: u8 = 8;
 

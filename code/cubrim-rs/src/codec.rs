@@ -322,6 +322,15 @@ fn encode_with_config_inner(
                 }
             }
         });
+    } else if try_binfloat {
+        // IW-05: Canterbury `sum` is a 38 KiB SPARC ELF. Architecture detection is
+        // sufficiently strict to let BCJ compete below the general multi-block gate;
+        // the strict size minimum preserves the existing byte stream when it does not win.
+        if let Some(b) = encode_bcj(data, config) {
+            if b.len() < best.len() {
+                best = b;
+            }
+        }
     }
     best
 }
@@ -2317,13 +2326,44 @@ fn bcj_arm64(buf: &mut [u8], encode: bool) {
     }
 }
 
-/// Detect an ELF/PE executable and its architecture. Returns 1 = x86/x86-64, 2 = ARM64.
+/// SPARC CALL rel↔abs filter, ported from XZ Utils' 0BSD simple/sparc.c.
+fn bcj_sparc(buf: &mut [u8], encode: bool) {
+    let size = buf.len() & !3;
+    for pos in (0..size).step_by(4) {
+        if (buf[pos] == 0x40 && (buf[pos + 1] & 0xC0) == 0x00)
+            || (buf[pos] == 0x7F && (buf[pos + 1] & 0xC0) == 0xC0)
+        {
+            let mut src = u32::from_be_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]);
+            src <<= 2;
+            let pc = pos as u32;
+            let mut dst = if encode {
+                pc.wrapping_add(src)
+            } else {
+                src.wrapping_sub(pc)
+            };
+            dst >>= 2;
+            dst = (((0u32.wrapping_sub((dst >> 22) & 1)) << 22) & 0x3FFF_FFFF)
+                | (dst & 0x003F_FFFF)
+                | 0x4000_0000;
+            buf[pos..pos + 4].copy_from_slice(&dst.to_be_bytes());
+        }
+    }
+}
+
+/// Detect an ELF/PE executable and its architecture.
+/// Returns 1 = x86/x86-64, 2 = ARM64, 3 = SPARC.
 fn bcj_detect_arch(data: &[u8]) -> Option<u8> {
-    // ELF: 0x7F 'E' 'L' 'F', e_machine at offset 18 (u16 LE)
+    // ELF: 0x7F 'E' 'L' 'F', EI_DATA at offset 5, e_machine at offset 18.
     if data.len() >= 20 && data[0] == 0x7F && &data[1..4] == b"ELF" {
-        return match u16::from_le_bytes([data[18], data[19]]) {
-            0x03 | 0x3E => Some(1), // EM_386 / EM_X86_64
-            0xB7 => Some(2),        // EM_AARCH64
+        let machine = match data[5] {
+            1 => u16::from_le_bytes([data[18], data[19]]),
+            2 => u16::from_be_bytes([data[18], data[19]]),
+            _ => return None,
+        };
+        return match machine {
+            0x03 | 0x3E => Some(1),        // EM_386 / EM_X86_64
+            0xB7 => Some(2),               // EM_AARCH64
+            0x02 | 0x12 | 0x2B => Some(3), // EM_SPARC / EM_SPARC32PLUS / EM_SPARCV9
             _ => None,
         };
     }
@@ -2342,14 +2382,12 @@ fn bcj_detect_arch(data: &[u8]) -> Option<u8> {
 }
 
 fn encode_bcj(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
-    if data.len() <= config.cube_size_limit() {
-        return None;
-    }
     let arch = bcj_detect_arch(data)?;
     let mut filtered = data.to_vec();
     match arch {
         1 => bcj_x86(&mut filtered, true),
         2 => bcj_arm64(&mut filtered, true),
+        3 => bcj_sparc(&mut filtered, true),
         _ => return None,
     }
     let nested = encode_with_config_inner(&filtered, config, false, false);
@@ -2379,6 +2417,7 @@ fn decode_bcj(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     match arch {
         1 => bcj_x86(&mut filtered, false),
         2 => bcj_arm64(&mut filtered, false),
+        3 => bcj_sparc(&mut filtered, false),
         _ => return Err(CubrimError::Decode(format!("MODE_BCJ: bad arch {arch}"))),
     }
     Ok(filtered)
@@ -8586,6 +8625,51 @@ pub(crate) fn lz_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
 mod tests {
     use super::*;
     use crate::header::VALUE_SCHEME_RLE_CODES;
+
+    #[test]
+    fn test_bcj_sparc_round_trip() {
+        let original = vec![
+            0x40, 0x00, 0x00, 0x01, // CALL +4
+            0x01, 0x00, 0x00, 0x00, // non-call instruction
+            0x7F, 0xFF, 0xFF, 0xFC, // sign-extended backward CALL
+            0xAA, 0xBB, 0xCC, // unaligned tail must remain untouched
+        ];
+        let mut filtered = original.clone();
+        bcj_sparc(&mut filtered, true);
+        assert_ne!(filtered, original, "SPARC encoder must normalize calls");
+        bcj_sparc(&mut filtered, false);
+        assert_eq!(filtered, original, "SPARC BCJ must be byte-reversible");
+    }
+
+    #[test]
+    fn test_bcj_detects_big_endian_sparc_elf() {
+        let mut elf = vec![0u8; 64];
+        elf[0..4].copy_from_slice(b"\x7FELF");
+        elf[5] = 2; // ELFDATA2MSB
+        elf[18..20].copy_from_slice(&2u16.to_be_bytes()); // EM_SPARC
+        assert_eq!(bcj_detect_arch(&elf), Some(3));
+
+        elf[18..20].copy_from_slice(&43u16.to_be_bytes()); // EM_SPARCV9
+        assert_eq!(bcj_detect_arch(&elf), Some(3));
+    }
+
+    #[test]
+    fn test_bcj_small_sparc_elf_container_round_trip() {
+        let mut elf = vec![0u8; 38_240];
+        elf[0..4].copy_from_slice(b"\x7FELF");
+        elf[5] = 2; // ELFDATA2MSB
+        elf[18..20].copy_from_slice(&2u16.to_be_bytes()); // EM_SPARC
+        for pos in (64..elf.len() - 4).step_by(8) {
+            elf[pos..pos + 4].copy_from_slice(&0x4000_0001u32.to_be_bytes());
+        }
+
+        let cfg = EncodeConfig::v1_default();
+        assert!(elf.len() < cfg.cube_size_limit());
+        let blob = encode_bcj(&elf, &cfg).expect("small SPARC ELF must reach BCJ");
+        assert_eq!(blob[5], MODE_BCJ);
+        assert_eq!(blob[10], 3);
+        assert_eq!(decode(&blob).expect("BCJ container must decode"), elf);
+    }
 
     /// Reference cyclic-rotation BWT (the previous O(n² log n) implementation),
     /// kept only to prove the SA-IS replacement is byte-identical.
