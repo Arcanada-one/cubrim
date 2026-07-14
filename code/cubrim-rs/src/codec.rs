@@ -2401,6 +2401,30 @@ fn encode_bcj(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// FH-07 forced-only probe: apply the production BCJ transform, then bypass the
+/// text-likeness gate and nest a direct CM blob. This is deliberately absent
+/// from every production encode path.
+#[cfg_attr(not(test), allow(dead_code))]
+fn encode_bcj_cm_probe(data: &[u8]) -> Option<Vec<u8>> {
+    let arch = bcj_detect_arch(data)?;
+    let mut filtered = data.to_vec();
+    match arch {
+        1 => bcj_x86(&mut filtered, true),
+        2 => bcj_arm64(&mut filtered, true),
+        3 => bcj_sparc(&mut filtered, true),
+        _ => return None,
+    }
+    let nested = build_cm_blob(&filtered);
+    let mut out = Vec::with_capacity(11 + nested.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_BCJ);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.push(arch);
+    out.extend_from_slice(&nested);
+    Some(out)
+}
+
 fn decode_bcj(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     const FIXED: usize = 11; // MAGIC4 + VER1 + MODE1 + orig4 + arch1
     if blob.len() < FIXED {
@@ -9005,6 +9029,60 @@ mod tests {
         assert_eq!(blob[5], MODE_BCJ);
         assert_eq!(blob[10], 3);
         assert_eq!(decode(&blob).expect("BCJ container must decode"), elf);
+    }
+
+    #[test]
+    fn test_bcj_cm_probe_round_trip() {
+        let mut elf = vec![0u8; 8_192];
+        elf[0..4].copy_from_slice(b"\x7FELF");
+        elf[5] = 1;
+        elf[18..20].copy_from_slice(&0x3Eu16.to_le_bytes());
+        for pos in (64..elf.len() - 5).step_by(11) {
+            elf[pos] = 0xE8;
+            elf[pos + 1..pos + 5].copy_from_slice(&(pos as u32).to_le_bytes());
+        }
+
+        let blob = encode_bcj_cm_probe(&elf).expect("x86 ELF must reach FH-07 probe");
+        assert_eq!(blob[5], MODE_BCJ);
+        assert_eq!(blob[10], 1);
+        assert_eq!(blob[16], MODE_CM);
+        assert_eq!(decode(&blob).expect("BCJ-CM container must decode"), elf);
+    }
+
+    #[test]
+    #[ignore = "FH-07 actual-file spike runs sequentially on dev-ai"]
+    fn test_fh07_actual_files_spike() {
+        let paths = std::env::var("CUBR_FH07_FILES")
+            .expect("CUBR_FH07_FILES must contain colon-separated corpus paths");
+        let cfg = EncodeConfig::v1_default();
+        for path in paths.split(':').filter(|path| !path.is_empty()) {
+            let data = std::fs::read(path).expect("read FH-07 corpus file");
+
+            let started = std::time::Instant::now();
+            let baseline = encode_with_config(&data, &cfg);
+            let baseline_ms = started.elapsed().as_millis();
+            assert_eq!(decode(&baseline).expect("baseline decode"), data);
+
+            let started = std::time::Instant::now();
+            let candidate = encode_bcj_cm_probe(&data).expect("recognized executable");
+            let candidate_ms = started.elapsed().as_millis();
+            assert_eq!(decode(&candidate).expect("FH-07 decode"), data);
+
+            println!(
+                "FH07 path={} orig={} baseline_comp={} baseline_ratio={:.15} baseline_mode={} baseline_ms={} candidate_comp={} candidate_ratio={:.15} candidate_mode={} candidate_ms={} delta_bytes={} rt=OK cmp=0",
+                path,
+                data.len(),
+                baseline.len(),
+                baseline.len() as f64 / data.len() as f64,
+                baseline[5],
+                baseline_ms,
+                candidate.len(),
+                candidate.len() as f64 / data.len() as f64,
+                candidate[5],
+                candidate_ms,
+                candidate.len() as i64 - baseline.len() as i64,
+            );
+        }
     }
 
     /// Reference cyclic-rotation BWT (the previous O(n² log n) implementation),
