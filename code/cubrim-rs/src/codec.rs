@@ -25,8 +25,8 @@ use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
-    MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_LARGEBWT, MODE_LZ,
-    MODE_MED16, MODE_RAW, MODE_SOA, MODE_VCF, VERSION,
+    MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_LARGEBWT,
+    MODE_LZ, MODE_MED16, MODE_RAW, MODE_SOA, MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -3306,6 +3306,182 @@ fn decode_large_bwt(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     Ok(out)
 }
 
+const BIFF_HEADER_SIZE: usize = 36;
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn build_biff_blob(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    use std::collections::BTreeMap;
+
+    let mut records: Vec<((u16, u16), &[u8])> = Vec::new();
+    let mut groups: BTreeMap<(u16, u16), Vec<&[u8]>> = BTreeMap::new();
+    let mut pos = 0usize;
+    while pos + 4 <= data.len() {
+        let record_type = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        let payload_len = u16::from_le_bytes([data[pos + 2], data[pos + 3]]);
+        let end = pos.checked_add(4 + payload_len as usize)?;
+        if end > data.len() {
+            break;
+        }
+        let payload = &data[pos + 4..end];
+        let key = (record_type, payload_len);
+        records.push((key, payload));
+        groups.entry(key).or_default().push(payload);
+        pos = end;
+    }
+    if records.is_empty() || groups.len() > 256 || records.len() > u32::MAX as usize {
+        return None;
+    }
+
+    let group_keys: Vec<(u16, u16)> = groups.keys().copied().collect();
+    let group_ids: BTreeMap<(u16, u16), u8> = group_keys
+        .iter()
+        .enumerate()
+        .map(|(id, &key)| (key, id as u8))
+        .collect();
+    let keys: Vec<u8> = records.iter().map(|(key, _)| group_ids[key]).collect();
+    let key_blob = encode_base(&keys, config);
+
+    let mut encoded_groups = Vec::with_capacity(groups.len());
+    for key in group_keys {
+        let payloads = &groups[&key];
+        let payload_len = key.1 as usize;
+        let plane_len = payload_len.checked_mul(payloads.len())?;
+        let mut planes = Vec::with_capacity(plane_len);
+        for column in 0..payload_len {
+            for payload in payloads {
+                planes.push(payload[column]);
+            }
+        }
+        let nested = encode_base(&planes, config);
+        if nested.len() > u32::MAX as usize || payloads.len() > u32::MAX as usize {
+            return None;
+        }
+        encoded_groups.push((key, payloads.len() as u32, nested));
+    }
+
+    let tail = &data[pos..];
+    if tail.len() > u32::MAX as usize || key_blob.len() > u32::MAX as usize {
+        return None;
+    }
+    let mut out = Vec::new();
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_BIFF);
+    out.extend_from_slice(&(data.len() as u64).to_be_bytes());
+    out.extend_from_slice(&cm_hash64(data).to_be_bytes());
+    out.extend_from_slice(&(records.len() as u32).to_be_bytes());
+    out.extend_from_slice(&(encoded_groups.len() as u16).to_be_bytes());
+    out.extend_from_slice(&(tail.len() as u32).to_be_bytes());
+    out.extend_from_slice(&(key_blob.len() as u32).to_be_bytes());
+    out.extend_from_slice(&key_blob);
+    for ((record_type, payload_len), count, nested) in encoded_groups {
+        out.extend_from_slice(&record_type.to_be_bytes());
+        out.extend_from_slice(&payload_len.to_be_bytes());
+        out.extend_from_slice(&count.to_be_bytes());
+        out.extend_from_slice(&(nested.len() as u32).to_be_bytes());
+        out.extend_from_slice(&nested);
+    }
+    out.extend_from_slice(tail);
+    Some(out)
+}
+
+fn decode_biff(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    if blob.len() < BIFF_HEADER_SIZE {
+        return Err(CubrimError::Decode("MODE_BIFF container too short".into()));
+    }
+    let orig_len = usize::try_from(read_u64(blob, 6)?)
+        .map_err(|_| CubrimError::Decode("MODE_BIFF orig_len exceeds usize".into()))?;
+    let expected_hash = read_u64(blob, 14)?;
+    let n_records = read_u32(blob, 22)? as usize;
+    let n_groups = u16::from_be_bytes([blob[26], blob[27]]) as usize;
+    let tail_len = read_u32(blob, 28)? as usize;
+    let key_blob_len = read_u32(blob, 32)? as usize;
+    if orig_len == 0 || n_records == 0 || n_groups == 0 || n_groups > 256 {
+        return Err(CubrimError::Decode("MODE_BIFF invalid counts".into()));
+    }
+    let key_end = BIFF_HEADER_SIZE
+        .checked_add(key_blob_len)
+        .ok_or_else(|| CubrimError::Decode("MODE_BIFF key length overflow".into()))?;
+    if key_end > blob.len() {
+        return Err(CubrimError::Decode("MODE_BIFF key blob truncated".into()));
+    }
+    let keys = decode(&blob[BIFF_HEADER_SIZE..key_end])?;
+    if keys.len() != n_records || keys.iter().any(|&id| id as usize >= n_groups) {
+        return Err(CubrimError::Decode("MODE_BIFF invalid key sequence".into()));
+    }
+
+    let mut groups: Vec<(u16, u16, usize, Vec<u8>)> = Vec::with_capacity(n_groups);
+    let mut off = key_end;
+    for _ in 0..n_groups {
+        if off + 12 > blob.len() {
+            return Err(CubrimError::Decode(
+                "MODE_BIFF group header truncated".into(),
+            ));
+        }
+        let record_type = u16::from_be_bytes([blob[off], blob[off + 1]]);
+        let payload_len = u16::from_be_bytes([blob[off + 2], blob[off + 3]]);
+        let count = read_u32(blob, off + 4)? as usize;
+        let nested_len = read_u32(blob, off + 8)? as usize;
+        off += 12;
+        let end = off
+            .checked_add(nested_len)
+            .ok_or_else(|| CubrimError::Decode("MODE_BIFF group length overflow".into()))?;
+        if count == 0 || end > blob.len() {
+            return Err(CubrimError::Decode(
+                "MODE_BIFF invalid group framing".into(),
+            ));
+        }
+        let planes = decode(&blob[off..end])?;
+        let expected_len = (payload_len as usize)
+            .checked_mul(count)
+            .ok_or_else(|| CubrimError::Decode("MODE_BIFF plane length overflow".into()))?;
+        if planes.len() != expected_len {
+            return Err(CubrimError::Decode(
+                "MODE_BIFF plane length mismatch".into(),
+            ));
+        }
+        groups.push((record_type, payload_len, count, planes));
+        off = end;
+    }
+    if off.checked_add(tail_len) != Some(blob.len()) {
+        return Err(CubrimError::Decode("MODE_BIFF tail length mismatch".into()));
+    }
+    let tail = &blob[off..];
+
+    let mut used = vec![0usize; n_groups];
+    let mut out = Vec::with_capacity(orig_len);
+    for &id in &keys {
+        let id = id as usize;
+        let (record_type, payload_len, count, planes) = &groups[id];
+        let row = used[id];
+        if row >= *count {
+            return Err(CubrimError::Decode(
+                "MODE_BIFF group count underflow".into(),
+            ));
+        }
+        out.extend_from_slice(&record_type.to_le_bytes());
+        out.extend_from_slice(&payload_len.to_le_bytes());
+        for column in 0..*payload_len as usize {
+            out.push(planes[column * *count + row]);
+        }
+        used[id] += 1;
+    }
+    if used
+        .iter()
+        .zip(groups.iter())
+        .any(|(&actual, (_, _, expected, _))| actual != *expected)
+    {
+        return Err(CubrimError::Decode("MODE_BIFF group count mismatch".into()));
+    }
+    out.extend_from_slice(tail);
+    if out.len() != orig_len || cm_hash64(&out) != expected_hash {
+        return Err(CubrimError::Decode(
+            "MODE_BIFF reconstructed length or checksum mismatch".into(),
+        ));
+    }
+    Ok(out)
+}
+
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     // Container modes are detected before parse_header (which only knows the
     // single-block modes 0/1): MODE_CHUNKED wraps independent sub-blobs; MODE_LZ
@@ -3340,6 +3516,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_LARGEBWT {
             return decode_large_bwt(blob);
+        }
+        if blob[5] == MODE_BIFF {
+            return decode_biff(blob);
         }
     }
 
@@ -9130,6 +9309,81 @@ mod tests {
         let mut bad_hash = blob;
         bad_hash[LARGEBWT_HEADER_SIZE + 12] ^= 0x01;
         assert!(decode(&bad_hash).is_err());
+    }
+
+    fn biff_record(out: &mut Vec<u8>, record_type: u16, payload: &[u8]) {
+        out.extend_from_slice(&record_type.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+    }
+
+    #[test]
+    fn test_biff_record_groups_round_trip_with_truncated_tail() {
+        let mut data = Vec::new();
+        for row in 0..500u16 {
+            let mut payload = [0u8; 9];
+            payload[0..2].copy_from_slice(&row.to_le_bytes());
+            payload[2..4].copy_from_slice(&(row % 23).to_le_bytes());
+            payload[4..9].copy_from_slice(&[0, 3, 3, 0, 1]);
+            biff_record(&mut data, if row % 4 == 0 { 2 } else { 5 }, &payload);
+        }
+        biff_record(&mut data, 0x24, &[1, 2, 3, 4]);
+        data.extend_from_slice(&[0x05, 0x00, 0x09]);
+
+        let blob = build_biff_blob(&data, &EncodeConfig::v1_default()).unwrap();
+        assert_eq!(blob[5], MODE_BIFF);
+        assert_eq!(decode(&blob).unwrap(), data);
+    }
+
+    #[test]
+    fn test_biff_rejects_bad_counts_lengths_and_hash() {
+        let mut data = Vec::new();
+        for row in 0..50u16 {
+            biff_record(&mut data, 5, &[row as u8; 9]);
+        }
+        let blob = build_biff_blob(&data, &EncodeConfig::v1_default()).unwrap();
+        assert!(decode(&blob[..BIFF_HEADER_SIZE - 1]).is_err());
+
+        let mut zero_groups = blob.clone();
+        zero_groups[26..28].copy_from_slice(&0u16.to_be_bytes());
+        assert!(decode(&zero_groups).is_err());
+
+        let mut bad_key_len = blob.clone();
+        bad_key_len[32..36].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(decode(&bad_key_len).is_err());
+
+        let mut bad_hash = blob;
+        bad_hash[14] ^= 0x01;
+        assert!(decode(&bad_hash).is_err());
+    }
+
+    #[test]
+    #[ignore = "FH-BIFF2 actual-file spike runs sequentially on dev-ai"]
+    fn test_fh_biff2_actual_file_spike() {
+        let path = std::env::var("CUBR_FH_BIFF_FILE")
+            .expect("CUBR_FH_BIFF_FILE must name the exact kennedy.xls corpus file");
+        let data = std::fs::read(&path).expect("read BIFF corpus file");
+        let cfg = EncodeConfig::v1_default();
+        let started = std::time::Instant::now();
+        let biff = build_biff_blob(&data, &cfg).expect("parse BIFF records");
+        let biff_ms = started.elapsed().as_millis();
+        assert_eq!(decode(&biff).expect("MODE_BIFF decode"), data);
+
+        let started = std::time::Instant::now();
+        let baseline = encode_with_config(&data, &cfg);
+        let baseline_ms = started.elapsed().as_millis();
+        assert_eq!(decode(&baseline).expect("baseline decode"), data);
+        println!(
+            "FH_BIFF2 path={} orig={} biff_comp={} biff_ratio={:.15} biff_ms={} baseline_comp={} baseline_ratio={:.15} baseline_ms={} rt=OK cmp=0",
+            path,
+            data.len(),
+            biff.len(),
+            biff.len() as f64 / data.len() as f64,
+            biff_ms,
+            baseline.len(),
+            baseline.len() as f64 / data.len() as f64,
+            baseline_ms
+        );
     }
 
     #[test]

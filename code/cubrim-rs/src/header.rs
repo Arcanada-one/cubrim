@@ -138,6 +138,11 @@ pub const MODE_CM: u8 = 10;
 ///       followed by concatenated rANS payloads.
 pub const MODE_LARGEBWT: u8 = 11;
 
+/// Forced-only BIFF record-group transform (FH-BIFF2 / NEW-11). Complete BIFF records
+/// are keyed by exact (type, payload length), and each group's payload is byte-plane
+/// transposed before nested encoding. An incomplete final record is preserved verbatim.
+pub const MODE_BIFF: u8 = 12;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).
