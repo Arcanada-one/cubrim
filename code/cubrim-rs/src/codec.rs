@@ -26,7 +26,7 @@ use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
     MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_LARGEBWT,
-    MODE_LZ, MODE_MED16, MODE_RAW, MODE_SOA, MODE_VCF, VERSION,
+    MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -2576,6 +2576,7 @@ const CM_BLOCK_SIZE: usize = 8 * 1024 * 1024;
 const CM_HEADER_SIZE: usize = 22; // MAGIC4 + VER1 + MODE1 + orig8 + block_size4 + n_blocks4
 const CM_ENTRY_SIZE: usize = 12; // comp_len4 + raw_hash8
 const CM_NIN: usize = 9; // order0..6 + word + match
+const RECORD_CM_NIN: usize = CM_NIN + 2; // base CM + record offset + previous same field
 
 const CM_SQT: [i32; 33] = [
     1, 2, 3, 6, 10, 16, 27, 45, 73, 120, 194, 310, 488, 747, 1101, 1546, 2047, 2549, 2994, 3348,
@@ -2832,6 +2833,36 @@ impl<'a> CmDecoder<'a> {
     }
 }
 
+struct CmRecordState {
+    width: usize,
+    position_base: usize,
+    mo: CmCtxModel,
+    mp: CmCtxModel,
+    mixer: CmMixer,
+    st: [i32; RECORD_CM_NIN],
+    offset_ctx: usize,
+    previous_ctx: usize,
+    mixer_base: usize,
+    mixer_pr: i32,
+}
+
+impl CmRecordState {
+    fn new(width: usize, position_base: usize) -> Self {
+        Self {
+            width,
+            position_base,
+            mo: CmCtxModel::new(16),
+            mp: CmCtxModel::new(22),
+            mixer: CmMixer::new(RECORD_CM_NIN, width * 8),
+            st: [0; RECORD_CM_NIN],
+            offset_ctx: 0,
+            previous_ctx: 0,
+            mixer_base: 0,
+            mixer_pr: 2048,
+        }
+    }
+}
+
 struct CmPredictor {
     stretch: CmStretch,
     m0: CmCtxModel,
@@ -2869,9 +2900,18 @@ struct CmPredictor {
     apm2_last: usize,
     apm3_last: usize,
     apm4_last: usize,
+    record: Option<CmRecordState>,
 }
 impl CmPredictor {
     fn new() -> Self {
+        Self::new_inner(None)
+    }
+
+    fn new_record(width: usize, position_base: usize) -> Self {
+        Self::new_inner(Some(CmRecordState::new(width, position_base)))
+    }
+
+    fn new_inner(record: Option<CmRecordState>) -> Self {
         Self {
             stretch: CmStretch::new(),
             m0: CmCtxModel::new(9),
@@ -2909,6 +2949,7 @@ impl CmPredictor {
             apm2_last: 0,
             apm3_last: 0,
             apm4_last: 0,
+            record,
         }
     }
     #[inline]
@@ -2943,9 +2984,38 @@ impl CmPredictor {
         self.st[7] = self.stretch.s(self.mw.p(Self::idx(self.hw, c0)));
         self.st[8] = mm_st;
         let bitpos = (31 - (c0 as u32).leading_zeros()) as usize & 7;
-        let (pr, bb) = self.mxb.mix(self.pb * 8 + bitpos, &self.st);
-        self.bb = bb;
-        self.mpr = pr;
+        let pr = if let Some(record) = &mut self.record {
+            let local_pos = self.hist.len();
+            let offset = (record.position_base + local_pos) % record.width;
+            let has_previous = local_pos >= record.width;
+            let previous = if has_previous {
+                self.hist[local_pos - record.width] as u32
+            } else {
+                0
+            };
+            let offset_hash = (offset as u32).wrapping_mul(0x9E37_79B1);
+            let previous_hash = offset_hash
+                ^ previous.wrapping_mul(0x0100_0193)
+                ^ if has_previous {
+                    0xA5A5_5A5A
+                } else {
+                    0x5A5A_A5A5
+                };
+            record.offset_ctx = Self::idx(offset_hash, c0);
+            record.previous_ctx = Self::idx(previous_hash, c0);
+            record.st[..CM_NIN].copy_from_slice(&self.st);
+            record.st[CM_NIN] = self.stretch.s(record.mo.p(record.offset_ctx));
+            record.st[CM_NIN + 1] = self.stretch.s(record.mp.p(record.previous_ctx));
+            let (pr, base) = record.mixer.mix(offset * 8 + bitpos, &record.st);
+            record.mixer_base = base;
+            record.mixer_pr = pr;
+            pr
+        } else {
+            let (pr, bb) = self.mxb.mix(self.pb * 8 + bitpos, &self.st);
+            self.bb = bb;
+            self.mpr = pr;
+            pr
+        };
         let q1 = self.apm.pp(pr, c0 & 255, &self.stretch, &mut self.apm_last);
         let q2 = self.apm2.pp(
             q1,
@@ -2970,7 +3040,15 @@ impl CmPredictor {
         self.m5.upd(Self::idx(self.h5, c0), bit);
         self.m6.upd(Self::idx(self.h6, c0), bit);
         self.mw.upd(Self::idx(self.hw, c0), bit);
-        self.mxb.update(self.bb, &self.st, self.mpr, bit);
+        if let Some(record) = &mut self.record {
+            record.mo.upd(record.offset_ctx, bit);
+            record.mp.upd(record.previous_ctx, bit);
+            record
+                .mixer
+                .update(record.mixer_base, &record.st, record.mixer_pr, bit);
+        } else {
+            self.mxb.update(self.bb, &self.st, self.mpr, bit);
+        }
         self.apm.upd(self.apm_last, bit);
         self.apm2.upd(self.apm2_last, bit);
         self.apm3.upd(self.apm3_last, bit);
@@ -3067,6 +3145,43 @@ fn cm_compress_block(data: &[u8]) -> Vec<u8> {
 
 fn cm_decompress_block(comp: &[u8], expected_len: usize) -> Result<Vec<u8>, CubrimError> {
     let mut p = CmPredictor::new();
+    let mut dec = CmDecoder::new(comp)?;
+    let mut out = Vec::with_capacity(expected_len);
+    for _ in 0..expected_len {
+        let mut byte = 0u8;
+        for _ in 0..8 {
+            let pr = p.predict();
+            let bit = dec.decode(pr);
+            p.update(bit);
+            byte = (byte << 1) | bit as u8;
+        }
+        out.push(byte);
+    }
+    Ok(out)
+}
+
+fn record_cm_compress_block(data: &[u8], width: usize, position_base: usize) -> Vec<u8> {
+    let mut p = CmPredictor::new_record(width, position_base);
+    let mut enc = CmEncoder::new();
+    for &byte in data {
+        for k in (0..8).rev() {
+            let bit = ((byte >> k) & 1) as i32;
+            let pr = p.predict();
+            enc.encode(bit, pr);
+            p.update(bit);
+        }
+    }
+    enc.flush();
+    enc.out
+}
+
+fn record_cm_decompress_block(
+    comp: &[u8],
+    expected_len: usize,
+    width: usize,
+    position_base: usize,
+) -> Result<Vec<u8>, CubrimError> {
+    let mut p = CmPredictor::new_record(width, position_base);
     let mut dec = CmDecoder::new(comp)?;
     let mut out = Vec::with_capacity(expected_len);
     for _ in 0..expected_len {
@@ -3183,6 +3298,129 @@ fn decode_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     if out.len() != orig_len {
         return Err(CubrimError::Decode(
             "MODE_CM: reconstructed length mismatch".into(),
+        ));
+    }
+    Ok(out)
+}
+
+const RECORD_CM_HEADER_SIZE: usize = 24;
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn encode_record_cm_probe(data: &[u8]) -> Option<Vec<u8>> {
+    let width = soa_detect_width(data)?;
+    build_record_cm_blob(data, width)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn build_record_cm_blob(data: &[u8], width: usize) -> Option<Vec<u8>> {
+    if !(4..=64).contains(&width) || data.len() / width < 8 {
+        return None;
+    }
+    let blocks: Vec<&[u8]> = data.chunks(CM_BLOCK_SIZE).collect();
+    if blocks.is_empty() || blocks.len() > u32::MAX as usize {
+        return None;
+    }
+    let mut comps = Vec::with_capacity(blocks.len());
+    let mut entries = Vec::with_capacity(blocks.len());
+    for (index, block) in blocks.into_iter().enumerate() {
+        let position_base = index.checked_mul(CM_BLOCK_SIZE)?;
+        let comp = record_cm_compress_block(block, width, position_base);
+        if comp.len() > u32::MAX as usize {
+            return None;
+        }
+        entries.push((comp.len() as u32, cm_hash64(block)));
+        comps.push(comp);
+    }
+    let payload_len = comps.iter().map(Vec::len).sum::<usize>();
+    let mut out =
+        Vec::with_capacity(RECORD_CM_HEADER_SIZE + entries.len() * CM_ENTRY_SIZE + payload_len);
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_RECORDCM);
+    out.extend_from_slice(&(data.len() as u64).to_be_bytes());
+    out.extend_from_slice(&(CM_BLOCK_SIZE as u32).to_be_bytes());
+    out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    out.extend_from_slice(&(width as u16).to_be_bytes());
+    for (len, hash) in &entries {
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(&hash.to_be_bytes());
+    }
+    for comp in comps {
+        out.extend_from_slice(&comp);
+    }
+    Some(out)
+}
+
+fn decode_record_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    if blob.len() < RECORD_CM_HEADER_SIZE {
+        return Err(CubrimError::Decode(
+            "MODE_RECORDCM container too short".into(),
+        ));
+    }
+    let orig_len = usize::try_from(read_u64(blob, 6)?)
+        .map_err(|_| CubrimError::Decode("MODE_RECORDCM orig_len exceeds usize".into()))?;
+    let block_size = read_u32(blob, 14)? as usize;
+    let n_blocks = read_u32(blob, 18)? as usize;
+    let width = u16::from_be_bytes([blob[22], blob[23]]) as usize;
+    if block_size != CM_BLOCK_SIZE
+        || !(4..=64).contains(&width)
+        || n_blocks == 0
+        || n_blocks != (orig_len + block_size - 1) / block_size
+    {
+        return Err(CubrimError::Decode(
+            "MODE_RECORDCM invalid framing or width".into(),
+        ));
+    }
+    let table_end = n_blocks
+        .checked_mul(CM_ENTRY_SIZE)
+        .and_then(|n| RECORD_CM_HEADER_SIZE.checked_add(n))
+        .ok_or_else(|| CubrimError::Decode("MODE_RECORDCM table overflow".into()))?;
+    if table_end > blob.len() {
+        return Err(CubrimError::Decode(
+            "MODE_RECORDCM block table truncated".into(),
+        ));
+    }
+    let mut entries = Vec::with_capacity(n_blocks);
+    let mut table_pos = RECORD_CM_HEADER_SIZE;
+    let mut payload_len = 0usize;
+    for _ in 0..n_blocks {
+        let comp_len = read_u32(blob, table_pos)? as usize;
+        let hash = read_u64(blob, table_pos + 4)?;
+        payload_len = payload_len
+            .checked_add(comp_len)
+            .ok_or_else(|| CubrimError::Decode("MODE_RECORDCM payload overflow".into()))?;
+        entries.push((comp_len, hash));
+        table_pos += CM_ENTRY_SIZE;
+    }
+    if table_end.checked_add(payload_len) != Some(blob.len()) {
+        return Err(CubrimError::Decode(
+            "MODE_RECORDCM payload length mismatch".into(),
+        ));
+    }
+    let mut out = Vec::with_capacity(orig_len);
+    let mut payload_pos = table_end;
+    for (index, (comp_len, expected_hash)) in entries.into_iter().enumerate() {
+        let end = payload_pos
+            .checked_add(comp_len)
+            .ok_or_else(|| CubrimError::Decode("MODE_RECORDCM block overflow".into()))?;
+        let raw_len = (orig_len - out.len()).min(block_size);
+        let block = record_cm_decompress_block(
+            &blob[payload_pos..end],
+            raw_len,
+            width,
+            index * block_size,
+        )?;
+        if block.len() != raw_len || cm_hash64(&block) != expected_hash {
+            return Err(CubrimError::Decode(
+                "MODE_RECORDCM block length or checksum mismatch".into(),
+            ));
+        }
+        out.extend_from_slice(&block);
+        payload_pos = end;
+    }
+    if out.len() != orig_len {
+        return Err(CubrimError::Decode(
+            "MODE_RECORDCM reconstructed length mismatch".into(),
         ));
     }
     Ok(out)
@@ -3543,6 +3781,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_BIFF {
             return decode_biff(blob);
+        }
+        if blob[5] == MODE_RECORDCM {
+            return decode_record_cm(blob);
         }
     }
 
@@ -9348,6 +9589,88 @@ mod tests {
         assert!(
             decode(&corrupt).is_err(),
             "MODE_CM checksum must reject corrupt payload"
+        );
+    }
+
+    fn record_cm_fixture() -> Vec<u8> {
+        let mut data = Vec::with_capacity(28 * 600);
+        for row in 0..600usize {
+            for column in 0..28usize {
+                let base = (column * 73 + column * column * 11) as u8;
+                data.push(base.wrapping_add((row / (column % 7 + 3)) as u8));
+            }
+        }
+        data
+    }
+
+    #[test]
+    fn test_record_cm_detects_width_and_round_trips() {
+        let data = record_cm_fixture();
+        assert_eq!(soa_detect_width(&data), Some(28));
+        let blob = encode_record_cm_probe(&data).expect("fixed records must reach FH-10");
+        assert_eq!(blob[5], MODE_RECORDCM);
+        assert_eq!(u16::from_be_bytes([blob[22], blob[23]]), 28);
+        assert_eq!(decode(&blob).expect("record-CM decode"), data);
+    }
+
+    #[test]
+    fn test_record_cm_rejects_bad_framing_and_hash() {
+        let data = record_cm_fixture();
+        let blob = build_record_cm_blob(&data, 28).unwrap();
+        assert!(decode(&blob[..RECORD_CM_HEADER_SIZE - 1]).is_err());
+
+        let mut bad_width = blob.clone();
+        bad_width[22..24].copy_from_slice(&0u16.to_be_bytes());
+        assert!(decode(&bad_width).is_err());
+
+        let mut bad_comp_len = blob.clone();
+        let comp_len = read_u32(&bad_comp_len, RECORD_CM_HEADER_SIZE).unwrap();
+        bad_comp_len[RECORD_CM_HEADER_SIZE..RECORD_CM_HEADER_SIZE + 4]
+            .copy_from_slice(&comp_len.wrapping_add(1).to_be_bytes());
+        assert!(decode(&bad_comp_len).is_err());
+
+        let mut bad_hash = blob;
+        bad_hash[RECORD_CM_HEADER_SIZE + 4] ^= 0x01;
+        assert!(decode(&bad_hash).is_err());
+    }
+
+    #[test]
+    #[ignore = "FH-10 actual-file spike runs sequentially on dev-ai"]
+    fn test_fh10_actual_file_spike() {
+        let path = std::env::var("CUBR_FH10_FILE")
+            .expect("CUBR_FH10_FILE must name the exact Silesia sao file");
+        let data = std::fs::read(&path).expect("read FH-10 corpus file");
+        let width = soa_detect_width(&data).expect("detect fixed record width");
+        assert_eq!(
+            width, 28,
+            "full sao must detect its exact 28-byte record width"
+        );
+        let cfg = EncodeConfig::v1_default();
+
+        let started = std::time::Instant::now();
+        let baseline = encode_with_config(&data, &cfg);
+        let baseline_ms = started.elapsed().as_millis();
+        assert_eq!(decode(&baseline).expect("baseline decode"), data);
+
+        let started = std::time::Instant::now();
+        let candidate = build_record_cm_blob(&data, width).expect("build record-CM archive");
+        let candidate_ms = started.elapsed().as_millis();
+        assert_eq!(decode(&candidate).expect("record-CM decode"), data);
+
+        println!(
+            "FH10 path={} width={} orig={} baseline_comp={} baseline_ratio={:.15} baseline_mode={} baseline_ms={} candidate_comp={} candidate_ratio={:.15} candidate_mode={} candidate_ms={} delta_bytes={} rt=OK cmp=0",
+            path,
+            width,
+            data.len(),
+            baseline.len(),
+            baseline.len() as f64 / data.len() as f64,
+            baseline[5],
+            baseline_ms,
+            candidate.len(),
+            candidate.len() as f64 / data.len() as f64,
+            candidate[5],
+            candidate_ms,
+            candidate.len() as i64 - baseline.len() as i64,
         );
     }
 
