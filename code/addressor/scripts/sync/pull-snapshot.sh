@@ -13,7 +13,9 @@ mkdir -p "$SNAPDIR"
 # discover the hub's latest epoch name (a plain file next to the epochs)
 rsync -e ssh "$HUB/snapshots/LATEST" "$SNAPDIR/.latest.tmp"
 LATEST=$(cat "$SNAPDIR/.latest.tmp"); rm -f "$SNAPDIR/.latest.tmp"
-case "$LATEST" in (*[!a-zA-Z0-9._-]*|"") echo "bad epoch name" >&2; exit 1;; esac
+case "$LATEST" in
+    (*[!a-zA-Z0-9._-]*|""|.|..|-*|*/*) echo "unsafe epoch name: $LATEST" >&2; exit 1;;
+esac
 
 TMP="$SNAPDIR/$LATEST.tmp"
 rm -rf "$TMP"

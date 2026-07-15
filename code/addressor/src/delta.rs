@@ -88,7 +88,12 @@ pub fn decode(base: &[u8], payload: &[u8]) -> Result<Vec<u8>> {
         .map_err(|e| AddressorError::Codec(format!("delta window max: {e:?}")))?;
     dctx.ref_prefix(base)
         .map_err(|e| AddressorError::Codec(format!("delta ref_prefix: {e:?}")))?;
-    let mut out = Vec::with_capacity(orig_len as usize);
+    // pre-reserve bounded by the frame size, NOT the attacker-declared length
+    // (a tiny frame declaring orig_len=2^40 must not force a 1 TiB reservation);
+    // the Vec still grows to the real size during decompress.
+    const MAX_DELTA_RATIO: usize = 4096;
+    let reserve = (orig_len as usize).min(frame.len().saturating_mul(MAX_DELTA_RATIO));
+    let mut out = Vec::with_capacity(reserve);
     dctx.decompress(&mut out, frame)
         .map_err(|e| AddressorError::Codec(format!("delta decompress: {e:?}")))?;
     if out.len() as u64 != orig_len {
@@ -162,6 +167,23 @@ mod tests {
             Err(AddressorError::Integrity(_)) => {}
             other => panic!("expected Integrity, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn absurd_orig_len_does_not_oom() {
+        // a tiny frame declaring a huge orig_len must error/decompress-fail,
+        // not pre-reserve terabytes (bounded by frame length)
+        let (base, target) = base_and_edit(1000);
+        let bh = *blake3::hash(&base).as_bytes();
+        let delta = encode(&base, &bh, &target).unwrap();
+        let (_, wl, _, frame) = parse_header(&delta).unwrap();
+        let mut forged = Vec::new();
+        forged.extend_from_slice(&bh);
+        crate::refs::varint_encode(wl as u64, &mut forged);
+        crate::refs::varint_encode(1u64 << 39, &mut forged); // 512 GiB declared
+        forged.extend_from_slice(frame);
+        // must not OOM; decompress will fail the length check
+        assert!(decode(&base, &forged).is_err());
     }
 
     #[test]

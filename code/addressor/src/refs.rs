@@ -1,12 +1,12 @@
 //! Ordinal reference coding — adaptive, not bare varint.
 //!
-//! AH-08's ~2.15 B/ref was measured with adaptive codes over a skewed real
-//! reference stream; a plain 7-bit varint over uniform ordinals ≥16384 costs
-//! 3 B and fails the acceptance gate arithmetically. Mechanism here:
-//! move-to-front recency ranking over the stream of ordinals, then varint of
-//! the rank — hot ordinals get 1-byte codes regardless of their absolute
-//! ordinal value. First occurrence of an ordinal is escaped with rank 0
-//! followed by the varint of the ordinal itself.
+//! AH-08's ~2.15 B/ref exploits ORDINAL LOCALITY: a file re-using a donor
+//! references a RUN of the donor's chunk ordinals, which were promoted in
+//! order and are therefore consecutive integers. So the coder delta-codes
+//! each ref against the previous one (zigzag varint of the difference): a
+//! consecutive run costs ~1 B/ref regardless of the absolute magnitude,
+//! where a bare varint of a large ordinal would cost 3 B. The stream is
+//! self-synchronizing; the decoder mirrors it.
 
 use crate::catalog::Ordinal;
 use crate::error::{AddressorError, Result};
@@ -45,51 +45,53 @@ pub fn varint_decode(data: &[u8], pos: &mut usize) -> Result<u64> {
     }
 }
 
-/// Streaming adaptive coder for a sequence of ordinal references.
+fn zigzag(d: i64) -> u64 {
+    ((d << 1) ^ (d >> 63)) as u64
+}
+fn unzigzag(z: u64) -> i64 {
+    ((z >> 1) as i64) ^ -((z & 1) as i64)
+}
+
+/// Streaming delta coder for a sequence of ordinal references.
 #[derive(Default)]
 pub struct RefCoder {
-    /// recency list: index = current rank (0 = most recent)
-    mtf: Vec<Ordinal>,
+    prev: Ordinal,
+    started: bool,
 }
 
 impl RefCoder {
     pub fn new() -> Self {
-        RefCoder { mtf: Vec::new() }
+        RefCoder { prev: 0, started: false }
     }
 
-    /// Encodes one ordinal into `out`.
-    /// Known ordinal → varint(rank+1); new ordinal → 0x00 escape + varint(ordinal).
+    /// Encodes one ordinal as a zigzag varint of its delta from the previous.
     pub fn encode(&mut self, ord: Ordinal, out: &mut Vec<u8>) {
-        if let Some(rank) = self.mtf.iter().position(|&o| o == ord) {
-            varint_encode((rank + 1) as u64, out);
-            self.mtf.remove(rank);
-            self.mtf.insert(0, ord);
+        if !self.started {
+            varint_encode(ord, out); // first ref: absolute
+            self.started = true;
         } else {
-            out.push(0);
-            varint_encode(ord, out);
-            self.mtf.insert(0, ord);
+            let delta = ord as i64 - self.prev as i64;
+            varint_encode(zigzag(delta), out);
         }
+        self.prev = ord;
     }
 
-    /// Decodes one ordinal from `data` at `pos` (symmetric to `encode`).
+    /// Decodes one ordinal (symmetric to `encode`).
     pub fn decode(&mut self, data: &[u8], pos: &mut usize) -> Result<Ordinal> {
-        let code = varint_decode(data, pos)?;
-        if code == 0 {
-            let ord = varint_decode(data, pos)?;
-            self.mtf.insert(0, ord);
-            Ok(ord)
+        let ord = if !self.started {
+            self.started = true;
+            varint_decode(data, pos)?
         } else {
-            let rank = (code - 1) as usize;
-            if rank >= self.mtf.len() {
-                return Err(AddressorError::Format(format!(
-                    "ref rank {rank} out of range ({} known)",
-                    self.mtf.len()
-                )));
+            let z = varint_decode(data, pos)?;
+            let d = unzigzag(z);
+            let v = self.prev as i64 + d;
+            if v < 0 {
+                return Err(AddressorError::Format("ref delta underflow".into()));
             }
-            let ord = self.mtf.remove(rank);
-            self.mtf.insert(0, ord);
-            Ok(ord)
-        }
+            v as Ordinal
+        };
+        self.prev = ord;
+        Ok(ord)
     }
 }
 
@@ -135,38 +137,38 @@ mod tests {
     }
 
     #[test]
-    fn hot_ordinals_cost_one_byte_regardless_of_magnitude() {
-        // adaptivity property: a repeated large ordinal costs 1 byte after
-        // its first occurrence — this is what bare varint cannot do.
+    fn consecutive_run_costs_one_byte_regardless_of_magnitude() {
+        // the AH-08 locality property: a run of consecutive large ordinals
+        // (a donor's chunks referenced in order) costs 1 B/ref after the
+        // first — bare varint of each would cost 3 B.
         let mut enc = RefCoder::new();
         let mut buf = Vec::new();
-        enc.encode(5_000_000, &mut buf); // escape + varint: several bytes
+        enc.encode(5_000_000, &mut buf); // first: absolute varint
         let after_first = buf.len();
-        for _ in 0..10 {
-            enc.encode(5_000_000, &mut buf);
+        for k in 1..=10u64 {
+            enc.encode(5_000_000 + k, &mut buf); // +1 deltas
         }
-        assert_eq!(buf.len() - after_first, 10, "hot ref must cost 1 B");
+        assert_eq!(buf.len() - after_first, 10, "consecutive run must cost 1 B/ref");
     }
 
     #[test]
-    fn skewed_stream_mean_under_gate() {
-        // Zipf-ish skewed stream over a large ordinal space: the acceptance
-        // gate expects mean <= 2.3 B/ref on realistic skew (AH-08 profile).
+    fn run_structured_stream_mean_under_gate() {
+        // realistic store ref stream: runs of consecutive donor ordinals
+        // interspersed with jumps to new runs. Mean must clear the 2.3 B gate
+        // via delta coding of the runs (the AH-08 mechanism).
         let mut enc = RefCoder::new();
         let mut buf = Vec::new();
         let mut n = 0usize;
         let mut x: u64 = 0x9e3779b97f4a7c15;
-        for i in 0..50_000u64 {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            // 80% of refs hit a hot set of 64 ordinals, 20% cold long tail
-            let ord = if x % 10 < 8 {
-                1_000_000 + (x % 64)
+        let mut cur: u64 = 500_000;
+        for _ in 0..50_000u64 {
+            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+            if x.is_multiple_of(8) {
+                cur = x % 5_000_000; // jump to a new run start
             } else {
-                (x % 5_000_000) + i
-            };
-            enc.encode(ord, &mut buf);
+                cur += 1; // continue the consecutive run
+            }
+            enc.encode(cur, &mut buf);
             n += 1;
         }
         let mean = buf.len() as f64 / n as f64;
@@ -174,11 +176,21 @@ mod tests {
     }
 
     #[test]
-    fn decode_bad_rank_errors() {
-        let mut dec = RefCoder::new();
+    fn decode_underflow_errors() {
+        // first ref absolute = 10, then a delta that would take it below 0
         let mut buf = Vec::new();
-        varint_encode(5, &mut buf); // rank 4 with empty mtf
+        varint_encode(10, &mut buf);
+        varint_encode(zigzag(-20), &mut buf); // 10 + (-20) < 0
+        let mut dec = RefCoder::new();
         let mut pos = 0;
+        assert_eq!(dec.decode(&buf, &mut pos).unwrap(), 10);
         assert!(dec.decode(&buf, &mut pos).is_err());
+    }
+
+    #[test]
+    fn zigzag_roundtrip() {
+        for d in [-1_000_000i64, -1, 0, 1, 1_000_000] {
+            assert_eq!(unzigzag(zigzag(d)), d);
+        }
     }
 }

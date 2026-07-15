@@ -90,10 +90,10 @@ impl Matrix {
             let t = tx
                 .open_table(MEMBERS)
                 .map_err(|e| AddressorError::Catalog(format!("matrix table: {e}")))?;
-            let mut iter = t
+            let iter = t
                 .iter()
                 .map_err(|e| AddressorError::Catalog(format!("matrix iter: {e}")))?;
-            while let Some(next) = iter.next() {
+            for next in iter {
                 let (k, v) =
                     next.map_err(|e| AddressorError::Catalog(format!("matrix iter: {e}")))?;
                 let (section, _ord) = v.value();
@@ -222,10 +222,10 @@ impl Matrix {
             .open_table(MEMBERS)
             .map_err(|e| AddressorError::Catalog(format!("matrix: {e}")))?;
         let mut rows: Vec<(u128, u64)> = Vec::new();
-        let mut iter = t
+        let iter = t
             .iter()
             .map_err(|e| AddressorError::Catalog(format!("matrix: {e}")))?;
-        while let Some(next) = iter.next() {
+        for next in iter {
             let (k, v) = next.map_err(|e| AddressorError::Catalog(format!("matrix: {e}")))?;
             let (sec, ord) = v.value();
             if sec == section {

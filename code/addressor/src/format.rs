@@ -5,7 +5,8 @@
 //! Scheme bytes (PRD scheme table):
 //!   0 = Raw            payload = original bytes as-is
 //!   1 = Cubrim1        payload = real cubrim container
-//!   2 = WholeFile      payload = RefCoder-encoded single ordinal ref
+//!   2 = WholeFile      OUTCOME TAG ONLY (whole-file dedup hit) — never
+//!                       serialized to a container; not a wire scheme
 //!   3 = CdcDedup       payload = entry stream, refs only (no residual)
 //!   4 = CdcResidual    payload = entry stream + residual sub-blob
 //!   5 = Delta          payload = version-chain delta (Core B)
@@ -52,6 +53,9 @@ impl SchemeByte {
         })
     }
 }
+
+/// A residual sub-blob: its own scheme byte + payload bytes.
+pub type ResidualBlob = (SchemeByte, Vec<u8>);
 
 /// One CDC entry of a scheme-3/4 container.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,10 +121,12 @@ pub fn encode_cdc_payload(
 pub fn decode_cdc_payload(
     data: &[u8],
     with_residual: bool,
-) -> Result<(Vec<CdcEntry>, Option<(SchemeByte, Vec<u8>)>)> {
+) -> Result<(Vec<CdcEntry>, Option<ResidualBlob>)> {
     let mut pos = 0usize;
     let count = varint_decode(data, &mut pos)?;
-    if count > (data.len() as u64) * 8 + 1 {
+    // each entry costs >= 2 payload bytes (flag + >=1 varint byte); a tight
+    // bound stops an allocation-amplification claim in the declared count
+    if count > (data.len() as u64) / 2 + 1 {
         return Err(AddressorError::Format("entry count exceeds payload".into()));
     }
     let mut entries = Vec::with_capacity(count as usize);

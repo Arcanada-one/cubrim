@@ -21,6 +21,12 @@ enum Cmd {
         /// Build a Merkle verification sidecar (optional, default off)
         #[arg(long)]
         verify: bool,
+        /// Fleet project section id (AH-20 sectioning)
+        #[arg(long, default_value_t = 0)]
+        section: u8,
+        /// Store as a version-chain delta against this base ordinal (Core B)
+        #[arg(long)]
+        delta_base: Option<u64>,
     },
     /// Retrieve by ordinal reference to stdout or -o file
     Retrieve {
@@ -52,10 +58,14 @@ enum Cmd {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Store { file, verify } => {
+        Cmd::Store { file, verify, section, delta_base } => {
             let data = std::fs::read(&file)?;
             let mut a = Addressor::open(&cli.root)?;
-            let out = a.store_bytes(&data)?;
+            let path_hint = file.to_str().map(|s| s.to_string());
+            let out = match delta_base {
+                Some(base) => a.store_delta(base, &data)?,
+                None => a.store_bytes_ctx(&data, section, path_hint.as_deref())?,
+            };
             if verify && !out.deduped {
                 // runtime-optional Merkle sidecar over the stored container
                 let entry = a.catalog.entry(out.ordinal)?.expect("fresh entry");
@@ -150,28 +160,34 @@ fn bench_regression(
     }
     let (mut total_in, mut total_pure, mut total_container) = (0u64, 0u64, 0u64);
     let mut per_file_violations = 0u64;
-    let mut dup_weighted = 0f64;
+    let mut deduped_bytes = 0f64; // realized dedup mass: whole-file hits + chunk hits
     for f in &files {
         let data = std::fs::read(f)?;
         let pure = Addressor::pure_cubrim_container(&data).len() as u64;
-        let dup = a.dup_fraction(&data)?;
+        let chunk_matched = a.dup_fraction(&data)? * data.len() as f64;
         let out = a.store_bytes(&data)?;
         if !out.deduped && out.container_len as u64 > pure {
             per_file_violations += 1;
             eprintln!("VIOLATION {}: router {} > pure {}", f.display(), out.container_len, pure);
         }
+        // a whole-file dedup hit reclaims the ENTIRE file; otherwise the
+        // chunk-matched bytes are the realized dedup for this file.
+        deduped_bytes += if out.deduped { data.len() as f64 } else { chunk_matched };
         total_in += data.len() as u64;
         total_pure += pure;
         total_container += out.container_len as u64;
-        dup_weighted += dup * data.len() as f64;
     }
-    let corpus_dup_fraction = dup_weighted / total_in as f64;
-    // charged aggregate: containers + ALL metadata (catalog, fp16, matrix)
+    let corpus_dup_fraction = deduped_bytes / total_in as f64;
+    // charged aggregate: EVERY on-disk cost the router incurs — container
+    // blobs AND the CAS chunk blobs they reference AND catalog/fp16/matrix
+    // metadata. (Charging containers alone would hide bytes merely relocated
+    // into CAS blobs — the unsound-size-model class Gotcha #6 forbids.)
+    let store_bytes = dir_bytes(&root.join("store"));
     let metadata = dir_bytes(&root.join("catalog")) + dir_bytes(&root.join("matrix"));
-    let charged_total = total_container + metadata;
+    let charged_total = store_bytes + metadata;
     println!("files={} input_bytes={total_in}", files.len());
     println!("pure_cubrim_total={total_pure}");
-    println!("router_containers_total={total_container} metadata_bytes={metadata} charged_total={charged_total}");
+    println!("router_containers_total={total_container} cas_store_bytes={store_bytes} metadata_bytes={metadata} charged_total={charged_total}");
     println!("corpus_dup_fraction={corpus_dup_fraction:.4}");
     println!("per_file_violations={per_file_violations}");
     if per_file_violations > 0 {

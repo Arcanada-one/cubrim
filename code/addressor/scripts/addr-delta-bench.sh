@@ -46,5 +46,10 @@ echo "$BASE_OUT"
 STRONGEST=$(echo "$BASE_OUT" | grep -oP 'strongest=\K[0-9]+')
 FACTOR=$(python3 -c "print(f'{$STRONGEST / $DELTA_BYTES:.4f}')")
 echo "factor_vs_strongest_baseline=${FACTOR} gate=${GATE}"
+echo "NOTE: pairs are a FRESH extraction from the workspace git history with"
+echo "the AH-15 methodology (same baselines/dict form), NOT the frozen AH-15"
+echo "pair set — the absolute factor reflects this corpus's similarity"
+echo "distribution; the gate asserts the >=4.2x mechanism lower bound only."
 python3 -c "import sys; sys.exit(0 if $FACTOR >= $GATE else 1)" \
-  && echo "DELTA GATE: PASS" || { echo "DELTA GATE: FAIL" >&2; exit 1; }
+  && echo "DELTA GATE: PASS (mechanism lower bound cleared)" \
+  || { echo "DELTA GATE: FAIL" >&2; exit 1; }

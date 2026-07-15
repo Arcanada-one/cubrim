@@ -21,6 +21,8 @@ const BY_ORDINAL: TableDefinition<u64, [u8; 65]> = TableDefinition::new("by_ordi
 const SEEN: TableDefinition<u128, u32> = TableDefinition::new("seen");
 /// singleton row: next free ordinal
 const META: TableDefinition<&str, u64> = TableDefinition::new("meta");
+/// delta entries: ordinal -> base ordinal (Core B version-chain)
+const DELTA_BASE: TableDefinition<u64, u64> = TableDefinition::new("delta_base");
 
 pub type Ordinal = u64;
 
@@ -82,13 +84,21 @@ impl Catalog {
                 .map_err(|e| AddressorError::Catalog(format!("redb table: {e}")))?;
             tx.open_table(SEEN)
                 .map_err(|e| AddressorError::Catalog(format!("redb table: {e}")))?;
+            tx.open_table(DELTA_BASE)
+                .map_err(|e| AddressorError::Catalog(format!("redb table: {e}")))?;
             tx.commit()
                 .map_err(|e| AddressorError::Catalog(format!("redb commit: {e}")))?;
         }
         let fp16_path = dir.join("index.fp16");
         let fp16 = if fp16_path.exists() {
             let raw = std::fs::read(&fp16_path)?;
-            if raw.len() % 2 != 0 || !raw.len().is_power_of_two() {
+            // reject malformed / hostile index files: must be an even,
+            // power-of-two slot count within a sane ceiling (256M slots = 512 MB)
+            const FP16_MAX_SLOTS: usize = 1 << 28;
+            if raw.len() % 2 != 0
+                || !raw.len().is_power_of_two()
+                || raw.len() / 2 > FP16_MAX_SLOTS
+            {
                 return Err(AddressorError::Catalog(
                     "fp16 index file has invalid size".into(),
                 ));
@@ -107,7 +117,7 @@ impl Catalog {
         })
     }
 
-    fn fp16_insert(&mut self, hash: &[u8; HASH_LEN]) {
+    fn fp16_insert(&mut self, hash: &[u8; HASH_LEN]) -> Result<()> {
         let fp = fp16_of(hash);
         let len = self.fp16.len();
         let start = slot_of(hash, len);
@@ -116,22 +126,29 @@ impl Catalog {
             if self.fp16[s] == 0 || self.fp16[s] == fp {
                 self.fp16[s] = fp;
                 self.fp16_dirty = true;
-                return;
+                return Ok(());
             }
         }
-        // probe window exhausted: grow 2x and rebuild is the clean answer,
-        // but rebuild needs all hashes (redb walk). Do it lazily.
-        self.fp16_grow_rebuild();
-        self.fp16_insert(hash);
+        // probe window exhausted: grow 2x and rebuild (needs a redb walk).
+        self.fp16_grow_rebuild()?;
+        self.fp16_insert(hash)
     }
 
-    fn fp16_grow_rebuild(&mut self) {
+    fn fp16_grow_rebuild(&mut self) -> Result<()> {
         let new_len = self.fp16.len() * 2;
         let mut table = vec![0u16; new_len];
-        let tx = self.db.begin_read().expect("redb read");
-        let t = tx.open_table(BY_ORDINAL).expect("by_ordinal");
-        let mut iter = t.iter().expect("iter");
-        while let Some(Ok((_, v))) = iter.next() {
+        let tx = self
+            .db
+            .begin_read()
+            .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        let t = tx
+            .open_table(BY_ORDINAL)
+            .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        let iter = t
+            .iter()
+            .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        for next in iter {
+            let (_, v) = next.map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
             let raw: [u8; 65] = v.value();
             let mut orig = [0u8; HASH_LEN];
             orig.copy_from_slice(&raw[1..33]);
@@ -147,6 +164,7 @@ impl Catalog {
         }
         self.fp16 = table;
         self.fp16_dirty = true;
+        Ok(())
     }
 
     /// fp16 prefilter: true = "possibly present", false = definitely absent.
@@ -173,6 +191,12 @@ impl Catalog {
 
     /// Bumps the unmatched-seen counter for a block hash (r-curation, AH-19);
     /// returns the count AFTER the bump.
+    ///
+    /// Accepted risk (trusted fleet): the counter is keyed by the truncated
+    /// 128-bit prefix; an accidental prefix collision (~2⁻⁶⁴ birthday) could
+    /// promote a block one occurrence early. Promotion still stores the
+    /// block under its FULL hash, and insert_kind's confirmation refuses a
+    /// colliding ref — correctness is unaffected, only curation strictness.
     pub fn bump_seen(&mut self, hash: &[u8; HASH_LEN]) -> Result<u32> {
         let key = truncate128(hash);
         let tx = self
@@ -215,10 +239,10 @@ impl Catalog {
             .open_table(SEEN)
             .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
         let mut n = 0u64;
-        let mut iter = by_ord
+        let iter = by_ord
             .iter()
             .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
-        while let Some(next) = iter.next() {
+        for next in iter {
             let (_, v) = next.map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
             let raw: [u8; 65] = v.value();
             if raw[0] == 1 {
@@ -249,10 +273,10 @@ impl Catalog {
             .open_table(SEEN)
             .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
         let mut n = 0u64;
-        let mut iter = seen
+        let iter = seen
             .iter()
             .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
-        while let Some(next) = iter.next() {
+        for next in iter {
             next.map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
             n += 1;
         }
@@ -321,7 +345,7 @@ impl Catalog {
         }
         tx.commit()
             .map_err(|e| AddressorError::Catalog(format!("redb commit: {e}")))?;
-        self.fp16_insert(&orig_hash);
+        self.fp16_insert(&orig_hash)?;
         Ok(ordinal)
     }
 
@@ -391,8 +415,45 @@ impl Catalog {
         Ok(Some(ord))
     }
 
+    /// Chunk-only confirmed lookup: like `lookup` but rejects CONTAINER
+    /// entries. A CDC chunk that coincidentally equals a whole stored file's
+    /// content must NOT bind to that file's container ordinal — the decoder
+    /// only accepts chunk-entry refs, so such a ref would make the file
+    /// permanently unretrievable. Used by the router scan/dup-fraction paths.
+    pub fn lookup_chunk(&self, hash: &[u8; HASH_LEN], cas: &CasStore) -> Result<Option<Ordinal>> {
+        match self.lookup(hash, cas)? {
+            Some(ord) => {
+                let entry = self
+                    .entry_of(ord)?
+                    .ok_or_else(|| AddressorError::Catalog("dangling ordinal".into()))?;
+                if entry.is_container {
+                    Ok(None) // treat a container hit as a chunk miss
+                } else {
+                    Ok(Some(ord))
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
     pub fn entry(&self, ordinal: Ordinal) -> Result<Option<Entry>> {
         self.entry_of(ordinal)
+    }
+
+    pub fn set_delta_base(&self, ordinal: Ordinal, base: Ordinal) -> Result<()> {
+        let tx = self.db.begin_write().map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        {
+            let mut t = tx.open_table(DELTA_BASE).map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+            t.insert(ordinal, base).map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        }
+        tx.commit().map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        Ok(())
+    }
+
+    pub fn delta_base(&self, ordinal: Ordinal) -> Result<Option<Ordinal>> {
+        let tx = self.db.begin_read().map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        let t = tx.open_table(DELTA_BASE).map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        Ok(t.get(ordinal).map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?.map(|g| g.value()))
     }
 
     pub fn len(&self) -> Result<u64> {

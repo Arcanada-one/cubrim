@@ -71,7 +71,13 @@ impl CasStore {
         }
         let dir = path.parent().expect("shard dir");
         fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!(".tmp-{}", r.to_hex()));
+        // unique temp name per writer: two concurrent puts of the same
+        // content must not interleave writes into one temp file
+        let tmp = dir.join(format!(
+            ".tmp-{}-{}",
+            std::process::id(),
+            r.to_hex()
+        ));
         fs::write(&tmp, data)?;
         // paranoia: re-read and verify before the blob becomes addressable
         let written = fs::read(&tmp)?;

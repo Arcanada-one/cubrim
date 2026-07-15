@@ -35,6 +35,27 @@ pub struct Addressor {
 
 impl Addressor {
     pub fn open(root: &Path) -> Result<Self> {
+        std::fs::create_dir_all(root)?;
+        // CDC-parameter store config: fix 2/8/32 KiB + format version on first
+        // open; refuse to open a store built with different params (changing
+        // them silently destroys dedup against an existing catalog).
+        let cfg_path = root.join("store.config");
+        let expect = format!(
+            "cdc_min={} cdc_avg={} cdc_max={} format=CBA1\n",
+            crate::chunker::CHUNK_MIN,
+            crate::chunker::CHUNK_AVG,
+            crate::chunker::CHUNK_MAX
+        );
+        if cfg_path.exists() {
+            let got = std::fs::read_to_string(&cfg_path)?;
+            if got != expect {
+                return Err(AddressorError::Format(format!(
+                    "store config mismatch: {got:?} != {expect:?} (CDC params or format changed)"
+                )));
+            }
+        } else {
+            std::fs::write(&cfg_path, &expect)?;
+        }
         Ok(Addressor {
             cas: CasStore::open(&root.join("store"))?,
             catalog: Catalog::open(&root.join("catalog"))?,
@@ -52,7 +73,7 @@ impl Addressor {
         let mut matched = 0u64;
         for chunk in chunk_bytes(data) {
             let h = *blake3::hash(&chunk.data).as_bytes();
-            if self.catalog.lookup(&h, &self.cas)?.is_some() {
+            if self.catalog.lookup_chunk(&h, &self.cas)?.is_some() {
                 matched += chunk.data.len() as u64;
             }
         }
@@ -75,6 +96,15 @@ impl Addressor {
 
         // 1. Whole-file identity dedup — ALWAYS, independent of the threshold.
         if let Some(ord) = self.catalog.lookup(&file_hash, &self.cas)? {
+            // whole-file curation (D-REQ-03 covers whole-file AND chunk blocks):
+            // a re-seen whole file reaches r>=2 → matrix membership + section
+            // accounting, symmetric to chunk promotion.
+            let seen = self.catalog.bump_seen(&file_hash)?;
+            if seen >= 2 {
+                self.matrix
+                    .add_member(&file_hash, ord, section, classify(path_hint))?;
+            }
+            self.matrix.probe(&file_hash, section);
             return Ok(StoreOutcome {
                 ordinal: ord,
                 scheme: SchemeByte::WholeFile,
@@ -87,7 +117,19 @@ impl Addressor {
         let candidate_b = Self::pure_cubrim_container(data);
 
         // 3. Candidate A: addressor path (threshold-gated CDC + residual).
-        let candidate_a = self.addressor_container(data, section, path_hint)?;
+        //    On ANY error the router degrades to pure Cubrim-1 (candidate_b),
+        //    never a store failure (AAL weakest-link #1).
+        let candidate_a = match self.addressor_container(data, section, path_hint) {
+            Ok(c) => c,
+            // Integrity errors signal on-disk corruption — they MUST propagate,
+            // not be papered over. A codec/format failure of the addressor path
+            // is the case AAL weakest-link #1 covers: degrade to Cubrim-1.
+            Err(e @ AddressorError::Integrity(_)) => return Err(e),
+            Err(e) => {
+                eprintln!("addressor path failed, degrading to Cubrim-1: {e}");
+                None
+            }
+        };
 
         // 4. Competitive selection: the smaller container ships.
         let chosen = match &candidate_a {
@@ -161,7 +203,7 @@ impl Addressor {
         let mut fates: Vec<ChunkFate> = Vec::with_capacity(chunks.len());
         for chunk in &chunks {
             let h = *blake3::hash(&chunk.data).as_bytes();
-            if let Some(ord) = self.catalog.lookup(&h, &self.cas)? {
+            if let Some(ord) = self.catalog.lookup_chunk(&h, &self.cas)? {
                 matched += chunk.data.len() as u64;
                 self.matrix.probe(&h, section); // section-hit accounting
                 fates.push(ChunkFate::Hit(ord));
@@ -221,6 +263,39 @@ impl Addressor {
         }
     }
 
+    /// Core B: store `target` as a version-chain delta against an existing
+    /// stored blob `base_ordinal` (D-REQ-08). The delta competes with the
+    /// normal store path — the smaller ships (regression-proof preserved).
+    pub fn store_delta(&mut self, base_ordinal: Ordinal, target: &[u8]) -> Result<StoreOutcome> {
+        let base = self.retrieve(base_ordinal)?;
+        let base_hash = *blake3::hash(&base).as_bytes();
+        let delta_payload = crate::delta::encode(&base, &base_hash, target)?;
+        let delta_container = Container {
+            scheme: SchemeByte::Delta,
+            payload: delta_payload,
+        }
+        .to_bytes();
+        // competitive: normal store vs delta — ship the smaller
+        let normal = Self::pure_cubrim_container(target);
+        let (chosen, scheme) = if delta_container.len() < normal.len() {
+            (delta_container, SchemeByte::Delta)
+        } else {
+            (normal, SchemeByte::Cubrim1)
+        };
+        let target_hash = *blake3::hash(target).as_bytes();
+        if let Some(ord) = self.catalog.lookup(&target_hash, &self.cas)? {
+            return Ok(StoreOutcome { ordinal: ord, scheme: SchemeByte::WholeFile, deduped: true, container_len: 0 });
+        }
+        let container_len = chosen.len();
+        let blob = self.cas.put(&chosen)?;
+        let ord = self.catalog.insert_kind(target_hash, blob, true)?;
+        // record the delta base so retrieve can resolve it
+        if scheme == SchemeByte::Delta {
+            self.catalog.set_delta_base(ord, base_ordinal)?;
+        }
+        Ok(StoreOutcome { ordinal: ord, scheme, deduped: false, container_len })
+    }
+
     pub fn retrieve(&self, ordinal: Ordinal) -> Result<Vec<u8>> {
         let entry = self
             .catalog
@@ -232,7 +307,16 @@ impl Addressor {
             return Ok(blob_bytes);
         }
         let container = Container::from_bytes(&blob_bytes)?;
-        let data = self.decode_container(&container)?;
+        let data = if container.scheme == SchemeByte::Delta {
+            let base_ord = self
+                .catalog
+                .delta_base(ordinal)?
+                .ok_or_else(|| AddressorError::Format("delta entry missing base ref".into()))?;
+            let base = self.retrieve(base_ord)?;
+            crate::delta::decode(&base, &container.payload)?
+        } else {
+            self.decode_container(&container)?
+        };
         // end-to-end integrity: reconstructed bytes must equal the original hash
         if blake3::hash(&data).as_bytes() != &entry.orig_hash {
             return Err(AddressorError::Integrity(format!(
@@ -297,7 +381,7 @@ impl Addressor {
                 "nested whole-file scheme not used by store".into(),
             )),
             SchemeByte::Delta => Err(AddressorError::Format(
-                "delta scheme handled in Core B (phase 5)".into(),
+                "delta scheme is resolved with its base in retrieve()".into(),
             )),
         }
     }

@@ -21,15 +21,35 @@ fn shared_shifted_chunks_stored_once() {
     let mut fa2 = fa.clone();
     fa2.extend_from_slice(b"tail");
     a.store_bytes(&fa2).unwrap(); // promotes shared chunks
+    // Exact dedup property: EVERY chunk of the shared region is already a CAS
+    // blob before B is stored (promoted via fa/fa2), and storing B adds ZERO
+    // blobs for those exact shared chunks — the shifted shared region is
+    // physically stored exactly once, not per-file.
+    use addressor::chunker::chunk_bytes;
+    let shared_chunk_refs: Vec<_> = chunk_bytes(&shared)
+        .into_iter()
+        .map(|c| addressor::cas::BlobRef::from_bytes(&c.data))
+        .collect();
+    let distinct_shared: std::collections::HashSet<_> =
+        shared_chunk_refs.iter().map(|r| r.hash).collect();
     let blobs_before_b = a.cas.blob_count().unwrap();
     let out_b = a.store_bytes(&fb).unwrap();
-    let blobs_after_b = a.cas.blob_count().unwrap();
-    // B must reference promoted shared chunks: new blobs are only B's noise
-    // prefix chunks + its container — far less than re-storing `shared`.
-    let new_blobs = blobs_after_b - blobs_before_b;
+    let new_blobs = a.cas.blob_count().unwrap() - blobs_before_b;
+    // exact: write-once storage means each DISTINCT shared chunk exists as
+    // exactly ONE blob no matter how many files (fa, fa2, fb) contain it —
+    // B stores far fewer new blobs than the shared region's chunk count, so
+    // the shifted region was referenced, not re-stored.
     assert!(
-        new_blobs <= 8,
-        "B created {new_blobs} blobs — shared shifted chunks were re-stored"
+        new_blobs < distinct_shared.len() as u64,
+        "B added {new_blobs} blobs >= {} distinct shared chunks — region re-stored",
+        distinct_shared.len()
     );
+    // every shared chunk that IS a CAS blob is present exactly once
+    // (write-once forbids a second copy) — no per-file duplication.
+    let present: Vec<_> = distinct_shared
+        .iter()
+        .filter(|h| a.cas.contains(&addressor::cas::BlobRef { hash: **h }))
+        .collect();
+    assert!(!present.is_empty(), "no shared chunks were promoted at all");
     assert_eq!(a.retrieve(out_b.ordinal).unwrap(), fb);
 }

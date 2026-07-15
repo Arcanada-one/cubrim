@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::path::Path;
 
 /// Deterministic compressible pseudo-text (no external RNG dep).

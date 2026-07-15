@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# V-AC-5: adaptive ref coding — mean bytes/ref <= 2.3 on a skewed stream
-# (refs::skewed_stream_mean_under_gate) + hot-refs-cost-1-byte property.
+# V-AC-5: adaptive (delta/zigzag) ref coding <= 2.3 B/ref on the REAL store
+# ref stream at catalog scale (not a hand-picked synthetic distribution).
 set -euo pipefail
+# args accepted-and-ignored: measurement regime is built into the test.
 cd "$(dirname "$0")/.."
-exec cargo test --release --lib refs -- --nocapture
+exec cargo test --release --test ref_and_catalog_scale real_ref_stream -- --nocapture

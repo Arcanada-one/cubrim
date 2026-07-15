@@ -8,7 +8,7 @@ set -euo pipefail
 SRC="${1:?usage: addr-no-build-gate.sh <src-dir>}"
 [ -d "$SRC" ] && [ -n "$(find "$SRC" -name '*.rs' -print -quit)" ] || {
     echo "FAIL: src dir empty or missing — vacuous pass forbidden" >&2; exit 2; }
-TERMS='fragment|signature|phi_key|phikey|generated_matrix|histogram|occupancy|size_routing'
+TERMS='fragment|signature|phi_key|phikey|generated_matrix|histogram|occupancy|size_routing|size-routing'
 FAIL=0
 if grep -rnE --include='*.rs' "\b($TERMS)\b" "$SRC"; then FAIL=1; fi
 if grep -rnE --include='*.rs' '\bdictionary\b' "$SRC" | grep -v '/delta\.rs:'; then FAIL=1; fi

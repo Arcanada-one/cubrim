@@ -2,7 +2,8 @@
 //!
 //! The parameters are part of the on-disk format contract: changing them
 //! destroys dedup against existing catalogs, so they are exposed as constants
-//! and recorded in the store config (checked on open).
+//! and recorded in `store.config` (written on first Addressor::open, and any
+//! reopen with different params is refused — see router.rs).
 
 use fastcdc::v2020::FastCDC;
 

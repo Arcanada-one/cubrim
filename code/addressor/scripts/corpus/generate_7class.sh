@@ -27,8 +27,8 @@ donors = {}
 for cls, gen in classes.items():
     d = os.path.join(out, cls); os.makedirs(d, exist_ok=True)
     donors[cls] = gen(60000)
-    for i in range(24):
-        size = rng.choice([1, 300, 4096, 20000, 80000, 200000])
+    for i in range(150):
+        size = rng.choice([1, 300, 4096, 20000, 80000, 200000, 800000] + ([4_000_000] if i % 50 == 0 else []))
         if rng.random() < dup_inj and size >= 20000:
             body = donors[cls][:size] + b"-v%d" % i   # near-copy of the donor
         else:
