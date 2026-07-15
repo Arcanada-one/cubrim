@@ -42,9 +42,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let data = std::fs::read(&file)?;
             let mut a = Addressor::open(&cli.root)?;
             let out = a.store_bytes(&data)?;
-            if verify {
-                // Merkle sidecar lands in phase 6 (merkle.rs); flag reserved.
-                eprintln!("note: --verify sidecar generation arrives in phase 6");
+            if verify && !out.deduped {
+                // runtime-optional Merkle sidecar over the stored container
+                let entry = a.catalog.entry(out.ordinal)?.expect("fresh entry");
+                let blob_path = a.cas.blob_path(&entry.blob);
+                let blob_bytes = a.cas.get(&entry.blob)?;
+                addressor::merkle::write_sidecar(&blob_path, &blob_bytes)?;
             }
             println!(
                 "{} scheme={:?} deduped={} container_bytes={}",
@@ -54,7 +57,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Cmd::Retrieve { ordinal, out, verify } => {
             let a = Addressor::open(&cli.root)?;
             if verify {
-                eprintln!("note: --verify sidecar check arrives in phase 6");
+                let entry = a
+                    .catalog
+                    .entry(ordinal)?
+                    .ok_or_else(|| format!("unknown ordinal {ordinal}"))?;
+                let blob_path = a.cas.blob_path(&entry.blob);
+                let blob_bytes = a.cas.get(&entry.blob)?;
+                addressor::merkle::verify_sidecar(&blob_path, &blob_bytes)?;
             }
             let data = a.retrieve(ordinal)?;
             match out {
