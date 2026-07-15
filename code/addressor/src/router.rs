@@ -9,6 +9,7 @@ use crate::error::{AddressorError, Result};
 use crate::format::{
     decode_cdc_payload, encode_cdc_payload, CdcEntry, Container, SchemeByte,
 };
+use crate::matrix::{classify, Matrix};
 use crate::residual;
 use std::path::Path;
 
@@ -29,6 +30,7 @@ pub struct StoreOutcome {
 pub struct Addressor {
     pub cas: CasStore,
     pub catalog: Catalog,
+    pub matrix: Matrix,
 }
 
 impl Addressor {
@@ -36,6 +38,7 @@ impl Addressor {
         Ok(Addressor {
             cas: CasStore::open(&root.join("store"))?,
             catalog: Catalog::open(&root.join("catalog"))?,
+            matrix: Matrix::open(&root.join("matrix"))?,
         })
     }
 
@@ -57,6 +60,17 @@ impl Addressor {
     }
 
     pub fn store_bytes(&mut self, data: &[u8]) -> Result<StoreOutcome> {
+        self.store_bytes_ctx(data, 0, None)
+    }
+
+    /// Store with fleet context: `section` = originating project section
+    /// (AH-20), `path_hint` feeds the content-class heuristic (AH-12).
+    pub fn store_bytes_ctx(
+        &mut self,
+        data: &[u8],
+        section: u8,
+        path_hint: Option<&str>,
+    ) -> Result<StoreOutcome> {
         let file_hash = *blake3::hash(data).as_bytes();
 
         // 1. Whole-file identity dedup — ALWAYS, independent of the threshold.
@@ -73,7 +87,7 @@ impl Addressor {
         let candidate_b = Self::pure_cubrim_container(data);
 
         // 3. Candidate A: addressor path (threshold-gated CDC + residual).
-        let candidate_a = self.addressor_container(data)?;
+        let candidate_a = self.addressor_container(data, section, path_hint)?;
 
         // 4. Competitive selection: the smaller container ships.
         let chosen = match &candidate_a {
@@ -121,7 +135,12 @@ impl Addressor {
     /// Addressor-path container, or None when the path collapses to the pure
     /// baseline (below threshold — the residual of the whole file IS candidate
     /// B for large inputs; for small ones lite may still win, so we build it).
-    fn addressor_container(&mut self, data: &[u8]) -> Result<Option<Vec<u8>>> {
+    fn addressor_container(
+        &mut self,
+        data: &[u8],
+        section: u8,
+        path_hint: Option<&str>,
+    ) -> Result<Option<Vec<u8>>> {
         if data.is_empty() {
             return Ok(None);
         }
@@ -144,6 +163,7 @@ impl Addressor {
             let h = *blake3::hash(&chunk.data).as_bytes();
             if let Some(ord) = self.catalog.lookup(&h, &self.cas)? {
                 matched += chunk.data.len() as u64;
+                self.matrix.probe(&h, section); // section-hit accounting
                 fates.push(ChunkFate::Hit(ord));
                 continue;
             }
@@ -152,6 +172,8 @@ impl Addressor {
                 // r>=2: promote — the block earned a catalog slot (AH-19)
                 let blob = self.cas.put(&chunk.data)?;
                 let ord = self.catalog.insert_kind(h, blob, false)?;
+                self.matrix
+                    .add_member(&h, ord, section, classify(path_hint))?;
                 fates.push(ChunkFate::Promoted(ord));
             } else {
                 fates.push(ChunkFate::Cold);
@@ -291,7 +313,7 @@ mod tests {
         let words = [
             "alpha", "beta", "gamma", "delta", "fleet", "router", "chunk", "store",
         ];
-        let mut x = seed | 1;
+        let mut x = seed.wrapping_mul(0x9E3779B97F4A7C15) | 1;
         let mut out = Vec::new();
         while out.len() < n {
             x ^= x << 13;

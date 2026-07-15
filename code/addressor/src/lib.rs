@@ -7,6 +7,7 @@ pub mod chunker;
 pub mod error;
 pub mod format;
 pub mod lite;
+pub mod matrix;
 pub mod refs;
 pub mod residual;
 pub mod router;

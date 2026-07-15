@@ -6,7 +6,7 @@ pub fn text(n: usize, seed: u64) -> Vec<u8> {
         "alpha", "beta", "gamma", "delta", "fleet", "router", "chunk", "store",
         "matrix", "ordinal", "bloom", "merkle",
     ];
-    let mut x = seed | 1;
+    let mut x = seed.wrapping_mul(0x9E3779B97F4A7C15) | 1;
     let mut out = Vec::new();
     while out.len() < n {
         x ^= x << 13;
@@ -21,7 +21,7 @@ pub fn text(n: usize, seed: u64) -> Vec<u8> {
 
 /// Deterministic incompressible noise.
 pub fn noise(n: usize, seed: u64) -> Vec<u8> {
-    let mut x = seed | 1;
+    let mut x = seed.wrapping_mul(0x9E3779B97F4A7C15) | 1;
     (0..n)
         .map(|_| {
             x ^= x << 13;

@@ -238,6 +238,27 @@ impl Catalog {
         Ok(n)
     }
 
+    /// Number of DISTINCT blocks ever scanned (the naive, uncurated matrix
+    /// baseline for the AH-19 curation ratio).
+    pub fn seen_distinct(&self) -> Result<u64> {
+        let tx = self
+            .db
+            .begin_read()
+            .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        let seen = tx
+            .open_table(SEEN)
+            .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        let mut n = 0u64;
+        let mut iter = seen
+            .iter()
+            .map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+        while let Some(next) = iter.next() {
+            next.map_err(|e| AddressorError::Catalog(format!("redb: {e}")))?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// Inserts (or returns existing) entry; assigns the next ordinal.
     pub fn insert_kind(
         &mut self,

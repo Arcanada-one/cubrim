@@ -35,7 +35,7 @@ mod tests {
 
     fn pseudo_random(len: usize, seed: u64) -> Vec<u8> {
         // deterministic xorshift fill — no external RNG dep
-        let mut x = seed | 1;
+        let mut x = seed.wrapping_mul(0x9E3779B97F4A7C15) | 1;
         (0..len)
             .map(|_| {
                 x ^= x << 13;
