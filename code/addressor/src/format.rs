@@ -9,7 +9,7 @@
 //!   3 = CdcDedup       payload = entry stream, refs only (no residual)
 //!   4 = CdcResidual    payload = entry stream + residual sub-blob
 //!   5 = Delta          payload = version-chain delta (Core B)
-//!   6 = Lite           payload = zstd frame (lite.rs)
+//!   6 = Lite           payload = light-codec frame (lite.rs)
 //!
 //! Scheme 3/4 entry stream: varint(chunk_count), then per chunk either
 //!   0x01 ++ refcoded(ordinal)          — matched chunk (catalog ref)

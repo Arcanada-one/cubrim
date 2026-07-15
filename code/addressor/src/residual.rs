@@ -1,5 +1,5 @@
 //! Residual backend selection: the REAL Cubrim-1 codec (in-process lib call,
-//! never a zstd stand-in) on large inputs; the light codec on small ones.
+//! never a stand-in compressor) on large inputs; the light codec on small ones.
 //! Every candidate also competes against raw — expansion never ships.
 //!
 //! Cubrim-1 integration note: the v1 cube codec raw-stores inputs above its
@@ -101,7 +101,7 @@ mod tests {
         let (scheme, payload) = encode(&data).unwrap();
         assert_eq!(scheme, SchemeByte::Cubrim1, "large residual must use cubrim");
         // every block must be a REAL cubrim container: cubrim::codec::decode
-        // accepts each — a zstd stand-in cannot fake this.
+        // accepts each — a stand-in compressor cannot fake this.
         let mut pos = 0usize;
         let n = varint_decode(&payload, &mut pos).unwrap();
         assert!(n >= 2, "300KB input must span multiple 64KiB cube blocks");
