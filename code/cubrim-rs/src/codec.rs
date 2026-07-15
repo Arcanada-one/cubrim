@@ -25,8 +25,8 @@ use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
-    MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_LARGEBWT,
-    MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_VCF, VERSION,
+    MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_EXECM,
+    MODE_LARGEBWT, MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -2577,6 +2577,7 @@ const CM_HEADER_SIZE: usize = 22; // MAGIC4 + VER1 + MODE1 + orig8 + block_size4
 const CM_ENTRY_SIZE: usize = 12; // comp_len4 + raw_hash8
 const CM_NIN: usize = 9; // order0..6 + word + match
 const RECORD_CM_NIN: usize = CM_NIN + 2; // base CM + record offset + previous same field
+const EXE_CM_NIN: usize = CM_NIN + 2; // base CM + aligned t-4 + aligned t-8
 
 const CM_SQT: [i32; 33] = [
     1, 2, 3, 6, 10, 16, 27, 45, 73, 120, 194, 310, 488, 747, 1101, 1546, 2047, 2549, 2994, 3348,
@@ -2863,6 +2864,34 @@ impl CmRecordState {
     }
 }
 
+struct CmExeState {
+    position_base: usize,
+    m4: CmCtxModel,
+    m8: CmCtxModel,
+    mixer: CmMixer,
+    st: [i32; EXE_CM_NIN],
+    ctx4: usize,
+    ctx8: usize,
+    mixer_base: usize,
+    mixer_pr: i32,
+}
+
+impl CmExeState {
+    fn new(position_base: usize) -> Self {
+        Self {
+            position_base,
+            m4: CmCtxModel::new(22),
+            m8: CmCtxModel::new(22),
+            mixer: CmMixer::new(EXE_CM_NIN, 4 * 8),
+            st: [0; EXE_CM_NIN],
+            ctx4: 0,
+            ctx8: 0,
+            mixer_base: 0,
+            mixer_pr: 2048,
+        }
+    }
+}
+
 struct CmPredictor {
     stretch: CmStretch,
     m0: CmCtxModel,
@@ -2901,17 +2930,22 @@ struct CmPredictor {
     apm3_last: usize,
     apm4_last: usize,
     record: Option<CmRecordState>,
+    exe: Option<CmExeState>,
 }
 impl CmPredictor {
     fn new() -> Self {
-        Self::new_inner(None)
+        Self::new_inner(None, None)
     }
 
     fn new_record(width: usize, position_base: usize) -> Self {
-        Self::new_inner(Some(CmRecordState::new(width, position_base)))
+        Self::new_inner(Some(CmRecordState::new(width, position_base)), None)
     }
 
-    fn new_inner(record: Option<CmRecordState>) -> Self {
+    fn new_exe(position_base: usize) -> Self {
+        Self::new_inner(None, Some(CmExeState::new(position_base)))
+    }
+
+    fn new_inner(record: Option<CmRecordState>, exe: Option<CmExeState>) -> Self {
         Self {
             stretch: CmStretch::new(),
             m0: CmCtxModel::new(9),
@@ -2950,6 +2984,7 @@ impl CmPredictor {
             apm3_last: 0,
             apm4_last: 0,
             record,
+            exe,
         }
     }
     #[inline]
@@ -3010,6 +3045,37 @@ impl CmPredictor {
             record.mixer_base = base;
             record.mixer_pr = pr;
             pr
+        } else if let Some(exe) = &mut self.exe {
+            let local_pos = self.hist.len();
+            let position_mod4 = (exe.position_base + local_pos) & 3;
+            let has4 = local_pos >= 4;
+            let has8 = local_pos >= 8;
+            let byte4 = if has4 {
+                self.hist[local_pos - 4] as u32
+            } else {
+                0
+            };
+            let byte8 = if has8 {
+                self.hist[local_pos - 8] as u32
+            } else {
+                0
+            };
+            let aligned = (position_mod4 as u32).wrapping_mul(0x9E37_79B1);
+            let hash4 = aligned
+                ^ byte4.wrapping_mul(0x0100_0193)
+                ^ if has4 { 0x1357_9BDF } else { 0x2468_ACE0 };
+            let hash8 = aligned
+                ^ byte8.wrapping_mul(0x85EB_CA6B)
+                ^ if has8 { 0xA5A5_5A5A } else { 0x5A5A_A5A5 };
+            exe.ctx4 = Self::idx(hash4, c0);
+            exe.ctx8 = Self::idx(hash8, c0);
+            exe.st[..CM_NIN].copy_from_slice(&self.st);
+            exe.st[CM_NIN] = self.stretch.s(exe.m4.p(exe.ctx4));
+            exe.st[CM_NIN + 1] = self.stretch.s(exe.m8.p(exe.ctx8));
+            let (pr, base) = exe.mixer.mix(position_mod4 * 8 + bitpos, &exe.st);
+            exe.mixer_base = base;
+            exe.mixer_pr = pr;
+            pr
         } else {
             let (pr, bb) = self.mxb.mix(self.pb * 8 + bitpos, &self.st);
             self.bb = bb;
@@ -3046,6 +3112,10 @@ impl CmPredictor {
             record
                 .mixer
                 .update(record.mixer_base, &record.st, record.mixer_pr, bit);
+        } else if let Some(exe) = &mut self.exe {
+            exe.m4.upd(exe.ctx4, bit);
+            exe.m8.upd(exe.ctx8, bit);
+            exe.mixer.update(exe.mixer_base, &exe.st, exe.mixer_pr, bit);
         } else {
             self.mxb.update(self.bb, &self.st, self.mpr, bit);
         }
@@ -3182,6 +3252,42 @@ fn record_cm_decompress_block(
     position_base: usize,
 ) -> Result<Vec<u8>, CubrimError> {
     let mut p = CmPredictor::new_record(width, position_base);
+    let mut dec = CmDecoder::new(comp)?;
+    let mut out = Vec::with_capacity(expected_len);
+    for _ in 0..expected_len {
+        let mut byte = 0u8;
+        for _ in 0..8 {
+            let pr = p.predict();
+            let bit = dec.decode(pr);
+            p.update(bit);
+            byte = (byte << 1) | bit as u8;
+        }
+        out.push(byte);
+    }
+    Ok(out)
+}
+
+fn exe_cm_compress_block(data: &[u8], position_base: usize) -> Vec<u8> {
+    let mut p = CmPredictor::new_exe(position_base);
+    let mut enc = CmEncoder::new();
+    for &byte in data {
+        for k in (0..8).rev() {
+            let bit = ((byte >> k) & 1) as i32;
+            let pr = p.predict();
+            enc.encode(bit, pr);
+            p.update(bit);
+        }
+    }
+    enc.flush();
+    enc.out
+}
+
+fn exe_cm_decompress_block(
+    comp: &[u8],
+    expected_len: usize,
+    position_base: usize,
+) -> Result<Vec<u8>, CubrimError> {
+    let mut p = CmPredictor::new_exe(position_base);
     let mut dec = CmDecoder::new(comp)?;
     let mut out = Vec::with_capacity(expected_len);
     for _ in 0..expected_len {
@@ -3424,6 +3530,134 @@ fn decode_record_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         ));
     }
     Ok(out)
+}
+
+const EXE_CM_HEADER_SIZE: usize = 23;
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn encode_exe_cm_probe(data: &[u8]) -> Option<Vec<u8>> {
+    let arch = bcj_detect_arch(data)?;
+    let mut filtered = data.to_vec();
+    match arch {
+        1 => bcj_x86(&mut filtered, true),
+        2 => bcj_arm64(&mut filtered, true),
+        3 => bcj_sparc(&mut filtered, true),
+        _ => return None,
+    }
+    build_exe_cm_blob(&filtered, arch)
+}
+
+fn build_exe_cm_blob(filtered: &[u8], arch: u8) -> Option<Vec<u8>> {
+    if !(1..=3).contains(&arch) || filtered.is_empty() {
+        return None;
+    }
+    let blocks: Vec<&[u8]> = filtered.chunks(CM_BLOCK_SIZE).collect();
+    if blocks.len() > u32::MAX as usize {
+        return None;
+    }
+    let mut comps = Vec::with_capacity(blocks.len());
+    let mut entries = Vec::with_capacity(blocks.len());
+    for (index, block) in blocks.into_iter().enumerate() {
+        let position_base = index.checked_mul(CM_BLOCK_SIZE)?;
+        let comp = exe_cm_compress_block(block, position_base);
+        if comp.len() > u32::MAX as usize {
+            return None;
+        }
+        entries.push((comp.len() as u32, cm_hash64(block)));
+        comps.push(comp);
+    }
+    let payload_len = comps.iter().map(Vec::len).sum::<usize>();
+    let mut out =
+        Vec::with_capacity(EXE_CM_HEADER_SIZE + entries.len() * CM_ENTRY_SIZE + payload_len);
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_EXECM);
+    out.extend_from_slice(&(filtered.len() as u64).to_be_bytes());
+    out.extend_from_slice(&(CM_BLOCK_SIZE as u32).to_be_bytes());
+    out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    out.push(arch);
+    for (len, hash) in &entries {
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(&hash.to_be_bytes());
+    }
+    for comp in comps {
+        out.extend_from_slice(&comp);
+    }
+    Some(out)
+}
+
+fn decode_exe_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    if blob.len() < EXE_CM_HEADER_SIZE {
+        return Err(CubrimError::Decode("MODE_EXECM container too short".into()));
+    }
+    let orig_len = usize::try_from(read_u64(blob, 6)?)
+        .map_err(|_| CubrimError::Decode("MODE_EXECM orig_len exceeds usize".into()))?;
+    let block_size = read_u32(blob, 14)? as usize;
+    let n_blocks = read_u32(blob, 18)? as usize;
+    let arch = blob[22];
+    if block_size != CM_BLOCK_SIZE
+        || !(1..=3).contains(&arch)
+        || n_blocks == 0
+        || n_blocks != (orig_len + block_size - 1) / block_size
+    {
+        return Err(CubrimError::Decode(
+            "MODE_EXECM invalid framing or architecture".into(),
+        ));
+    }
+    let table_end = n_blocks
+        .checked_mul(CM_ENTRY_SIZE)
+        .and_then(|n| EXE_CM_HEADER_SIZE.checked_add(n))
+        .ok_or_else(|| CubrimError::Decode("MODE_EXECM table overflow".into()))?;
+    if table_end > blob.len() {
+        return Err(CubrimError::Decode(
+            "MODE_EXECM block table truncated".into(),
+        ));
+    }
+    let mut entries = Vec::with_capacity(n_blocks);
+    let mut table_pos = EXE_CM_HEADER_SIZE;
+    let mut payload_len = 0usize;
+    for _ in 0..n_blocks {
+        let comp_len = read_u32(blob, table_pos)? as usize;
+        let hash = read_u64(blob, table_pos + 4)?;
+        payload_len = payload_len
+            .checked_add(comp_len)
+            .ok_or_else(|| CubrimError::Decode("MODE_EXECM payload overflow".into()))?;
+        entries.push((comp_len, hash));
+        table_pos += CM_ENTRY_SIZE;
+    }
+    if table_end.checked_add(payload_len) != Some(blob.len()) {
+        return Err(CubrimError::Decode(
+            "MODE_EXECM payload length mismatch".into(),
+        ));
+    }
+    let mut filtered = Vec::with_capacity(orig_len);
+    let mut payload_pos = table_end;
+    for (index, (comp_len, expected_hash)) in entries.into_iter().enumerate() {
+        let end = payload_pos
+            .checked_add(comp_len)
+            .ok_or_else(|| CubrimError::Decode("MODE_EXECM block overflow".into()))?;
+        let raw_len = (orig_len - filtered.len()).min(block_size);
+        let block = exe_cm_decompress_block(&blob[payload_pos..end], raw_len, index * block_size)?;
+        if block.len() != raw_len || cm_hash64(&block) != expected_hash {
+            return Err(CubrimError::Decode(
+                "MODE_EXECM block length or checksum mismatch".into(),
+            ));
+        }
+        filtered.extend_from_slice(&block);
+        payload_pos = end;
+    }
+    if filtered.len() != orig_len {
+        return Err(CubrimError::Decode(
+            "MODE_EXECM reconstructed length mismatch".into(),
+        ));
+    }
+    match arch {
+        1 => bcj_x86(&mut filtered, false),
+        2 => bcj_arm64(&mut filtered, false),
+        3 => bcj_sparc(&mut filtered, false),
+        _ => unreachable!("validated architecture"),
+    }
+    Ok(filtered)
 }
 
 const LARGEBWT_HEADER_SIZE: usize = 22;
@@ -3784,6 +4018,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_RECORDCM {
             return decode_record_cm(blob);
+        }
+        if blob[5] == MODE_EXECM {
+            return decode_exe_cm(blob);
         }
     }
 
@@ -9322,6 +9559,83 @@ mod tests {
                 candidate[5],
                 candidate_ms,
                 candidate.len() as i64 - baseline.len() as i64,
+            );
+        }
+    }
+
+    #[test]
+    fn test_exe_cm_round_trip_and_rejects_corruption() {
+        let mut elf = vec![0u8; 16_384];
+        elf[0..4].copy_from_slice(b"\x7FELF");
+        elf[5] = 1;
+        elf[18..20].copy_from_slice(&0x3Eu16.to_le_bytes());
+        for pos in (64..elf.len() - 8).step_by(16) {
+            elf[pos] = 0xE8;
+            elf[pos + 1..pos + 5].copy_from_slice(&(pos as u32).to_le_bytes());
+            elf[pos + 5..pos + 8].copy_from_slice(&[0x48, 0x89, 0xC0]);
+        }
+
+        let blob = encode_exe_cm_probe(&elf).expect("x86 ELF must reach FH-08 probe");
+        assert_eq!(blob[5], MODE_EXECM);
+        assert_eq!(blob[22], 1);
+        assert_eq!(decode(&blob).expect("exe-CM decode"), elf);
+        assert!(decode(&blob[..EXE_CM_HEADER_SIZE - 1]).is_err());
+
+        let mut bad_arch = blob.clone();
+        bad_arch[22] = 0;
+        assert!(decode(&bad_arch).is_err());
+
+        let mut bad_comp_len = blob.clone();
+        let comp_len = read_u32(&bad_comp_len, EXE_CM_HEADER_SIZE).unwrap();
+        bad_comp_len[EXE_CM_HEADER_SIZE..EXE_CM_HEADER_SIZE + 4]
+            .copy_from_slice(&comp_len.wrapping_add(1).to_be_bytes());
+        assert!(decode(&bad_comp_len).is_err());
+
+        let mut bad_hash = blob;
+        bad_hash[EXE_CM_HEADER_SIZE + 4] ^= 0x01;
+        assert!(decode(&bad_hash).is_err());
+    }
+
+    #[test]
+    #[ignore = "FH-08 actual-file spike runs sequentially on dev-ai"]
+    fn test_fh08_actual_files_spike() {
+        let paths = std::env::var("CUBR_FH08_FILES")
+            .expect("CUBR_FH08_FILES must contain colon-separated corpus paths");
+        let cfg = EncodeConfig::v1_default();
+        for path in paths.split(':').filter(|path| !path.is_empty()) {
+            let data = std::fs::read(path).expect("read FH-08 corpus file");
+
+            let started = std::time::Instant::now();
+            let current = encode_with_config(&data, &cfg);
+            let current_ms = started.elapsed().as_millis();
+            assert_eq!(decode(&current).expect("current rail decode"), data);
+
+            let started = std::time::Instant::now();
+            let fh07 = encode_bcj_cm_probe(&data).expect("recognized executable for FH-07");
+            let fh07_ms = started.elapsed().as_millis();
+            assert_eq!(decode(&fh07).expect("FH-07 decode"), data);
+
+            let started = std::time::Instant::now();
+            let fh08 = encode_exe_cm_probe(&data).expect("recognized executable for FH-08");
+            let fh08_ms = started.elapsed().as_millis();
+            assert_eq!(decode(&fh08).expect("FH-08 decode"), data);
+
+            println!(
+                "FH08 path={} orig={} current_comp={} current_ratio={:.15} current_mode={} current_ms={} fh07_comp={} fh07_ratio={:.15} fh07_ms={} fh08_comp={} fh08_ratio={:.15} fh08_mode={} fh08_ms={} vs_fh07_delta_bytes={} rt=OK cmp=0",
+                path,
+                data.len(),
+                current.len(),
+                current.len() as f64 / data.len() as f64,
+                current[5],
+                current_ms,
+                fh07.len(),
+                fh07.len() as f64 / data.len() as f64,
+                fh07_ms,
+                fh08.len(),
+                fh08.len() as f64 / data.len() as f64,
+                fh08[5],
+                fh08_ms,
+                fh08.len() as i64 - fh07.len() as i64,
             );
         }
     }

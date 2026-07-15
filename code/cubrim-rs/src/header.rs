@@ -148,6 +148,10 @@ pub const MODE_BIFF: u8 = 12;
 /// and the previous record's byte at the same offset.
 pub const MODE_RECORDCM: u8 = 13;
 
+/// Forced-only executable-aware context mixer (FH-08). An architecture-matched
+/// BCJ filter feeds a CM profile with aligned t-4/t-8 sparse contexts.
+pub const MODE_EXECM: u8 = 14;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).
