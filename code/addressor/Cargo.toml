@@ -1,0 +1,39 @@
+[package]
+name = "addressor"
+version = "0.1.0"
+edition = "2021"
+description = "Cubrim-2 Addressor — fleet CAS/dedup router over Cubrim-1"
+license-file = "../cubrim-rs/LICENSE"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "cubrim-addr"
+path = "src/main.rs"
+
+[lib]
+name = "addressor"
+path = "src/lib.rs"
+
+[dependencies]
+cubrim = { path = "../cubrim-rs" }
+fastcdc = "=4.0.1"
+blake3 = "=1.8.5"
+zstd = "=0.13.3"
+growable-bloom-filter = "=2.1.1"
+xorf = "=0.12.0"
+redb = "=4.1.0"
+fst = "=0.4.7"
+bao = "=0.13.1"
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+
+[dev-dependencies]
+proptest = "=1.11.0"
+criterion = "=0.8.2"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
