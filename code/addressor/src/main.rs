@@ -33,6 +33,8 @@ enum Cmd {
     },
     /// Store/catalog statistics
     Stats,
+    /// Print the BLAKE3-256 hex of a file (used by sync scripts)
+    Hash { file: PathBuf },
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -73,6 +75,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     std::io::stdout().write_all(&data)?;
                 }
             }
+        }
+        Cmd::Hash { file } => {
+            let data = std::fs::read(&file)?;
+            println!("{}", blake3::hash(&data).to_hex());
         }
         Cmd::Stats => {
             let a = Addressor::open(&cli.root)?;

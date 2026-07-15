@@ -1,0 +1,6 @@
+# Hub-side authorized_keys entry for ONE spoke's sync key.
+# rrsync write-only, confined to that spoke's inbox; a second read-only
+# entry (second key) serves snapshot pulls. The key gives NO shell.
+# Replace <SPOKE_ID>, <STORE_ROOT>, <PUBKEY>.
+restrict,command="/usr/bin/rrsync -wo <STORE_ROOT>/inbox/spoke_<SPOKE_ID>" ssh-ed25519 <PUBKEY> addr-sync-push-<SPOKE_ID>
+restrict,command="/usr/bin/rrsync -ro <STORE_ROOT>/snapshots" ssh-ed25519 <PUBKEY_RO> addr-sync-pull-<SPOKE_ID>
