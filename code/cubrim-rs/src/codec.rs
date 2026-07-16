@@ -26,7 +26,8 @@ use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
     MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_EXECM,
-    MODE_LARGEBWT, MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_VCF, VERSION,
+    MODE_LARGEBWT, MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_TARBCJ, MODE_VCF,
+    VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -2447,6 +2448,181 @@ fn decode_bcj(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     Ok(filtered)
 }
 
+// ---- MODE_TARBCJ (FH-18): tar-aware DEC Alpha ECOFF BCJ ----
+
+/// A regular-file member inside a POSIX ustar stream: payload offset and exact length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TarMember {
+    payload_off: usize,
+    payload_len: usize,
+}
+
+/// Parse an unsigned octal field (leading spaces/NULs allowed, terminated by space/NUL).
+fn tar_octal(field: &[u8]) -> Option<u64> {
+    let mut value: u64 = 0;
+    let mut seen = false;
+    for &b in field {
+        match b {
+            b'0'..=b'7' => {
+                value = value.checked_mul(8)?.checked_add((b - b'0') as u64)?;
+                seen = true;
+            }
+            b' ' | 0 => {
+                if seen {
+                    break;
+                }
+            }
+            _ => return None,
+        }
+    }
+    if seen {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+/// Walk a POSIX ustar stream and return every regular-file member region.
+///
+/// Returns None unless the WHOLE stream is a well-formed ustar archive
+/// (512-byte blocking, "ustar" magic and a valid checksum in every header,
+/// all-zero end-of-archive padding). The walk depends only on header blocks
+/// and size fields — never on payload content — so it re-derives byte-exact
+/// identical regions on the BCJ-transformed stream during decode.
+fn tar_members(data: &[u8]) -> Option<Vec<TarMember>> {
+    if data.is_empty() || data.len() % 512 != 0 {
+        return None;
+    }
+    let mut members = Vec::new();
+    let mut off = 0usize;
+    while off + 512 <= data.len() {
+        let block = &data[off..off + 512];
+        if block.iter().all(|&b| b == 0) {
+            // End-of-archive: everything after the first zero header must be zero.
+            if data[off..].iter().all(|&b| b == 0) {
+                return Some(members);
+            }
+            return None;
+        }
+        // POSIX "ustar\0" or GNU "ustar " magic.
+        if &block[257..262] != b"ustar" {
+            return None;
+        }
+        let stored_checksum = tar_octal(&block[148..156])?;
+        let mut sum: u64 = 0;
+        for (i, &b) in block.iter().enumerate() {
+            sum += if (148..156).contains(&i) { 32 } else { b as u64 };
+        }
+        if sum != stored_checksum {
+            return None;
+        }
+        let size = tar_octal(&block[124..136])? as usize;
+        let typeflag = block[156];
+        off += 512;
+        let padded = size.div_ceil(512) * 512;
+        if off.checked_add(padded)? > data.len() {
+            return None;
+        }
+        if typeflag == b'0' || typeflag == 0 {
+            members.push(TarMember {
+                payload_off: off,
+                payload_len: size,
+            });
+        }
+        off += padded;
+    }
+    // No end-of-archive marker seen; accept only an exactly-consumed stream.
+    if off == data.len() {
+        Some(members)
+    } else {
+        None
+    }
+}
+
+/// ECOFF ALPHAMAGIC 0x0183 stored little-endian at the start of the member payload.
+fn is_alpha_ecoff(payload: &[u8]) -> bool {
+    payload.len() >= 4 && payload[0] == 0x83 && payload[1] == 0x01
+}
+
+/// In-place Alpha BCJ over one member payload. BR (opcode 0x30) and BSR (0x34)
+/// 21-bit PC-relative displacements become absolute word indexes so repeated
+/// branch targets compress as identical bytes. Word 0 (the ECOFF magic) is never
+/// touched: the is_alpha_ecoff decision therefore survives the transform and the
+/// decoder re-derives the exact member set with no transmitted map. Displacement
+/// arithmetic is mod 2^21 per word, so the transform is bijective.
+fn alpha_bcj(payload: &mut [u8], encode: bool) {
+    let words = payload.len() / 4;
+    for i in 1..words {
+        let at = i * 4;
+        let w = u32::from_le_bytes([payload[at], payload[at + 1], payload[at + 2], payload[at + 3]]);
+        let opcode = w >> 26;
+        if opcode == 0x30 || opcode == 0x34 {
+            let disp = w & 0x001F_FFFF;
+            let pc = (i as u32 + 1) & 0x001F_FFFF;
+            let new_disp = if encode {
+                disp.wrapping_add(pc) & 0x001F_FFFF
+            } else {
+                disp.wrapping_sub(pc) & 0x001F_FFFF
+            };
+            let nw = (w & 0xFFE0_0000) | new_disp;
+            payload[at..at + 4].copy_from_slice(&nw.to_le_bytes());
+        }
+    }
+}
+
+/// FH-18 probe: whole-input ustar with at least one Alpha-ECOFF member, or None.
+#[cfg_attr(not(test), allow(dead_code))]
+fn encode_fh18_tar_alpha_probe(data: &[u8]) -> Option<Vec<u8>> {
+    let members = tar_members(data)?;
+    let targets: Vec<TarMember> = members
+        .iter()
+        .copied()
+        .filter(|m| is_alpha_ecoff(&data[m.payload_off..m.payload_off + m.payload_len]))
+        .collect();
+    if targets.is_empty() {
+        return None;
+    }
+    let mut transformed = data.to_vec();
+    for m in &targets {
+        alpha_bcj(
+            &mut transformed[m.payload_off..m.payload_off + m.payload_len],
+            true,
+        );
+    }
+    let nested = encode_with_config(&transformed, &EncodeConfig::v1_default());
+    let mut out = Vec::with_capacity(10 + nested.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_TARBCJ);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(&nested);
+    Some(out)
+}
+
+fn decode_tar_bcj(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    const FIXED: usize = 10; // MAGIC4 + VER1 + MODE1 + orig4
+    if blob.len() < FIXED {
+        return Err(CubrimError::Decode("MODE_TARBCJ container too short".into()));
+    }
+    let orig_len = read_u32(blob, 6)? as usize;
+    let mut stream = decode(&blob[FIXED..])?;
+    if stream.len() != orig_len {
+        return Err(CubrimError::Decode(
+            "MODE_TARBCJ: nested length mismatch".into(),
+        ));
+    }
+    let members = tar_members(&stream).ok_or_else(|| {
+        CubrimError::Decode("MODE_TARBCJ: stream is not a well-formed ustar".into())
+    })?;
+    for m in members {
+        let payload = &mut stream[m.payload_off..m.payload_off + m.payload_len];
+        if is_alpha_ecoff(payload) {
+            alpha_bcj(payload, false);
+        }
+    }
+    Ok(stream)
+}
+
 // ---- MODE_SOA (H-40): byte-plane Structure-of-Arrays for fixed-width binary records ----
 
 fn soa_forward(data: &[u8], w: usize) -> Vec<u8> {
@@ -4021,6 +4197,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_EXECM {
             return decode_exe_cm(blob);
+        }
+        if blob[5] == MODE_TARBCJ {
+            return decode_tar_bcj(blob);
         }
     }
 
@@ -9636,6 +9815,169 @@ mod tests {
                 fh08[5],
                 fh08_ms,
                 fh08.len() as i64 - fh07.len() as i64,
+            );
+        }
+    }
+
+    // ---- FH-18: tar-aware Alpha/ECOFF BCJ ----
+
+    /// Build one ustar header block with a valid checksum.
+    fn make_tar_header(name: &str, size: usize, typeflag: u8) -> [u8; 512] {
+        let mut block = [0u8; 512];
+        block[..name.len()].copy_from_slice(name.as_bytes());
+        block[100..107].copy_from_slice(b"0000644"); // mode
+        block[108..115].copy_from_slice(b"0000000"); // uid
+        block[116..123].copy_from_slice(b"0000000"); // gid
+        let size_field = format!("{size:011o}");
+        block[124..135].copy_from_slice(size_field.as_bytes());
+        block[136..147].copy_from_slice(b"00000000000"); // mtime
+        block[156] = typeflag;
+        block[257..263].copy_from_slice(b"ustar\0");
+        block[263..265].copy_from_slice(b"00");
+        let mut sum: u64 = 0;
+        for (i, &b) in block.iter().enumerate() {
+            sum += if (148..156).contains(&i) { 32 } else { b as u64 };
+        }
+        let checksum_field = format!("{sum:06o}\0 ");
+        block[148..156].copy_from_slice(checksum_field.as_bytes());
+        block
+    }
+
+    /// Assemble a full ustar stream from (name, payload, typeflag) members.
+    fn make_tar(members: &[(&str, &[u8], u8)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for (name, payload, typeflag) in members {
+            out.extend_from_slice(&make_tar_header(name, payload.len(), *typeflag));
+            out.extend_from_slice(payload);
+            let pad = payload.len().div_ceil(512) * 512 - payload.len();
+            out.extend(std::iter::repeat_n(0u8, pad));
+        }
+        out.extend(std::iter::repeat_n(0u8, 1024)); // end-of-archive
+        out
+    }
+
+    /// Synthetic Alpha-ECOFF payload: magic word + BR/BSR branches to one hot target.
+    fn make_alpha_payload(words: usize) -> Vec<u8> {
+        let mut payload = Vec::with_capacity(words * 4);
+        payload.extend_from_slice(&[0x83, 0x01, 0x15, 0x00]); // ALPHAMAGIC 0x0183
+        for i in 1..words {
+            let word: u32 = if i % 3 == 0 {
+                // BR/BSR with a PC-relative displacement to fixed target word 4096.
+                let opcode: u32 = if i % 6 == 0 { 0x30 } else { 0x34 };
+                let disp = 4096u32.wrapping_sub(i as u32 + 1) & 0x001F_FFFF;
+                (opcode << 26) | (31 << 21) | disp
+            } else {
+                0x47FF_041F // Alpha NOP-like filler (opcode 0x11), never rewritten
+            };
+            payload.extend_from_slice(&word.to_le_bytes());
+        }
+        payload
+    }
+
+    #[test]
+    fn test_fh18_alpha_bcj_is_bijective() {
+        let mut payload = make_alpha_payload(256);
+        let original = payload.clone();
+        alpha_bcj(&mut payload, true);
+        assert_ne!(payload, original, "forward transform must change branches");
+        assert_eq!(
+            &payload[..4],
+            &original[..4],
+            "word 0 (ECOFF magic) must never be touched"
+        );
+        alpha_bcj(&mut payload, false);
+        assert_eq!(payload, original, "inverse must restore the payload exactly");
+    }
+
+    #[test]
+    fn test_fh18_alpha_bcj_makes_targets_identical() {
+        let mut payload = make_alpha_payload(256);
+        alpha_bcj(&mut payload, true);
+        // Every rewritten BR/BSR now stores the same absolute target word 4096.
+        let mut seen = std::collections::HashSet::new();
+        for i in (3..256).step_by(3) {
+            let at = i * 4;
+            let w = u32::from_le_bytes([payload[at], payload[at + 1], payload[at + 2], payload[at + 3]]);
+            if w >> 26 == 0x30 || w >> 26 == 0x34 {
+                seen.insert(w & 0x001F_FFFF);
+            }
+        }
+        assert_eq!(seen.len(), 1, "absolute displacements must collapse to one value");
+        assert!(seen.contains(&4096));
+    }
+
+    #[test]
+    fn test_fh18_tar_members_walk_and_rejects() {
+        let alpha = make_alpha_payload(300);
+        let plain = vec![0x55u8; 700];
+        let tar = make_tar(&[("lib.so", &alpha, b'0'), ("readme", &plain, b'0')]);
+        let members = tar_members(&tar).expect("well-formed ustar must parse");
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].payload_off, 512);
+        assert_eq!(members[0].payload_len, alpha.len());
+        assert_eq!(members[1].payload_len, 700);
+        // Non-tar and truncated inputs must be rejected.
+        assert_eq!(tar_members(b"not a tar at all"), None);
+        // Cut inside member 2's payload: its header promises more bytes than remain.
+        assert_eq!(tar_members(&tar[..members[1].payload_off]), None);
+        let mut corrupted = tar.clone();
+        corrupted[150] ^= 0x01; // break header checksum
+        assert_eq!(tar_members(&corrupted), None);
+    }
+
+    #[test]
+    fn test_fh18_probe_roundtrip_synthetic_tar() {
+        let alpha = make_alpha_payload(2048);
+        let plain: Vec<u8> = (0..3000u32).map(|i| (i * 7 % 251) as u8).collect();
+        let tar = make_tar(&[("libgk.so", &alpha, b'0'), ("chrome.jar", &plain, b'0')]);
+        let blob = encode_fh18_tar_alpha_probe(&tar).expect("alpha member must arm FH-18");
+        assert_eq!(blob[5], MODE_TARBCJ);
+        assert_eq!(decode(&blob).expect("FH-18 decode"), tar);
+    }
+
+    #[test]
+    fn test_fh18_probe_refuses_non_tar_and_non_alpha() {
+        assert!(encode_fh18_tar_alpha_probe(b"plain text, not a tar").is_none());
+        let plain = vec![0x20u8; 900];
+        let tar = make_tar(&[("readme", &plain, b'0')]);
+        assert!(
+            encode_fh18_tar_alpha_probe(&tar).is_none(),
+            "tar without Alpha-ECOFF members must not arm FH-18"
+        );
+    }
+
+    #[test]
+    #[ignore = "FH-18 actual-file spike runs sequentially on dev-ai"]
+    fn test_fh18_actual_file_spike() {
+        let paths = std::env::var("CUBR_FH18_FILES")
+            .expect("CUBR_FH18_FILES must contain colon-separated corpus paths");
+        let cfg = EncodeConfig::v1_default();
+        for path in paths.split(':').filter(|path| !path.is_empty()) {
+            let data = std::fs::read(path).expect("read FH-18 corpus file");
+
+            let started = std::time::Instant::now();
+            let baseline = encode_with_config(&data, &cfg);
+            let baseline_ms = started.elapsed().as_millis();
+            assert_eq!(decode(&baseline).expect("baseline decode"), data);
+
+            let started = std::time::Instant::now();
+            let candidate = encode_fh18_tar_alpha_probe(&data).expect("recognized alpha tar");
+            let candidate_ms = started.elapsed().as_millis();
+            assert_eq!(decode(&candidate).expect("FH-18 decode"), data);
+
+            println!(
+                "FH18 path={} orig={} baseline_comp={} baseline_ratio={:.15} baseline_mode={} baseline_ms={} candidate_comp={} candidate_ratio={:.15} candidate_mode={} candidate_ms={} delta_bytes={} rt=OK cmp=0",
+                path,
+                data.len(),
+                baseline.len(),
+                baseline.len() as f64 / data.len() as f64,
+                baseline[5],
+                baseline_ms,
+                candidate.len(),
+                candidate.len() as f64 / data.len() as f64,
+                candidate[5],
+                candidate_ms,
+                candidate.len() as i64 - baseline.len() as i64,
             );
         }
     }

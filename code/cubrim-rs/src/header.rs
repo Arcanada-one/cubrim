@@ -152,6 +152,16 @@ pub const MODE_RECORDCM: u8 = 13;
 /// BCJ filter feeds a CM profile with aligned t-4/t-8 sparse contexts.
 pub const MODE_EXECM: u8 = 14;
 
+/// Forced-only tar-aware DEC Alpha ECOFF BCJ (FH-18). A well-formed POSIX ustar
+/// stream is walked by its 512-byte headers; every regular-file member whose
+/// payload starts with ECOFF ALPHAMAGIC 0x0183 has its Alpha BR (0x30) / BSR
+/// (0x34) 21-bit PC-relative displacements rewritten to absolute word indexes
+/// (words 1.., word 0 with the magic is never touched, so the member decision
+/// re-derives identically on decode — no member map is transmitted). The
+/// transformed stream is coded via the base competitive pipeline.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_TARBCJ 1B][orig_len 4B BE] then nested sub-blob.
+pub const MODE_TARBCJ: u8 = 15;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).
