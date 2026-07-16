@@ -88,14 +88,35 @@ pub fn decode(base: &[u8], payload: &[u8]) -> Result<Vec<u8>> {
         .map_err(|e| AddressorError::Codec(format!("delta window max: {e:?}")))?;
     dctx.ref_prefix(base)
         .map_err(|e| AddressorError::Codec(format!("delta ref_prefix: {e:?}")))?;
-    // pre-reserve bounded by the frame size, NOT the attacker-declared length
-    // (a tiny frame declaring orig_len=2^40 must not force a 1 TiB reservation);
-    // the Vec still grows to the real size during decompress.
-    const MAX_DELTA_RATIO: usize = 4096;
-    let reserve = (orig_len as usize).min(frame.len().saturating_mul(MAX_DELTA_RATIO));
-    let mut out = Vec::with_capacity(reserve);
-    dctx.decompress(&mut out, frame)
-        .map_err(|e| AddressorError::Codec(format!("delta decompress: {e:?}")))?;
+    // STREAMING decompress: the output buffer grows only as bytes are actually
+    // produced, so a tiny alloc-bomb frame (small frame, huge declared
+    // orig_len) never forces a large up-front reservation, while a legit
+    // high-ratio version delta (small frame → large real output) decodes
+    // correctly. A frame that genuinely decompresses past the absolute cap is
+    // rejected mid-stream.
+    const CHUNK: usize = 128 * 1024;
+    let mut out: Vec<u8> = Vec::new();
+    let mut in_buf = zstd::zstd_safe::InBuffer::around(frame);
+    loop {
+        let old_len = out.len();
+        out.resize(old_len + CHUNK, 0);
+        let mut out_buf = zstd::zstd_safe::OutBuffer::around_pos(&mut out, old_len);
+        let hint = dctx
+            .decompress_stream(&mut out_buf, &mut in_buf)
+            .map_err(|e| AddressorError::Codec(format!("delta decompress: {e:?}")))?;
+        let produced = out_buf.pos();
+        out.truncate(produced);
+        if out.len() as u64 > (1u64 << 40) {
+            return Err(AddressorError::Format("delta output exceeds cap".into()));
+        }
+        // hint == 0 ⇒ a frame boundary was reached (whole frame consumed)
+        if hint == 0 && in_buf.pos() == frame.len() {
+            break;
+        }
+        if produced == old_len && in_buf.pos() == frame.len() {
+            break; // no progress and input exhausted
+        }
+    }
     if out.len() as u64 != orig_len {
         return Err(AddressorError::Integrity(
             "delta reconstructed length mismatch".into(),
@@ -167,6 +188,20 @@ mod tests {
             Err(AddressorError::Integrity(_)) => {}
             other => panic!("expected Integrity, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn large_base_tiny_diff_roundtrips() {
+        // the version-chain target class: a big file with a 1-line change →
+        // a tiny delta frame, large output. (Regression: a frame-size-bounded
+        // pre-reservation broke exactly this case.)
+        let (base, _) = base_and_edit(500_000);
+        let mut target = base.clone();
+        target.splice(250_000..250_000, b"one changed line\n".iter().copied());
+        let bh = *blake3::hash(&base).as_bytes();
+        let delta = encode(&base, &bh, &target).unwrap();
+        assert!(delta.len() < 2000, "tiny diff must produce a tiny delta, got {}", delta.len());
+        assert_eq!(decode(&base, &delta).unwrap(), target);
     }
 
     #[test]
