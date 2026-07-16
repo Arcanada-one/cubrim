@@ -1,0 +1,37 @@
+{
+ "probe": "REGEN-lex-order-v1",
+ "unique_matrices": 2824381,
+ "sort_s": 11.4,
+ "log2_M_bits": 21.43,
+ "raw_list_bits_per_matrix": 4096,
+ "uniform_bar_bits_per_matrix": 4074.57,
+ "measured_gap_bits_per_matrix": 4010.03,
+ "measured_elias_delta_bits_per_matrix": 4033.01,
+ "order_bonus_vs_raw_pct": 2.099,
+ "extra_bonus_vs_uniform_bits": 64.54,
+ "gap_approx_err_max_bits_on_sample": 177,
+ "prefix_bits_quantiles": {
+  "50": 31,
+  "90": 146,
+  "99": 974,
+  "99.9": 3459
+ },
+ "prefix_ge_64bits_count": 699252,
+ "prefix_ge_128bits_count": 327621,
+ "hamming_to_lex_neighbor_mean_bits": 1616.7,
+ "hamming_lt_k_counts": {
+  "8": 4734,
+  "16": 7843,
+  "32": 14065,
+  "64": 29023,
+  "128": 42679,
+  "256": 57986
+ },
+ "zlib9_front_coding_sample": {
+  "n_blocks": 131072,
+  "sorted_bytes": 39768408,
+  "shuffled_bytes": 42527348,
+  "sorted_gain_pct": 6.487
+ },
+ "elapsed_s": 34.2
+}

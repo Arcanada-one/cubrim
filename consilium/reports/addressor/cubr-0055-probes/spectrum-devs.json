@@ -1,0 +1,74 @@
+{
+ "probe": "REGEN-spectrum-v1",
+ "unique_matrices": 12451314,
+ "classes": {
+  "const": {
+   "count": 36,
+   "desc_bytes": 72,
+   "zlib_bytes": 288,
+   "desc_lt_zlib": 36,
+   "desc_lt_half_zlib": 36
+  },
+  "arith": {
+   "count": 1,
+   "desc_bytes": 3,
+   "zlib_bytes": 9,
+   "desc_lt_zlib": 1,
+   "desc_lt_half_zlib": 1
+  },
+  "xor_delta": {
+   "count": 32,
+   "desc_bytes": 96,
+   "zlib_bytes": 288,
+   "desc_lt_zlib": 32,
+   "desc_lt_half_zlib": 32
+  },
+  "periodic<=64": {
+   "count": 3280,
+   "desc_bytes": 118898,
+   "zlib_bytes": 103589,
+   "desc_lt_zlib": 860,
+   "desc_lt_half_zlib": 0
+  },
+  "xorshift32": {
+   "count": 0,
+   "desc_bytes": 0,
+   "zlib_bytes": 0,
+   "desc_lt_zlib": 0,
+   "desc_lt_half_zlib": 0
+  },
+  "xorshift64": {
+   "count": 0,
+   "desc_bytes": 0,
+   "zlib_bytes": 0,
+   "desc_lt_zlib": 0,
+   "desc_lt_half_zlib": 0
+  },
+  "lcg_nr32": {
+   "count": 0,
+   "desc_bytes": 0,
+   "zlib_bytes": 0,
+   "desc_lt_zlib": 0,
+   "desc_lt_half_zlib": 0
+  },
+  "rle": {
+   "count": 747128,
+   "desc_bytes": 258679848,
+   "zlib_bytes": 94219932,
+   "desc_lt_zlib": 2074,
+   "desc_lt_half_zlib": 0
+  },
+  "none": {
+   "count": 11700837,
+   "desc_bytes": 5990828544,
+   "zlib_bytes": 4736346507,
+   "desc_lt_zlib": 0,
+   "desc_lt_half_zlib": 0
+  }
+ },
+ "generator_fit_share_pct": 6.0273,
+ "regen_wins_vs_zlib9": 3003,
+ "elapsed_s": 1690.2,
+ "zlib_time_s": 452.5,
+ "classify_cpu_us_per_matrix": 99.4
+}

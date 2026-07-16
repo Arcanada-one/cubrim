@@ -1,0 +1,31 @@
+{
+ "probe": "REGEN-bruteforce-cost-v1",
+ "model": "xorshift32, unknown 32-bit seed, warmup=4 (seed not readable from output)",
+ "sweep_candidates": 67108864,
+ "sweep_elapsed_s": 4.28,
+ "candidates_per_sec_1proc": 15667239,
+ "hidden_seed_found_in_window": true,
+ "full_2e32_sweep_one_matrix": {
+  "sec_1proc": 274.1,
+  "hours_16cores": 0.0
+ },
+ "per_corpus_devs_12_45M_matrices_16cores_years": 6.8,
+ "seed_spaces_wallclock_16cores": {
+  "2^32": "0.00 h",
+  "2^40": "0.1 d",
+  "2^48": "0.0 y",
+  "2^64": "2.33e+03 y"
+ },
+ "exa_supercomputer_1e18_cps": {
+  "2^64": "18.4 s",
+  "2^80": "0.0 y",
+  "2^96": "2.51e+03 y",
+  "2^128": "1.08e+13 y"
+ },
+ "grover_oracle_calls_sqrt": {
+  "d=64": "2^32 oracle calls",
+  "d=128": "2^64 oracle calls (AES-128-scale: ~2^83 gate-ops with QEC, millions of qubits, decades \u2014 physically remote)",
+  "note": "BBBV: sqrt is optimal for unstructured search; no exponential quantum shortcut"
+ },
+ "economics_note": "search is sender-side one-time; receiver replays generator for free. Even so: a 2^32 sweep costs ~1 CPU-core-hour-scale PER MATRIX to save <=~500 B vs storing the compressed block; at ~0.05 USD/core-hour the search costs ~5 orders of magnitude more than a lifetime of storing/shipping 500 B. Break-even N does not exist for blind search."
+}
