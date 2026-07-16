@@ -3121,6 +3121,23 @@ impl CmPredictor {
         Self::new_inner(None, Some(CmExeState::new(position_base)))
     }
 
+    /// FH-19 probe: the stock predictor with the high-order/word/match tables
+    /// scaled to `bits` (m0/m1 keep their small dedicated sizes). bits == 22
+    /// reproduces new() byte-exactly.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn new_scaled(bits: usize) -> Self {
+        let mut p = Self::new_inner(None, None);
+        p.m2 = CmCtxModel::new(bits);
+        p.m3 = CmCtxModel::new(bits);
+        p.m4 = CmCtxModel::new(bits);
+        p.m5 = CmCtxModel::new(bits);
+        p.m6 = CmCtxModel::new(bits);
+        p.mw = CmCtxModel::new(bits);
+        p.mm_ht = vec![0u32; 1 << bits];
+        p.mm_mask = (1 << bits) - 1;
+        p
+    }
+
     fn new_inner(record: Option<CmRecordState>, exe: Option<CmExeState>) -> Self {
         Self {
             stretch: CmStretch::new(),
@@ -3391,6 +3408,46 @@ fn cm_compress_block(data: &[u8]) -> Vec<u8> {
 
 fn cm_decompress_block(comp: &[u8], expected_len: usize) -> Result<Vec<u8>, CubrimError> {
     let mut p = CmPredictor::new();
+    let mut dec = CmDecoder::new(comp)?;
+    let mut out = Vec::with_capacity(expected_len);
+    for _ in 0..expected_len {
+        let mut byte = 0u8;
+        for _ in 0..8 {
+            let pr = p.predict();
+            let bit = dec.decode(pr);
+            p.update(bit);
+            byte = (byte << 1) | bit as u8;
+        }
+        out.push(byte);
+    }
+    Ok(out)
+}
+
+/// FH-19 probe: cm_compress_block with a scaled predictor.
+#[cfg_attr(not(test), allow(dead_code))]
+fn cm_compress_block_scaled(data: &[u8], bits: usize) -> Vec<u8> {
+    let mut p = CmPredictor::new_scaled(bits);
+    let mut enc = CmEncoder::new();
+    for &byte in data {
+        for k in (0..8).rev() {
+            let bit = ((byte >> k) & 1) as i32;
+            let pr = p.predict();
+            enc.encode(bit, pr);
+            p.update(bit);
+        }
+    }
+    enc.flush();
+    enc.out
+}
+
+/// FH-19 probe: cm_decompress_block with a scaled predictor.
+#[cfg_attr(not(test), allow(dead_code))]
+fn cm_decompress_block_scaled(
+    comp: &[u8],
+    expected_len: usize,
+    bits: usize,
+) -> Result<Vec<u8>, CubrimError> {
+    let mut p = CmPredictor::new_scaled(bits);
     let mut dec = CmDecoder::new(comp)?;
     let mut out = Vec::with_capacity(expected_len);
     for _ in 0..expected_len {
@@ -9978,6 +10035,99 @@ mod tests {
                 candidate[5],
                 candidate_ms,
                 candidate.len() as i64 - baseline.len() as i64,
+            );
+        }
+    }
+
+    // ---- FH-19: text-profile CM scaling probe ----
+
+    #[test]
+    fn test_fh19_scaled_22_is_byte_identical_to_stock() {
+        // The scaled predictor at bits=22 must reproduce the stock CM stream
+        // byte-exactly, proving the probe measures ONLY the scaling deltas.
+        const PHRASE: &[u8] = b"the quick brown fox jumps over the lazy dog. ";
+        let sample: Vec<u8> = (0..40_000usize).map(|i| PHRASE[i % PHRASE.len()]).collect();
+        let stock = cm_compress_block(&sample);
+        let scaled = cm_compress_block_scaled(&sample, 22);
+        assert_eq!(stock, scaled);
+        let back = cm_decompress_block_scaled(&scaled, sample.len(), 22).expect("decode");
+        assert_eq!(back, sample);
+    }
+
+    #[test]
+    fn test_fh19_scaled_roundtrip_at_higher_bits() {
+        let sample: Vec<u8> = (0..60_000u32).map(|i| (i * 31 % 251) as u8).collect();
+        for bits in [24usize, 26] {
+            let comp = cm_compress_block_scaled(&sample, bits);
+            let back =
+                cm_decompress_block_scaled(&comp, sample.len(), bits).expect("scaled decode");
+            assert_eq!(back, sample, "bits={bits} must round-trip");
+        }
+    }
+
+    #[test]
+    #[ignore = "FH-19 dickens scaling probe runs on demand (local, ~minutes)"]
+    fn test_fh19_dickens_scaling_probe() {
+        let path = std::env::var("CUBR_FH19_FILE")
+            .expect("CUBR_FH19_FILE must point at the dickens corpus file");
+        let data = std::fs::read(&path).expect("read FH-19 corpus file");
+
+        // (block_size, table_bits); (8MiB, 22) is the live rail baseline.
+        // Gate 3 can select one ladder point so expensive full-file probes do
+        // not repeat variants that already failed a cheaper threshold.
+        let default_variants = [
+            (8 << 20, 22),
+            (32 << 20, 22),
+            (8 << 20, 24),
+            (8 << 20, 26),
+            (32 << 20, 24),
+            (32 << 20, 26),
+        ];
+        let selected = std::env::var("CUBR_FH19_VARIANT").ok().map(|value| {
+            let (block_mib, bits) = value
+                .split_once('/')
+                .expect("CUBR_FH19_VARIANT must be BLOCK_MIB/TABLE_BITS");
+            let block_mib: usize = block_mib.parse().expect("invalid block MiB");
+            let bits: usize = bits.parse().expect("invalid table bits");
+            assert!(
+                [32, 64, 128].contains(&block_mib),
+                "invalid block ladder point"
+            );
+            assert!([22, 24, 26].contains(&bits), "invalid table ladder point");
+            (block_mib << 20, bits)
+        });
+        let variants: Vec<(usize, usize)> = selected
+            .map(|variant| vec![variant])
+            .unwrap_or_else(|| default_variants.to_vec());
+        for (block_size, bits) in variants {
+            let started = std::time::Instant::now();
+            let blocks: Vec<&[u8]> = data.chunks(block_size).collect();
+            let comps: Vec<Vec<u8>> = blocks
+                .iter()
+                .map(|block| cm_compress_block_scaled(block, bits))
+                .collect();
+            let compress_ms = started.elapsed().as_millis();
+            // Charged wire size: real MODE_CM framing (header + per-block entry).
+            let charged: usize = CM_HEADER_SIZE
+                + blocks.len() * CM_ENTRY_SIZE
+                + comps.iter().map(Vec::len).sum::<usize>();
+            let mut restored = Vec::with_capacity(data.len());
+            for (block, comp) in blocks.iter().zip(&comps) {
+                restored.extend_from_slice(
+                    &cm_decompress_block_scaled(comp, block.len(), bits).expect("probe decode"),
+                );
+            }
+            assert_eq!(restored, data, "block={block_size} bits={bits} round-trip");
+            println!(
+                "FH19 path={} block_mib={} bits={} orig={} charged_comp={} ratio={:.15} n_blocks={} compress_ms={} rt=OK cmp=0",
+                path,
+                block_size >> 20,
+                bits,
+                data.len(),
+                charged,
+                charged as f64 / data.len() as f64,
+                blocks.len(),
+                compress_ms,
             );
         }
     }
