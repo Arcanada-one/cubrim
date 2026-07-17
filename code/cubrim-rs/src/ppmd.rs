@@ -163,6 +163,256 @@ impl BitModel {
     }
 }
 
+// ── Step 3: variable-order PPM skeleton (PPMC, escape method C) ───────────────
+// A real variable-order PPM: per-order context stores, method-C escape, coding-
+// time (partial) exclusion, order-ramp N→0→(-1). Correctness-first structure
+// (deterministic BTreeMap context store); the Shkarin SubAllocator that makes it
+// memory/speed-efficient lands in step 6. This is the model class where PPMd's
+// superiority over the block-reset order-limited CM lives.
+
+use std::collections::BTreeMap;
+
+/// Per-context total cap — rescale when reached. Kept below the coder's
+/// `RC_BOT = 2^16` cap with headroom for the method-C escape band (≤ 256).
+const CTX_RESCALE: u32 = 1 << 14;
+/// Count increment per observation.
+const PPM_INC: u32 = 4;
+
+/// One PPM context: (symbol, count) stats in deterministic insertion order.
+#[derive(Default)]
+struct Ctx {
+    stats: Vec<(u8, u32)>,
+    total: u32,
+}
+
+impl Ctx {
+    #[inline]
+    fn bump(&mut self, sym: u8) {
+        if let Some(e) = self.stats.iter_mut().find(|(s, _)| *s == sym) {
+            e.1 += PPM_INC;
+        } else {
+            self.stats.push((sym, PPM_INC));
+        }
+        self.total += PPM_INC;
+        if self.total >= CTX_RESCALE {
+            self.rescale();
+        }
+    }
+    fn rescale(&mut self) {
+        let mut t = 0u32;
+        for (_, c) in self.stats.iter_mut() {
+            *c = (*c >> 1) | 1; // halve, keep ≥ 1 → distinct set (and method-C esc) stays stable
+            t += *c;
+        }
+        self.total = t;
+    }
+}
+
+/// Variable-order PPM model. `ctx[k]` holds the order-`k` contexts keyed by the
+/// k-byte history (k = 0 is the single empty-history order-0 context).
+struct PpmModel {
+    order: usize,
+    ctx: Vec<BTreeMap<Vec<u8>, Ctx>>,
+}
+
+impl PpmModel {
+    fn new(order: usize) -> Self {
+        Self {
+            order,
+            ctx: (0..=order).map(|_| BTreeMap::new()).collect(),
+        }
+    }
+
+    /// Encode `sym` given `hist` (the bytes preceding it). Read-only on the model;
+    /// [`update`](Self::update) mutates state afterwards, identically on decode.
+    fn encode_symbol(&self, enc: &mut RangeEncoder, hist: &[u8], sym: u8) {
+        let mut excluded = [false; 256];
+        let mut k = self.order.min(hist.len());
+        loop {
+            let key = &hist[hist.len() - k..];
+            if let Some(ctx) = self.ctx[k].get(key) {
+                let (run, esc) = escape_band(ctx, &excluded);
+                if esc > 0 {
+                    let total = run + esc;
+                    // Cumulative position of `sym` among the non-excluded symbols.
+                    let mut cum = 0u32;
+                    let mut found = None;
+                    for &(s, c) in &ctx.stats {
+                        if excluded[s as usize] {
+                            continue;
+                        }
+                        if s == sym {
+                            found = Some((cum, c));
+                            break;
+                        }
+                        cum += c;
+                    }
+                    match found {
+                        Some((cum, c)) => {
+                            enc.encode(cum, c, total);
+                            return;
+                        }
+                        None => {
+                            enc.encode(run, esc, total); // escape sits above all symbols
+                            for &(s, _) in &ctx.stats {
+                                excluded[s as usize] = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if k == 0 {
+                break;
+            }
+            k -= 1;
+        }
+        // Order -1: uniform over the symbols not yet excluded (`sym` is guaranteed free).
+        let (rank, nfree) = uniform_rank(sym, &excluded);
+        enc.encode(rank, 1, nfree);
+    }
+
+    /// Decode one symbol given `hist`. Mirrors [`encode_symbol`](Self::encode_symbol).
+    fn decode_symbol(&self, dec: &mut RangeDecoder, hist: &[u8]) -> u8 {
+        let mut excluded = [false; 256];
+        let mut k = self.order.min(hist.len());
+        loop {
+            let key = &hist[hist.len() - k..];
+            if let Some(ctx) = self.ctx[k].get(key) {
+                let (run, esc) = escape_band(ctx, &excluded);
+                if esc > 0 {
+                    let total = run + esc;
+                    let f = dec.get_freq(total);
+                    if f < run {
+                        let mut cum = 0u32;
+                        for &(s, c) in &ctx.stats {
+                            if excluded[s as usize] {
+                                continue;
+                            }
+                            if f < cum + c {
+                                dec.decode(cum, c, total);
+                                return s;
+                            }
+                            cum += c;
+                        }
+                        debug_assert!(false, "PPM decode: f<run but no symbol matched");
+                        return 0;
+                    }
+                    dec.decode(run, esc, total); // escape
+                    for &(s, _) in &ctx.stats {
+                        excluded[s as usize] = true;
+                    }
+                }
+            }
+            if k == 0 {
+                break;
+            }
+            k -= 1;
+        }
+        // Order -1: uniform.
+        let mut nfree = 0u32;
+        for &e in &excluded {
+            if !e {
+                nfree += 1;
+            }
+        }
+        let f = dec.get_freq(nfree);
+        let mut rank = 0u32;
+        for (b, &e) in excluded.iter().enumerate() {
+            if !e {
+                if rank == f {
+                    dec.decode(rank, 1, nfree);
+                    return b as u8;
+                }
+                rank += 1;
+            }
+        }
+        debug_assert!(false, "PPM decode: uniform rank not found");
+        0
+    }
+
+    /// Update all orders `0..=maxk` with the coded symbol (creating contexts as
+    /// needed). Called identically after encode and after decode → byte-exact.
+    fn update(&mut self, hist: &[u8], sym: u8) {
+        let maxk = self.order.min(hist.len());
+        for k in 0..=maxk {
+            let key = &hist[hist.len() - k..];
+            if let Some(ctx) = self.ctx[k].get_mut(key) {
+                ctx.bump(sym);
+            } else {
+                let mut c = Ctx::default();
+                c.bump(sym);
+                self.ctx[k].insert(key.to_vec(), c);
+            }
+        }
+    }
+}
+
+/// Method-C escape band over the non-excluded symbols of a context:
+/// returns `(run, esc)` where `run` = Σ non-excluded counts and `esc` = number
+/// of distinct non-excluded symbols (the method-C escape frequency).
+#[inline]
+fn escape_band(ctx: &Ctx, excluded: &[bool; 256]) -> (u32, u32) {
+    let mut run = 0u32;
+    let mut esc = 0u32;
+    for &(s, c) in &ctx.stats {
+        if !excluded[s as usize] {
+            run += c;
+            esc += 1;
+        }
+    }
+    (run, esc)
+}
+
+/// Rank of `sym` among the non-excluded symbols, and the count of non-excluded
+/// symbols. `sym` MUST be non-excluded (guaranteed at order -1).
+#[inline]
+fn uniform_rank(sym: u8, excluded: &[bool; 256]) -> (u32, u32) {
+    let mut rank = 0u32;
+    let mut nfree = 0u32;
+    for (b, &e) in excluded.iter().enumerate() {
+        if !e {
+            if b == sym as usize {
+                rank = nfree;
+            }
+            nfree += 1;
+        }
+    }
+    (rank, nfree)
+}
+
+/// Encode `data` with an order-`order` PPM. Wire: `[orig_len u64 BE][order u8][rc]`.
+fn ppm_encode(data: &[u8], order: usize) -> Vec<u8> {
+    let mut out = (data.len() as u64).to_be_bytes().to_vec();
+    out.push(order as u8);
+    let mut model = PpmModel::new(order);
+    let mut enc = RangeEncoder::new();
+    for i in 0..data.len() {
+        model.encode_symbol(&mut enc, &data[..i], data[i]);
+        model.update(&data[..i], data[i]);
+    }
+    out.extend_from_slice(&enc.finish());
+    out
+}
+
+/// Decode a blob produced by [`ppm_encode`]. Fail-closed on a truncated header.
+fn ppm_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    if blob.len() < 9 {
+        return Err(CubrimError::Decode("MODE_PPMD: header truncated".into()));
+    }
+    let orig_len = u64::from_be_bytes(blob[..8].try_into().unwrap());
+    let order = blob[8] as usize;
+    let cap = orig_len.min(1 << 20) as usize;
+    let mut out = Vec::with_capacity(cap);
+    let mut model = PpmModel::new(order);
+    let mut dec = RangeDecoder::new(&blob[9..]);
+    for _ in 0..orig_len {
+        let sym = model.decode_symbol(&mut dec, &out);
+        model.update(&out, sym); // hist == already-decoded prefix (no clone: no borrow conflict)
+        out.push(sym);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +516,68 @@ mod tests {
             })
             .collect();
         rt_bits(&bits);
+    }
+
+    // ── Step 3: variable-order PPM (PPMC) ────────────────────────────────────
+
+    /// Round-trip through the order-`order` PPM, byte-exact (cmp=0).
+    fn ppm_rt(data: &[u8], order: usize) -> usize {
+        let blob = ppm_encode(data, order);
+        let out = ppm_decode(&blob).expect("ppm decode");
+        assert_eq!(out, data, "PPM(order {order}) round-trip cmp!=0 for len {}", data.len());
+        blob.len()
+    }
+
+    #[test]
+    fn ppm_rt_edge_cases() {
+        for order in [0usize, 1, 2, 4, 6] {
+            ppm_rt(b"", order);
+            ppm_rt(b"A", order);
+            ppm_rt(&[0x5Au8; 500], order);
+        }
+    }
+
+    #[test]
+    fn ppm_rt_text_multi_order() {
+        let text = b"To be, or not to be, that is the question. \
+                     Whether 'tis nobler in the mind to suffer. "
+            .repeat(40);
+        for order in [0usize, 2, 4, 6] {
+            ppm_rt(&text, order);
+        }
+    }
+
+    #[test]
+    fn ppm_rt_all_byte_values() {
+        let data: Vec<u8> = (0..6000).map(|i| (i % 256) as u8).collect();
+        for order in [0usize, 2, 4] {
+            ppm_rt(&data, order);
+        }
+    }
+
+    #[test]
+    fn ppm_rt_pseudo_random() {
+        let mut x: u32 = 0xF00D_CAFE;
+        let data: Vec<u8> = (0..6000)
+            .map(|_| {
+                x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (x >> 24) as u8
+            })
+            .collect();
+        for order in [0usize, 3, 6] {
+            ppm_rt(&data, order);
+        }
+    }
+
+    /// Repetitive English-like text must compress far below 8 bits/byte — a
+    /// higher order captures the repetition better than order 0.
+    #[test]
+    fn ppm_text_compresses_with_order() {
+        let text = b"the quick brown fox jumps over the lazy dog. ".repeat(400);
+        let o0 = ppm_rt(&text, 0);
+        let o4 = ppm_rt(&text, 4);
+        assert!(o4 < text.len(), "order-4 PPM did not compress: {o4} vs {}", text.len());
+        assert!(o4 < o0, "order-4 ({o4}) should beat order-0 ({o0}) on repetitive text");
     }
 
     /// A strongly biased bit stream must compress well below the raw 1-bit/bit
