@@ -7206,14 +7206,14 @@ const ADAPT_RESCALE: u32 = 1 << 15;
 /// (larger inc) sharpens the model faster on run-structured BWT streams.
 const ADAPT_INCS: [u32; 4] = [8, 16, 32, 64];
 
-struct RangeEncoder {
+pub(crate) struct RangeEncoder {
     low: u32,
     range: u32,
     out: Vec<u8>,
 }
 
 impl RangeEncoder {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             low: 0,
             range: 0xFFFF_FFFF,
@@ -7221,7 +7221,7 @@ impl RangeEncoder {
         }
     }
     #[inline]
-    fn encode(&mut self, cum: u32, freq: u32, total: u32) {
+    pub(crate) fn encode(&mut self, cum: u32, freq: u32, total: u32) {
         let r = self.range / total;
         self.low = self.low.wrapping_add(r * cum);
         self.range = r * freq;
@@ -7239,7 +7239,7 @@ impl RangeEncoder {
             self.range <<= 8;
         }
     }
-    fn finish(mut self) -> Vec<u8> {
+    pub(crate) fn finish(mut self) -> Vec<u8> {
         for _ in 0..4 {
             self.out.push((self.low >> 24) as u8);
             self.low <<= 8;
@@ -7248,7 +7248,7 @@ impl RangeEncoder {
     }
 }
 
-struct RangeDecoder<'a> {
+pub(crate) struct RangeDecoder<'a> {
     low: u32,
     range: u32,
     code: u32,
@@ -7257,7 +7257,7 @@ struct RangeDecoder<'a> {
 }
 
 impl<'a> RangeDecoder<'a> {
-    fn new(buf: &'a [u8]) -> Self {
+    pub(crate) fn new(buf: &'a [u8]) -> Self {
         let mut code: u32 = 0;
         let mut pos = 0;
         for _ in 0..4 {
@@ -7273,7 +7273,7 @@ impl<'a> RangeDecoder<'a> {
         }
     }
     #[inline]
-    fn get_freq(&self, total: u32) -> u32 {
+    pub(crate) fn get_freq(&self, total: u32) -> u32 {
         let r = self.range / total;
         let dv = (self.code.wrapping_sub(self.low)) / r;
         if dv >= total {
@@ -7283,7 +7283,7 @@ impl<'a> RangeDecoder<'a> {
         }
     }
     #[inline]
-    fn decode(&mut self, cum: u32, freq: u32, total: u32) {
+    pub(crate) fn decode(&mut self, cum: u32, freq: u32, total: u32) {
         let r = self.range / total;
         self.low = self.low.wrapping_add(r * cum);
         self.range = r * freq;

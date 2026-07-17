@@ -15,6 +15,7 @@ pub mod error;
 pub mod header;
 pub(crate) mod huffman;
 pub mod phi;
+pub(crate) mod ppmd;
 pub mod rle;
 
 pub use codec::{decode, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
