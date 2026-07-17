@@ -580,6 +580,54 @@ mod tests {
         assert!(o4 < o0, "order-4 ({o4}) should beat order-0 ({o0}) on repetitive text");
     }
 
+    /// Step 4 self-probe (charged, real numbers). Not run by default — invoke:
+    ///   CUBR_PROBE_FILE=/path/to/dickens [CUBR_PROBE_LIMIT=N] \
+    ///     cargo test --release -j4 ppmd::tests::self_probe -- --ignored --nocapture
+    /// Reports the PPM charged ratio at several orders vs the incumbent Cubrim
+    /// (`crate::encode` = competitive-min best = what Cubrim actually ships), and
+    /// whether PPM strictly beats it. RT cmp=0 is enforced per order.
+    #[test]
+    #[ignore]
+    fn self_probe() {
+        let path = std::env::var("CUBR_PROBE_FILE").expect("set CUBR_PROBE_FILE");
+        let mut data = std::fs::read(&path).expect("read probe file");
+        if let Ok(lim) = std::env::var("CUBR_PROBE_LIMIT") {
+            let lim: usize = lim.parse().expect("CUBR_PROBE_LIMIT usize");
+            data.truncate(lim);
+        }
+        let n = data.len() as f64;
+        let inc = crate::encode(&data).len();
+        println!(
+            "PROBE file={} n={} incumbent={} ratio={:.9}",
+            path,
+            data.len(),
+            inc,
+            inc as f64 / n
+        );
+        // 1 MB dickens-head gauge showed the method-C skeleton peaks around
+        // order 4–5 (higher orders lose to escape overhead without SEE, exactly
+        // as the consilium predicted for order-16). Probe the competitive band.
+        let orders: Vec<usize> = std::env::var("CUBR_PROBE_ORDERS")
+            .ok()
+            .map(|s| s.split(',').map(|x| x.trim().parse().unwrap()).collect())
+            .unwrap_or_else(|| vec![3, 4, 5]);
+        for order in orders {
+            let blob = ppm_encode(&data, order);
+            let out = ppm_decode(&blob).expect("decode");
+            let rt = out == data;
+            let p = blob.len();
+            println!(
+                "PROBE order={} ppm={} ratio={:.9} rt_cmp0={} beats_incumbent={}",
+                order,
+                p,
+                p as f64 / n,
+                rt,
+                p < inc
+            );
+            assert!(rt, "self-probe RT cmp!=0 at order {order}");
+        }
+    }
+
     /// A strongly biased bit stream must compress well below the raw 1-bit/bit
     /// bound — the adaptive model learns the bias. This is the coder-loss /
     /// V-AC-6 sanity: a working coder + model beats the entropy of the source.
