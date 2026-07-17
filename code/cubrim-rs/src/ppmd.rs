@@ -105,6 +105,64 @@ pub(crate) fn ppmd_o0_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     Ok(out)
 }
 
+// ── Step 2: binary bit-coder primitive (SSE / escape primitive) ──────────────
+// A single binary decision coded through the reused range coder via its A=2
+// special case (`encode(0, p0, T)` for bit 0, `encode(p0, T-p0, T)` for bit 1).
+// PPMd/PPMII escape and SEE decisions are binary events; this is their coder.
+
+/// Probability scale for the binary coder — 12-bit, matching the crate's
+/// existing `CmEncoder` (`p >> 12`). Well under the coder's `RC_BOT = 2^16` cap.
+const BIT_TOTAL: u32 = 1 << 12;
+
+/// Encode one `bit` given `p0` = P(bit == 0) in `[1, BIT_TOTAL-1]`.
+#[inline]
+fn encode_bit(enc: &mut RangeEncoder, bit: u8, p0: u32) {
+    if bit == 0 {
+        enc.encode(0, p0, BIT_TOTAL);
+    } else {
+        enc.encode(p0, BIT_TOTAL - p0, BIT_TOTAL);
+    }
+}
+
+/// Decode one bit given the same `p0` the encoder used.
+#[inline]
+fn decode_bit(dec: &mut RangeDecoder, p0: u32) -> u8 {
+    if dec.get_freq(BIT_TOTAL) < p0 {
+        dec.decode(0, p0, BIT_TOTAL);
+        0
+    } else {
+        dec.decode(p0, BIT_TOTAL - p0, BIT_TOTAL);
+        1
+    }
+}
+
+/// Adaptive binary probability state. `p0` = P(bit == 0), 12-bit, init centred.
+/// Integer-only shift update (lpaq-style) — deterministic, no float.
+struct BitModel {
+    p0: u32,
+}
+
+impl BitModel {
+    fn new() -> Self {
+        Self { p0: BIT_TOTAL / 2 }
+    }
+    #[inline]
+    fn predict(&self) -> u32 {
+        self.p0
+    }
+    #[inline]
+    fn update(&mut self, bit: u8) {
+        const RATE: u32 = 5;
+        if bit == 0 {
+            self.p0 += (BIT_TOTAL - self.p0) >> RATE;
+        } else {
+            self.p0 -= self.p0 >> RATE;
+        }
+        // Keep both intervals non-empty (the coder needs freq ≥ 1 on each side).
+        self.p0 = self.p0.clamp(1, BIT_TOTAL - 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +212,87 @@ mod tests {
             })
             .collect();
         rt(&data);
+    }
+
+    // ── Step 2: binary bit-coder primitive ───────────────────────────────────
+
+    /// Round-trip an adaptive bit sequence: encode with a BitModel, decode with
+    /// an identically-initialised BitModel, assert bit-exact.
+    fn rt_bits(bits: &[u8]) -> usize {
+        let mut enc = RangeEncoder::new();
+        let mut m = BitModel::new();
+        for &b in bits {
+            let p = m.predict();
+            encode_bit(&mut enc, b, p);
+            m.update(b);
+        }
+        let blob = enc.finish();
+        let mut dec = RangeDecoder::new(&blob);
+        let mut m2 = BitModel::new();
+        let mut out = Vec::with_capacity(bits.len());
+        for _ in 0..bits.len() {
+            let p = m2.predict();
+            let b = decode_bit(&mut dec, p);
+            m2.update(b);
+            out.push(b);
+        }
+        assert_eq!(out, bits, "bit round-trip cmp!=0 for {} bits", bits.len());
+        blob.len()
+    }
+
+    #[test]
+    fn bits_rt_all_zero() {
+        rt_bits(&[0u8; 4000]);
+    }
+
+    #[test]
+    fn bits_rt_all_one() {
+        rt_bits(&[1u8; 4000]);
+    }
+
+    #[test]
+    fn bits_rt_alternating() {
+        let bits: Vec<u8> = (0..4000).map(|i| (i % 2) as u8).collect();
+        rt_bits(&bits);
+    }
+
+    #[test]
+    fn bits_rt_pseudo_random() {
+        let mut x: u32 = 0xDEAD_BEEF;
+        let bits: Vec<u8> = (0..8000)
+            .map(|_| {
+                x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((x >> 31) & 1) as u8
+            })
+            .collect();
+        rt_bits(&bits);
+    }
+
+    /// A strongly biased bit stream must compress well below the raw 1-bit/bit
+    /// bound — the adaptive model learns the bias. This is the coder-loss /
+    /// V-AC-6 sanity: a working coder + model beats the entropy of the source.
+    #[test]
+    fn bits_biased_compresses() {
+        // ~1 in 32 bits is a 1 → source entropy ≈ 0.20 bit/bit.
+        let mut x: u32 = 0x0BADF00D;
+        let n = 40_000usize;
+        let bits: Vec<u8> = (0..n)
+            .map(|_| {
+                x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                if (x >> 27) % 32 == 0 {
+                    1
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let bytes = rt_bits(&bits);
+        // Raw would be n/8 = 5000 B; entropy ~0.2 bit/bit ⇒ ~1000 B. Require the
+        // coder to reach well under half the raw bound (loose, robust bound).
+        assert!(
+            bytes < n / 8 / 2,
+            "biased bit stream did not compress: {bytes} B for {n} bits (raw {} B)",
+            n / 8
+        );
     }
 }
