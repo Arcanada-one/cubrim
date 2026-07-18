@@ -223,9 +223,11 @@ impl PpmModel {
         }
     }
 
-    /// Encode `sym` given `hist` (the bytes preceding it). Read-only on the model;
-    /// [`update`](Self::update) mutates state afterwards, identically on decode.
-    fn encode_symbol(&self, enc: &mut RangeEncoder, hist: &[u8], sym: u8) {
+    /// Encode `sym` given `hist`. Returns the order at which it was coded (the
+    /// found order, or 0 for the order -1 uniform base) so [`update`](Self::update)
+    /// can apply update exclusion — increment only the consulted contexts
+    /// (`found..=maxk`), never the un-consulted lower orders. Read-only on model.
+    fn encode_symbol(&self, enc: &mut RangeEncoder, hist: &[u8], sym: u8) -> usize {
         let mut excluded = [false; 256];
         let mut k = self.order.min(hist.len());
         loop {
@@ -250,7 +252,7 @@ impl PpmModel {
                     match found {
                         Some((cum, c)) => {
                             enc.encode(cum, c, total);
-                            return;
+                            return k;
                         }
                         None => {
                             enc.encode(run, esc, total); // escape sits above all symbols
@@ -269,10 +271,12 @@ impl PpmModel {
         // Order -1: uniform over the symbols not yet excluded (`sym` is guaranteed free).
         let (rank, nfree) = uniform_rank(sym, &excluded);
         enc.encode(rank, 1, nfree);
+        0
     }
 
-    /// Decode one symbol given `hist`. Mirrors [`encode_symbol`](Self::encode_symbol).
-    fn decode_symbol(&self, dec: &mut RangeDecoder, hist: &[u8]) -> u8 {
+    /// Decode one symbol given `hist`. Mirrors [`encode_symbol`](Self::encode_symbol);
+    /// returns `(symbol, found_order)` for update exclusion.
+    fn decode_symbol(&self, dec: &mut RangeDecoder, hist: &[u8]) -> (u8, usize) {
         let mut excluded = [false; 256];
         let mut k = self.order.min(hist.len());
         loop {
@@ -290,12 +294,12 @@ impl PpmModel {
                             }
                             if f < cum + c {
                                 dec.decode(cum, c, total);
-                                return s;
+                                return (s, k);
                             }
                             cum += c;
                         }
                         debug_assert!(false, "PPM decode: f<run but no symbol matched");
-                        return 0;
+                        return (0, k);
                     }
                     dec.decode(run, esc, total); // escape
                     for &(s, _) in &ctx.stats {
@@ -321,20 +325,23 @@ impl PpmModel {
             if !e {
                 if rank == f {
                     dec.decode(rank, 1, nfree);
-                    return b as u8;
+                    return (b as u8, 0);
                 }
                 rank += 1;
             }
         }
         debug_assert!(false, "PPM decode: uniform rank not found");
-        0
+        (0, 0)
     }
 
     /// Update all orders `0..=maxk` with the coded symbol (creating contexts as
     /// needed). Called identically after encode and after decode → byte-exact.
-    fn update(&mut self, hist: &[u8], sym: u8) {
+    fn update(&mut self, hist: &[u8], sym: u8, found_order: usize) {
         let maxk = self.order.min(hist.len());
-        for k in 0..=maxk {
+        // Update exclusion: only the consulted contexts (found_order..=maxk) —
+        // the found context plus the ones that escaped. Lower orders were never
+        // consulted for this symbol and are left untouched (standard PPM).
+        for k in found_order..=maxk {
             let key = &hist[hist.len() - k..];
             if let Some(ctx) = self.ctx[k].get_mut(key) {
                 ctx.bump(sym);
@@ -387,8 +394,8 @@ fn ppm_encode(data: &[u8], order: usize) -> Vec<u8> {
     let mut model = PpmModel::new(order);
     let mut enc = RangeEncoder::new();
     for i in 0..data.len() {
-        model.encode_symbol(&mut enc, &data[..i], data[i]);
-        model.update(&data[..i], data[i]);
+        let fo = model.encode_symbol(&mut enc, &data[..i], data[i]);
+        model.update(&data[..i], data[i], fo);
     }
     out.extend_from_slice(&enc.finish());
     out
@@ -406,8 +413,8 @@ fn ppm_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let mut model = PpmModel::new(order);
     let mut dec = RangeDecoder::new(&blob[9..]);
     for _ in 0..orig_len {
-        let sym = model.decode_symbol(&mut dec, &out);
-        model.update(&out, sym); // hist == already-decoded prefix (no clone: no borrow conflict)
+        let (sym, fo) = model.decode_symbol(&mut dec, &out);
+        model.update(&out, sym, fo);
         out.push(sym);
     }
     Ok(out)
