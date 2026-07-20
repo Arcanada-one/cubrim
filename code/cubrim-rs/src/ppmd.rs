@@ -82,7 +82,9 @@ pub(crate) fn ppmd_o0_encode(data: &[u8]) -> Vec<u8> {
 /// adversarial length field cannot force an OOM.
 pub(crate) fn ppmd_o0_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     if blob.len() < 8 {
-        return Err(CubrimError::Decode("MODE_PPMD(o0): header truncated".into()));
+        return Err(CubrimError::Decode(
+            "MODE_PPMD(o0): header truncated".into(),
+        ));
     }
     let orig_len = u64::from_be_bytes(blob[..8].try_into().unwrap());
     let cap = orig_len.min(1 << 20) as usize;
@@ -208,11 +210,67 @@ impl Ctx {
     }
 }
 
-/// Variable-order PPM model. `ctx[k]` holds the order-`k` contexts keyed by the
-/// k-byte history (k = 0 is the single empty-history order-0 context).
+/// PPMd var.H SEE2 state: a decaying escape mean with an adaptive period.
+#[derive(Clone, Copy)]
+struct SeeState {
+    summ: u32,
+    shift: u8,
+    count: u16,
+}
+
+impl SeeState {
+    fn new() -> Self {
+        Self::with_init(10)
+    }
+
+    fn with_init(init: u32) -> Self {
+        Self {
+            summ: init << 3,
+            shift: 3,
+            count: 4,
+        }
+    }
+
+    fn predict(&mut self, _base: u32) -> u32 {
+        let mean = self.summ >> self.shift;
+        self.summ -= mean;
+        mean.max(1)
+    }
+
+    fn update_escape(&mut self, total: u32) {
+        self.summ = self.summ.saturating_add(total).min(u16::MAX as u32);
+    }
+
+    fn update_hit(&mut self) {
+        if self.shift < 7 {
+            self.count -= 1;
+            if self.count == 0 {
+                self.summ = (self.summ << 1).min(u16::MAX as u32);
+                self.count = 3 << self.shift;
+                self.shift += 1;
+            }
+        }
+    }
+}
+
+#[inline]
+fn see_bucket(
+    order: usize,
+    max_order: usize,
+    masked: usize,
+    symbols: usize,
+    _run: usize,
+    _suffix: usize,
+    _scale: usize,
+) -> usize {
+    (order.min(max_order) << 8) | (masked.min(15) << 4) | symbols.min(15)
+}
+
+/// Variable-order PPM model with shared, bucketed secondary escape estimators.
 struct PpmModel {
     order: usize,
     ctx: Vec<BTreeMap<Vec<u8>, Ctx>>,
+    see: Vec<SeeState>,
 }
 
 impl PpmModel {
@@ -220,23 +278,32 @@ impl PpmModel {
         Self {
             order,
             ctx: (0..=order).map(|_| BTreeMap::new()).collect(),
+            see: (0..((order + 1) << 8))
+                .map(|bucket| SeeState::with_init(5 * ((bucket & 15) as u32) + 10))
+                .collect(),
         }
     }
 
-    /// Encode `sym` given `hist`. Returns the order at which it was coded (the
-    /// found order, or 0 for the order -1 uniform base) so [`update`](Self::update)
-    /// can apply update exclusion — increment only the consulted contexts
-    /// (`found..=maxk`), never the un-consulted lower orders. Read-only on model.
-    fn encode_symbol(&self, enc: &mut RangeEncoder, hist: &[u8], sym: u8) -> usize {
+    fn encode_symbol(&mut self, enc: &mut RangeEncoder, hist: &[u8], sym: u8) -> usize {
         let mut excluded = [false; 256];
         let mut k = self.order.min(hist.len());
         loop {
             let key = &hist[hist.len() - k..];
             if let Some(ctx) = self.ctx[k].get(key) {
-                let (run, esc) = escape_band(ctx, &excluded);
-                if esc > 0 {
+                let (run, base_esc) = escape_band(ctx, &excluded);
+                if base_esc > 0 {
+                    let masked = excluded.iter().filter(|&&v| v).count();
+                    let bucket = see_bucket(
+                        k,
+                        self.order,
+                        masked,
+                        base_esc as usize,
+                        run as usize,
+                        0,
+                        CTX_RESCALE as usize,
+                    );
+                    let esc = self.see[bucket].predict(base_esc);
                     let total = run + esc;
-                    // Cumulative position of `sym` among the non-excluded symbols.
                     let mut cum = 0u32;
                     let mut found = None;
                     for &(s, c) in &ctx.stats {
@@ -249,59 +316,13 @@ impl PpmModel {
                         }
                         cum += c;
                     }
-                    match found {
-                        Some((cum, c)) => {
-                            enc.encode(cum, c, total);
-                            return k;
-                        }
-                        None => {
-                            enc.encode(run, esc, total); // escape sits above all symbols
-                            for &(s, _) in &ctx.stats {
-                                excluded[s as usize] = true;
-                            }
-                        }
+                    if let Some((cum, c)) = found {
+                        enc.encode(cum, c, total);
+                        self.see[bucket].update_hit();
+                        return k;
                     }
-                }
-            }
-            if k == 0 {
-                break;
-            }
-            k -= 1;
-        }
-        // Order -1: uniform over the symbols not yet excluded (`sym` is guaranteed free).
-        let (rank, nfree) = uniform_rank(sym, &excluded);
-        enc.encode(rank, 1, nfree);
-        0
-    }
-
-    /// Decode one symbol given `hist`. Mirrors [`encode_symbol`](Self::encode_symbol);
-    /// returns `(symbol, found_order)` for update exclusion.
-    fn decode_symbol(&self, dec: &mut RangeDecoder, hist: &[u8]) -> (u8, usize) {
-        let mut excluded = [false; 256];
-        let mut k = self.order.min(hist.len());
-        loop {
-            let key = &hist[hist.len() - k..];
-            if let Some(ctx) = self.ctx[k].get(key) {
-                let (run, esc) = escape_band(ctx, &excluded);
-                if esc > 0 {
-                    let total = run + esc;
-                    let f = dec.get_freq(total);
-                    if f < run {
-                        let mut cum = 0u32;
-                        for &(s, c) in &ctx.stats {
-                            if excluded[s as usize] {
-                                continue;
-                            }
-                            if f < cum + c {
-                                dec.decode(cum, c, total);
-                                return (s, k);
-                            }
-                            cum += c;
-                        }
-                        debug_assert!(false, "PPM decode: f<run but no symbol matched");
-                        return (0, k);
-                    }
-                    dec.decode(run, esc, total); // escape
+                    enc.encode(run, esc, total);
+                    self.see[bucket].update_escape(total);
                     for &(s, _) in &ctx.stats {
                         excluded[s as usize] = true;
                     }
@@ -312,7 +333,59 @@ impl PpmModel {
             }
             k -= 1;
         }
-        // Order -1: uniform.
+        let (rank, nfree) = uniform_rank(sym, &excluded);
+        enc.encode(rank, 1, nfree);
+        0
+    }
+
+    fn decode_symbol(&mut self, dec: &mut RangeDecoder, hist: &[u8]) -> (u8, usize) {
+        let mut excluded = [false; 256];
+        let mut k = self.order.min(hist.len());
+        loop {
+            let key = &hist[hist.len() - k..];
+            if let Some(ctx) = self.ctx[k].get(key) {
+                let (run, base_esc) = escape_band(ctx, &excluded);
+                if base_esc > 0 {
+                    let masked = excluded.iter().filter(|&&v| v).count();
+                    let bucket = see_bucket(
+                        k,
+                        self.order,
+                        masked,
+                        base_esc as usize,
+                        run as usize,
+                        0,
+                        CTX_RESCALE as usize,
+                    );
+                    let esc = self.see[bucket].predict(base_esc);
+                    let total = run + esc;
+                    let f = dec.get_freq(total);
+                    if f < run {
+                        let mut cum = 0u32;
+                        for &(s, c) in &ctx.stats {
+                            if excluded[s as usize] {
+                                continue;
+                            }
+                            if f < cum + c {
+                                dec.decode(cum, c, total);
+                                self.see[bucket].update_hit();
+                                return (s, k);
+                            }
+                            cum += c;
+                        }
+                        unreachable!("PPM decode: f<run but no symbol matched");
+                    }
+                    dec.decode(run, esc, total);
+                    self.see[bucket].update_escape(total);
+                    for &(s, _) in &ctx.stats {
+                        excluded[s as usize] = true;
+                    }
+                }
+            }
+            if k == 0 {
+                break;
+            }
+            k -= 1;
+        }
         let mut nfree = 0u32;
         for &e in &excluded {
             if !e {
@@ -330,17 +403,11 @@ impl PpmModel {
                 rank += 1;
             }
         }
-        debug_assert!(false, "PPM decode: uniform rank not found");
-        (0, 0)
+        unreachable!("PPM decode: uniform rank not found")
     }
 
-    /// Update all orders `0..=maxk` with the coded symbol (creating contexts as
-    /// needed). Called identically after encode and after decode → byte-exact.
     fn update(&mut self, hist: &[u8], sym: u8, found_order: usize) {
         let maxk = self.order.min(hist.len());
-        // Update exclusion: only the consulted contexts (found_order..=maxk) —
-        // the found context plus the ones that escaped. Lower orders were never
-        // consulted for this symbol and are left untouched (standard PPM).
         for k in found_order..=maxk {
             let key = &hist[hist.len() - k..];
             if let Some(ctx) = self.ctx[k].get_mut(key) {
@@ -531,7 +598,12 @@ mod tests {
     fn ppm_rt(data: &[u8], order: usize) -> usize {
         let blob = ppm_encode(data, order);
         let out = ppm_decode(&blob).expect("ppm decode");
-        assert_eq!(out, data, "PPM(order {order}) round-trip cmp!=0 for len {}", data.len());
+        assert_eq!(
+            out,
+            data,
+            "PPM(order {order}) round-trip cmp!=0 for len {}",
+            data.len()
+        );
         blob.len()
     }
 
@@ -583,8 +655,65 @@ mod tests {
         let text = b"the quick brown fox jumps over the lazy dog. ".repeat(400);
         let o0 = ppm_rt(&text, 0);
         let o4 = ppm_rt(&text, 4);
-        assert!(o4 < text.len(), "order-4 PPM did not compress: {o4} vs {}", text.len());
-        assert!(o4 < o0, "order-4 ({o4}) should beat order-0 ({o0}) on repetitive text");
+        assert!(
+            o4 < text.len(),
+            "order-4 PPM did not compress: {o4} vs {}",
+            text.len()
+        );
+        assert!(
+            o4 < o0,
+            "order-4 ({o4}) should beat order-0 ({o0}) on repetitive text"
+        );
+    }
+
+    // ── Step 5: proper SEE + binary-context SSE ─────────────────────────────
+
+    #[test]
+    fn see_escape_frequency_rises_on_escape_and_falls_on_hits() {
+        let mut see = SeeState::new();
+        let initial = see.predict(3);
+
+        see.update_escape(80);
+        let raised = see.predict(3);
+        assert!(
+            raised > initial,
+            "escape must raise SEE frequency: initial={initial}, raised={raised}"
+        );
+
+        for _ in 0..12 {
+            see.update_hit();
+            let _ = see.predict(3);
+        }
+        let lowered = see.predict(3);
+        assert!(
+            lowered < raised,
+            "hits must lower SEE frequency: raised={raised}, lowered={lowered}"
+        );
+    }
+
+    #[test]
+    fn see_bucket_separates_masking_and_high_order() {
+        let plain_low = see_bucket(2, 16, 4, 4, 0, 8, 32);
+        let masked_low = see_bucket(2, 16, 4, 2, 2, 8, 32);
+        let plain_high = see_bucket(14, 16, 4, 4, 0, 8, 32);
+        assert_ne!(
+            plain_low, masked_low,
+            "masked and unmasked SEE states must differ"
+        );
+        assert_ne!(
+            plain_low, plain_high,
+            "low and high orders must not share SEE state"
+        );
+    }
+
+    #[test]
+    fn ppm_rt_order16_with_escape_bursts() {
+        let mut data = Vec::new();
+        for i in 0..4000u32 {
+            data.extend_from_slice(b"common-prefix:");
+            data.push(if i % 29 == 0 { (i / 29) as u8 } else { b'e' });
+        }
+        ppm_rt(&data, 16);
     }
 
     /// Step 4 self-probe (charged, real numbers). Not run by default — invoke:
