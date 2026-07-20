@@ -1,0 +1,834 @@
+{
+  "task": "CUBR-0034",
+  "title": "World benchmark \u2014 Cubrim vs standard archivers",
+  "generated": "2026-06-25",
+  "code_sha": "317a32337b5e327768cd3a50747b38400539b888",
+  "method": "ratio = compressed/original (lower is better); RT byte-exact verified for cubrim",
+  "archivers": {
+    "cubrim": "competitive (built-in scheme selection)",
+    "gzip": "-9",
+    "bzip2": "-9",
+    "xz": "-9e",
+    "zstd": "--ultra -22",
+    "brotli": "-q 11",
+    "lz4": "-12",
+    "ppmd": "7z -m0=PPMd"
+  },
+  "archiver_order": [
+    "cubrim",
+    "gzip",
+    "bzip2",
+    "xz",
+    "zstd",
+    "brotli",
+    "lz4",
+    "ppmd"
+  ],
+  "corpora": [
+    "silesia",
+    "enwik8",
+    "canterbury"
+  ],
+  "files": [
+    {
+      "corpus": "silesia",
+      "file": "dickens",
+      "type": "text",
+      "orig": 10192446,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.291223,
+        "gzip": 0.377909,
+        "bzip2": 0.274666,
+        "xz": 0.277775,
+        "zstd": 0.279558,
+        "brotli": 0.277438,
+        "lz4": 0.430207,
+        "ppmd": 0.225342
+      },
+      "comp": {
+        "cubrim": 2968279,
+        "gzip": 3851823,
+        "bzip2": 2799520,
+        "xz": 2831212,
+        "zstd": 2849388,
+        "brotli": 2827777,
+        "lz4": 4384871,
+        "ppmd": 2296792
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "mozilla",
+      "type": "exe",
+      "orig": 51220480,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 4,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.308246,
+        "gzip": 0.370831,
+        "bzip2": 0.34975,
+        "xz": 0.26115,
+        "zstd": 0.292224,
+        "brotli": 0.270834,
+        "lz4": 0.430211,
+        "ppmd": 0.316503
+      },
+      "comp": {
+        "cubrim": 15788540,
+        "gzip": 18994142,
+        "bzip2": 17914392,
+        "xz": 13376240,
+        "zstd": 14967875,
+        "brotli": 13872265,
+        "lz4": 22035615,
+        "ppmd": 16211446
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "mr",
+      "type": "image",
+      "orig": 9970564,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.332599,
+        "gzip": 0.368478,
+        "bzip2": 0.244848,
+        "xz": 0.276001,
+        "zstd": 0.311494,
+        "brotli": 0.283147,
+        "lz4": 0.420449,
+        "ppmd": 0.230793
+      },
+      "comp": {
+        "cubrim": 3316207,
+        "gzip": 3673940,
+        "bzip2": 2441280,
+        "xz": 2751892,
+        "zstd": 3105773,
+        "brotli": 2823136,
+        "lz4": 4192122,
+        "ppmd": 2301139
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "nci",
+      "type": "database",
+      "orig": 33553445,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 3,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.047821,
+        "gzip": 0.089038,
+        "bzip2": 0.054025,
+        "xz": 0.043192,
+        "zstd": 0.048145,
+        "brotli": 0.045293,
+        "lz4": 0.10813,
+        "ppmd": 0.068566
+      },
+      "comp": {
+        "cubrim": 1604568,
+        "gzip": 2987533,
+        "bzip2": 1812734,
+        "xz": 1449272,
+        "zstd": 1615446,
+        "brotli": 1519768,
+        "lz4": 3628161,
+        "ppmd": 2300655
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "ooffice",
+      "type": "exe",
+      "orig": 6152192,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 5,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.436254,
+        "gzip": 0.502331,
+        "bzip2": 0.465285,
+        "xz": 0.394529,
+        "zstd": 0.422424,
+        "brotli": 0.402922,
+        "lz4": 0.575006,
+        "ppmd": 0.413417
+      },
+      "comp": {
+        "cubrim": 2683924,
+        "gzip": 3090442,
+        "bzip2": 2862526,
+        "xz": 2427224,
+        "zstd": 2598838,
+        "brotli": 2478855,
+        "lz4": 3537552,
+        "ppmd": 2543421
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "osdb",
+      "type": "database",
+      "orig": 10085684,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.314538,
+        "gzip": 0.368476,
+        "bzip2": 0.277898,
+        "xz": 0.282038,
+        "zstd": 0.307212,
+        "brotli": 0.279235,
+        "lz4": 0.392319,
+        "ppmd": 0.236641
+      },
+      "comp": {
+        "cubrim": 3172333,
+        "gzip": 3716342,
+        "bzip2": 2802792,
+        "xz": 2844556,
+        "zstd": 3098446,
+        "brotli": 2816278,
+        "lz4": 3956812,
+        "ppmd": 2386690
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "reymont",
+      "type": "text",
+      "orig": 6627202,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.215834,
+        "gzip": 0.274751,
+        "bzip2": 0.188047,
+        "xz": 0.198513,
+        "zstd": 0.203346,
+        "brotli": 0.201013,
+        "lz4": 0.311792,
+        "ppmd": 0.172238
+      },
+      "comp": {
+        "cubrim": 1430381,
+        "gzip": 1820834,
+        "bzip2": 1246230,
+        "xz": 1315592,
+        "zstd": 1347616,
+        "brotli": 1332158,
+        "lz4": 2066309,
+        "ppmd": 1141461
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "samba",
+      "type": "code",
+      "orig": 21606400,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 5,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.197226,
+        "gzip": 0.250308,
+        "bzip2": 0.210574,
+        "xz": 0.173074,
+        "zstd": 0.179453,
+        "brotli": 0.174315,
+        "lz4": 0.282705,
+        "ppmd": 0.194284
+      },
+      "comp": {
+        "cubrim": 4261362,
+        "gzip": 5408272,
+        "bzip2": 4549759,
+        "xz": 3739524,
+        "zstd": 3877354,
+        "brotli": 3766340,
+        "lz4": 6108252,
+        "ppmd": 4197794
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "sao",
+      "type": "binary",
+      "orig": 7251944,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.695309,
+        "gzip": 0.734567,
+        "bzip2": 0.681268,
+        "xz": 0.610272,
+        "zstd": 0.689541,
+        "brotli": 0.632394,
+        "lz4": 0.781993,
+        "ppmd": 0.656107
+      },
+      "comp": {
+        "cubrim": 5042344,
+        "gzip": 5327041,
+        "bzip2": 4940524,
+        "xz": 4425664,
+        "zstd": 5000515,
+        "brotli": 4586092,
+        "lz4": 5670974,
+        "ppmd": 4758053
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "webster",
+      "type": "text",
+      "orig": 41458703,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.21072,
+        "gzip": 0.290931,
+        "bzip2": 0.208513,
+        "xz": 0.201855,
+        "zstd": 0.204017,
+        "brotli": 0.2033,
+        "lz4": 0.334075,
+        "ppmd": 0.157846
+      },
+      "comp": {
+        "cubrim": 8736211,
+        "gzip": 12061624,
+        "bzip2": 8644714,
+        "xz": 8368672,
+        "zstd": 8458306,
+        "brotli": 8428575,
+        "lz4": 13850346,
+        "ppmd": 6544130
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "x-ray",
+      "type": "image",
+      "orig": 8474240,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.616063,
+        "gzip": 0.712478,
+        "bzip2": 0.47805,
+        "xz": 0.52999,
+        "zstd": 0.608402,
+        "brotli": 0.552586,
+        "lz4": 0.84731,
+        "ppmd": 0.454471
+      },
+      "comp": {
+        "cubrim": 5220673,
+        "gzip": 6037713,
+        "bzip2": 4051112,
+        "xz": 4491264,
+        "zstd": 5155752,
+        "brotli": 4682753,
+        "lz4": 7180314,
+        "ppmd": 3851299
+      }
+    },
+    {
+      "corpus": "silesia",
+      "file": "xml",
+      "type": "text",
+      "orig": 5345280,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 5,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.09218,
+        "gzip": 0.1239,
+        "bzip2": 0.082537,
+        "xz": 0.08136,
+        "zstd": 0.084788,
+        "brotli": 0.08055,
+        "lz4": 0.142441,
+        "ppmd": 0.092878
+      },
+      "comp": {
+        "cubrim": 492729,
+        "gzip": 662284,
+        "bzip2": 441186,
+        "xz": 434892,
+        "zstd": 453217,
+        "brotli": 430566,
+        "lz4": 761392,
+        "ppmd": 496463
+      }
+    },
+    {
+      "corpus": "enwik8",
+      "file": "enwik8",
+      "type": "text",
+      "orig": 100000000,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 5,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.262293,
+        "gzip": 0.364452,
+        "bzip2": 0.290087,
+        "xz": 0.248316,
+        "zstd": 0.253336,
+        "brotli": 0.25742,
+        "lz4": 0.419879,
+        "ppmd": 0.224035
+      },
+      "comp": {
+        "cubrim": 26229345,
+        "gzip": 36445248,
+        "bzip2": 29008758,
+        "xz": 24831648,
+        "zstd": 25333695,
+        "brotli": 25742001,
+        "lz4": 41987997,
+        "ppmd": 22403589
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "alice29.txt",
+      "type": "text",
+      "orig": 152089,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.345093,
+        "gzip": 0.356311,
+        "bzip2": 0.284057,
+        "xz": 0.319076,
+        "zstd": 0.323593,
+        "brotli": 0.305656,
+        "lz4": 0.414047,
+        "ppmd": 0.256336
+      },
+      "comp": {
+        "cubrim": 52485,
+        "gzip": 54191,
+        "bzip2": 43202,
+        "xz": 48528,
+        "zstd": 49215,
+        "brotli": 46487,
+        "lz4": 62972,
+        "ppmd": 38986
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "asyoulik.txt",
+      "type": "text",
+      "orig": 125179,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.384002,
+        "gzip": 0.390073,
+        "bzip2": 0.316099,
+        "xz": 0.356225,
+        "zstd": 0.360611,
+        "brotli": 0.341215,
+        "lz4": 0.465956,
+        "ppmd": 0.290336
+      },
+      "comp": {
+        "cubrim": 48069,
+        "gzip": 48829,
+        "bzip2": 39569,
+        "xz": 44592,
+        "zstd": 45141,
+        "brotli": 42713,
+        "lz4": 58328,
+        "ppmd": 36344
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "cp.html",
+      "type": "text",
+      "orig": 24603,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 8,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.880136,
+        "gzip": 0.324391,
+        "bzip2": 0.30988,
+        "xz": 0.311018,
+        "zstd": 0.31362,
+        "brotli": 0.28025,
+        "lz4": 0.418932,
+        "ppmd": 0.271999
+      },
+      "comp": {
+        "cubrim": 21654,
+        "gzip": 7981,
+        "bzip2": 7624,
+        "xz": 7652,
+        "zstd": 7716,
+        "brotli": 6895,
+        "lz4": 10307,
+        "ppmd": 6692
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "fields.c",
+      "type": "code",
+      "orig": 11150,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 8,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.886726,
+        "gzip": 0.281255,
+        "bzip2": 0.272556,
+        "xz": 0.271928,
+        "zstd": 0.270762,
+        "brotli": 0.243677,
+        "lz4": 0.378565,
+        "ppmd": 0.247623
+      },
+      "comp": {
+        "cubrim": 9887,
+        "gzip": 3136,
+        "bzip2": 3039,
+        "xz": 3032,
+        "zstd": 3019,
+        "brotli": 2717,
+        "lz4": 4221,
+        "ppmd": 2761
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "grammar.lsp",
+      "type": "code",
+      "orig": 3721,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 8,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.906208,
+        "gzip": 0.334856,
+        "bzip2": 0.344799,
+        "xz": 0.347218,
+        "zstd": 0.326256,
+        "brotli": 0.302338,
+        "lz4": 0.466809,
+        "ppmd": 0.316312
+      },
+      "comp": {
+        "cubrim": 3372,
+        "gzip": 1246,
+        "bzip2": 1283,
+        "xz": 1292,
+        "zstd": 1214,
+        "brotli": 1125,
+        "lz4": 1737,
+        "ppmd": 1177
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "kennedy.xls",
+      "type": "binary",
+      "orig": 1029744,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 4,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.069518,
+        "gzip": 0.203674,
+        "bzip2": 0.126516,
+        "xz": 0.050369,
+        "zstd": 0.067714,
+        "brotli": 0.059721,
+        "lz4": 0.314773,
+        "ppmd": 0.134733
+      },
+      "comp": {
+        "cubrim": 71586,
+        "gzip": 209733,
+        "bzip2": 130280,
+        "xz": 51868,
+        "zstd": 69729,
+        "brotli": 61498,
+        "lz4": 324136,
+        "ppmd": 138741
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "lcet10.txt",
+      "type": "text",
+      "orig": 426754,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.299474,
+        "gzip": 0.338436,
+        "bzip2": 0.252384,
+        "xz": 0.279992,
+        "zstd": 0.284412,
+        "brotli": 0.265764,
+        "lz4": 0.384629,
+        "ppmd": 0.226249
+      },
+      "comp": {
+        "cubrim": 127802,
+        "gzip": 144429,
+        "bzip2": 107706,
+        "xz": 119488,
+        "zstd": 121374,
+        "brotli": 113416,
+        "lz4": 164142,
+        "ppmd": 96553
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "plrabn12.txt",
+      "type": "text",
+      "orig": 481861,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 6,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.366134,
+        "gzip": 0.40318,
+        "bzip2": 0.302114,
+        "xz": 0.343368,
+        "zstd": 0.34749,
+        "brotli": 0.338825,
+        "lz4": 0.466263,
+        "ppmd": 0.275035
+      },
+      "comp": {
+        "cubrim": 176426,
+        "gzip": 194277,
+        "bzip2": 145577,
+        "xz": 165456,
+        "zstd": 167442,
+        "brotli": 163267,
+        "lz4": 224674,
+        "ppmd": 132529
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "ptt5",
+      "type": "image",
+      "orig": 513216,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 4,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.094215,
+        "gzip": 0.102066,
+        "bzip2": 0.096955,
+        "xz": 0.077667,
+        "zstd": 0.084566,
+        "brotli": 0.079769,
+        "lz4": 0.128898,
+        "ppmd": 0.095801
+      },
+      "comp": {
+        "cubrim": 48353,
+        "gzip": 52382,
+        "bzip2": 49759,
+        "xz": 39860,
+        "zstd": 43401,
+        "brotli": 40939,
+        "lz4": 66153,
+        "ppmd": 49167
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "sum",
+      "type": "binary",
+      "orig": 38240,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 8,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 1.000339,
+        "gzip": 0.333995,
+        "bzip2": 0.337578,
+        "xz": 0.24843,
+        "zstd": 0.293723,
+        "brotli": 0.265245,
+        "lz4": 0.426464,
+        "ppmd": 0.306537
+      },
+      "comp": {
+        "cubrim": 38253,
+        "gzip": 12772,
+        "bzip2": 12909,
+        "xz": 9500,
+        "zstd": 11232,
+        "brotli": 10143,
+        "lz4": 16308,
+        "ppmd": 11722
+      }
+    },
+    {
+      "corpus": "canterbury",
+      "file": "xargs.1",
+      "type": "text",
+      "orig": 4227,
+      "cubrim_rt": "OK",
+      "cubrim_rank": 8,
+      "n_archivers": 8,
+      "ratio": {
+        "cubrim": 0.902058,
+        "gzip": 0.415424,
+        "bzip2": 0.416844,
+        "xz": 0.428672,
+        "zstd": 0.4088,
+        "brotli": 0.346344,
+        "lz4": 0.57251,
+        "ppmd": 0.380884
+      },
+      "comp": {
+        "cubrim": 3813,
+        "gzip": 1756,
+        "bzip2": 1762,
+        "xz": 1812,
+        "zstd": 1728,
+        "brotli": 1464,
+        "lz4": 2420,
+        "ppmd": 1610
+      }
+    }
+  ],
+  "aggregate_by_corpus": {
+    "silesia": {
+      "cubrim": 0.258176,
+      "gzip": 0.319111,
+      "bzip2": 0.257182,
+      "xz": 0.228632,
+      "zstd": 0.247848,
+      "brotli": 0.233863,
+      "lz4": 0.365071,
+      "ppmd": 0.231338
+    },
+    "enwik8": {
+      "cubrim": 0.262293,
+      "gzip": 0.364452,
+      "bzip2": 0.290088,
+      "xz": 0.248316,
+      "zstd": 0.253337,
+      "brotli": 0.25742,
+      "lz4": 0.41988,
+      "ppmd": 0.224036
+    },
+    "canterbury": {
+      "cubrim": 0.214068,
+      "gzip": 0.259974,
+      "bzip2": 0.193081,
+      "xz": 0.175424,
+      "zstd": 0.185433,
+      "brotli": 0.174565,
+      "lz4": 0.332789,
+      "ppmd": 0.183679
+    }
+  },
+  "aggregate_by_type": {
+    "binary": {
+      "cubrim": 0.619258,
+      "gzip": 0.667019,
+      "bzip2": 0.611028,
+      "xz": 0.539311,
+      "zstd": 0.61076,
+      "brotli": 0.559829,
+      "lz4": 0.722532,
+      "ppmd": 0.589971
+    },
+    "code": {
+      "cubrim": 0.197704,
+      "gzip": 0.250339,
+      "bzip2": 0.21063,
+      "xz": 0.173156,
+      "zstd": 0.179526,
+      "brotli": 0.174374,
+      "lz4": 0.282787,
+      "ppmd": 0.194333
+    },
+    "database": {
+      "cubrim": 0.109464,
+      "gzip": 0.153621,
+      "bzip2": 0.105766,
+      "xz": 0.098394,
+      "zstd": 0.10802,
+      "brotli": 0.099361,
+      "lz4": 0.173811,
+      "ppmd": 0.107412
+    },
+    "exe": {
+      "cubrim": 0.321973,
+      "gzip": 0.384932,
+      "bzip2": 0.36214,
+      "xz": 0.275453,
+      "zstd": 0.306186,
+      "brotli": 0.284998,
+      "lz4": 0.445738,
+      "ppmd": 0.326895
+    },
+    "image": {
+      "cubrim": 0.452855,
+      "gzip": 0.515035,
+      "bzip2": 0.345086,
+      "xz": 0.384165,
+      "zstd": 0.438069,
+      "brotli": 0.398081,
+      "lz4": 0.603364,
+      "ppmd": 0.327123
+    },
+    "text": {
+      "cubrim": 0.244404,
+      "gzip": 0.335439,
+      "bzip2": 0.257743,
+      "xz": 0.231557,
+      "zstd": 0.235593,
+      "brotli": 0.237416,
+      "lz4": 0.385673,
+      "ppmd": 0.20138
+    }
+  },
+  "aggregate_overall": {
+    "cubrim": 0.259091,
+    "gzip": 0.332989,
+    "bzip2": 0.267064,
+    "xz": 0.234411,
+    "zstd": 0.249034,
+    "brotli": 0.240818,
+    "lz4": 0.382197,
+    "ppmd": 0.228592
+  }
+}

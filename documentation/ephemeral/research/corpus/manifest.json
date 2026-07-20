@@ -1,0 +1,170 @@
+[
+  {
+    "name": "sparse_clustered",
+    "seed": 1001,
+    "size_bytes": 2048,
+    "sha256": "d11533a77218a34e56285bf0df004ac06e845319e1ca07cb8d65f0911d75f7ce",
+    "rho": 0.03125,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      256,
+      8
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/sparse_clustered.bin",
+    "actual_t4_bytes": 502,
+    "actual_t4_mode": "cube"
+  },
+  {
+    "name": "dense",
+    "seed": 2001,
+    "size_bytes": 4096,
+    "sha256": "a4ecb8ba6554b63d398076f1f00545c935d7b73b4e21988666185d6371c65c27",
+    "rho": 0.0625,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      256,
+      16
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/dense.bin",
+    "actual_t4_bytes": 4109,
+    "actual_t4_mode": "raw"
+  },
+  {
+    "name": "text",
+    "seed": 3001,
+    "size_bytes": 16384,
+    "sha256": "0160b7a1b4311fa6b273b63125f8cff4603205d8dc7fcc7cf9186691570c5415",
+    "rho": 0.25,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      256,
+      64
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/text.bin",
+    "actual_t4_bytes": 5705,
+    "actual_t4_mode": "cube"
+  },
+  {
+    "name": "log_like",
+    "seed": 4001,
+    "size_bytes": 16384,
+    "sha256": "ac4ef4845750390362797bc33af63b3a3d480f827a8b7ff54090ce1c89a9543d",
+    "rho": 0.25,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      256,
+      64
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/log_like.bin",
+    "actual_t4_bytes": 7318,
+    "actual_t4_mode": "cube"
+  },
+  {
+    "name": "binary_mixed",
+    "seed": 5001,
+    "size_bytes": 8192,
+    "sha256": "669a93863d0fab21a599f70df7d8bc9ec98c9c933f60be5112612157622672d6",
+    "rho": 0.125,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      256,
+      32
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/binary_mixed.bin",
+    "actual_t4_bytes": 8205,
+    "actual_t4_mode": "raw"
+  },
+  {
+    "name": "random_high",
+    "seed": 6001,
+    "size_bytes": 4096,
+    "sha256": "0e232e8ae9db07cc67194aa713d7a287876fec886ded19cffddb732a1094b415",
+    "rho": 0.0625,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      256,
+      16
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/random_high.bin",
+    "actual_t4_bytes": 4109,
+    "actual_t4_mode": "raw"
+  },
+  {
+    "name": "sparse_small",
+    "seed": 7001,
+    "size_bytes": 256,
+    "sha256": "8c23d37b2230be9754c446b6cdef385fb4eb7dcac874905fcbb2e25b6f05672c",
+    "rho": 0.003906,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      256,
+      1
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/sparse_small.bin",
+    "actual_t4_bytes": 269,
+    "actual_t4_mode": "raw"
+  },
+  {
+    "name": "both_sparse_16",
+    "seed": 8001,
+    "size_bytes": 16,
+    "sha256": "84c92eca52cc2721fbd3a0e285ecf16596756e1e7513bf4f4e314c0b7b9259e3",
+    "rho": 0.000244,
+    "rho_axis0": 0.0625,
+    "rho_axis1": 0.003906,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      16,
+      1
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/both_sparse_16.bin",
+    "actual_t4_bytes": 16,
+    "actual_t4_mode": "raw",
+    "t4_bytes_assumption": "Conservative bound: raw mode, L bytes. No Rust run performed (spike-gate: no src change unless GO). T4 raw mode is the expected winner for near-incompressible L<=25 files."
+  },
+  {
+    "name": "both_sparse_24",
+    "seed": 8002,
+    "size_bytes": 24,
+    "sha256": "ba3a1f0d984b45025c9a8ade0740d33355f430e48864bc7d83f26af579a2e510",
+    "rho": 0.000366,
+    "rho_axis0": 0.09375,
+    "rho_axis1": 0.003906,
+    "has_nontrivial_gap_mechanism": true,
+    "axis_unique_counts": [
+      24,
+      1
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/both_sparse_24.bin",
+    "actual_t4_bytes": 24,
+    "actual_t4_mode": "raw",
+    "t4_bytes_assumption": "Conservative bound: raw mode, L bytes. No Rust run performed (spike-gate: no src change unless GO). T4 raw mode is the expected winner for near-incompressible L<=25 files."
+  },
+  {
+    "name": "block_bound_runs",
+    "seed": 8003,
+    "size_bytes": 65536,
+    "sha256": "abcb2d5a7ea6c1e74f753c2a775998379568e79a13358cb52dfb48a956c040d5",
+    "rho": 1.0,
+    "has_nontrivial_gap_mechanism": false,
+    "rho_note": "rho=1.0 \u2014 cube fully populated, all gaps=1, gap map carries zero info. Compression lever is entirely in the value-code stream (run structure).",
+    "axis_unique_counts": [
+      256,
+      256
+    ],
+    "path": "/Users/ug/arcanada/Projects/Cubrim/documentation/ephemeral/research/corpus/block_bound_runs.bin",
+    "run_stats": {
+      "num_runs": 1923,
+      "avg_run_length": 34.08,
+      "max_run_length": 2812,
+      "min_run_length": 2,
+      "runs_ge_100": 90,
+      "distinct_values": 8
+    },
+    "fair_test_note": "Run-heavy fixture (Pareto alpha=1.5 run lengths, k=8 alphabet, Markov transitions). Deliberately FAVORABLE to BWT \u2014 if BWT does not beat T4 here, no real-world structured data at this block size will justify the u16->u32 widening.",
+    "actual_t4_bytes": null,
+    "actual_bwt_bytes": null,
+    "actual_t4_mode": "cube",
+    "measurement_note": "T4 and BWT bytes to be filled by tests/cubr0031_bench.rs (real codec). This placeholder must not be used for GO/NO-GO \u2014 wait for bench output."
+  }
+]

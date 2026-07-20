@@ -1,0 +1,25 @@
+[champ] silesia__reymont ratio=0.213606 mode=LZ rt=OK
+[champ] silesia__dickens ratio=0.290305 mode=LZ rt=OK
+[champ] silesia__ooffice ratio=0.435461 mode=LZ rt=OK
+[champ] silesia__nci ratio=0.047792 mode=LZ rt=OK
+[champ] silesia__xml ratio=0.090698 mode=LZ rt=OK
+[champ] silesia__samba ratio=0.193439 mode=LZ rt=OK
+[champ] silesia__osdb ratio=0.309304 mode=LZ rt=OK
+[champ] canterbury__alice29.txt ratio=0.326828 mode=CHUNKED rt=OK
+[champ] canterbury__asyoulik.txt ratio=0.348085 mode=CHUNKED rt=OK
+[champ] canterbury__cp.html ratio=0.326464 mode=CUBE rt=OK
+[champ] canterbury__grammar.lsp ratio=0.387261 mode=CUBE rt=OK
+[champ] canterbury__fields.c ratio=0.305650 mode=CUBE rt=OK
+[champ] canterbury__lcet10.txt ratio=0.296367 mode=LZ rt=OK
+[champ] canterbury__plrabn12.txt ratio=0.363633 mode=CHUNKED rt=OK
+[champ] canterbury__ptt5 ratio=0.087341 mode=LZ rt=OK
+[champ] canterbury__sum ratio=0.345815 mode=CUBE rt=OK
+[champ] canterbury__xargs.1 ratio=0.453039 mode=CUBE rt=OK
+[champ] canterbury__kennedy.xls ratio=0.051346 mode=LZ rt=OK
+[champ] silesia__mr ratio=0.254021 mode=CHUNKED rt=OK
+[champ] silesia__sao ratio=0.684659 mode=CHUNKED rt=OK
+[champ] silesia__x-ray ratio=0.509444 mode=CHUNKED rt=OK
+[champ] silesia__webster ratio=0.210508 mode=LZ rt=OK
+[champ] silesia__mozilla ratio=0.306609 mode=LZ rt=OK
+[champ] enwik8__enwik8 ratio=0.262222 mode=LZ rt=OK
+ALL CHAMP DONE

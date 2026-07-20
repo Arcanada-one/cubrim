@@ -1,0 +1,2151 @@
+{
+  "generated_at": "2026-06-25T12:13:34+00:00",
+  "champion": {
+    "scheme": "BwtGeoMix (scheme 11, logistic-mix; competitive rail over schemes 7..11)",
+    "aggregate": 0.158273,
+    "vs_previous_pct": -5.9
+  },
+  "goal": {
+    "beat": "zstd-19 aggregate 0.154872",
+    "current": 0.158273,
+    "leader_history": [
+      0.58724,
+      0.54773,
+      0.504412,
+      0.299337,
+      0.221726,
+      0.207618,
+      0.177122,
+      0.168262,
+      0.168227,
+      0.158273
+    ],
+    "leader_history_rich": [
+      {
+        "aggregate": 0.58724,
+        "label": "T4",
+        "desc": {
+          "en": "T4 baseline — the starting aggregate before any BWT work.",
+          "ru": "Базовая линия T4 — стартовый агрегат до начала работы над BWT."
+        }
+      },
+      {
+        "aggregate": 0.54773,
+        "label": "H-12",
+        "desc": {
+          "en": "H-12 — first sub-0.55 record.",
+          "ru": "H-12 — первый рекорд ниже 0.55."
+        }
+      },
+      {
+        "aggregate": 0.504412,
+        "label": "BwtEntropy (7-file)",
+        "desc": {
+          "en": "BwtEntropy — early record measured on the 7-file subset.",
+          "ru": "BwtEntropy — ранний рекорд, измеренный на подмножестве из 7 файлов."
+        }
+      },
+      {
+        "aggregate": 0.299337,
+        "label": "BwtEntropy (full)",
+        "desc": {
+          "en": "BwtEntropy re-seeded to the full 10-file corpus (CUBR-0028, e476294) — the 3 large files pull the aggregate down.",
+          "ru": "BwtEntropy, пересчитанный на полном 10-файловом корпусе (CUBR-0028, e476294) — 3 больших файла снижают агрегат."
+        }
+      },
+      {
+        "aggregate": 0.221726,
+        "label": "BwtRans (H-19)",
+        "desc": {
+          "en": "BwtRans (H-19) — rANS entropy coding over the BWT output.",
+          "ru": "BwtRans (H-19) — энтропийное кодирование rANS поверх вывода BWT."
+        }
+      },
+      {
+        "aggregate": 0.207618,
+        "label": "Order2Rans (H-20)",
+        "desc": {
+          "en": "Order2Rans (H-20) — order-2 context model for the rANS coder.",
+          "ru": "Order2Rans (H-20) — контекстная модель 2-го порядка для кодера rANS."
+        }
+      },
+      {
+        "aggregate": 0.177122,
+        "label": "H-21",
+        "desc": {
+          "en": "H-21 — new record from a refined model.",
+          "ru": "H-21 — новый рекорд от улучшённой модели."
+        }
+      },
+      {
+        "aggregate": 0.168262,
+        "label": "H-22",
+        "desc": {
+          "en": "H-22 — incremental record.",
+          "ru": "H-22 — инкрементальный рекорд."
+        }
+      },
+      {
+        "aggregate": 0.168227,
+        "label": "checkpoint",
+        "desc": {
+          "en": "Published checkpoint just below H-22.",
+          "ru": "Опубликованный чекпойнт чуть ниже H-22."
+        }
+      },
+      {
+        "aggregate": 0.158273,
+        "label": "H-24 / champion",
+        "desc": {
+          "en": "H-24 — current champion: BwtGeoMix (logistic-mix, competitive rail over schemes 7..11). Past gzip, behind zstd-19.",
+          "ru": "H-24 — текущий чемпион: BwtGeoMix (logistic-mix, конкурентный отбор схем 7..11). Обогнал gzip, позади zstd-19."
+        }
+      }
+    ],
+    "rivals": [
+      {
+        "name": "gzip-9",
+        "aggregate": 0.159674,
+        "status": "passed",
+        "desc": {
+          "en": "gzip -9 (DEFLATE, maximum level) on the frozen 10-file corpus: 18687 / 117032 bytes = 0.159674. The bar Cubrim has already passed.",
+          "ru": "gzip -9 (DEFLATE, максимальный уровень) на фиксированном 10-файловом корпусе: 18687 / 117032 байт = 0.159674. Планка, которую Cubrim уже преодолел."
+        }
+      },
+      {
+        "name": "zstd-19",
+        "aggregate": 0.154872,
+        "status": "target",
+        "desc": {
+          "en": "zstd -19 --ultra on the frozen 10-file corpus: 18125 / 117032 bytes = 0.154872. The state-of-the-art bar we are still chasing — Cubrim is ~2.2% behind it.",
+          "ru": "zstd -19 --ultra на фиксированном 10-файловом корпусе: 18125 / 117032 байт = 0.154872. Передовая планка, которую мы ещё догоняем — Cubrim отстаёт от неё на ~2.2%."
+        }
+      }
+    ]
+  },
+  "hypotheses": [
+    {
+      "id": "H-29",
+      "title": {
+        "en": "class-C specialization: log/telemetry/columnar — GO; columnar field-split is the hardening lever",
+        "ru": "специализация под класс-C: логи/телеметрия/колоночные данные — GO; колоночный field-split — рычаг усиления"
+      },
+      "meaning": {
+        "en": "The general-purpose zstd gap is a data-determined ceiling, but Cubrim already BEATS zstd on logs via BWT+geomix. Reframe the goal as a specialist that beats zstd on the whole log/telemetry/columnar class — characterize it on a real corpus, then harden the path.",
+        "ru": "Разрыв до zstd на общих данных — потолок, определяемый данными, но на логах Cubrim уже БЬЁТ zstd через BWT+geomix. Переформулировать цель: специалист, который бьёт zstd на всём классе логи/телеметрия/колоночные данные — охарактеризовать на реальном корпусе, затем усилить путь."
+      },
+      "status": "GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "GO",
+        "ru": "GO"
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "On a SEPARATE log/telemetry class corpus (9 files, disjoint from the leaderboard corpus — so it does not move the main 0.158273 record), the implemented columnar field-split (MODE_COLUMNAR) turned a tie into a decisive zstd-19 WIN: aggregate 219107 → 185883 vs zstd 219039 = +0.03% → −15.1% (now BEATS zstd), and −39.5% vs gzip. The numeric-telemetry files are crushed: forex −4.2% → −27.6% and −0.5% → −30.7%, status_timeseries +7.1% loss → −2.9% win. 234 tests green, byte-exact, tuned+holdout byte-identical.",
+        "ru": "На ОТДЕЛЬНОМ класс-корпусе логов/телеметрии (9 файлов, не пересекается с лидерборд-корпусом — поэтому основной рекорд 0.158273 не двигается) реализованный колоночный field-split (MODE_COLUMNAR) превратил ничью в РЕШИТЕЛЬНУЮ победу над zstd-19: агрегат 219107 → 185883 против zstd 219039 = +0,03% → −15,1% (теперь БЬЁТ zstd), и −39,5% против gzip. Числовая телеметрия разгромлена: forex −4,2% → −27,6% и −0,5% → −30,7%, status_timeseries +7,1% проигрыш → −2,9% выигрыш. 234 теста green, byte-exact, tuned+holdout byte-identical."
+      },
+      "verdict_line": {
+        "en": "The columnar field-split is now implemented (MODE_COLUMNAR) — it flips the whole class from a zstd tie to a decisive −15.1% zstd WIN and crushes the CSV/telemetry files by 27–31%. Regression-proof by construction; the main leaderboard record is unchanged (different corpus). Next on the roadmap: timestamp-column delta, then log-template split.",
+        "ru": "Колоночный field-split реализован (MODE_COLUMNAR) — он переворачивает весь класс из ничьей с zstd в РЕШИТЕЛЬНУЮ победу −15,1% над zstd и разносит CSV/телеметрию на 27–31%. Regression-proof по построению; рекорд основного лидерборда не сдвинулся (другой корпус). Дальше по дорожной карте: дельта по столбцам времени, затем разделение шаблонов логов."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-27",
+      "title": {
+        "en": "context-modelled offset coding — NO-GO; the conditional-entropy gain is a learning-cost mirage",
+        "ru": "контекстное кодирование offset'ов — NO-GO; выигрыш по условной энтропии — это мираж стоимости обучения"
+      },
+      "meaning": {
+        "en": "Close the residual mixed/near-duplicate zstd gap (+3.4%/+5.5%) by conditioning the byte-split offset streams on recent state (prev byte / length-class) instead of the context-free order-0 coding — a context-modelled offset-code like zstd btultra2.",
+        "ru": "Закрыть остаточный разрыв до zstd на mixed/near-duplicate (+3.4%/+5.5%), обуславливая byte-split offset-потоки на недавнем состоянии (prev byte / класс длины) вместо context-free order-0 — контекстный offset-code как у zstd btultra2."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "NO-GO. The ideal conditional-entropy gain (−9%/−21%) is a LEARNING-COST MIRAGE: the only context with real gain (prev-byte) is UNLEARNABLE at these stream sizes (256×256 cells, ~1 obs/cell → a real adaptive order-1 model LOSES to order-0 by 4.5–6.3%); the static-table variant is deader (+50–126KB of tables); learnable low-cardinality contexts carry ≤3%. zstd does NOT beat us via order-1-on-offsets either (repcodes + single adaptive FSE offset-code = Cubrim rep-cache + byte-split, already competitive per H-25k). Residual gap NOT recoverable by offset-code context modelling. Added Gotcha #9 (an H1 probe is asymptotic — charge a real online predictor + cell/stream-size sanity). Leaderboard untouched, not pushed.",
+        "ru": "NO-GO. Идеальный выигрыш по условной энтропии (−9%/−21%) — это МИРАЖ СТОИМОСТИ ОБУЧЕНИЯ: единственный контекст с реальным выигрышем (prev-byte) НЕОБУЧАЕМ при таких размерах потоков (256×256 ячеек, ~1 наблюдение/ячейку → реальная адаптивная order-1 модель ПРОИГРЫВАЕТ order-0 на 4.5–6.3%); вариант со static-таблицей ещё хуже (+50–126KB таблиц); обучаемые low-cardinality контексты дают ≤3%. zstd тоже НЕ бьёт нас order-1-на-offset (repcodes + один адаптивный FSE offset-code = rep-cache + byte-split у Cubrim, уже конкурентно по H-25k). Остаточный разрыв НЕ берётся контекстным моделированием offset-кодов. Добавлена Gotcha #9 (H1-проба асимптотична — заряжать реальный online-предиктор + проверку размеров ячеек/потоков). Лидерборд не тронут, не запушено."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Theoretical ceiling −9% / −21%, but at real file sizes the model can't learn it — a live adaptive model actually LOSES to the simple one by 4.5–6.3%.",
+        "ru": "Теоретический потолок −9% / −21%, но на реальных размерах файлов модель не может его выучить — живая адаптивная модель реально ПРОИГРЫВАЕТ простой на 4,5–6,3%."
+      },
+      "verdict_line": {
+        "en": "Tested context-aware offset coding: theoretical ceiling −9% / −21%, but at real file sizes the model can't reach it. Ceiling confirmed; next lever.",
+        "ru": "Проверили контекстное кодирование смещений: потолок −9% / −21%, но на реальных размерах файлов рычаг не дотягивает. Потолок зафиксирован — к следующему рычагу."
+      },
+      "measured": {
+        "en": "ideal gain −9% / −21% is a learning-cost mirage; a real order-1 model LOSES to order-0 by 4.5–6.3%; aggregate unchanged 0.158273.",
+        "ru": "идеальный выигрыш −9% / −21% — мираж стоимости обучения; реальная order-1 модель ПРОИГРЫВАЕТ order-0 на 4.5–6.3%; агрегат без изменений 0.158273."
+      }
+    },
+    {
+      "id": "H-26",
+      "title": {
+        "en": "pre-LZ offset-reducing transform class — NO-GO; the offset floor is information-conserved, the residual is zstd micro-efficiency",
+        "ru": "класс pre-LZ трансформов, снижающих offset'ы — NO-GO; offset-пол сохраняет информацию, остаток — микро-эффективность zstd"
+      },
+      "meaning": {
+        "en": "H-25l showed the residual mixed-data gap is the data-determined offset-entropy floor (~64K distinct cross-file offsets). Change the CLASS of lever: a pre-LZ transform that reduces the count of distinct cross-file offsets before the matcher (cross-file dedup / content-defined reordering so similar regions sit closer → smaller offsets → the floor itself drops).",
+        "ru": "H-25l показал, что остаточный разрыв на mixed-данных — это определяемый данными offset-entropy floor (~64K различных cross-file offset'ов). Меняем КЛАСС рычага: pre-LZ трансформ, снижающий число различных cross-file offset'ов до матчера (cross-file dedup / content-defined переупорядочивание, чтобы похожие участки лежали ближе → меньше offset'ы → сам пол падает)."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "NO-GO (whole class). The entire pre-LZ offset-reducing transform class is closed — the offset-entropy floor is data-determined AND information-conserved: any transform reducing the COUNT of distinct cross-file offsets must re-transmit the removed info (within-bucket or residual+chunk-ref stream), and LZ already codes that structure at its floor. Gotcha #7 generalised to cross-file offsets, confirmed END-TO-END (not just charged-model). The mixed/near-duplicate gap to zstd (+3.4%/+5.5%) is zstd's FSE-offset + btultra2 parse MICRO-EFFICIENCY, not a missing structural transform. Added Gotcha #8 to CLAUDE.md. Leaderboard untouched, not pushed.",
+        "ru": "NO-GO (весь класс). Весь класс pre-LZ трансформов, снижающих offset'ы, закрыт — offset-entropy floor определяется данными И сохраняет информацию: любой трансформ, снижающий ЧИСЛО различных cross-file offset'ов, обязан переслать убранную инфу (within-bucket или residual+chunk-ref поток), а LZ уже кодирует эту структуру на своём полу. Gotcha #7 обобщена на cross-file offset'ы, подтверждено END-TO-END (не только charged-модель). Разрыв на mixed/near-duplicate до zstd (+3.4%/+5.5%) — это МИКРО-ЭФФЕКТИВНОСТЬ zstd (FSE-offset + btultra2 parse), а не недостающий структурный трансформ. Добавлена Gotcha #8 в CLAUDE.md. Лидерборд не тронут, не запушено."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "The whole transform class was closed: any way to cut distinct offsets must re-send the removed info, which LZ already codes. The leftover zstd gap (+3.4% / +5.5%) is micro-efficiency, not structure.",
+        "ru": "Весь класс трансформов закрыт: любой способ сократить число различных смещений обязан переслать убранную инфу, которую LZ уже кодирует. Остаточный разрыв до zstd (+3,4% / +5,5%) — микро-эффективность, не структура."
+      },
+      "verdict_line": {
+        "en": "Tested preprocessing that shrinks offsets: the floor conserves information, so nothing is saved. Ceiling confirmed; the residual is zstd's coding efficiency, not a missing transform.",
+        "ru": "Проверили предобработку, сжимающую смещения: пол сохраняет информацию, поэтому ничего не экономится. Потолок зафиксирован; остаток — эффективность кодирования zstd, а не недостающий трансформ."
+      },
+      "measured": {
+        "en": "whole transform class closed; residual zstd gap +3.4% / +5.5% is micro-efficiency, not a structural lever; aggregate unchanged 0.158273.",
+        "ru": "весь класс трансформов закрыт; остаточный разрыв до zstd +3.4% / +5.5% — микро-эффективность, не структурный рычаг; агрегат без изменений 0.158273."
+      }
+    },
+    {
+      "id": "H-25l",
+      "title": {
+        "en": "parse/match-count + literal-entropy on the residual gap — marginal; both levers near-exhausted, the floor is data-determined",
+        "ru": "parse/match-count + literal-entropy на остаточном разрыве — маргинально; оба рычага почти исчерпаны, пол определяется данными"
+      },
+      "meaning": {
+        "en": "After H-25k ruled out offset coding, the residual ~7% mixed-data gap must be in the two remaining levers: parse / match-count (fewer, longer matches) and literal entropy. Charged-diagnose where the bytes sit, then refine both behind the competitive rail.",
+        "ru": "После того как H-25k исключил offset coding, остаточный разрыв ~7% на mixed-данных должен быть в двух оставшихся рычагах: parse / match-count (меньше, длиннее матчей) и literal entropy. Сначала charged-диагностика, где сидят байты, затем доработка обоих за competitive rail."
+      },
+      "status": "MARGINAL",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "MARGINAL — deep diminishing returns. Sub-1% per lever (srctree −0.08%, multiversion −0.59% vs zstd), regression-proof + byte-exact (tuned/holdout byte-identical). KEY FINDING: the residual floor is the OFFSET ENTROPY of ~64K distinct cross-file offsets — DATA-DETERMINED (how many genuinely-different matches the tarball holds), not a coding lever. Parse/match-count + literal-entropy now BOTH near-exhausted. The H-25 LZ arc: gzip-parity → beats zstd on logs (−18%) & pure-duplicate, within ~7% on mixed tarballs, beats gzip everywhere — all holdout-validated, never tuned. Sensible STOP for the LZ line. Committed feat/cubr-bigfiles (705b29f), not pushed.",
+        "ru": "МАРГИНАЛЬНО — глубоко убывающая отдача. Меньше 1% на рычаг (srctree −0.08%, multiversion −0.59% vs zstd), regression-proof + byte-exact (tuned/holdout byte-identical). ВАЖНЫЙ ВЫВОД: остаточный пол — это OFFSET ENTROPY ~64K различных cross-file offset'ов — ОПРЕДЕЛЯЕТСЯ ДАННЫМИ (сколько реально разных матчей в tarball), а не рычаг кодирования. Parse/match-count + literal-entropy теперь ОБА почти исчерпаны. Дуга H-25 LZ: паритет с gzip → бьёт zstd на логах (−18%) и pure-duplicate, в пределах ~7% на mixed tarball, бьёт gzip везде — всё проверено на holdout, без подгонки. Разумная ТОЧКА ОСТАНОВА для LZ-линии. Закоммичено feat/cubr-bigfiles (705b29f), не запушено."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Sub-1% per lever now: source tarball −0.08%, versioned files −0.59% vs the previous build. The floor is how many genuinely different matches the data has.",
+        "ru": "Теперь меньше 1% на рычаг: tarball исходников −0,08%, версионные файлы −0,59% к прошлой сборке. Пол — это сколько по-настоящему разных совпадений в данных."
+      },
+      "verdict_line": {
+        "en": "Both remaining levers are near-exhausted — the leftover gap is set by the data itself, not by coding. A sensible stopping point for this line. Overall record unchanged.",
+        "ru": "Оба оставшихся рычага почти исчерпаны — остаточный разрыв задан самими данными, а не кодированием. Разумная точка останова для этой линии. Рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25k",
+      "title": {
+        "en": "FSE/rANS offset-code model — marginal win on pure-duplicate; offset coding RULED OUT as the residual lever",
+        "ru": "FSE/rANS offset-code модель — маргинальная победа на pure-duplicate; offset coding ИСКЛЮЧЁН как остаточный рычаг"
+      },
+      "meaning": {
+        "en": "The H-25j-full verdict named offset coding as the residual floor. Test it: replace Cubrim's LEB128-varint distance through rANS with a zstd-style offset-code (bit-length bucket entropy-coded + raw low bits), behind the competitive min (regression-proof).",
+        "ru": "Вердикт H-25j-full назвал offset coding остаточным полом. Проверяем: заменить LEB128-varint distance через rANS на zstd-style offset-code (entropy-coded bucket по битовой длине + сырые младшие биты), за competitive min (regression-proof)."
+      },
+      "status": "WIN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "MARGINAL WIN: the offset-code model wins on pure-duplicate (multicopy −11.3%, gap to zstd +36%→+20.5%) but does NOT close the diverse-offset gap. KEY FINDING: on srctree/multiversion/repeated.log the EXISTING separate-stream coder (seq_format 0, byte-split + order-1 rANS) already beats both combined-varint and the offset-code — Cubrim was ALREADY coding offsets competitively, so the 'offset coding is the floor' diagnosis was only half-right. Offset coding is RULED OUT as the residual lever; the ~7% mixed-data gap is elsewhere. Regression-proof + byte-exact (tuned/holdout byte-identical). Next: H-25l (parse/match-count + literal entropy, diminishing returns). Committed on feat/cubr-bigfiles (edabfe0), not pushed.",
+        "ru": "МАРГИНАЛЬНАЯ ПОБЕДА: offset-code модель выигрывает на pure-duplicate (multicopy −11.3%, разрыв до zstd +36%→+20.5%), но НЕ закрывает разрыв на разнородных offset'ах. ВАЖНЫЙ ВЫВОД: на srctree/multiversion/repeated.log СУЩЕСТВУЮЩИЙ separate-stream coder (seq_format 0, byte-split + order-1 rANS) уже бьёт и combined-varint, и offset-code — Cubrim УЖЕ кодировал offset'ы конкурентно, так что диагноз «offset coding — это пол» был верен лишь наполовину. Offset coding ИСКЛЮЧЁН как остаточный рычаг; разрыв ~7% на mixed-данных — в другом месте. Regression-proof + byte-exact (tuned/holdout byte-identical). Дальше: H-25l (parse/match-count + literal entropy, убывающая отдача). Закоммичено на feat/cubr-bigfiles (edabfe0), не запушено."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": 20.5,
+      "effect": {
+        "en": "−11.3% on duplicate-heavy files (the zstd gap there shrank +36% → +20.5%); on mixed files, no change.",
+        "ru": "−11,3% на файлах с повторами (отставание от zstd там сжалось +36% → +20,5%); на разнородных файлах — без изменений."
+      },
+      "verdict_line": {
+        "en": "Works on duplicate-heavy files (11.3% better), but the gap to zstd stays on mixed data — and we were already coding offsets competitively. Mechanism noted; overall record unchanged.",
+        "ru": "Работает на файлах с повторами (на 11,3% лучше), но отставание от zstd на разнородных данных осталось — а смещения мы и так кодировали конкурентно. Механику отметили, рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": "pure-duplicate multicopy −11.3% (gap to zstd +36% → +20.5%); diverse-offset gap unchanged; aggregate 0.158273 byte-identical.",
+        "ru": "pure-duplicate multicopy −11.3% (разрыв до zstd +36% → +20.5%); разрыв на разнородных offset'ах без изменений; агрегат 0.158273 byte-identical."
+      }
+    },
+    {
+      "id": "H-25j-full",
+      "title": {
+        "en": "binary-tree match finder feeding the DP (cause a) — progress; match selection no longer the bottleneck",
+        "ru": "binary-tree match finder, питающий DP (причина a) — прогресс; отбор матчей больше не узкое место"
+      },
+      "meaning": {
+        "en": "The dominant residual zstd gap (cause a) is match-finder candidate density: the hash chain yields fewer/shorter candidates than zstd's binary tree, so the optimal DP is only optimal over what it sees. Replace the hash-chain finder with a binary-tree finder feeding the H-25i DP.",
+        "ru": "Доминирующая часть остаточного разрыва до zstd (причина a) — плотность кандидатов match-finder: hash-chain даёт меньше/короче кандидатов, чем binary-tree zstd, поэтому optimal DP оптимален лишь над тем, что видит. Заменяем hash-chain finder на binary-tree, питающий DP из H-25i."
+      },
+      "status": "PROGRESS",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "PROGRESS: the binary-tree finder surfaces longer/cleaner matches the hash chain missed, narrowing the zstd gap a further ~1% (srctree +8.3%→+7.3%, multiversion +8.5%→+7.7%, repeated.log +18.1%→+17.0%), regression-proof + byte-exact (tuned 0.158273 byte-identical, holdout 0.2390 byte-identical). Does NOT beat zstd uniformly — ~7–8% remains. With match selection no longer the bottleneck, the residual floor is OFFSET CODING (zstd FSE offset-code + repcode vs Cubrim LEB128-varint through rANS). Next lever: H-25k FSE/rANS offset-code model. ~73s/1.9MB. Committed on feat/cubr-bigfiles (01617c8), not pushed.",
+        "ru": "ПРОГРЕСС: binary-tree finder находит более длинные/чистые матчи, которые пропускал hash-chain, сокращая разрыв до zstd ещё на ~1% (srctree +8.3%→+7.3%, multiversion +8.5%→+7.7%, repeated.log +18.1%→+17.0%), regression-proof + byte-exact (tuned 0.158273 byte-identical, holdout 0.2390 byte-identical). Не равномерная победа над zstd — остаётся ~7–8%. Отбор матчей больше не узкое место — остаточный пол теперь OFFSET CODING (FSE offset-code + repcode у zstd против LEB128-varint через rANS у Cubrim). Следующий рычаг: H-25k — FSE/rANS offset-code модель. ~73с/1.9MB. Закоммичено на feat/cubr-bigfiles (01617c8), не запушено."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": 7.3,
+      "effect": {
+        "en": "On a source tarball: 86152 → 85398 bytes (zstd gap +8.3% → +7.3%); versioned files +8.5% → +7.7%; logs +18.1% → +17.0%.",
+        "ru": "На tarball исходников: 86152 → 85398 байт (разрыв до zstd +8,3% → +7,3%); версионные файлы +8,5% → +7,7%; логи +18,1% → +17,0%."
+      },
+      "verdict_line": {
+        "en": "A stronger match finder surfaced cleaner matches and trimmed another ~1% — match selection is no longer the bottleneck. Overall record unchanged.",
+        "ru": "Более сильный поиск совпадений нашёл более чистые совпадения и срезал ещё ~1% — отбор совпадений больше не узкое место. Рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25j-lite",
+      "title": {
+        "en": "repeat-offset-aware DP cost model (cause b) — marginal win on long-range, regression-proof",
+        "ru": "DP cost-модель с учётом repeat-offset (причина b) — маргинальная победа на long-range, regression-proof"
+      },
+      "meaning": {
+        "en": "The residual ~5% zstd gap has two causes: (a) the hash-chain finder yields fewer match candidates than zstd's binary tree, (b) the DP cost model is not repeat-offset-aware. This lite run attacks (b): price matches at the 3 recent offsets at ~2–3 bits instead of full offset entropy. Reuses the H-25i DP.",
+        "ru": "Остаточный разрыв ~5% до zstd имеет две причины: (a) hash-chain finder даёт меньше match-кандидатов, чем binary-tree zstd, (b) DP cost-модель не учитывает repeat-offset. Этот lite-прогон бьёт (b): цена матчей на 3 недавних offset ~2–3 бита вместо полной offset-энтропии. Переиспользует DP из H-25i."
+      },
+      "status": "WIN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "MARGINAL WIN (long-range): the rep-aware cost model helps rep-offset-rich data (repeated.log −9.4%, vs zstd +30.4%→+18.1%; multiversion −0.11%; srctree −0.16%), regression-proof + byte-exact (tuned 0.158273 byte-identical, holdout 0.2390 byte-identical). But no uniform zstd-beat — the ~8% tarball/near-duplicate gap is dominated by cause (a), match-finder candidate density. Next lever: H-25j-full (binary-tree finder feeding the DP). Leaderboard untouched; committed on feat/cubr-bigfiles, not pushed.",
+        "ru": "МАРГИНАЛЬНАЯ ПОБЕДА (long-range): rep-aware cost-модель помогает данным с repeat-offset (repeated.log −9.4%, vs zstd +30.4%→+18.1%; multiversion −0.11%; srctree −0.16%), regression-proof + byte-exact (tuned 0.158273 byte-identical, holdout 0.2390 byte-identical). Но не равномерная победа над zstd — разрыв ~8% на tarball/near-duplicate доминирует причиной (a), плотностью кандидатов match-finder. Следующий рычаг: H-25j-full (binary-tree finder, питающий DP). Лидерборд не тронут; закоммичено на feat/cubr-bigfiles, не запушено."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": 18.1,
+      "effect": {
+        "en": "On repeat-heavy logs: 13123 → 11889 bytes (−9.4%); the zstd gap on that file narrowed +30.4% → +18.1%. Mixed files barely moved.",
+        "ru": "На логах с повторами: 13123 → 11889 байт (−9,4%); отставание от zstd на этом файле сузилось +30,4% → +18,1%. Разнородные файлы почти не двинулись."
+      },
+      "verdict_line": {
+        "en": "Pricing reused offsets cheaply helps repeat-heavy data, but mixed files barely moved. Mechanism adopted; overall record unchanged.",
+        "ru": "Дешёвая цена для повторно используемых смещений помогает данным с повторами, но разнородные файлы почти не двинулись. Механику берём, рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25i",
+      "title": {
+        "en": "btultra-class optimal DP parser (competitive greedy/optimal container) — progress; the gap to zstd HALVED",
+        "ru": "btultra-class optimal DP-парсер (контейнер competitive greedy/optimal) — прогресс; разрыв до zstd сокращён ВДВОЕ"
+      },
+      "meaning": {
+        "en": "Replace the greedy parse with an optimal dynamic-programming parser that minimises total cost — zstd's BTULTRA lever, finding fewer/longer matches so fewer offsets are coded. A pure optimal DP regresses duplicate data, so the encoder builds BOTH the fast greedy and the optimal DP and keeps the smaller.",
+        "ru": "Заменить greedy-парс оптимальным DP-парсером, минимизирующим суммарную стоимость — рычаг BTULTRA zstd: меньше/длиннее матчей → меньше offset'ов кодировать. Чистый optimal DP регрессирует на дубль-данных, поэтому энкодер строит И fast greedy, И optimal DP и берёт меньший."
+      },
+      "status": "PROGRESS",
+      "aggregate": null,
+      "vs_zstd": [
+        {
+          "corpus": "repeated.log",
+          "vs_zstd_pct": "-18.3%"
+        },
+        {
+          "corpus": "120KB",
+          "vs_zstd_pct": "+0.2%"
+        },
+        {
+          "corpus": "srctree.tar",
+          "vs_zstd_pct": "+5.1%"
+        },
+        {
+          "corpus": "multiversion",
+          "vs_zstd_pct": "+6.4%"
+        }
+      ],
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "PROGRESS, not uniform: the optimal DP parser is the BIGGEST mixed-data gain yet — it HALVED the gap to zstd (srctree +10.4%→+5.1%, multiversion +9.9%→+6.4%), regression-proof (competitive greedy/optimal pick, tuned byte-identical, holdout RT 6/6, 120KB restored, no regression). But does NOT beat zstd uniformly: still +5–6% behind on mixed tarball and near-duplicate versions; beats zstd on logs (−18%), ties on pure-duplicate, beats gzip on ALL. The remaining ~5%: the hash-chain match finder yields fewer candidates than zstd's binary tree, and the DP cost model is not repeat-offset-aware. Closing it needs a binary-tree/suffix-automaton match finder feeding the DP (H-25j). Optimal parse ~27s for 1.5MB — max-ratio path. NOT tuned to any corpus.",
+        "ru": "ПРОГРЕСС, не равномерно: optimal DP-парсер — крупнейший выигрыш на mixed-данных за всё время — сократил разрыв до zstd ВДВОЕ (srctree +10.4%→+5.1%, multiversion +9.9%→+6.4%), regression-proof (competitive greedy/optimal выбор, tuned byte-identical, holdout RT 6/6, 120KB восстановлен, без регрессии). Но НЕ бьёт zstd равномерно: всё ещё +5–6% позади на mixed tarball и near-duplicate версиях; бьёт zstd на логах (−18%), tied на pure-duplicate, бьёт gzip на ВСЕХ. Оставшиеся ~5%: hash-chain match finder даёт меньше кандидатов, чем binary-tree zstd, и DP-cost-модель не учитывает repeat-offset. Закрыть — binary-tree/suffix-automaton match finder, питающий DP (H-25j). Optimal parse ~27с на 1.5MB — путь max-ratio. Без подгонки к корпусу."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": 5.1,
+      "effect": {
+        "en": "Halved the zstd gap on mixed data: source tarball +10.4% → +5.1%, versioned files +9.9% → +6.4%; beats zstd 18% on logs.",
+        "ru": "Сократил разрыв до zstd вдвое на разнородных данных: tarball исходников +10,4% → +5,1%, версионные файлы +9,9% → +6,4%; бьёт zstd на 18% на логах."
+      },
+      "verdict_line": {
+        "en": "An optimal parse was the biggest mixed-data gain yet — it halved the gap to zstd, though zstd still leads by 5–6%. Overall record unchanged.",
+        "ru": "Оптимальный разбор дал крупнейший выигрыш на разнородных данных — сократил разрыв до zstd вдвое, хотя zstd всё ещё впереди на 5–6%. Рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25h",
+      "title": {
+        "en": "repeat-offset-aware cost-optimal LZ parse (zstd's repcode lever) — marginal; the zstd gap is parse optimality",
+        "ru": "cost-optimal LZ-парс с учётом repeat-offset (рычаг repcode zstd) — маргинально; разрыв до zstd в оптимальности парса"
+      },
+      "meaning": {
+        "en": "zstd still wins on a mixed tarball (+11%); the lever is the repcode — a short match at a recent offset (~3 bits) can out-save a longer match at a new offset (~16-26 bits). Pick max-net-saving among the longest match and the 3 recent offsets.",
+        "ru": "zstd всё ещё выигрывает на mixed tarball (+11%); рычаг — repcode: короткий матч на недавнем offset'е (~3 бита) может дать больше экономии, чем длинный на новом offset'е (~16-26 бит). Выбирать max-net-saving среди longest-матча и 3 недавних offset'ов."
+      },
+      "status": "MARGINAL",
+      "aggregate": null,
+      "vs_zstd": [
+        {
+          "corpus": "repeated.log",
+          "vs_zstd_pct": "-18%"
+        },
+        {
+          "corpus": "multiversion",
+          "vs_zstd_pct": "+9.9%"
+        },
+        {
+          "corpus": "srctree.tar",
+          "vs_zstd_pct": "+10.4%"
+        }
+      ],
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "MARGINAL: the repcode parse is the CORRECT algorithm and improves real long-range data (srctree −0.7%, multiversion −0.2%), regression-proof + byte-exact — but no uniform zstd-beat. The mixed-tarball +10% is FUNDAMENTAL: ~72K distinct cross-file offsets × ~16 bits = ~143KB offset floor, driven by MATCH COUNT. zstd wins via its BTULTRA optimal parser (fewer/longer matches). Deeper hash chains barely helped — the lever is parse OPTIMALITY, not search depth. Net: beats zstd on logs (−18%), ties on pure-duplicate, ~10% behind on tarballs; beats gzip on ALL. Next: H-25i btultra-class optimal parser.",
+        "ru": "МАРГИНАЛЬНО: repcode-парс — ПРАВИЛЬНЫЙ алгоритм, улучшает реальные long-range данные (srctree −0.7%, multiversion −0.2%), regression-proof + byte-exact — но не равномерная победа над zstd. +10% на mixed tarball ФУНДАМЕНТАЛЬНЫ: ~72K различных cross-file offset'ов × ~16 бит = ~143KB пол offset'ов, определяется ЧИСЛОМ МАТЧЕЙ. zstd выигрывает своим BTULTRA optimal parser (меньше/длиннее матчей). Более глубокие hash-chains почти не помогли — рычаг это ОПТИМАЛЬНОСТЬ парса, не глубина поиска. Итог: бьёт zstd на логах (−18%), tied на pure-duplicate, ~10% позади на tarball; бьёт gzip на ВСЕХ. Дальше: H-25i btultra-class optimal parser."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": 10.4,
+      "effect": {
+        "en": "On a big source tarball: 286447 → 284369 bytes (beats gzip 11%, still +10.4% behind zstd); crushes gzip 64% on versioned files; beats zstd 18% on logs.",
+        "ru": "На большом tarball исходников: 286447 → 284369 байт (бьёт gzip на 11%, всё ещё +10,4% позади zstd); разносит gzip на 64% на версионных файлах; бьёт zstd на 18% на логах."
+      },
+      "verdict_line": {
+        "en": "The right algorithm, small real gains — the big mixed-file gap comes down to how many distinct matches the data holds, not the coder. Overall record unchanged.",
+        "ru": "Правильный алгоритм, малые реальные выигрыши — большой разрыв на разнородных файлах упирается в число различных совпадений в данных, а не в кодер. Рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25g",
+      "title": {
+        "en": "combined sequence coder for MODE_LZ — MATCHES zstd-19 on long-range data",
+        "ru": "combined sequence coder для MODE_LZ — СРАВНЯЛСЯ с zstd-19 на long-range данных"
+      },
+      "meaning": {
+        "en": "The remaining 2.5% gap to zstd was framing: ~8 separate rANS streams each paid a fixed table+state. zstd interleaves the sequence codes (literal-length, match-length, offset) into one stream with shared state — restructure the same way and drop the per-token flag stream.",
+        "ru": "Оставшиеся 2.5% до zstd были framing'ом: ~8 раздельных rANS-потоков, каждый платил фикс. таблицу+состояние. zstd интерливит коды последовательностей (literal-length, match-length, offset) в один поток с общим состоянием — перестроить так же и убрать поток per-token флагов."
+      },
+      "status": "WIN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "WIN (long-range): the combined sequence coder closes the gap — 120KB 5335→5211 vs zstd 5202 (0.17% behind, within 9 BYTES), beats gzip by 25%, all regression-proof + byte-exact. Cubrim now MATCHES zstd-19 on long-range/duplicate data. The H-25f re-diagnosis was right — it was framing, not literals. Holdout unchanged (0.2390): diverse data has no cross-block repeats, its ceiling is the local BWT-family coder (~gzip parity). The H-25 LZ arc: from NO-GO to zstd-19 parity on long-range, every step measured on a disjoint holdout, never tuned to it.",
+        "ru": "ПОБЕДА (long-range): combined sequence coder закрывает разрыв — 120KB 5335→5211 vs zstd 5202 (0.17% позади, в пределах 9 БАЙТ), бьёт gzip на 25%, всё regression-proof + byte-exact. Cubrim теперь СРАВНЯЛСЯ с zstd-19 на long-range/дубль-данных. Ре-диагностика H-25f была верна — это был framing, не литералы. Holdout без изменений (0.2390): у разнородных данных нет cross-block повторов, их потолок — локальный кодер BWT-семейства (~паритет gzip). Дуга H-25 LZ: от NO-GO до паритета с zstd-19 на long-range, каждый шаг измерен на disjoint holdout, без подгонки."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": 0.17,
+      "effect": {
+        "en": "On long-range data: 5335 → 5211 bytes — within 9 bytes of zstd-19 (essentially tied) and 25% better than gzip.",
+        "ru": "На long-range данных: 5335 → 5211 байт — в 9 байтах от zstd-19 (по сути ничья) и на 25% лучше gzip."
+      },
+      "verdict_line": {
+        "en": "Packing the codes into one shared stream like zstd matched zstd-19 on long-range files; overall record unchanged.",
+        "ru": "Упаковка кодов в один общий поток как у zstd сравняла с zstd-19 на long-range файлах; рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25f",
+      "title": {
+        "en": "dedicated literal coder for the LZ residue — marginal; the gap is framing, not literals",
+        "ru": "выделенный кодер литералов для LZ-остатка — маргинально; разрыв в framing, а не литералах"
+      },
+      "meaning": {
+        "en": "H-25e attributed the 3% gap to zstd to literal coding — add a dedicated literal coder (pick order-0 / order-1 / cube per residue) and close it.",
+        "ru": "H-25e отнёс 3% разрыва до zstd к кодированию литералов — добавить выделенный кодер литералов (выбор order-0 / order-1 / cube по остатку) и закрыть его."
+      },
+      "status": "MARGINAL",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-24",
+      "note": {
+        "en": "MARGINAL + honest re-diagnosis: the coder is real and regression-proof but only shaved 24B (120KB 5359→5335, gap to zstd 3.0%→2.5%). The H-25e premise was partly wrong — the residue was already near order-0 entropy. The real remaining gap is LZ FRAMING/SEQUENCE overhead (separate token streams + per-token flags + headers) vs zstd's combined-FSE sequence coding with shared state. Holdout unchanged (0.2390).",
+        "ru": "МАРГИНАЛЬНО + честная ре-диагностика: кодер реален и regression-proof, но дал лишь 24Б (120KB 5359→5335, разрыв до zstd 3.0%→2.5%). Премиса H-25e была частично неверна — остаток уже был у order-0 энтропии. Настоящий оставшийся разрыв — это LZ FRAMING/SEQUENCE overhead (раздельные token-потоки + per-token флаги + заголовки) против combined-FSE sequence-кодирования zstd с общим состоянием. Holdout без изменений (0.2390)."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": 2.5,
+      "effect": {
+        "en": "On duplicate-heavy files: 5359 → 5335 bytes (24 bytes); the zstd gap narrowed 3.0% → 2.5%.",
+        "ru": "На файлах с повторами: 5359 → 5335 байт (24 байта); отставание от zstd сузилось 3,0% → 2,5%."
+      },
+      "verdict_line": {
+        "en": "A dedicated coder for the leftover bytes only shaved 24 bytes — the real gap turned out to be framing, not the bytes themselves. Overall record unchanged.",
+        "ru": "Отдельный кодер для остаточных байтов дал лишь 24 байта — настоящий разрыв оказался в обвязке, а не в самих байтах. Рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25e",
+      "title": {
+        "en": "cost-aware / lazy LZ parse (the real zstd lever) — beats gzip 23%, within 3% of zstd on long-range",
+        "ru": "cost-aware / lazy LZ-парс (настоящий рычаг zstd) — бьёт gzip на 23%, в 3% от zstd на long-range"
+      },
+      "meaning": {
+        "en": "A debug breakdown showed the gap was a PARSE problem, not entropy: greedy LZ took 2424 junk short matches at far offsets. The real zstd lever is the optimal/lazy parse — take a match only when its coded cost beats the literals it replaces.",
+        "ru": "Разбор показал, что разрыв — это проблема ПАРСА, а не энтропии: greedy LZ брал 2424 мусорных коротких матча на далёких offset'ах. Настоящий рычаг zstd — оптимальный/lazy парс: брать матч только когда его кодированная стоимость меньше заменяемых литералов."
+      },
+      "status": "WIN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "PARTIAL-WIN: cost-aware parse cut matches 2424→16; on 120KB long-range Cubrim 6934→5359 — BEATS gzip by 23% AND narrows to zstd from 33% behind to 3% (157B). Does not yet beat zstd (the 3% is literal coding). Holdout unchanged (0.2390, MODE_LZ 0/6) — diverse files lack the cross-block structure whole-file LZ needs. rANS already equals FSE, so the lever was the parse, not the entropy back-end.",
+        "ru": "ЧАСТИЧНАЯ ПОБЕДА: cost-aware парс сократил матчи 2424→16; на 120KB long-range Cubrim 6934→5359 — БЬЁТ gzip на 23% И сокращает разрыв до zstd с 33% до 3% (157B). Пока не бьёт zstd (эти 3% — кодирование литералов). Holdout без изменений (0.2390, MODE_LZ 0/6) — разнородным файлам не хватает cross-block структуры, нужной whole-file LZ. rANS уже равен FSE, так что рычагом был парс, а не энтропийный back-end."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": 3.0,
+      "effect": {
+        "en": "On duplicate-heavy files: 6934 → 5359 bytes — beats gzip by 23% and closes to within 3% of zstd. Trimmed junk matches 2424 → 16.",
+        "ru": "На файлах с повторами: 6934 → 5359 байт — бьёт gzip на 23% и подходит к zstd на 3%. Срезал мусорные совпадения 2424 → 16."
+      },
+      "verdict_line": {
+        "en": "Taking a match only when it actually pays off works on duplicate-heavy files (23% better than gzip); overall record unchanged.",
+        "ru": "Брать совпадение только когда оно реально окупается — работает на файлах с повторами (на 23% лучше gzip); рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25d",
+      "title": {
+        "en": "whole-file LZ pre-pass before chunking (MODE_LZ) — first gzip win on long-range",
+        "ru": "whole-file LZ-препасс до чанкинга (MODE_LZ) — первая победа над gzip на long-range"
+      },
+      "meaning": {
+        "en": "The 64KB chunk boundary capped LZ reach, so cross-block repeats (where gzip/zstd window-match) were unreachable. Fix it at the container level: a whole-file LZ pre-pass BEFORE chunking, as a new mode — regression-proof via the competitive size pick.",
+        "ru": "64KB chunk-граница ограничивала дальность LZ, поэтому cross-block повторы (где gzip/zstd выигрывают окном) были недостижимы. Починить на уровне контейнера: whole-file LZ-препасс ДО чанкинга, как новый режим — regression-proof через competitive size-pick."
+      },
+      "status": "CLOSED",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "MIXED — the lever WORKS and is regression-proof: on genuine cross-block long-range data Cubrim BEATS GZIP for the first time (120KB multi-copy 6934 < gzip 6950), 2× better than chunked-only, ZERO tuned-corpus regression. BUT it does not help diverse real data — the holdout lacks cross-block repeats (unchanged 0.2390, selected 0/6) and zstd still leads. Whole-file LZ beats gzip only on genuinely long-range/duplicate data.",
+        "ru": "СМЕШАННЫЙ — рычаг РАБОТАЕТ и regression-proof: на настоящих cross-block long-range данных Cubrim ВПЕРВЫЕ БЬЁТ GZIP (120KB multi-copy 6934 < gzip 6950), 2× лучше чанк-онли, НОЛЬ регрессии на тюненом корпусе. НО разнородным реальным данным не помогает — у holdout нет cross-block повторов (без изменений 0.2390, выбран 0/6), zstd всё ещё впереди. Whole-file LZ бьёт gzip только на по-настоящему long-range/дубль-данных."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "First-ever gzip win on long-range data: 6934 vs gzip 6950 bytes (−16), 2× better than before. But diverse files don't repeat each other, so unseen data was unchanged.",
+        "ru": "Первая в истории победа над gzip на long-range данных: 6934 против gzip 6950 байт (−16), 2× лучше прежнего. Но разнородные файлы не повторяют друг друга, поэтому новые данные без изменений."
+      },
+      "verdict_line": {
+        "en": "A whole-file pass before chunking beats gzip on genuinely long-range data — but only there; diverse files have nothing to exploit. Overall record unchanged.",
+        "ru": "Проход по всему файлу до нарезки бьёт gzip на по-настоящему long-range данных — но только там; разнородным файлам нечего использовать. Рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25c",
+      "title": {
+        "en": "LzRans repeat-offset distance cache + order-1 literals (re-open of H-25b)",
+        "ru": "LzRans с repeat-offset кэшем дистанций + order-1 литералы (re-open H-25b)"
+      },
+      "meaning": {
+        "en": "The real LZ lever is LONG-RANGE structure beyond a single block — add zstd's actual win: a repeat-offset distance cache (reuse a recent offset in ~2 bits) plus a lighter literal coder picking min(order-0, order-1).",
+        "ru": "Настоящий рычаг LZ — это LONG-RANGE структура за пределами одного блока — добавить настоящий выигрыш zstd: repeat-offset кэш дистанций (переиспользовать недавний offset за ~2 бита) плюс лёгкий кодер литералов min(order-0, order-1)."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "NO-GO (ratio) but the lever is real: on single-block long-range data LzRans WINS the rail for the first time (−29% vs geomix, 6867 vs 9628). Ceiling located precisely — Cubrim's 64KB chunk boundary caps LZ reach, so cross-block long-range repeats (where gzip/zstd window-match) are unreachable. Re-open: a WHOLE-FILE LZ pre-pass before chunking — an architecture change, not a value-scheme.",
+        "ru": "NO-GO (по сжатию), но рычаг реален: на single-block long-range данных LzRans впервые ВЫИГРЫВАЕТ рейл (−29% vs geomix, 6867 vs 9628). Потолок локализован точно — 64KB chunk-граница Cubrim ограничивает дальность LZ, поэтому cross-block long-range повторы (где выигрывают gzip/zstd окном) недостижимы. Re-open: whole-file LZ-препасс ДО чанкинга — изменение архитектуры, не value-схемы."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "On within-block repeats LZ won the rail for the first time (6867 bytes, −29% vs the champion) — but a 120KB multi-block input was 2× worse than gzip: the 64KB block boundary blocks long-range reach.",
+        "ru": "На повторах внутри блока LZ впервые выиграл рейл (6867 байт, −29% к чемпиону) — но 120КБ многоблочный вход оказался 2× хуже gzip: граница блока 64КБ режет дальность."
+      },
+      "verdict_line": {
+        "en": "The mechanism is real, but the 64KB block boundary caps how far it can reach. Ceiling located precisely; re-open needs a whole-file pass before chunking.",
+        "ru": "Механизм реален, но граница блока 64КБ ограничивает дальность. Потолок локализован точно; переоткрыть нужен проход по всему файлу до нарезки."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25b",
+      "title": {
+        "en": "LzRans strengthened: order-0 literals + byte-split distance coding (re-open of H-25)",
+        "ru": "усиленный LzRans: order-0 литералы + byte-split кодирование дистанций (re-open H-25)"
+      },
+      "meaning": {
+        "en": "H-25's NO-GO had two measured overheads, not a fundamental flaw: fix the raw distance bits (byte-split into order-0 rANS) and the heavy order-1 literal table (lighter order-0 coder) and the −24% probe floor may be reachable.",
+        "ru": "NO-GO в H-25 был из-за двух измеренных overhead'ов, а не фундаментального изъяна: починить сырые биты дистанций (byte-split в order-0 rANS) и тяжёлую order-1 таблицу литералов (лёгкий order-0 кодер) — и пол пробника −24% может стать достижимым."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "NO-GO (ratio) — but real progress: the fixes worked (LZ went from 2× worse to beating 4 of 7 sibling schemes, e.g. exe.bin 2× better), yet it still loses to the geomix champion per-file (selected 0/6, holdout unchanged 0.2390). On ≤64KB cube blocks BWT+geomix already extracts the local redundancy. Re-open: order-1 literal coder + a repeat-offset distance cache (zstd's real lever).",
+        "ru": "NO-GO (по сжатию) — но прогресс реальный: фиксы сработали (LZ из 2× хуже стал бить 4 из 7 родственных схем, напр. exe.bin 2× лучше), но всё ещё проигрывает чемпиону geomix per-file (выбран 0/6, holdout без изменений 0.2390). На ≤64KB cube-блоках BWT+geomix уже извлекает локальную избыточность. Re-open: order-1 кодер литералов + repeat-offset кэш дистанций (настоящий рычаг zstd)."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "The fixes worked — LZ went from 2× worse to 2× better on a big binary (exe 16619 vs 33042 bytes) — but still loses to the champion per file (selected 0/6).",
+        "ru": "Фиксы сработали — LZ из 2× хуже стал 2× лучше на большом бинарнике (exe 16619 против 33042 байт) — но всё ещё проигрывает чемпиону по файлам (выбран 0/6)."
+      },
+      "verdict_line": {
+        "en": "The two overheads were real and now fixed, yet on small blocks the champion already extracts the redundancy. Ceiling found; re-open with a recent-offset cache.",
+        "ru": "Два overhead'а были реальны и теперь исправлены, но на малых блоках чемпион уже извлекает избыточность. Потолок найден; переоткрыть с кэшем недавних смещений."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-25",
+      "title": {
+        "en": "LZ77 match modeling as a new ValueScheme (scheme 12, LzRans)",
+        "ru": "LZ77-моделирование совпадений как новая ValueScheme (scheme 12, LzRans)"
+      },
+      "meaning": {
+        "en": "The holdout gap to gzip/zstd is entirely LZ dictionary matching (long-range repeats) that the cube+BWT+rANS pipeline has no model for — add an LZ77 front-end: literals via the BWT+rANS backend, match length/distance streams entropy-coded with rANS.",
+        "ru": "Весь разрыв до gzip/zstd на holdout — это LZ-словарное сопоставление (длинные повторы), которого у pipeline cube+BWT+rANS нет — добавить LZ77 front-end: литералы через BWT+rANS backend, потоки длины/дистанции совпадений энтропийно кодировать rANS."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "NO-GO (ratio) — implemented, regression-proof and round-trip-clean, but the −24% probe floor is not realized: raw distance extra-bits + a heavy order-1 literal table land it at ~+15% over gzip on the holdout (never selected 0/6). Re-open needs context-entropy distance coding (zstd-style FSE) + a lighter literal coder.",
+        "ru": "NO-GO (по сжатию) — реализовано, regression-proof, round-trip-чисто, но −24% пол пробника не достигнут: сырые extra-биты дистанций + тяжёлая order-1 таблица литералов дают ~+15% над gzip на holdout (выбрано 0/6). Re-open требует контекст-энтропийного кодирования дистанций (zstd-style FSE) + лёгкого кодера литералов."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Reached ~+15% over gzip on unseen data; never selected (0 of 6 files). The promising −24% ceiling stayed out of reach.",
+        "ru": "Достигли ~+15% над gzip на новых данных; ни разу не выбрано (0 из 6 файлов). Многообещающий потолок −24% остался недостижим."
+      },
+      "verdict_line": {
+        "en": "Tested LZ match-modelling: theoretical ceiling −24%, but raw distance bits and a heavy literal table land it +15% over gzip. Ceiling not reached; re-open with better coding.",
+        "ru": "Проверили LZ-моделирование совпадений: потолок −24%, но сырые биты дистанций и тяжёлая таблица литералов дают +15% над gzip. Потолок не взят; переоткрыть с лучшим кодированием."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-24",
+      "title": {
+        "en": "geometric / logistic mixing (scheme 11, BwtGeoMix) — the gzip milestone",
+        "ru": "геометрическое / логистическое микширование (scheme 11, BwtGeoMix) — рубеж gzip"
+      },
+      "meaning": {
+        "en": "Replace H-22's linear (arithmetic-mean) probability mix with a logistic (geometric-mean) mix in the stretch/squash domain — the standard PAQ-family context-mixing combiner.",
+        "ru": "Заменить линейный (среднее-арифметическое) микс вероятностей из H-22 на логистический (среднее-геометрическое) микс в домене stretch/squash — стандартный комбинатор контекст-микширования семейства PAQ."
+      },
+      "status": "GO",
+      "aggregate": 0.158273,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−5.91% rel",
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "GO — and the gzip-parity milestone is reached (0.158273 edges gzip 0.159674 on the tuned corpus; see the honest caveat above).",
+        "ru": "GO — и рубеж паритета с gzip достигнут (0.158273 чуть ниже gzip 0.159674 на отлаженном корпусе; см. честную оговорку выше)."
+      },
+      "race": {
+        "aggregate": 0.158273,
+        "delta": "−5.91% rel",
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Ratio improved to 0.158273 (−5.91%) and beat gzip-9 by 164 bytes — the gzip-parity milestone.",
+        "ru": "Коэф. улучшился до 0.158273 (−5,91%) и обошёл gzip-9 на 164 байта — рубеж паритета с gzip."
+      },
+      "verdict_line": {
+        "en": "Compression improved 5.91% overall; beat gzip-9 by 164 bytes. Decompression verified byte-for-byte.",
+        "ru": "Сжатие улучшилось на 5,91% в целом; обошли gzip-9 на 164 байта. Распаковка проверена — байт-в-байт."
+      },
+      "measured": {
+        "en": "aggregate 0.168227 → 0.158273 (−5.91% rel); edges gzip-9 0.159674 by 164 B; RT 10/10 byte-exact.",
+        "ru": "агрегат 0.168227 → 0.158273 (−5.91% rel); обходит gzip-9 0.159674 на 164 Б; RT 10/10 byte-exact."
+      }
+    },
+    {
+      "id": "H-23",
+      "title": {
+        "en": "interleaved / SIMD rANS (throughput, not ratio)",
+        "ru": "интерливленный / SIMD rANS (пропускная способность, не степень сжатия)"
+      },
+      "meaning": {
+        "en": "Interleave N independent rANS streams so a SIMD/ILP decoder processes N symbols per step — a throughput optimisation per the brief, explicitly NOT a ratio play.",
+        "ru": "Интерливить N независимых rANS-потоков, чтобы SIMD/ILP-декодер обрабатывал N символов за шаг — оптимизация пропускной способности по брифу, явно НЕ про степень сжатия."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "NO-GO for the ratio leaderboard (+11 B/file); the 2.35× decode speedup is banked as a throughput-only result.",
+        "ru": "NO-GO для лидерборда по сжатию (+11 Б/файл); ускорение декода в 2,35× зачтено как результат только по пропускной способности."
+      },
+      "race": {
+        "aggregate": 0.168262,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Size got slightly worse (+11 bytes/file) but decode ran 2.35× faster — a speed result, explicitly not a compression one.",
+        "ru": "Размер чуть ухудшился (+11 байт/файл), зато декод стал 2,35× быстрее — результат по скорости, явно не по сжатию."
+      },
+      "verdict_line": {
+        "en": "Splitting into parallel streams cost 11 bytes/file but ran decode 2.35× faster — banked as a throughput win, not a ratio one. Overall record unchanged.",
+        "ru": "Разбиение на параллельные потоки стоило 11 байт/файл, но ускорило декод в 2,35× — зачтено как выигрыш по скорости, не по сжатию. Рекорд не сдвинулся."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-22",
+      "title": {
+        "en": "context-mixing (learned-weight order-1 + order-0 mix)",
+        "ru": "контекст-микширование (микс order-1 + order-0 с обучаемым весом)"
+      },
+      "meaning": {
+        "en": "Mix two adaptive predictors — an order-1 model (sharp on local BWT runs) and an order-0 model (robust where order-1 has thin statistics) — combining their probabilities.",
+        "ru": "Смешать два адаптивных предиктора — order-1 модель (острая на локальных BWT-сериях) и order-0 модель (устойчивая там, где у order-1 мало статистики) — комбинируя их вероятности."
+      },
+      "status": "GO",
+      "aggregate": 0.168262,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−24.11% rel",
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "GO — aggregate 0.168262, the learned-weight mix beats either model alone.",
+        "ru": "GO — агрегат 0.168262, микс с обучаемым весом обходит каждую модель по отдельности."
+      },
+      "race": {
+        "aggregate": 0.168262,
+        "delta": "−24.11% rel",
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Blending two predictors (sharp + robust) dropped the ratio to 0.168262 (−24.11%), beating either one alone.",
+        "ru": "Смешивание двух предикторов (острый + устойчивый) снизило коэф. до 0.168262 (−24,11%), обойдя каждый по отдельности."
+      },
+      "verdict_line": {
+        "en": "Combining a sharp and a robust model beat both. Decompression verified byte-for-byte.",
+        "ru": "Комбинация острой и устойчивой модели обошла обе. Распаковка проверена — байт-в-байт."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-21",
+      "title": {
+        "en": "adaptive (online) order-1 range coding, no transmitted frequency tables",
+        "ru": "адаптивное (онлайн) order-1 range-кодирование без передачи таблиц частот"
+      },
+      "meaning": {
+        "en": "Every scheme so far (Huffman, static rANS, order-2 rANS) TRANSMITS its frequency model in the header; an adaptive coder learns it online and ships zero tables.",
+        "ru": "Все схемы до сих пор (Хаффман, статический rANS, order-2 rANS) ПЕРЕДАЮТ модель частот в шапке; адаптивный кодер учит её онлайн и не отгружает таблиц."
+      },
+      "status": "GO",
+      "aggregate": 0.177122,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−20.12% rel",
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "GO — aggregate 0.177122, the zero-table model frees the cost Gotcha #6 keeps charging.",
+        "ru": "GO — агрегат 0.177122, модель без таблиц убирает издержку, которую раз за разом начисляет Gotcha #6."
+      },
+      "race": {
+        "aggregate": 0.177122,
+        "delta": "−20.12% rel",
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Learning the model on the fly (shipping zero frequency tables) cut the ratio to 0.177122 (−20.12%).",
+        "ru": "Обучение модели на лету (без передачи таблиц частот) снизило коэф. до 0.177122 (−20,12%)."
+      },
+      "verdict_line": {
+        "en": "Dropping the transmitted tables and learning them live removed real overhead. Decompression verified byte-for-byte.",
+        "ru": "Отказ от передаваемых таблиц в пользу обучения вживую убрал реальный overhead. Распаковка проверена — байт-в-байт."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-20",
+      "title": {
+        "en": "order-2 context rANS (deeper context model on the BWT'd value stream)",
+        "ru": "order-2 контекстный rANS (более глубокая контекст-модель на BWT-потоке значений)"
+      },
+      "meaning": {
+        "en": "The H-19 champion BwtRans (scheme 7) uses an order-1 context rANS (context = previous code); order-2 context predicts the BWT'd stream more sharply.",
+        "ru": "Чемпион H-19 BwtRans (scheme 7) использует order-1 контекстный rANS (контекст = предыдущий код); order-2 контекст предсказывает BWT-поток острее."
+      },
+      "status": "GO",
+      "aggregate": 0.207618,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−6.36% rel",
+      "per_file": [
+        {
+          "file": "text",
+          "from": 3177,
+          "to": 2889
+        },
+        {
+          "file": "sparse_clustered",
+          "from": 443,
+          "to": 400
+        }
+      ],
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "GO — aggregate improves to 0.207618, the 2-level layout wins where order-2 captures BWT-grouped runs.",
+        "ru": "GO — агрегат улучшается до 0.207618, 2-уровневая раскладка выигрывает там, где order-2 ловит BWT-сгруппированные серии."
+      },
+      "race": {
+        "aggregate": 0.207618,
+        "delta": "−6.36% rel",
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "A deeper context model dropped the ratio to 0.207618 (−6.36%) where it catches longer repeated patterns.",
+        "ru": "Более глубокая контекст-модель снизила коэф. до 0.207618 (−6,36%) там, где ловит более длинные повторы."
+      },
+      "verdict_line": {
+        "en": "Looking two symbols back instead of one improved the prediction. Decompression verified byte-for-byte.",
+        "ru": "Взгляд на два символа назад вместо одного улучшил предсказание. Распаковка проверена — байт-в-байт."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-19",
+      "title": {
+        "en": "ANS / tANS (asymmetric numeral systems) replacing canonical Huffman",
+        "ru": "ANS / tANS (асимметричные системы счисления) вместо канонического Хаффмана"
+      },
+      "meaning": {
+        "en": "Replace the codec's canonical Huffman entropy coder (order-0/1 and the BWT+order-1 leader) with ANS/tANS (or range coding) to code in fractional bits.",
+        "ru": "Заменить канонический энтропийный кодер Хаффмана (order-0/1 и лидер BWT+order-1) на ANS/tANS (или range coding), чтобы кодировать дробными битами."
+      },
+      "status": "GO",
+      "aggregate": 0.221726,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−25.9% relative",
+      "per_file": [
+        {
+          "file": "block_bound_runs",
+          "from": 9011,
+          "to": 4169
+        },
+        {
+          "file": "log_like",
+          "from": 5178,
+          "to": 1402
+        },
+        {
+          "file": "text",
+          "from": 3583,
+          "to": 3177
+        },
+        {
+          "file": "sparse_clustered",
+          "from": 502,
+          "to": 443
+        }
+      ],
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "GO (IMPLEMENTED + MEASURED) — ValueScheme byte 7, BwtRans (BWT + order-1 rANS).",
+        "ru": "GO (РЕАЛИЗОВАНО + ИЗМЕРЕНО) — ValueScheme byte 7, BwtRans (BWT + order-1 rANS)."
+      },
+      "race": {
+        "aggregate": 0.221726,
+        "delta": "−25.9% rel",
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Switching the final coder to ANS/rANS cut the ratio to 0.221726 (−25.9% overall) — fractional-bit coding beats whole-bit Huffman.",
+        "ru": "Замена финального кодера на ANS/rANS снизила коэф. до 0.221726 (−25,9% в целом) — кодирование дробными битами обходит побитовый Хаффман."
+      },
+      "verdict_line": {
+        "en": "Coding in fractional bits instead of whole bits gave the biggest single jump yet. Decompression verified byte-for-byte.",
+        "ru": "Кодирование дробными битами вместо целых дало крупнейший скачок. Распаковка проверена — байт-в-байт."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-18c",
+      "title": {
+        "en": "Corpus-total size model: dedup vs gzip-on-concat (the real verdict)",
+        "ru": "Корпус-итоговая модель размера: дедупликация vs gzip-по-конкатенации (настоящий вердикт)"
+      },
+      "meaning": {
+        "en": "H-18b showed 74.84% RAW cross-file redundancy on the dedup-corpus, but raw redundancy is not a win — the honest test is whether a shipped shared-dictionary scheme beats gzip on the concatenated stream.",
+        "ru": "H-18b показал 74,84% СЫРОЙ кросс-файловой избыточности на dedup-корпусе, но сырая избыточность — не победа: честный тест — обходит ли отгружаемая схема общего словаря gzip на конкатенированном потоке."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": null,
+      "note": {
+        "en": "gzip's sliding window already captures versioned/near-duplicate repeats and shared boilerplate across a concatenated stream.",
+        "ru": "Скользящее окно gzip уже ловит версионные/почти-дублирующиеся повторы и общий boilerplate в конкатенированном потоке."
+      },
+      "race": {
+        "aggregate": 0.504412,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Even on an ideally redundant corpus, a custom shared-dictionary scheme lost to plain gzip on the concatenated stream.",
+        "ru": "Даже на идеально избыточном корпусе своя схема общего словаря проиграла обычному gzip на конкатенированном потоке."
+      },
+      "verdict_line": {
+        "en": "gzip's sliding window already captures versioned repeats and shared boilerplate — a bespoke dedup doesn't beat it. Ceiling confirmed; line closed.",
+        "ru": "Скользящее окно gzip уже ловит версионные повторы и общий boilerplate — своя дедупликация его не обходит. Потолок подтверждён; линия закрыта."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-18b",
+      "title": {
+        "en": "Re-test of corpus-local dedup on a redundant multi-file corpus (B)",
+        "ru": "Перепроверка корпус-локальной дедупликации на избыточном мульти-файловом корпусе (B)"
+      },
+      "meaning": {
+        "en": "The H-18 NO-GO was corpus-bound (the frozen corpus has ~0 cross-file redundancy).",
+        "ru": "NO-GO в H-18 был привязан к корпусу (у замороженного корпуса ~0 кросс-файловой избыточности)."
+      },
+      "status": "GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-23",
+      "note": {
+        "en": "conditional GO — the dedup mechanism is real and strong on redundant multi-file corpora.",
+        "ru": "условный GO — механизм дедупликации реален и силён на избыточных мульти-файловых корпусах."
+      },
+      "race": {
+        "aggregate": 0.504412,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "On a deliberately redundant corpus the dedup mechanism is real and strong (74.84% raw cross-file redundancy found).",
+        "ru": "На намеренно избыточном корпусе механизм дедупликации реален и силён (найдено 74,84% сырой кросс-файловой избыточности)."
+      },
+      "verdict_line": {
+        "en": "The mechanism works on redundant multi-file data — but raw redundancy isn't a win until it beats gzip on the concatenated stream (tested next, H-18c).",
+        "ru": "Механизм работает на избыточных мульти-файловых данных — но сырая избыточность не победа, пока не обойдёт gzip на конкатенированном потоке (проверено далее, H-18c)."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-18",
+      "title": {
+        "en": "Corpus-local deduplication against a charged shared dictionary",
+        "ru": "Корпус-локальная дедупликация против учтённого общего словаря"
+      },
+      "meaning": {
+        "en": "A self-contained archive that ships ONE shared dictionary inside the artefact and replaces repeated content within and across the corpus files with references into it.",
+        "ru": "Самодостаточный архив, несущий ОДИН общий словарь внутри артефакта и заменяющий повторяющийся контент внутри и между файлами корпуса ссылками в него."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-22",
+      "note": {
+        "en": "measured — NO-GO on the frozen corpus (cross-file dedup probe, 2026-06-22).",
+        "ru": "измерено — NO-GO на замороженном корпусе (проба кросс-файловой дедупликации, 2026-06-22)."
+      },
+      "race": {
+        "aggregate": 0.504412,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Cross-file dedup found nothing to remove on the frozen corpus — it has essentially no repeated content between files.",
+        "ru": "Кросс-файловая дедупликация не нашла что убрать на замороженном корпусе — у него практически нет повторов между файлами."
+      },
+      "verdict_line": {
+        "en": "Deduplication needs redundant files to work on; this corpus has almost none. Ceiling is the corpus, not the method — re-open only on redundant data.",
+        "ru": "Дедупликации нужны избыточные файлы; у этого корпуса их почти нет. Потолок — это корпус, а не метод — переоткрыть только на избыточных данных."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-17",
+      "title": {
+        "en": "External-address / global-snapshot lookup (16-byte universal reference)",
+        "ru": "Внешний адрес / глобальный снапшот (16-байтная универсальная ссылка)"
+      },
+      "meaning": {
+        "en": "Replace any file with a short fixed-width reference (16 bytes = 8-byte server/disk id + 8-byte snapshot id) into a global external library of cube bitmap snapshots.",
+        "ru": "Заменить любой файл короткой ссылкой фиксированной ширины (16 байт = 8-байтный id сервера/диска + 8-байтный id снапшота) в глобальную внешнюю библиотеку cube-снапшотов."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-22",
+      "note": {
+        "en": "A fixed-width reference of B bits addresses at most 2^B inputs — the pigeonhole closes the branch.",
+        "ru": "Ссылка фиксированной ширины в B бит адресует не более 2^B входов — принцип Дирихле закрывает ветвь."
+      },
+      "race": {
+        "aggregate": 0.504412,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Closed by arithmetic: a fixed B-bit reference can address at most 2^B inputs — it cannot stand in for arbitrary files.",
+        "ru": "Закрыто арифметикой: ссылка фиксированной ширины в B бит адресует не более 2^B входов — она не может заменить произвольные файлы."
+      },
+      "verdict_line": {
+        "en": "A short fixed-width reference can't uniquely point at every possible file — the pigeonhole principle rules it out. No measurement needed; closed.",
+        "ru": "Короткая ссылка фиксированной ширины не может однозначно указать на любой возможный файл — принцип Дирихле исключает это. Замер не нужен; закрыто."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-16",
+      "title": {
+        "en": "BWT Rust implementation (CUBR-0028, follow-up to H-13)",
+        "ru": "Реализация BWT на Rust (CUBR-0028, продолжение H-13)"
+      },
+      "meaning": {
+        "en": "Implementing `ValueScheme::BwtEntropy` (scheme byte 6) in Rust and measuring against the 7-file corpus confirms H-13's Python GO and produces a real aggregate ≤ 0.5754.",
+        "ru": "Реализация `ValueScheme::BwtEntropy` (scheme byte 6) на Rust и замер на 7-файловом корпусе подтверждают Python-GO из H-13 и дают реальный агрегат ≤ 0.5754."
+      },
+      "status": "WIN",
+      "aggregate": 0.504412,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−8.28% vs T4",
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-20",
+      "note": {
+        "en": "measured — GO (CUBR-0028, 2026-06-20, Rust).",
+        "ru": "измерено — GO (CUBR-0028, 2026-06-20, Rust)."
+      },
+      "race": {
+        "aggregate": 0.504412,
+        "delta": "−8.28% vs T4",
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Rust build hit ratio 0.504412 (−8.28% vs T4), comfortably under the 0.575495 bar it had to clear.",
+        "ru": "Сборка на Rust дала коэф. 0.504412 (−8,28% к T4), уверенно ниже планки 0.575495, которую надо было взять."
+      },
+      "verdict_line": {
+        "en": "The Python win held up in real Rust code — a genuine record. Decompression verified byte-for-byte.",
+        "ru": "Выигрыш из Python подтвердился в реальном Rust-коде — настоящий рекорд. Распаковка проверена — байт-в-байт."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-15",
+      "title": {
+        "en": "Distance-map enhancement on the canonical corpus (CUBR-0028)",
+        "ru": "Улучшение карты расстояний на каноническом корпусе (CUBR-0028)"
+      },
+      "meaning": {
+        "en": "An enhanced distance-map encoding (beyond RLE of gap=1) can improve compression on the canonical 7-file corpus.",
+        "ru": "Улучшенное кодирование карты расстояний (сверх RLE для gap=1) может улучшить сжатие на каноническом 7-файловом корпусе."
+      },
+      "status": "NO-GO",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-20",
+      "note": {
+        "en": "measured — NO-GO (CUBR-0028, 2026-06-20).",
+        "ru": "измерено — NO-GO (CUBR-0028, 2026-06-20)."
+      },
+      "race": {
+        "aggregate": 0.504412,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "An enhanced distance-map encoding didn't improve the canonical corpus — the existing gap=1 run-length already captures the structure.",
+        "ru": "Улучшенное кодирование карты расстояний не улучшило канонический корпус — существующий RLE для gap=1 уже ловит структуру."
+      },
+      "verdict_line": {
+        "en": "There was no extra structure in the distance map left to exploit. Ceiling found; next lever.",
+        "ru": "В карте расстояний не осталось дополнительной структуры для использования. Потолок найден — к следующему рычагу."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-14",
+      "title": {
+        "en": "Byte-level pre-processing (delta/MTF/stride-2 transforms, CUBR-0028)",
+        "ru": "Байт-уровневая предобработка (delta/MTF/stride-2, CUBR-0028)"
+      },
+      "meaning": {
+        "en": "Invertible byte-level transforms applied before T4's Huffman reduce n_distinct (the symbol alphabet), lowering both table overhead and bitstream size.",
+        "ru": "Обратимые байт-уровневые преобразования перед Хаффманом T4 снижают n_distinct (алфавит символов), уменьшая и оверхед таблиц, и размер битстрима."
+      },
+      "status": "NO-GO",
+      "aggregate": 0.586365,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−0.149% vs T4",
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-20",
+      "note": {
+        "en": "measured — NO-GO (CUBR-0028, 2026-06-20).",
+        "ru": "измерено — NO-GO (CUBR-0028, 2026-06-20)."
+      },
+      "race": {
+        "aggregate": 0.504412,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Byte-level pre-transforms left the ratio essentially flat (0.586365, −0.149% vs T4) — no real gain.",
+        "ru": "Байт-уровневые предобразования оставили коэф. почти без изменений (0.586365, −0,149% к T4) — реального выигрыша нет."
+      },
+      "verdict_line": {
+        "en": "Reshuffling bytes before coding didn't shrink the alphabet enough to matter. Ceiling found; next lever.",
+        "ru": "Перетасовка байтов перед кодированием не сократила алфавит настолько, чтобы это имело значение. Потолок найден — к следующему рычагу."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-13",
+      "title": {
+        "en": "BWT-style value-stream reordering (CUBR-0028)",
+        "ru": "BWT-переупорядочивание потока значений (CUBR-0028)"
+      },
+      "meaning": {
+        "en": "Applying the Burrows-Wheeler Transform to the value-code stream before T4's order-1 per-code Huffman reduces H(X_t|X_{t-1}) on structured inputs (text, log-like).",
+        "ru": "Применение преобразования Барроуза-Уилера к потоку value-кодов перед order-1 Хаффманом T4 снижает H(X_t|X_{t-1}) на структурированных входах (текст, лог-подобные)."
+      },
+      "status": "GO",
+      "aggregate": 0.504412,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−20.971% vs T4",
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-20",
+      "note": {
+        "en": "GO — Python probe 2026-06-20.",
+        "ru": "GO — Python-проба 2026-06-20."
+      },
+      "race": {
+        "aggregate": 0.504412,
+        "delta": "−20.971% vs T4",
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Compression ratio dropped to 0.504412 (−20.97% vs the T4 baseline) — the first big win from rearranging the value stream before coding.",
+        "ru": "Коэф. сжатия упал до 0.504412 (−20,97% к базовой линии T4) — первый крупный выигрыш от переупорядочивания потока значений перед кодированием."
+      },
+      "verdict_line": {
+        "en": "Reordering the data the BWT way before coding paid off; confirmed in Rust at H-16. Decompression verified byte-for-byte.",
+        "ru": "Переупорядочивание данных способом BWT перед кодированием сработало; подтверждено в Rust на H-16. Распаковка проверена — байт-в-байт."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-12",
+      "title": {
+        "en": "Order-2 context-key Huffman (R6 scheme hypothesis)",
+        "ru": "Хаффман с ключом контекста order-2 (гипотеза схемы R6)"
+      },
+      "meaning": {
+        "en": "Using `(prev2_code, prev_code)` as the context key for per-context Huffman tables (order-2) will outperform the order-1 key `prev_code` (T4) because it captures two-symbol structure.",
+        "ru": "Использование `(prev2_code, prev_code)` как ключа контекста для per-context таблиц Хаффмана (order-2) обойдёт order-1 ключ `prev_code` (T4), потому что ловит двухсимвольную структуру."
+      },
+      "status": "NO-GO",
+      "aggregate": 0.54773,
+      "vs_zstd": null,
+      "delta_vs_baseline": "−6.73% vs T4",
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-20",
+      "note": {
+        "en": "measured — NO-GO in implementation (CUBR-0027, best 0.592215 = +0.004975 above T4 0.587240).",
+        "ru": "измерено — NO-GO в реализации (CUBR-0027, лучшее 0.592215 = +0.004975 над T4 0.587240)."
+      },
+      "race": {
+        "aggregate": 0.58724,
+        "delta": "0.00%",
+        "byte_identical": true
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": "Deeper-context Huffman ended slightly worse than the baseline (0.592215, +0.004975 over T4) — the table cost outweighed the gain.",
+        "ru": "Хаффман с более глубоким контекстом вышел чуть хуже базовой линии (0.592215, +0,004975 над T4) — цена таблиц перевесила выигрыш."
+      },
+      "verdict_line": {
+        "en": "A two-symbol context captured more structure but cost more in tables than it saved. Ceiling found; next lever.",
+        "ru": "Контекст из двух символов поймал больше структуры, но в таблицах обошёлся дороже, чем сэкономил. Потолок найден — к следующему рычагу."
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-11",
+      "title": {
+        "en": "Interleaved map layout vs N streams (cross-axis entropy context)",
+        "ru": "Интерливленная раскладка карты vs N потоков (кросс-осевой энтропийный контекст)"
+      },
+      "meaning": {
+        "en": "Splitting the distance map into `N` independent per-axis streams (H-04 default) fragments the statistical context and loses the cross-axis `gap_x ↔ gap_y` correlations.",
+        "ru": "Раскладка карты расстояний в `N` независимых потоков по осям (H-04 v1-default) фрагментирует статистический контекст и теряет кросс-осевые корреляции `gap_x ↔ gap_y`."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-10",
+      "title": {
+        "en": "File format: deterministic decode from the header",
+        "ru": "Формат файла: детерминированный декод из шапки"
+      },
+      "meaning": {
+        "en": "A header (`magic/version/mode/N/b_k/B/L/count/map_scheme/value_scheme/W | width_table/value_dict/traversal/phi`) plus two streams is enough for a fully deterministic decode.",
+        "ru": "Шапки (`magic/version/mode/N/b_k/B/L/count/map_scheme/value_scheme/W | width_table/value_dict/traversal/phi`) + двух потоков достаточно для полностью детерминированного декода."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-09",
+      "title": {
+        "en": "raw-store fallback against blowup (invariant, not a falsifiable default)",
+        "ru": "raw-store fallback против blowup (инвариант, не falsifiable-default)"
+      },
+      "meaning": {
+        "en": "A mandatory `mode=1 (raw-store)` guarantees the format never inflates beyond `size(S) + bounded_overhead` on incompressible (non-clustered) inputs.",
+        "ru": "Обязательный режим `mode=1 (raw-store)` гарантирует, что формат никогда не раздувается выше `size(S) + bounded_overhead` на несжимаемых (не кластеризованных) входах."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-08",
+      "title": {
+        "en": "Input domain V = the byte stream as-is",
+        "ru": "Доменизация входа V = байтовый поток как есть"
+      },
+      "meaning": {
+        "en": "Treating the input as a raw byte stream (no preprocessing) is the honest, zero-assumption start.",
+        "ru": "Трактовка входа как сырого байтового потока (без предобработки) — честный, ноль-предположений старт."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-07",
+      "title": {
+        "en": "Value bit-packing = explicit fixed width in the header",
+        "ru": "Бит-пакинг значений = явная фиксированная ширина в шапке"
+      },
+      "meaning": {
+        "en": "A single fixed width `W = ⌈log2(max+1)⌉` (or a per-block width from an explicit width-table) is the simplest deterministic no-delimiter packing.",
+        "ru": "Единая фиксированная ширина `W = ⌈log2(max+1)⌉` (или ширина-на-блок из явной width-table) — простейшая детерминированная no-delimiter упаковка."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": null,
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-06",
+      "title": {
+        "en": "Map run-coding = plain RLE",
+        "ru": "Run-кодирование карты = чистый RLE"
+      },
+      "meaning": {
+        "en": "Plain RLE over the `gap_k` rows is a sufficient starting compact scheme.",
+        "ru": "Чистый RLE по рядам `gap_k` — достаточная стартовая компактная схема."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-05",
+      "title": {
+        "en": "Gap semantics: sentinel −1, gap=1 = zero skips",
+        "ru": "Семантика gap: sentinel −1, gap=1 = ноль пропусков"
+      },
+      "meaning": {
+        "en": "The only correct decode semantics: start `x_k = −1`, `x_k += gap_k`, where `gap=1` means ZERO skipped slots (the immediate position) and the number of skips = `gap − 1`.",
+        "ru": "Единственная корректная декод-семантика — старт `x_k = −1`, `x_k += gap_k`, где `gap=1` означает НОЛЬ пропущенных слотов (немедленная позиция), а число пропусков = `gap − 1`."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-04",
+      "title": {
+        "en": "Distance-map layout = N per-axis streams",
+        "ru": "Раскладка карты расстояний = N потоков по осям"
+      },
+      "meaning": {
+        "en": "`N` separate `gap_k` streams (one per axis) are simpler to code and debug than a single interleaved stream, and no worse on compression at the start.",
+        "ru": "`N` отдельных потоков `gap_k` (по одному на ось) проще кодировать и отлаживать, чем единый интерливленный поток, и не хуже по сжатию на старте."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-03",
+      "title": {
+        "en": "Edge bound B = 256 (power of two)",
+        "ru": "Граница ребра B = 256 (степень двойки)"
+      },
+      "meaning": {
+        "en": "`B = 256` is a reasonable starting compromise: a byte-equivalent coordinate digit, ≤ 8 bits per raw gap, neither too small (too many axes) nor too large.",
+        "ru": "`B = 256` — разумный стартовый компромисс: байт-эквивалентный разряд координаты, ≤ 8 бит на сырой gap, не слишком мелкий (иначе много осей) и не слишком крупный."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-02a",
+      "title": {
+        "en": "Φ = Hilbert curve (candidate to replace mixed-radix)",
+        "ru": "Φ = Hilbert-кривая (претендент на замену mixed-radix)"
+      },
+      "meaning": {
+        "en": "A Hilbert traversal preserves N-dimensional locality better than lexicographic mixed-radix → higher share of `gap=1`, longer RLE runs → stronger map compression.",
+        "ru": "Hilbert-обход сохраняет N-мерную локальность лучше лексикографического mixed-radix → выше доля `gap=1`, длиннее RLE-серии → сильнее сжатие карты."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": null,
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-02",
+      "title": {
+        "en": "Mapping Φ = mixed-radix by position",
+        "ru": "Отображение Φ = mixed-radix по позиции"
+      },
+      "meaning": {
+        "en": "A mixed-radix decomposition of the index in base `B` is an adequate starting `Φ`.",
+        "ru": "mixed-radix разложение индекса по основанию `B` — адекватная стартовая `Φ`."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    },
+    {
+      "id": "H-01",
+      "title": {
+        "en": "Cube dimensionality N = 2 (baseline)",
+        "ru": "Размерность куба N = 2 (baseline)"
+      },
+      "meaning": {
+        "en": "A fixed `N = 2` is a sufficient starting baseline.",
+        "ru": "Фиксированное `N = 2` — достаточный стартовый baseline."
+      },
+      "status": "OPEN",
+      "aggregate": null,
+      "vs_zstd": null,
+      "delta_vs_baseline": null,
+      "per_file": null,
+      "duration": null,
+      "date": "2026-06-17",
+      "note": {
+        "en": "open — not yet measured",
+        "ru": "открыто — пока не измерено"
+      },
+      "race": {
+        "aggregate": null,
+        "delta": null,
+        "byte_identical": false
+      },
+      "zstd_gap": null,
+      "effect": {
+        "en": null,
+        "ru": null
+      },
+      "verdict_line": {
+        "en": null,
+        "ru": null
+      },
+      "measured": {
+        "en": null,
+        "ru": null
+      }
+    }
+  ],
+  "roadmap": [
+    {
+      "id": "H-30",
+      "priority": "HIGH",
+      "state": "implementing",
+      "expected": "−27..−31% vs zstd (probe-confirmed by H-29)",
+      "refs": [
+        "CLP (Uber)",
+        "Parquet",
+        "BtrBlocks"
+      ],
+      "title": {
+        "en": "Columnar field-split",
+        "ru": "Колоночный field-split"
+      },
+      "desc": {
+        "en": "Reorder each field into its own column before BWT+geomix, so similar values sit together. The H-29 probe confirmed −27..−31% vs zstd on telemetry CSV — this is the round being built now.",
+        "ru": "Переупорядочить каждое поле в отдельную колонку перед BWT+geomix, чтобы похожие значения лежали рядом. Проба H-29 подтвердила −27..−31% против zstd на телеметрии CSV — этот раунд сейчас в работе."
+      }
+    },
+    {
+      "id": "H-31",
+      "priority": "HIGH",
+      "state": "planned",
+      "expected": "10–100× on timestamp columns (Parquet literature)",
+      "refs": [
+        "Parquet delta/FOR",
+        "Denum"
+      ],
+      "title": {
+        "en": "Timestamp / counter column delta",
+        "ru": "Дельта по столбцам времени/счётчиков"
+      },
+      "desc": {
+        "en": "After the split, store only the difference between consecutive values in monotonic columns (timestamps, ids). Fully reversible, no learning cost. Stacks on top of H-30.",
+        "ru": "После разбиения хранить только разницу между соседними значениями в монотонных столбцах (метки времени, id). Полностью обратимо, без стоимости обучения. Стыкуется поверх H-30."
+      }
+    },
+    {
+      "id": "H-36",
+      "priority": "HIGH",
+      "state": "planned",
+      "expected": "2.16–2.5× over zstd (CLP / LogPrism literature)",
+      "refs": [
+        "CLP",
+        "Logzip",
+        "LogPrism",
+        "LogFold"
+      ],
+      "title": {
+        "en": "Log template / variable split",
+        "ru": "Разделение шаблон/переменные в логах"
+      },
+      "desc": {
+        "en": "Parse each log line into a template id, a timestamp delta, and the variable values, then compress each stream separately. High ceiling but major complexity — gated by a mandatory Python spike first.",
+        "ru": "Разобрать каждую строку лога на id шаблона, дельту времени и значения переменных, затем сжимать каждый поток отдельно. Высокий потолок, но крупная сложность — сперва обязательный Python-спайк как гейт."
+      }
+    },
+    {
+      "id": "H-32",
+      "priority": "MEDIUM",
+      "state": "planned",
+      "expected": "+17–37% over LZMA as a preprocessor (LogLite literature)",
+      "refs": [
+        "LogLite (VLDB 2025)"
+      ],
+      "title": {
+        "en": "XOR-cache line preprocessor",
+        "ru": "XOR-кэш предобработчик строк"
+      },
+      "desc": {
+        "en": "XOR each line against a recent same-length line and run-length the zero runs before BWT. Promising in the literature, but BWT+geomix may already capture this — competitive-gated.",
+        "ru": "XOR каждой строки с недавней строкой той же длины и RLE нулевых серий перед BWT. В литературе перспективно, но BWT+geomix, возможно, уже это ловит — под competitive-гейтом."
+      }
+    },
+    {
+      "id": "H-35",
+      "priority": "MEDIUM",
+      "state": "planned",
+      "expected": "3–4× over non-dict zstd for <1 KB records (narrow scope)",
+      "refs": [
+        "zstd --train",
+        "Cassandra CEP-54"
+      ],
+      "title": {
+        "en": "Trained dictionary for short records",
+        "ru": "Обученный словарь для коротких записей"
+      },
+      "desc": {
+        "en": "Train a small dictionary on the first records of a short-fixed-record block. Strong for sub-1 KB records (JSON API logs, Kafka, WAL); the effect vanishes on larger records. Narrow scope.",
+        "ru": "Обучить небольшой словарь на первых записях блока коротких фиксированных записей. Сильно для записей <1 КБ (JSON API логи, Kafka, WAL); на больших записях эффект исчезает. Узкая область."
+      }
+    },
+    {
+      "id": "H-33",
+      "priority": "MARGINAL",
+      "state": "planned",
+      "expected": "~1.6% on enwik9; maybe 2–3% on numeric-dense logs",
+      "refs": [
+        "arXiv 2606.03570"
+      ],
+      "title": {
+        "en": "Digit-context decomposition",
+        "ru": "Декомпозиция по цифровому контексту"
+      },
+      "desc": {
+        "en": "Split digit-run bytes into side streams before BWT. Cheap, no tables; a small gain expected on numeric-dense logs.",
+        "ru": "Вынести байты цифровых серий в боковые потоки перед BWT. Дёшево, без таблиц; небольшой выигрыш ожидается на числово-плотных логах."
+      }
+    },
+    {
+      "id": "H-34",
+      "priority": "MARGINAL",
+      "state": "planned",
+      "expected": "uncertain — possible mirage, self-disables if uncorrelated",
+      "refs": [
+        "cbloom APM/SSE",
+        "PAQ"
+      ],
+      "title": {
+        "en": "Secondary probability estimation (APM/SSE)",
+        "ru": "Вторичная оценка вероятности (APM/SSE)"
+      },
+      "desc": {
+        "en": "Refine the geomix probability through a small adaptive table. Self-disables if it finds no correlation (no regression risk), but the gain may be a mirage — gated by a small probe.",
+        "ru": "Уточнить вероятность geomix через небольшую адаптивную таблицу. Сама отключается, если корреляции нет (без риска регрессии), но выигрыш может оказаться миражом — под небольшим probe-гейтом."
+      }
+    }
+  ],
+  "class_race": {
+    "corpus_files": 9,
+    "input_bytes": 2540717,
+    "files": [
+      {
+        "file": "app_orchestrate.log",
+        "cubrim": 19952,
+        "gzip": 50846,
+        "zstd": 23218,
+        "vs_zstd": -14.1
+      },
+      {
+        "file": "forex_tick.csv",
+        "cubrim": 58741,
+        "gzip": 76885,
+        "zstd": 61346,
+        "vs_zstd": -4.2
+      },
+      {
+        "file": "forex_usdchf.csv",
+        "cubrim": 55274,
+        "gzip": 73842,
+        "zstd": 55576,
+        "vs_zstd": -0.5
+      },
+      {
+        "file": "journal.log",
+        "cubrim": 19775,
+        "gzip": 26303,
+        "zstd": 18688,
+        "vs_zstd": 5.8
+      },
+      {
+        "file": "status_timeseries.csv",
+        "cubrim": 22889,
+        "gzip": 28761,
+        "zstd": 21381,
+        "vs_zstd": 7.1
+      },
+      {
+        "file": "deals_record.csv",
+        "cubrim": 3799,
+        "gzip": 4290,
+        "zstd": 3549,
+        "vs_zstd": 7.0
+      },
+      {
+        "file": "dpkg.log",
+        "cubrim": 7303,
+        "gzip": 8175,
+        "zstd": 6764,
+        "vs_zstd": 8.0
+      },
+      {
+        "file": "toolchain.log",
+        "cubrim": 30136,
+        "gzip": 37120,
+        "zstd": 27548,
+        "vs_zstd": 9.4
+      },
+      {
+        "file": "alternatives.log",
+        "cubrim": 1238,
+        "gzip": 1166,
+        "zstd": 969,
+        "vs_zstd": 27.8
+      }
+    ],
+    "aggregate": {
+      "cubrim": 219107,
+      "gzip": 307388,
+      "zstd": 219039,
+      "vs_zstd": 0.03,
+      "vs_gzip": -28.7,
+      "wins_vs_zstd": "3/9",
+      "wins_vs_gzip": "8/9"
+    },
+    "columnar": [
+      {
+        "file": "forex_tick.csv",
+        "row": 58741,
+        "col": 44359,
+        "row_vs_zstd": -4.2,
+        "col_vs_zstd": -27.7,
+        "flipped": false
+      },
+      {
+        "file": "forex_usdchf.csv",
+        "row": 55274,
+        "col": 38457,
+        "row_vs_zstd": -0.5,
+        "col_vs_zstd": -30.8,
+        "flipped": false
+      },
+      {
+        "file": "status_timeseries.csv",
+        "row": 22889,
+        "col": 20710,
+        "row_vs_zstd": 7.1,
+        "col_vs_zstd": -3.1,
+        "flipped": true
+      },
+      {
+        "file": "deals_record.csv",
+        "row": 3799,
+        "col": 3702,
+        "row_vs_zstd": 7.0,
+        "col_vs_zstd": 4.3,
+        "flipped": false
+      }
+    ]
+  }
+}

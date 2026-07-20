@@ -56,7 +56,7 @@ ARBITER_DIR="$REPO_ROOT/consilium/arbiter"
 SIZE_MODEL="$ARBITER_DIR/size-model.sh"
 
 ITER_BRIEF_TEMPLATE="$REPO_ROOT/consilium/iteration-brief.template.md"
-LEADERBOARD="$REPO_ROOT/docs/leaderboard/cubrim-leaderboard.json"
+LEADERBOARD="$REPO_ROOT/documentation/leaderboard/cubrim-leaderboard.json"
 CLOSED_LEDGER="$REPO_ROOT/consilium/closed-branches.md"
 DEFAULT_TARGET_FILE="code/cubrim-rs/src/codec.rs"
 

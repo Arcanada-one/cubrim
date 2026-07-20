@@ -1,0 +1,28 @@
+self-check OK: 8-archiver aggregate reproduces stored values
+silesia__dickens: 7z=2831111 (0.277766)  rar=3032348 (0.297509)
+silesia__mozilla: 7z=13344686 (0.260534)  rar=15154816 (0.295874)
+silesia__mr: 7z=2748257 (0.275637)  rar=2775588 (0.278378)
+silesia__nci: 7z=1741410 (0.0519)  rar=1858762 (0.055397)
+silesia__ooffice: 7z=2425568 (0.394261)  rar=2302453 (0.374249)
+silesia__osdb: 7z=2851796 (0.282757)  rar=3236987 (0.320949)
+silesia__reymont: 7z=1318394 (0.198937)  rar=1444857 (0.218019)
+silesia__samba: 7z=3759770 (0.174012)  rar=4107378 (0.1901)
+silesia__sao: 7z=4413926 (0.608654)  rar=5542665 (0.764301)
+silesia__webster: 7z=8388839 (0.202342)  rar=9035006 (0.217928)
+silesia__x-ray: 7z=4479871 (0.528646)  rar=4162373 (0.49118)
+silesia__xml: 7z=455003 (0.085122)  rar=484659 (0.09067)
+enwik8__enwik8: 7z=24862427 (0.248624)  rar=27351354 (0.273514)
+canterbury__alice29.txt: 7z=48588 (0.319471)  rar=51180 (0.336513)
+canterbury__asyoulik.txt: 7z=44666 (0.356817)  rar=46927 (0.374879)
+canterbury__cp.html: 7z=7726 (0.314027)  rar=8074 (0.328171)
+canterbury__fields.c: 7z=3085 (0.276682)  rar=3161 (0.283498)
+canterbury__grammar.lsp: 7z=1365 (0.366837)  rar=1318 (0.354206)
+canterbury__kennedy.xls: 7z=50528 (0.049069)  rar=35569 (0.034542)
+canterbury__lcet10.txt: 7z=119592 (0.280236)  rar=126428 (0.296255)
+canterbury__plrabn12.txt: 7z=165653 (0.343778)  rar=175587 (0.364393)
+canterbury__ptt5: 7z=42211 (0.082248)  rar=49266 (0.095995)
+canterbury__sum: 7z=9609 (0.251281)  rar=11602 (0.3034)
+canterbury__xargs.1: 7z=1878 (0.444287)  rar=1819 (0.430329)
+
+overall: {"cubrim": 0.259091, "gzip": 0.332989, "bzip2": 0.267064, "xz": 0.234411, "zstd": 0.249034, "brotli": 0.240818, "lz4": 0.382197, "ppmd": 0.228592, "7z": 0.235476, "rar": 0.257348}
+wrote /home/dev/cubrim-worldbench/results/world-benchmark-cubr0036.json

@@ -1,0 +1,42 @@
+=== 12-file WORLD corpus, 243,004,774 B ===
+
+per-file:  rANS-rail   best-nonrANS(scheme)   oracle-pick   -> does a non-rANS EVER beat the rail?
+  canterbury/cp.html         rail=0.3265  bestNR=0.6670(entropy)  oracle=0.3265(rANS-rail)  beat=NO
+  canterbury/fields.c        rail=0.3057  bestNR=0.6499(entropy)  oracle=0.3057(rANS-rail)  beat=NO
+  canterbury/grammar.lsp     rail=0.3873  bestNR=0.6348(entropy)  oracle=0.3873(rANS-rail)  beat=NO
+  canterbury/sum             rail=0.3458  bestNR=0.6850(entropy)  oracle=0.3458(rANS-rail)  beat=NO
+  canterbury/xargs.1         rail=0.4530  bestNR=0.6600(entropy)  oracle=0.4530(rANS-rail)  beat=NO
+  dickens                    rail=0.2903  bestNR=0.2912(bitpack-fixed)  oracle=0.2903(rANS-rail)  beat=NO
+  enwik8                     rail=0.2622  bestNR=0.2623(bitpack-fixed)  oracle=0.2622(rANS-rail)  beat=NO
+  mr                         rail=0.2104  bestNR=0.3326(bitpack-fixed)  oracle=0.2104(rANS-rail)  beat=NO
+  silesia/mozilla            rail=0.3068  bestNR=0.3077(entropy)  oracle=0.3068(rANS-rail)  beat=NO
+  silesia/samba              rail=0.1935  bestNR=0.1948(entropy)  oracle=0.1935(rANS-rail)  beat=NO
+  silesia/webster            rail=0.2105  bestNR=0.2107(bitpack-fixed)  oracle=0.2105(rANS-rail)  beat=NO
+  x-ray                      rail=0.4451  bestNR=0.5487(entropy)  oracle=0.4451(rANS-rail)  beat=NO
+
+=== CURRENT competitive-min (rANS rail), 12-file world corpus = 0.262140 ===
+=== ORACLE (ideal per-file pick over all 12 existing schemes)   = 0.262140 ===
+=== SPECIALIZATION CEILING (existing schemes) = 0.000000 abs  (0.000% relative) ===
+=== files where a non-rANS scheme beats the rail: NONE ===
+
+=== reference compressors, SAME 12-file world corpus (size-weighted overall) ===
+  ppmd                   0.239264
+  xz                     0.248611
+  brotli                 0.255819
+  cubrim(rail/oracle)    0.262140
+  zstd                   0.270837
+  bzip2                  0.285740
+
+=== TYPE MAP: per-file cubrim-best vs ppmd vs xz vs brotli (ratios) ===
+  canterbury/cp.html         cubrim=0.3265  ppmd=0.2922 xz=0.3110 brotli=0.2803  leader=brotli(0.2803)  cubrim gap=+16.5%
+  canterbury/fields.c        cubrim=0.3057  ppmd=0.2709 xz=0.2719 brotli=0.2437  leader=brotli(0.2437)  cubrim gap=+25.4%
+  canterbury/grammar.lsp     cubrim=0.3873  ppmd=0.3435 xz=0.3472 brotli=0.3023  leader=brotli(0.3023)  cubrim gap=+28.1%
+  canterbury/sum             cubrim=0.3458  ppmd=0.3135 xz=0.2484 brotli=0.2652  leader=xz(0.2484)  cubrim gap=+39.2%
+  canterbury/xargs.1         cubrim=0.4530  ppmd=0.3818 xz=0.4287 brotli=0.3463  leader=brotli(0.3463)  cubrim gap=+30.8%
+  dickens                    cubrim=0.2903  ppmd=0.2269 xz=0.2778 brotli=0.2774  leader=ppmd(0.2269)  cubrim gap=+27.9%
+  enwik8                     cubrim=0.2622  ppmd=0.2318 xz=0.2483 brotli=0.2574  leader=ppmd(0.2318)  cubrim gap=+13.1%
+  mr                         cubrim=0.2104  ppmd=0.2326 xz=0.2760 brotli=0.2831  leader=ppmd(0.2326)  cubrim gap=-9.5%
+  silesia/mozilla            cubrim=0.3068  ppmd=0.3108 xz=0.2612 brotli=0.2708  leader=xz(0.2612)  cubrim gap=+17.5%
+  silesia/samba              cubrim=0.1935  ppmd=0.1741 xz=0.1731 brotli=0.1743  leader=xz(0.1731)  cubrim gap=+11.8%
+  silesia/webster            cubrim=0.2105  ppmd=0.1635 xz=0.2019 brotli=0.2033  leader=ppmd(0.1635)  cubrim gap=+28.7%
+  x-ray                      cubrim=0.4451  ppmd=0.4544 xz=0.5300 brotli=0.5526  leader=ppmd(0.4544)  cubrim gap=-2.1%

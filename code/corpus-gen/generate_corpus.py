@@ -2,7 +2,7 @@
 Deterministic corpus generator for the benchmark harness.
 
 Each generator produces a fixed-size binary blob from a seeded PRNG.
-Outputs go to docs/ephemeral/research/corpus/ (gitignored).
+Outputs go to documentation/ephemeral/research/corpus/ (gitignored).
 A manifest is written to corpus/manifest.json with:
   - class name, seed, params, output path, size_bytes, sha256, rho
 

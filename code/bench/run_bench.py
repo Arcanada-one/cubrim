@@ -9,15 +9,15 @@ For each corpus input:
   5. Computes compressed/input size ratios
 
 Writes:
-  docs/ephemeral/research/{REPORT_ID}-bench.json  (machine-readable)
-  docs/ephemeral/research/{REPORT_ID}-report.md   (human-readable, private)
+  documentation/ephemeral/research/{REPORT_ID}-bench.json  (machine-readable)
+  documentation/ephemeral/research/{REPORT_ID}-report.md   (human-readable, private)
 
 Usage:
   python code/bench/run_bench.py [--config-label LABEL] [--report-id REPORT_ID]
   python code/bench/run_bench.py --config-label t1_v1_default --report-id my-report
   python code/bench/run_bench.py --config-label t2_packed_nibble --gap-scheme packed_nibble --report-id my-report
 
-The harness reads the corpus from docs/ephemeral/research/corpus/manifest.json.
+The harness reads the corpus from documentation/ephemeral/research/corpus/manifest.json.
 Run generate_corpus.py first to produce the corpus data.
 
 This script is designed to run on the measurement host (arcana-dev or Mac-local).
@@ -410,7 +410,7 @@ def write_report(runs: list[dict], report_id: str = "bench") -> None:
     lines = [
         f"# {report_id} Compression Report",
         "",
-        "> PRIVATE — internal research artefact. Lives only in docs/ephemeral/research/.",
+        "> PRIVATE — internal research artefact. Lives only in documentation/ephemeral/research/.",
         "> Algorithm mechanism is strictly secret — this file must not reach public surfaces.",
         "",
         "## Environment",

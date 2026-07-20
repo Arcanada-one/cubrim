@@ -53,11 +53,11 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 
 ## Tech Stack
 
-> **Research-first.** Phase 0 is algorithm design on the consilium — no production code until the rulebook stabilizes. Prototyping in Python (fast iteration on hypotheses, NumPy for cube math) is acceptable in `docs/ephemeral/research/`.
+> **Research-first.** Phase 0 is algorithm design on the consilium — no production code until the rulebook stabilizes. Prototyping in Python (fast iteration on hypotheses, NumPy for cube math) is acceptable in `documentation/ephemeral/research/`.
 
 - **Default implementation language:** Rust — bit-level packing, deterministic memory layout, and compression throughput favour it (consistent with Disk Arcana / PaxBeach in the ecosystem). Final choice is a consilium deliverable.
-- **Prototyping:** Python 3 + NumPy (cube construction, gap-distance experiments, entropy measurement) — `docs/ephemeral/research/` only.
-- **Benchmark corpus:** curated test datasets (synthetic + real) under `docs/ephemeral/research/`; compression-ratio + round-trip-fidelity are the headline metrics.
+- **Prototyping:** Python 3 + NumPy (cube construction, gap-distance experiments, entropy measurement) — `documentation/ephemeral/research/` only.
+- **Benchmark corpus:** curated test datasets (synthetic + real) under `documentation/ephemeral/research/`; compression-ratio + round-trip-fidelity are the headline metrics.
 
 ## Build Commands
 
@@ -71,11 +71,11 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 
 ## 📖 Algorithm Disclosure (operator decision 2026-06-18 — supersedes the 2026-06-17 secrecy constraint)
 
-**The archiver algorithm is now PUBLICLY DISCLOSABLE.** The operator decided on 2026-06-18 to explain the mechanism openly — including an educational, step-by-step visualisation of the pipeline on `cubrim.com` (the `/algorithm` page). The earlier "STRICTLY SECRET" constraint (operator decision 2026-06-17) is **retired**. Public surfaces (`cubrim.com`, `docs/`, OG tags, the arcanada.ai listing, marketing) MAY describe and illustrate the real mechanism: the N-dimensional cube, the φ (mixed-radix) coordinate mapping, the per-axis distance map, RLE of that map, and the value-stream coding (bitpack / RLE-codes / Huffman entropy).
+**The archiver algorithm is now PUBLICLY DISCLOSABLE.** The operator decided on 2026-06-18 to explain the mechanism openly — including an educational, step-by-step visualisation of the pipeline on `cubrim.com` (the `/algorithm` page). The earlier "STRICTLY SECRET" constraint (operator decision 2026-06-17) is **retired**. Public surfaces (`cubrim.com`, `documentation/`, OG tags, the arcanada.ai listing, marketing) MAY describe and illustrate the real mechanism: the N-dimensional cube, the φ (mixed-radix) coordinate mapping, the per-axis distance map, RLE of that map, and the value-stream coding (bitpack / RLE-codes / Huffman entropy).
 
 **Accuracy supersedes secrecy.** The only remaining hard rule for the disclosed mechanism is *truthfulness*: any public description MUST match the actual code (`code/cubrim-rs/src/`), not an invented or aspirational version. Read the real pipeline (`codec.rs` encode comment block, `phi.rs`, `cube.rs`, `distance_map.rs`, `rle.rs`, `bitpack.rs`, `huffman.rs`) before writing public content about how it works. Real measured numbers only — never estimated ratios in prose.
 
-**The secrecy grep gate is retired** — `docs/` and public pages no longer need to be mechanism-free. (Disclosure is reversible only in policy, not in fact: once published, treat the mechanism as public knowledge.)
+**The secrecy grep gate is retired** — `documentation/` and public pages no longer need to be mechanism-free. (Disclosure is reversible only in policy, not in fact: once published, treat the mechanism as public knowledge.)
 
 ## Conventions
 
@@ -112,19 +112,19 @@ This project uses [Datarim](https://datarim.club) for structured task execution.
 
 ## Documentation Map
 
-Docs follow the Diátaxis taxonomy — `docs/{tutorials,how-to,reference,explanation}/` (mandate: `skills/diataxis-docs/SKILL.md`).
+Docs follow the Diátaxis taxonomy — `documentation/{tutorials,how-to,reference,explanation}/` (mandate: `skills/diataxis-documentation/SKILL.md`).
 
 | Document | Purpose |
 |----------|---------|
 | `consilium/founding-brief.md` | Verbatim operator brief that founded the project |
 | `consilium/` | Algorithm rulebook drafts, hypothesis log, council verdicts |
-| `docs/explanation/` | Why the cube model — background, mathematical context, design rationale |
-| `docs/reference/` | Algorithm reference: cube schema, distance-map encoding, bit-format spec |
-| `docs/how-to/` | Task recipes: run a benchmark, add a test corpus, reproduce a ratio |
-| `docs/tutorials/` | Newcomer walkthrough once the archiver exists |
-| `docs/ephemeral/plans/` | Implementation plans (transient) |
-| `docs/ephemeral/research/` | Prototypes, math surveys, benchmark experiments (transient) |
-| `docs/ephemeral/reviews/` | QA reports and reviews (transient) |
+| `documentation/explanation/` | Why the cube model — background, mathematical context, design rationale |
+| `documentation/reference/` | Algorithm reference: cube schema, distance-map encoding, bit-format spec |
+| `documentation/how-to/` | Task recipes: run a benchmark, add a test corpus, reproduce a ratio |
+| `documentation/tutorials/` | Newcomer walkthrough once the archiver exists |
+| `documentation/ephemeral/plans/` | Implementation plans (transient) |
+| `documentation/ephemeral/research/` | Prototypes, math surveys, benchmark experiments (transient) |
+| `documentation/ephemeral/reviews/` | QA reports and reviews (transient) |
 
 ## Key Files
 
@@ -136,3 +136,24 @@ Docs follow the Diátaxis taxonomy — `docs/{tutorials,how-to,reference,explana
 
 - **Server code:** never edit on servers directly — all changes in this local tree, deployed via the ecosystem pipeline.
 - **No task IDs in shipped code/specs** — provenance lives in git log / archive (ecosystem rule).
+- **Evolution race cards (`cubrim.com` `/evolution`) — every card carries its measured numbers.** The hypothesis race is published from `consilium/hypothesis-log.md` into `cubrim.com/data/evolution.json` (cards rendered from `tools/evolution_i18n.py` + `tools/gen_evolution_json.py`). **Every** card — GO, NO-GO, and marginal alike — MUST surface the measured figure that justifies its verdict, not only the rounds that moved the champion. A verdict label (`WIN`/`NO-GO`) without a number reads as "trust me" to an observer; the number is what makes accept/reject understandable. For rounds that did not move the champion (`aggregate` unchanged), show the round's own measured result and state the aggregate held byte-identical (e.g. H-25k: "−11.3% on pure-duplicate; aggregate unchanged, byte-identical 0.158273"). Numbers come ONLY from `hypothesis-log.md` `**MEASURED:**` lines — never invented (ties to *Real numbers only* above).
+- **Race-card publishing is autonomous + deploy-per-iteration.** Improving the cards (informativeness, design, human-readability) does not require an operator preview gate: implement, deploy each iteration to `cubrim.com` via `deploy.sh`, then verify prod (`/data/evolution.json` + `/ru/evolution` + `/en/evolution` 200, numbers grep-confirmed against the log). The hard-gated floor still applies (force-push / secrets / finance / public social) — routine card deploys do not. (Operator decision 2026-06-24.)
+- **The compression race is continuous-improvement until the leaders are beaten — a data-determined ceiling is NOT a stop.** Earlier guidance treated a converging set of NO-GOs (a "data-determined micro-efficiency ceiling") as an honest place to halt. **Retired (operator decision 2026-06-24):** the research session does NOT stop at a ceiling. The mandate is to keep generating and testing hypotheses until Cubrim beats the reference leaders (`gzip-9`, `zstd-19`) on the target class — including by (a) specializing for the class where Cubrim already structurally wins (logs/telemetry/columnar — BWT+geomix already beats zstd-19 on `repeated.log` −18%), and (b) actively researching the open literature and the wider internet for state-of-the-art compression practices, papers, and ideas, then synthesizing NEW hypotheses from them. Every hypothesis — GO, NO-GO, marginal, and externally-sourced — is logged to `hypothesis-log.md` and published to the `/evolution` race cards. "Honest NO-GO, ceiling reached" closes a *lever*, never the *race*: after a NO-GO, propose the next class or the next externally-sourced idea, do not surrender. (Supersedes the prior "accept the zstd micro-efficiency gap as residual / honest final ceiling" framing.)
+- **The race goal is to beat zstd-19 (gzip-9 is already passed).** Public surfaces (`cubrim.com` `/evolution` goal block, race cards, graphs) MUST name **zstd-19** as the current target and show **gzip-9** as an already-cleared milestone — not "beat gzip" (stale; gzip's aggregate 0.159674 was passed at H-24). (Operator decision 2026-06-24.)
+- **Every hypothesis stage writes a permanent per-stage report committed to the repo.** Each hypothesis round (`H-NN`) MUST produce a standalone report file — one file per hypothesis, holding **the hypothesis AND its measured result** — written to **`consilium/reports/`** (a permanent, git-tracked directory, distinct from the transient `documentation/ephemeral/research/`). Naming: `consilium/reports/H-NN-<short-slug>.md`. The report carries: hypothesis statement, why-it-might-help, what was implemented/probed, measured numbers (real, from the bench — never estimated), verdict (GO/NO-GO/MARGINAL), and the code SHA. `hypothesis-log.md` remains the running one-line-per-round journal and the `/evolution` publishing source; the per-stage report is the full record. Reports are committed to the Cubrim repo (push operator-gated as usual). `documentation/ephemeral/research/` stays for transient probes/prototypes; the canonical stage report is promoted to `consilium/reports/`. (Operator decision 2026-06-24.)
+- **The goal is to beat the leaders on EVERY data type, not just where Cubrim is already strong — and a benchmark loss is a hypothesis seed, never a verdict.** The world benchmark (CUBR-0034: Silesia / enwik8 / Canterbury × gzip / bzip2 / xz / zstd / brotli / lz4 / ppmd + max-ratio reference) MUST cover non-text data (binaries, images, executables) and report results honestly, **including the data classes where Cubrim loses** — those losses are not failures, they are the explicit input to the next research round. The continuous loop is precisely the mechanism for closing them: a benchmark that shows Cubrim behind xz/brotli on (say) `mozilla` (executable) or `x-ray` (medical image) is a *new lever to attack* — the agents synthesise a hypothesis specialised for that class (just as columnar field-split was synthesised for telemetry CSV after H-29 exposed the gap) and iterate until Cubrim leads there too, lossless. Mandate: after each benchmark, the weakest data class becomes a candidate hypothesis (logged + published); never present a loss as a terminal result, never hide it, never stop the race because "we lose on binaries." The endgame is leading the world archivers on **all** input classes with byte-exact round-trip. (Operator decision 2026-06-25.)
+- **A ratio is only valid against the corpus it was measured on — when the benchmark dataset changes, the champion and every prior GO/WIN MUST be re-validated, not inherited.** Every measured ratio (`hypothesis-log.md`, reports, `/evolution` cards, champion aggregate) MUST name the corpus it was measured on; a number without its corpus is meaningless. A `GO`/`WIN` verdict means "better **on that corpus**" — it does NOT automatically carry to a different or expanded dataset. **When the benchmark dataset is changed or broadened** (e.g. moving from the tuned 10-file corpus to the world corpus Silesia/enwik8/Canterbury), the project MUST re-measure the current champion and re-validate the standing GO/WIN hypotheses on the new yardstick — a hypothesis that was corpus-overfit (precedent: H-24 was a tuned-corpus champion yet 2.2× WORSE than gzip on the disjoint holdout) may flip to neutral or NO-GO under the broader corpus. Distinguish two kinds: **structural/lossless invariants** (BWT, columnar split, round-trip correctness) are correct on any data by construction and need no re-vote — the competitive rail simply selects or skips them per file; **corpus-tuned decisions** (thresholds, per-corpus scheme picks, "champion aggregate") are exactly what must be re-measured. Re-validation is autonomous: on a dataset change, run the standing winners through the new corpus, record the new corpus-tagged numbers, and update verdicts/cards honestly (a flipped verdict is logged + published like any other result, never quietly dropped). The continuous race's true target is the world corpus; the old tuned corpus is a secondary, historical yardstick. (Operator decision 2026-06-25.)
+
+## The Research Loop (how hypotheses are found — the core process)
+
+> **This is the engine of the project.** Cubrim is not hand-tuned; it is discovered by an autonomous research loop that never stops until the world's leaders are beaten on every data class, lossless. (Operator decision 2026-06-25.)
+
+The loop runs continuously, each turn:
+
+1. **Active literature & web research — mandatory, not optional.** Dedicated researcher agents actively search the internet and scientific literature for state-of-the-art compression: published papers, ACL/DCC/arXiv results, real-world best practices (zstd/brotli/CLP/Parquet internals), *and solved mathematical problems that bear on compression* — information theory, coding theory, combinatorics on words, suffix structures, lattice/number-theoretic mappings, transforms, prediction models. The point is to mine **existing solved problems** the field already has and ask "does this apply to our cube model?" — not to re-derive from scratch. Every research sweep records its sources (URLs / paper titles) in the report.
+2. **Synthesise a hypothesis** of the form *"if we apply <new idea X> then it will affect <metric Y> on <data class Z> because <mechanism>"* — concrete, falsifiable, with a predicted lever and an honest expected ceiling. Externally-sourced ideas are first-class hypotheses (cite the source).
+3. **Test it** — cheap probe first (Python entropy/size model where applicable, per the Gotchas), then real Rust implementation behind the competitive rail, byte-exact round-trip, regression-proof. Measure real numbers (never estimate).
+4. **Record everywhere — both repo AND site, every hypothesis and its result.** Write the running one-liner to `consilium/hypothesis-log.md`, the full per-stage report to `consilium/reports/H-NN-<slug>.md`, and **publish the card to `cubrim.com` `/evolution`** — the hypothesis when it opens and the measured result when it closes (GO / NO-GO / MARGINAL), dead-ends included. Nothing is hidden.
+5. **Loop.** A NO-GO closes a *lever*, never the race; the benchmark's weakest class and the next literature finding feed the next hypothesis. Continue until Cubrim leads gzip-9 and zstd-19 (and the max-ratio reference where reachable) on every input class with lossless round-trip.
+
+Researcher agents that do the web/literature sweep run in parallel (own tmux session / own working dir) alongside the implementation agent, so the candidate ladder stays fed while the current round is implemented. Voice-bearing reasoning of a hypothesis stays on the assigned agent (do not route the hypothesis text through a bulk-delegate LLM); only bulk *reading* of source material may be delegated.

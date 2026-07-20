@@ -1,0 +1,11 @@
+**Deepseek panelist – findings brief CUBR-0041**
+
+1. **REFUTED.** Oracle = current (0% ceiling) means for every file, the single best existing scheme is already the rANS scheme that the competitive-min picks. No “hidden per‑type win” exists within the 12‑scheme space. The hypothesis that averaging hides such wins is false for the current set of schemes.
+
+2. **Reset‑lite (add a CM value‑scheme).** Zero ceiling proves the dispatcher is already optimal for existing schemes. The gap to leaders (ppmd, xz) is a model‑class gap (order‑2 → CM). Re‑auditing the dispatcher cannot improve because it already picks the best existing scheme; only a new algorithm (CM) behind the same rail can narrow the gap.
+
+3. The measured‑beats‑prose corrections (mr, x-ray) show that some per‑type value is already captured, but they do **not** affect the oracle ceiling. Those files might already be served by the rANS scheme; the stale prose does not contradict the zero ceiling. The overall gap to ppmd remains, confirming the model‑class issue.
+
+4. **Yes, blind spot.** The oracle swept only 12 value‑schemes; the MODE axis (LZ / CUBE / CHUNKED / MED16 / SOA) is dispatched per‑file but was **not** jointly optimized with each value‑scheme. It is possible that some MODE×value‑scheme combination yields wins on specific file types that the current sweep missed. The ceiling might not be zero if MODE is also swept.
+
+5. **Steelman opposite:** The 0% ceiling is an artifact of only sweeping value‑schemes while leaving MODE selection unoptimized. Re‑auditing the dispatcher to jointly explore MODE and scheme could uncover per‑type wins that the narrow sweep missed, and adding CM (reset‑lite) would be distractive if the real leverage is in better routing across existing algorithms.

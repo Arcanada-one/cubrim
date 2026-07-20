@@ -12,7 +12,7 @@ This is a **research instrument**, not production code. Its purpose:
 ```bash
 cd Projects/Cubrim/code
 make test       # run all tests
-make benchmark  # run measurements → docs/ephemeral/research/CUBR-0004-first-measurements.md
+make benchmark  # run measurements → documentation/ephemeral/research/CUBR-0004-first-measurements.md
 ```
 
 ## Module Map

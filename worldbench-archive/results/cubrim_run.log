@@ -1,0 +1,25 @@
+[cubrim] silesia__ooffice done ratio=0.436254 rt=OK comp=62.267195640s
+[cubrim] silesia__reymont done ratio=0.215834 rt=OK comp=85.874208139s
+[cubrim] silesia__osdb done ratio=0.314538 rt=OK comp=137.551382929s
+[cubrim] silesia__sao done ratio=0.695309 rt=OK comp=87.131982397s
+[cubrim] silesia__mr done ratio=0.332599 rt=OK comp=164.444946187s
+[cubrim] silesia__xml done ratio=0.092180 rt=OK comp=46.927447736s
+[cubrim] canterbury__alice29.txt done ratio=0.345093 rt=OK comp=.351025314s
+[cubrim] canterbury__asyoulik.txt done ratio=0.384002 rt=OK comp=.264197944s
+[cubrim] canterbury__cp.html done ratio=0.880136 rt=OK comp=.030856283s
+[cubrim] canterbury__fields.c done ratio=0.886726 rt=OK comp=.022033525s
+[cubrim] canterbury__grammar.lsp done ratio=0.906208 rt=OK comp=.015233247s
+[cubrim] canterbury__kennedy.xls done ratio=0.069518 rt=OK comp=5.637761276s
+[cubrim] canterbury__lcet10.txt done ratio=0.299474 rt=OK comp=1.974927375s
+[cubrim] canterbury__plrabn12.txt done ratio=0.366134 rt=OK comp=3.496327198s
+[cubrim] canterbury__ptt5 done ratio=0.094215 rt=OK comp=8.990035350s
+[cubrim] canterbury__sum done ratio=01.000339 rt=OK comp=.042966127s
+[cubrim] canterbury__xargs.1 done ratio=0.902058 rt=OK comp=.007914575s
+[cubrim] silesia__dickens done ratio=0.291223 rt=OK comp=264.776544426s
+[cubrim] silesia__x-ray done ratio=0.616063 rt=OK comp=135.806192392s
+[cubrim] silesia__samba done ratio=0.197226 rt=OK comp=292.178932922s
+[cubrim] silesia__nci done ratio=0.047821 rt=OK comp=315.597812948s
+[cubrim] silesia__mozilla done ratio=0.308246 rt=OK comp=532.627746121s
+[cubrim] silesia__webster done ratio=0.210720 rt=OK comp=692.829527306s
+[cubrim] enwik8__enwik8 done ratio=0.262293 rt=OK comp=1709.003855892s
+ALL CUBRIM DONE

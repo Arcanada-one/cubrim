@@ -1349,7 +1349,7 @@ pub const ORDER2_DEFAULT_MIN_CTX: u16 = 128;
 // at best ≈0.626 aggregate, compared to Option A best 0.592215 and T4 baseline 0.587240.
 // Both options are worse than T4 — the NO-GO is real from two independent wire designs.
 // The Option B builders are removed; the measured numbers are recorded in:
-//   docs/ephemeral/research/CUBR-0027-bench.json  § option_b_summary
+//   documentation/ephemeral/research/CUBR-0027-bench.json  § option_b_summary
 //
 // To re-derive Option B: drop the Order1 arm in order2_build_context_tables and the
 // order1_map lookup in the encoder/size functions below.
@@ -5548,7 +5548,7 @@ mod tests {
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
             format!(
-                "{}/../../docs/ephemeral/research/corpus",
+                "{}/../../documentation/ephemeral/research/corpus",
                 env!("CARGO_MANIFEST_DIR")
             )
         });
@@ -5648,7 +5648,7 @@ mod tests {
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
             format!(
-                "{}/../../docs/ephemeral/research/corpus",
+                "{}/../../documentation/ephemeral/research/corpus",
                 env!("CARGO_MANIFEST_DIR")
             )
         });
@@ -5687,7 +5687,7 @@ mod tests {
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
             format!(
-                "{}/../../docs/ephemeral/research/corpus",
+                "{}/../../documentation/ephemeral/research/corpus",
                 env!("CARGO_MANIFEST_DIR")
             )
         });
@@ -5834,7 +5834,7 @@ mod tests {
         // decoder MUST recover every file. Round-trip is non-negotiable (Gotcha).
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -5865,7 +5865,7 @@ mod tests {
         // set can NEVER be larger than the BwtEntropy leader on any corpus file.
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -5978,7 +5978,7 @@ mod tests {
         // file. Round-trip is non-negotiable (Gotcha).
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -6007,7 +6007,7 @@ mod tests {
         // NEVER be larger than the BwtEntropy leader on any corpus file.
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -6127,7 +6127,7 @@ mod tests {
         // every file. Round-trip is non-negotiable (Gotcha).
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -6155,7 +6155,7 @@ mod tests {
         // Competitive (Gotcha #4): can NEVER be larger than the BwtEntropy leader.
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -6272,7 +6272,7 @@ mod tests {
         // file. Round-trip is non-negotiable (Gotcha).
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",
@@ -6300,7 +6300,7 @@ mod tests {
         // Competitive (Gotcha #4): can NEVER be larger than the BwtEntropy leader.
         use std::fs;
         let corpus_dir = std::env::var("CUBRIM_CORPUS_DIR").unwrap_or_else(|_| {
-            format!("{}/../../docs/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
+            format!("{}/../../documentation/ephemeral/research/corpus", env!("CARGO_MANIFEST_DIR"))
         });
         let names = [
             "sparse_clustered", "dense", "text", "log_like",

@@ -1,0 +1,20 @@
+[entropy-context__x-ray] RT MISMATCH
+[entropy-context__x-ray] RT MISMATCH
+[bwt-entropy__x-ray] RT MISMATCH
+[bwt-entropy__x-ray] RT MISMATCH
+[bwt-ctxmix__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 87834ms
+[order2-rans__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 490176ms
+[bwt-rans__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 792833ms
+compressed: 51220480 bytes -> 15714519 bytes
+[bwt-geomix__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 34986ms
+[bwt-ctxmix__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 412693ms
+[bwt-adaptive__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 389688ms
+[order2-rans__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 414557ms
+[bwt-adaptive__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 421442ms
+[lz-rans__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 3022ms
+[lz-rans__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 3552ms
+[bwt-geomix__silesia_mozilla] COMPRESS CRASH/TIMEOUT rc=143 after 3811ms
+[entropy-context__silesia_samba] RT MISMATCH
+[entropy-context__silesia_samba] RT MISMATCH
+[bwt-entropy__silesia_samba] RT MISMATCH
+[bwt-entropy__silesia_samba] RT MISMATCH

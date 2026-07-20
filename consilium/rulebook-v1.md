@@ -7,7 +7,7 @@ status: draft-v1
 created: 2026-06-17
 ---
 
-> 🔒 **СЕКРЕТНО — внутренний артефакт.** Механизм алгоритма строго секретен. Этот файл живёт ТОЛЬКО в приватном репо `Arcanada-one/cubrim` (`Projects/Cubrim/consilium/`) и в gitignored `datarim/`. Принцип/механизм НИКОГДА не попадает в `Projects/Cubrim/docs/`, README, OG-теги, лендинг или любую публичную поверхность.
+> 🔒 **СЕКРЕТНО — внутренний артефакт.** Механизм алгоритма строго секретен. Этот файл живёт ТОЛЬКО в приватном репо `Arcanada-one/cubrim` (`Projects/Cubrim/consilium/`) и в gitignored `datarim/`. Принцип/механизм НИКОГДА не попадает в `Projects/Cubrim/documentation/`, README, OG-теги, лендинг или любую публичную поверхность.
 
 # Cubrim — Rulebook v1 (каноническая стартовая спецификация правила)
 

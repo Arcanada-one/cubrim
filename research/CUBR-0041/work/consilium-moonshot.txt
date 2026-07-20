@@ -1,0 +1,14 @@
+1. **REFUTED.** `oracle-overall = 0.262140` is byte-identical to `current competitive-min overall = 0.262140` and the specialization ceiling is `0.000000` absolute / `0.000%` relative. Because the rail already takes the per-file minimum across all 12 existing schemes, no file is better served by any non-rANS option; averaging cannot hide wins that the competitive-min rail has already captured.
+
+2. **RESET-LITE.** The dispatcher is provably optimal for the existing scheme space (zero gap), and measured per-type levers like SPARC-BCJ (`+0.96%`) and x86-BCJ (`≤0.2%`) failed, confirming the gap is model-class, not routing. The only evidenced gains are from the CM probe (`+13–21%` on text, `mozilla 0.2351` vs `7z 0.2605`, 16-bit image beating delta filters), so the correct move is to add a CM value-scheme behind the existing competitive-min rail.
+
+3. **Yes.** Shipped ratios are already `mr=0.2104` (beats `ppmd 0.2326`) and `x-ray=0.4451` (beats `ppmd 0.4544`), making cubrim #1 on both images despite stale prose claiming rank-3. This means image per-type value is already captured and shipped, shrinking the plausible upside of dispatcher re-audit and shifting focus to text/exe domains where the CM probe shows real delta.
+
+4. **Multiple severe blind-spots.**
+   - The "oracle" only swept `--value-scheme`; the full `MODE × width × scheme` matrix was not factorially tested. If MODE is heuristic-gated before the rail, cross-product wins were never observed.
+   - The 12-file subsample is not the 24-file benchmark; the operator's own `ppmd` reference shifts from `0.228591` to `0.239264` on the subset, so a `0.000000` ceiling on 12 files does not bound the whole corpus.
+   - The 6 collapsing rANS variants reveal value-scheme degeneracy, not dispatcher optimality; non-rANS paths at untested widths/orders may have been discarded upstream.
+   - Intra-file chunk-level switching was not evaluated; per-file competitive-min leaves in-file specialization wins on the table.
+   - The CLI default is "broken for tiny files," proving dispatcher gating logic itself is defective; concluding "exhaustion" from a buggy dispatcher is circular.
+
+5. The zero ceiling merely shows the 12 shipped value-schemes collapse to one effective algorithm, not that the dispatcher is correct; if MODE pre-filtering discards non-rANS outputs before they reach the competitive-min rail, hidden wins remain in untested configuration space, and the CM probe's gains are unvalidated on the full benchmark with unknown runtime costs, making dispatcher re-audit the safer bet than a core reset.

@@ -20,7 +20,7 @@ set -euo pipefail
 
 GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$GATE_DIR/../../.." && pwd)"
-MANIFEST="$REPO_ROOT/docs/ephemeral/research/corpus/manifest.json"
+MANIFEST="$REPO_ROOT/documentation/ephemeral/research/corpus/manifest.json"
 CUBRIM_BIN="$REPO_ROOT/code/cubrim-rs/target/release/cubrim"
 
 # Optional arguments
@@ -43,12 +43,12 @@ command -v git >/dev/null 2>&1 || die "git required"
 
 # ── read per-file baselines from main branch via git-object store (tamper-resistant) ──
 # Baseline source priority (highest to lowest):
-#   1. git show main:docs/leaderboard/cubrim-leaderboard.json  — resolves from
+#   1. git show main:documentation/leaderboard/cubrim-leaderboard.json  — resolves from
 #      the main branch ref in the git object store; the candidate branch's
 #      working-tree copy is never consulted.
 #   2. Pinned fallback: $GATE_DIR/pinned-leaderboard-baseline.json  — bootstrap
 #      mode (before the leaderboard file is committed to main).
-LEADERBOARD_GIT_PATH="docs/leaderboard/cubrim-leaderboard.json"
+LEADERBOARD_GIT_PATH="documentation/leaderboard/cubrim-leaderboard.json"
 PINNED_BASELINE="$GATE_DIR/pinned-leaderboard-baseline.json"
 MAIN_LEADERBOARD_JSON="$(git -C "$REPO_ROOT" show "main:${LEADERBOARD_GIT_PATH}" 2>/dev/null || true)"
 
@@ -105,7 +105,7 @@ while IFS= read -r entry; do
 
     # Resolve path portably
     if [ ! -f "$path" ]; then
-        path="$REPO_ROOT/docs/ephemeral/research/corpus/$(basename "$path")"
+        path="$REPO_ROOT/documentation/ephemeral/research/corpus/$(basename "$path")"
     fi
     [ -f "$path" ] || { echo "gate-competitive: SKIP $name (corpus file not found)" >&2; continue; }
 
