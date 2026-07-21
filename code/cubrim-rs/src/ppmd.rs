@@ -505,6 +505,13 @@ struct PpmModel {
     /// on the order-(-1) uniform fallback. Hit bits = ideal_bits - esc - uniform.
     esc_bits: f64,
     uni_bits: f64,
+    /// Two-order mixing ceiling probe (encode path, hits only; no wire effect).
+    /// `mix_actual` = actual hit bits under order-k alone; `mix_oracle` = bits if
+    /// we could pick per-hit the cheaper of order-k / order-(k-1); `mix_blend` =
+    /// bits under a fixed 50/50 blend. Gap actual→oracle bounds the mixing gain.
+    mix_actual: f64,
+    mix_oracle: f64,
+    mix_blend: f64,
     /// Optional PAQ-style APM on the escape probability (chained after SEE2).
     /// `None` = exact champion behaviour (byte-identical wire).
     apm: Option<Apm>,
@@ -542,6 +549,9 @@ impl PpmModel {
             ideal_bits: 0.0,
             esc_bits: 0.0,
             uni_bits: 0.0,
+            mix_actual: 0.0,
+            mix_oracle: 0.0,
+            mix_blend: 0.0,
             apm: flags.apm.then(|| Apm::new(APM_CTX)),
             bin: flags.bin.then(BinModel::new),
             inc: std::env::var("CUBR_PPM_INC")
@@ -682,6 +692,39 @@ impl PpmModel {
                         if let Some((cum, c)) = found {
                             enc.encode(cum, c, total);
                             self.ideal_bits += -((c as f64) / (total as f64)).log2();
+                            // Two-order mixing ceiling probe (read-only).
+                            let pk = (c as f64) / (total as f64);
+                            let mut poracle = pk;
+                            let mut pblend = pk;
+                            if k >= 1 {
+                                let pkey = &hist[hist.len() - (k - 1)..];
+                                if let Some(pctx) = self.ctx[k - 1].get(pkey) {
+                                    if let Some(&(_, ck1)) =
+                                        pctx.stats.iter().find(|(s, _)| *s == sym)
+                                    {
+                                        let tot1 = pctx.total + pctx.stats.len() as u32;
+                                        let pk1 = (ck1 as f64) / (tot1 as f64);
+                                        poracle = pk.max(pk1);
+                                        // Representative causal mixer weight
+                                        // (trust order-k by its non-escape mass).
+                                        // Measured NO-GO: every causal weight tried
+                                        // — this (run/total, −5008 B), reliability
+                                        // total/(total+24) (−13915 B), and uniform
+                                        // 0.5 (−18518 B) — REGRESSES vs order-k
+                                        // alone; the realizable optimum is w→1 (no
+                                        // mixing). The oracle's +14147 B is not
+                                        // causally realizable because tiered-LOE
+                                        // already gates out unreliable sparse
+                                        // high-order contexts, leaving order-k the
+                                        // best causal predictor at the hit path.
+                                        let w = (run as f64) / (total as f64);
+                                        pblend = w * pk + (1.0 - w) * pk1;
+                                    }
+                                }
+                            }
+                            self.mix_actual += -pk.log2();
+                            self.mix_oracle += -poracle.max(1e-12).log2();
+                            self.mix_blend += -pblend.max(1e-12).log2();
                             self.see[bucket].update_hit();
                             if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
                                 apm.update(idx, false);
@@ -889,7 +932,7 @@ fn ppm_encode_bounded(
     order: usize,
     mem: MemCfg,
     flags: Flags,
-) -> (Vec<u8>, u32, usize, f64, f64, f64) {
+) -> (Vec<u8>, u32, usize, f64, f64, f64, f64, f64, f64) {
     let mut out = (data.len() as u64).to_be_bytes().to_vec();
     out.push(order as u8);
     let mut model = PpmModel::new_bounded(order, mem, flags);
@@ -906,6 +949,9 @@ fn ppm_encode_bounded(
         model.ideal_bits,
         model.esc_bits,
         model.uni_bits,
+        model.mix_actual,
+        model.mix_oracle,
+        model.mix_blend,
     )
 }
 
@@ -1202,7 +1248,7 @@ mod tests {
     /// eviction is a deterministic function of the processed history, so decode
     /// reclaims exactly the contexts encode did.
     fn ppm_rt_bounded(data: &[u8], order: usize, mem: MemCfg, flags: Flags) -> (usize, u32, usize) {
-        let (blob, rescales, peak, _, _, _) = ppm_encode_bounded(data, order, mem, flags);
+        let (blob, rescales, peak, _, _, _, _, _, _) = ppm_encode_bounded(data, order, mem, flags);
         let out = ppm_decode_bounded(&blob, mem, flags).expect("bounded ppm decode");
         assert_eq!(
             out,
@@ -1248,7 +1294,7 @@ mod tests {
         let text = b"the quick brown fox jumps over the lazy dog. ".repeat(200);
         for order in [4usize, 8, 16] {
             let champ = ppm_encode(&text, order);
-            let (bounded, rescales, _, _, _, _) =
+            let (bounded, rescales, _, _, _, _, _, _, _) =
                 ppm_encode_bounded(&text, order, MemCfg::DISABLED, Flags::OFF);
             assert_eq!(
                 champ, bounded,
@@ -1286,7 +1332,7 @@ mod tests {
         }
         for order in [0usize, 4, 8, 16] {
             for data in [text.as_slice(), mixed.as_slice(), b"", b"A", &[7u8; 400]] {
-                let (blob, _, _, _, _, _) = ppm_encode_bounded(
+                let (blob, _, _, _, _, _, _, _, _) = ppm_encode_bounded(
                     data,
                     order,
                     MemCfg::DISABLED,
@@ -1335,7 +1381,8 @@ mod tests {
         }
         for order in [0usize, 4, 8, 16] {
             for data in [text.as_slice(), mixed.as_slice(), b"", b"A", &[9u8; 600]] {
-                let (blob, _, _, _, _, _) = ppm_encode_bounded(data, order, MemCfg::DISABLED, bin);
+                let (blob, _, _, _, _, _, _, _, _) =
+                    ppm_encode_bounded(data, order, MemCfg::DISABLED, bin);
                 let out = ppm_decode_bounded(&blob, MemCfg::DISABLED, bin).expect("bin decode");
                 assert_eq!(
                     out,
@@ -1355,7 +1402,8 @@ mod tests {
         };
         let text = b"pack my box with five dozen liquor jugs. ".repeat(180);
         for order in [4usize, 8, 16] {
-            let (blob, _, _, _, _, _) = ppm_encode_bounded(&text, order, MemCfg::DISABLED, both);
+            let (blob, _, _, _, _, _, _, _, _) =
+                ppm_encode_bounded(&text, order, MemCfg::DISABLED, both);
             let out = ppm_decode_bounded(&blob, MemCfg::DISABLED, both).expect("both decode");
             assert_eq!(out, text, "APM+BinSumm RT cmp!=0 (order {order})");
         }
@@ -1366,7 +1414,7 @@ mod tests {
         let text = b"the quick brown fox jumps over the lazy dog. ".repeat(200);
         for order in [4usize, 8, 16] {
             let champ = ppm_encode(&text, order);
-            let (apm_off, _, _, _, _, _) =
+            let (apm_off, _, _, _, _, _, _, _, _) =
                 ppm_encode_bounded(&text, order, MemCfg::DISABLED, Flags::OFF);
             assert_eq!(
                 champ, apm_off,
@@ -1437,7 +1485,7 @@ mod tests {
                 .unwrap_or(false),
         };
         for order in orders {
-            let (blob, rescales, peak, ideal_bits, esc_bits, uni_bits) =
+            let (blob, rescales, peak, ideal_bits, esc_bits, uni_bits, mix_a, mix_o, mix_b) =
                 ppm_encode_bounded(&data, order, mem, flags);
             let out = ppm_decode_bounded(&blob, mem, flags).expect("decode");
             let rt = out == data;
@@ -1450,10 +1498,16 @@ mod tests {
             let coder_overhead = (p as f64 - ideal_bytes) / p as f64;
             let esc_frac = esc_bits / ideal_bits;
             let uni_frac = uni_bits / ideal_bits;
+            // Two-order mixing ceiling: potential HIT-byte savings if we could
+            // pick per-hit the better of order-k / order-(k-1) (oracle) or a
+            // fixed 50/50 blend, vs actual order-k-alone hit bits.
+            let mix_oracle_saved = (mix_a - mix_o) / 8.0;
+            let mix_blend_saved = (mix_a - mix_b) / 8.0;
             println!(
                 "PROBE order={} ppm={} ratio={:.9} rt_cmp0={} beats_incumbent={} \
                  maxctx={} lowpct={} halve={} peak_ctx={} rescales={} \
-                 ideal_bytes={:.1} coder_overhead={:.6} esc_frac={:.4} uni_frac={:.4}",
+                 ideal_bytes={:.1} coder_overhead={:.6} esc_frac={:.4} uni_frac={:.4} \
+                 hit_bytes={:.0} mix_oracle_saved={:.0} mix_blend_saved={:.0}",
                 order,
                 p,
                 p as f64 / n,
@@ -1472,6 +1526,9 @@ mod tests {
                 coder_overhead,
                 esc_frac,
                 uni_frac,
+                mix_a / 8.0,
+                mix_oracle_saved,
+                mix_blend_saved,
             );
             assert!(rt, "self-probe RT cmp!=0 at order {order}");
         }
