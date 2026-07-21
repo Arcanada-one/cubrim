@@ -1,15 +1,16 @@
 //! MODE_CM2 — bit-level context-mixing codec (CM PoC, CUBR-0059 CM track).
 //!
-//! Phase 3: order-0..7 + 3 sparse (skip-gram) + 1 indirect (history-of-history)
+//! Phase 3: order-0..11 + 3 sparse (skip-gram) + 1 indirect (history-of-history)
 //! + 2 match models (long & short) + a word model, combined by a TWO-LAYER
 //! integer logistic mixer (NL1 context-specialised layer-1 mixers → a layer-2
-//! mixer over their outputs) refined by one gently-blended APM/SSE stage, coded
-//! per bit through the crate's carryless range coder in binary mode (12-bit).
+//! mixer over their outputs) refined by a 2-stage APM/SSE chain, coded per bit
+//! through the crate's carryless range coder in binary mode (12-bit).
 //!
-//! The 2-layer mixer is the decisive lever: full-dickens 0.231335 (single mixer)
-//! → 0.225995 (2-layer, RT cmp=0) — M1 (< champion 0.229919) achieved, a hair
-//! over the ppmd floor 0.2253. Reverted dead ends: 16-bit resolution (ST_MAX
-//! caps it), 512-set single mixer, heavy APM blend — all REGRESSED (see log).
+//! The 2-layer mixer is the decisive lever. Full-dickens trajectory (RT cmp=0):
+//! single mixer 0.231335 → 2-layer 0.225303 → +order-8..11 +2-stage-SSE 0.224491
+//! — M1 (< champion 0.229919) and M2 (< ppmd floor 0.225342) both achieved.
+//! enwik8-head 0.226235. Reverted dead ends: 16-bit resolution (ST_MAX caps it),
+//! 512-set single mixer, heavy APM blend — all REGRESSED (see log).
 //!
 //! ALL prediction/mixing/adaptation is integer, so encode and decode — processing
 //! the identical byte sequence — build byte-exact identical state and the round
@@ -166,7 +167,7 @@ impl Mixer {
     }
 }
 
-const NORD: usize = 8; // order-0..7
+const NORD: usize = 12; // order-0..11
 const NSPARSE: usize = 3;
 const SP_I: usize = NORD; // 8,9,10
 const IND_I: usize = SP_I + NSPARSE; // 11
@@ -445,11 +446,13 @@ impl CmModel {
         let pmix = self.l2.px;
         self.pmix = pmix;
 
-        // SSE: single APM stage (prev byte), gently blended.
+        // SSE chain: apm1 (prev byte) then apm2 (order-2 hash), gently blended.
         let (a1, i1) = self.apm1.refine(&self.lg, self.prev, pmix);
         self.apm1_idx = i1;
-        self.apm2_idx = usize::MAX; // apm2 disabled
-        ((pmix * 13 + a1 * 3) >> 4).clamp(1, PSCALE - 1)
+        let a2ctx = (self.ind_key ^ (c0 << 3)) & 1023;
+        let (a2, i2) = self.apm2.refine(&self.lg, a2ctx, a1);
+        self.apm2_idx = i2;
+        ((pmix * 10 + a1 * 3 + a2 * 3) >> 4).clamp(1, PSCALE - 1)
     }
 
     fn update_bit(&mut self, y: i32) {
