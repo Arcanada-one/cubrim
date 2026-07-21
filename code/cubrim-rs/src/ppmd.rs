@@ -187,6 +187,43 @@ const CTX_RESCALE: u32 = 1 << 13;
 /// for the gauge; the default IS the champion value.
 const PPM_INC: u32 = 3;
 
+/// SEE run-length ceiling probe: quantization of the SEE2 escape probability and
+/// of the deterministic-run length into diagnostic buckets.
+const SEE_PBUCKETS: usize = 16;
+const SEE_RLBUCKETS: usize = 8;
+
+/// Bucket the SEE2 escape probability by its bit-length (−log2 p), 0..15.
+#[inline]
+fn see_p_bucket(p_esc: f64) -> usize {
+    let bits = -p_esc.max(1e-9).log2(); // ~0..30
+    ((bits * 1.5) as usize).min(SEE_PBUCKETS - 1)
+}
+
+/// Bucket the deterministic-run length 0,1,2,3-4,5-8,9-16,17-32,33+.
+#[inline]
+fn see_rl_bucket(rl: u32) -> usize {
+    match rl {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        3..=4 => 3,
+        5..=8 => 4,
+        9..=16 => 5,
+        17..=32 => 6,
+        _ => 7,
+    }
+}
+
+/// Binary entropy (bits) of a Bernoulli(p) event, with 0·log0 = 0.
+#[inline]
+fn bin_entropy(p: f64) -> f64 {
+    if p <= 0.0 || p >= 1.0 {
+        0.0
+    } else {
+        -p * p.log2() - (1.0 - p) * (1.0 - p).log2()
+    }
+}
+
 /// One PPM context: (symbol, count) stats in deterministic insertion order.
 /// `last_used` is the model tick of the most recent update touching this context;
 /// it drives least-recently-used eviction under the bounded-memory RESCALE policy
@@ -196,6 +233,10 @@ struct Ctx {
     stats: Vec<(u8, u32)>,
     total: u32,
     last_used: u64,
+    /// Deterministic-run length: consecutive hits at this context since the last
+    /// escape/creation. Causal (known before coding the next symbol). Diagnostic
+    /// only in this branch — measured, not yet used for coding.
+    det_run: u32,
 }
 
 impl Ctx {
@@ -204,6 +245,7 @@ impl Ctx {
             stats: vec![(sym, freq.max(1))],
             total: freq.max(1),
             last_used: 0,
+            det_run: 0,
         }
     }
 
@@ -512,6 +554,15 @@ struct PpmModel {
     mix_actual: f64,
     mix_oracle: f64,
     mix_blend: f64,
+    /// SEE deterministic-run-length ceiling probe (encode path; no wire effect).
+    /// `see_esc_bits` = actual binary escape-decision bits under the live SEE2
+    /// estimate. `esc_n`/`esc_t` = per-(P_esc bucket × run-length bucket) escape
+    /// and total counts; comparing the empirical binary entropy conditioned on
+    /// (P_esc × run-length) vs on P_esc alone gives run-length's MARGINAL,
+    /// causally-realizable value over SEE2.
+    see_esc_bits: f64,
+    esc_n: Vec<u32>,
+    esc_t: Vec<u32>,
     /// Optional PAQ-style APM on the escape probability (chained after SEE2).
     /// `None` = exact champion behaviour (byte-identical wire).
     apm: Option<Apm>,
@@ -552,6 +603,9 @@ impl PpmModel {
             mix_actual: 0.0,
             mix_oracle: 0.0,
             mix_blend: 0.0,
+            see_esc_bits: 0.0,
+            esc_n: vec![0u32; SEE_PBUCKETS * SEE_RLBUCKETS],
+            esc_t: vec![0u32; SEE_PBUCKETS * SEE_RLBUCKETS],
             apm: flags.apm.then(|| Apm::new(APM_CTX)),
             bin: flags.bin.then(BinModel::new),
             inc: std::env::var("CUBR_PPM_INC")
@@ -688,6 +742,24 @@ impl PpmModel {
                                 break;
                             }
                             cum += c;
+                        }
+                        // SEE run-length ceiling probe: record this binary escape
+                        // decision under the live SEE2 estimate, bucketed by
+                        // (P_esc × deterministic-run length). Read-only.
+                        {
+                            let p_esc = (esc2 as f64) / (total as f64);
+                            let escaped = found.is_none();
+                            self.see_esc_bits += if escaped {
+                                -p_esc.max(1e-12).log2()
+                            } else {
+                                -(1.0 - p_esc).max(1e-12).log2()
+                            };
+                            let idx =
+                                see_p_bucket(p_esc) * SEE_RLBUCKETS + see_rl_bucket(ctx.det_run);
+                            self.esc_t[idx] += 1;
+                            if escaped {
+                                self.esc_n[idx] += 1;
+                            }
                         }
                         if let Some((cum, c)) = found {
                             enc.encode(cum, c, total);
@@ -859,6 +931,14 @@ impl PpmModel {
             if let Some(ctx) = self.ctx[k].get_mut(key) {
                 ctx.bump(sym, inc, rescale_at);
                 ctx.last_used = tick;
+                // Deterministic-run bookkeeping (causal, diagnostic-only): a hit
+                // at the found order extends the run; a consulted higher order
+                // that escaped resets it.
+                if k == found_order {
+                    ctx.det_run += 1;
+                } else {
+                    ctx.det_run = 0;
+                }
             } else {
                 let seed = if k == 0 {
                     inc
@@ -932,7 +1012,20 @@ fn ppm_encode_bounded(
     order: usize,
     mem: MemCfg,
     flags: Flags,
-) -> (Vec<u8>, u32, usize, f64, f64, f64, f64, f64, f64) {
+) -> (
+    Vec<u8>,
+    u32,
+    usize,
+    f64,
+    f64,
+    f64,
+    f64,
+    f64,
+    f64,
+    f64,
+    f64,
+    f64,
+) {
     let mut out = (data.len() as u64).to_be_bytes().to_vec();
     out.push(order as u8);
     let mut model = PpmModel::new_bounded(order, mem, flags);
@@ -942,6 +1035,26 @@ fn ppm_encode_bounded(
         model.update(&data[..i], data[i], fo);
     }
     out.extend_from_slice(&enc.finish());
+    // SEE run-length ceiling: empirical binary escape entropy conditioned on
+    // (P_esc × run-length) [joint] vs on P_esc alone [marginal]. Their gap is
+    // run-length's marginal, causally-realizable value over SEE2.
+    let mut oracle_joint = 0.0f64;
+    let mut oracle_marginal = 0.0f64;
+    for pb in 0..SEE_PBUCKETS {
+        let (mut mn, mut mt) = (0u32, 0u32);
+        for rb in 0..SEE_RLBUCKETS {
+            let idx = pb * SEE_RLBUCKETS + rb;
+            let (e, t) = (model.esc_n[idx], model.esc_t[idx]);
+            if t > 0 {
+                oracle_joint += bin_entropy(e as f64 / t as f64) * t as f64;
+            }
+            mn += e;
+            mt += t;
+        }
+        if mt > 0 {
+            oracle_marginal += bin_entropy(mn as f64 / mt as f64) * mt as f64;
+        }
+    }
     (
         out,
         model.rescales,
@@ -952,6 +1065,9 @@ fn ppm_encode_bounded(
         model.mix_actual,
         model.mix_oracle,
         model.mix_blend,
+        model.see_esc_bits,
+        oracle_marginal,
+        oracle_joint,
     )
 }
 
@@ -1248,7 +1364,8 @@ mod tests {
     /// eviction is a deterministic function of the processed history, so decode
     /// reclaims exactly the contexts encode did.
     fn ppm_rt_bounded(data: &[u8], order: usize, mem: MemCfg, flags: Flags) -> (usize, u32, usize) {
-        let (blob, rescales, peak, _, _, _, _, _, _) = ppm_encode_bounded(data, order, mem, flags);
+        let (blob, rescales, peak, _, _, _, _, _, _, _, _, _) =
+            ppm_encode_bounded(data, order, mem, flags);
         let out = ppm_decode_bounded(&blob, mem, flags).expect("bounded ppm decode");
         assert_eq!(
             out,
@@ -1294,7 +1411,7 @@ mod tests {
         let text = b"the quick brown fox jumps over the lazy dog. ".repeat(200);
         for order in [4usize, 8, 16] {
             let champ = ppm_encode(&text, order);
-            let (bounded, rescales, _, _, _, _, _, _, _) =
+            let (bounded, rescales, _, _, _, _, _, _, _, _, _, _) =
                 ppm_encode_bounded(&text, order, MemCfg::DISABLED, Flags::OFF);
             assert_eq!(
                 champ, bounded,
@@ -1332,7 +1449,7 @@ mod tests {
         }
         for order in [0usize, 4, 8, 16] {
             for data in [text.as_slice(), mixed.as_slice(), b"", b"A", &[7u8; 400]] {
-                let (blob, _, _, _, _, _, _, _, _) = ppm_encode_bounded(
+                let (blob, _, _, _, _, _, _, _, _, _, _, _) = ppm_encode_bounded(
                     data,
                     order,
                     MemCfg::DISABLED,
@@ -1381,7 +1498,7 @@ mod tests {
         }
         for order in [0usize, 4, 8, 16] {
             for data in [text.as_slice(), mixed.as_slice(), b"", b"A", &[9u8; 600]] {
-                let (blob, _, _, _, _, _, _, _, _) =
+                let (blob, _, _, _, _, _, _, _, _, _, _, _) =
                     ppm_encode_bounded(data, order, MemCfg::DISABLED, bin);
                 let out = ppm_decode_bounded(&blob, MemCfg::DISABLED, bin).expect("bin decode");
                 assert_eq!(
@@ -1402,7 +1519,7 @@ mod tests {
         };
         let text = b"pack my box with five dozen liquor jugs. ".repeat(180);
         for order in [4usize, 8, 16] {
-            let (blob, _, _, _, _, _, _, _, _) =
+            let (blob, _, _, _, _, _, _, _, _, _, _, _) =
                 ppm_encode_bounded(&text, order, MemCfg::DISABLED, both);
             let out = ppm_decode_bounded(&blob, MemCfg::DISABLED, both).expect("both decode");
             assert_eq!(out, text, "APM+BinSumm RT cmp!=0 (order {order})");
@@ -1414,7 +1531,7 @@ mod tests {
         let text = b"the quick brown fox jumps over the lazy dog. ".repeat(200);
         for order in [4usize, 8, 16] {
             let champ = ppm_encode(&text, order);
-            let (apm_off, _, _, _, _, _, _, _, _) =
+            let (apm_off, _, _, _, _, _, _, _, _, _, _, _) =
                 ppm_encode_bounded(&text, order, MemCfg::DISABLED, Flags::OFF);
             assert_eq!(
                 champ, apm_off,
@@ -1485,8 +1602,20 @@ mod tests {
                 .unwrap_or(false),
         };
         for order in orders {
-            let (blob, rescales, peak, ideal_bits, esc_bits, uni_bits, mix_a, mix_o, mix_b) =
-                ppm_encode_bounded(&data, order, mem, flags);
+            let (
+                blob,
+                rescales,
+                peak,
+                ideal_bits,
+                esc_bits,
+                uni_bits,
+                mix_a,
+                mix_o,
+                mix_b,
+                see_eb,
+                orc_m,
+                orc_j,
+            ) = ppm_encode_bounded(&data, order, mem, flags);
             let out = ppm_decode_bounded(&blob, mem, flags).expect("decode");
             let rt = out == data;
             let p = blob.len();
@@ -1503,11 +1632,22 @@ mod tests {
             // fixed 50/50 blend, vs actual order-k-alone hit bits.
             let mix_oracle_saved = (mix_a - mix_o) / 8.0;
             let mix_blend_saved = (mix_a - mix_b) / 8.0;
+            // SEE run-length ceiling: bytes saved if an adaptive SEE indexed by
+            // (P_esc × run-length) reached its empirical binary entropy [joint]
+            // vs indexed by P_esc alone [marginal]. (marginal-joint) = run-length
+            // marginal ceiling; (see_esc_bits-marginal) = SEE2 adaptation lag.
+            let see_actual_bytes = see_eb / 8.0;
+            let see_marginal_bytes = orc_m / 8.0;
+            let see_joint_bytes = orc_j / 8.0;
+            let see_rl_ceiling = (orc_m - orc_j) / 8.0;
+            let see_lag = (see_eb - orc_m) / 8.0;
             println!(
                 "PROBE order={} ppm={} ratio={:.9} rt_cmp0={} beats_incumbent={} \
                  maxctx={} lowpct={} halve={} peak_ctx={} rescales={} \
                  ideal_bytes={:.1} coder_overhead={:.6} esc_frac={:.4} uni_frac={:.4} \
-                 hit_bytes={:.0} mix_oracle_saved={:.0} mix_blend_saved={:.0}",
+                 hit_bytes={:.0} mix_oracle_saved={:.0} mix_blend_saved={:.0} \
+                 see_actual={:.0} see_marginal={:.0} see_joint={:.0} \
+                 see_rl_ceiling={:.0} see_lag={:.0}",
                 order,
                 p,
                 p as f64 / n,
@@ -1529,6 +1669,11 @@ mod tests {
                 mix_a / 8.0,
                 mix_oracle_saved,
                 mix_blend_saved,
+                see_actual_bytes,
+                see_marginal_bytes,
+                see_joint_bytes,
+                see_rl_ceiling,
+                see_lag,
             );
             assert!(rt, "self-probe RT cmp!=0 at order {order}");
         }
