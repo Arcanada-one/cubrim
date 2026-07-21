@@ -177,8 +177,12 @@ use std::collections::BTreeMap;
 /// Per-context total cap — rescale when reached. Kept below the coder's
 /// `RC_BOT = 2^16` cap with headroom for the method-C escape band (≤ 256).
 const CTX_RESCALE: u32 = 1 << 14;
-/// Count increment per observation.
-const PPM_INC: u32 = 4;
+/// Count increment per observation — the effective Laplace smoothing is
+/// `alpha = 1 / PPM_INC`. Tuned from 4 to 3 (softer smoothing) after a
+/// count-scaling sweep: on full-dickens o8 this improved the ratio from
+/// 0.230166 to 0.229923 (−0.106%, RT cmp=0). Overridable via `CUBR_PPM_INC`
+/// for the gauge; the default IS the champion value.
+const PPM_INC: u32 = 3;
 
 /// One PPM context: (symbol, count) stats in deterministic insertion order.
 /// `last_used` is the model tick of the most recent update touching this context;
@@ -201,14 +205,14 @@ impl Ctx {
     }
 
     #[inline]
-    fn bump(&mut self, sym: u8) {
+    fn bump(&mut self, sym: u8, inc: u32, rescale_at: u32) {
         if let Some(e) = self.stats.iter_mut().find(|(s, _)| *s == sym) {
-            e.1 += PPM_INC;
+            e.1 += inc;
         } else {
-            self.stats.push((sym, PPM_INC));
+            self.stats.push((sym, inc));
         }
-        self.total += PPM_INC;
-        if self.total >= CTX_RESCALE {
+        self.total += inc;
+        if self.total >= rescale_at {
             self.rescale();
         }
     }
@@ -503,6 +507,11 @@ struct PpmModel {
     apm: Option<Apm>,
     /// Optional PPMII binary-context (BinSumm) model for deterministic contexts.
     bin: Option<BinModel>,
+    /// Count-scaling weights (statistics-shaping sweep). Default = champion
+    /// (`PPM_INC`, `CTX_RESCALE`); overridable via env for the gauge only, so
+    /// unset env ⇒ byte-identical champion.
+    inc: u32,
+    ctx_rescale: u32,
 }
 
 /// Number of APM contexts = escape probability calibration is keyed by order
@@ -532,6 +541,16 @@ impl PpmModel {
             uni_bits: 0.0,
             apm: flags.apm.then(|| Apm::new(APM_CTX)),
             bin: flags.bin.then(BinModel::new),
+            inc: std::env::var("CUBR_PPM_INC")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .filter(|&v| v > 0)
+                .unwrap_or(PPM_INC),
+            ctx_rescale: std::env::var("CUBR_PPM_RESCALE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .filter(|&v| v > PPM_INC && v <= (1u32 << 16))
+                .unwrap_or(CTX_RESCALE),
         }
     }
 
@@ -786,15 +805,17 @@ impl PpmModel {
     fn update(&mut self, hist: &[u8], sym: u8, found_order: usize) {
         self.tick += 1;
         let tick = self.tick;
+        let inc = self.inc;
+        let rescale_at = self.ctx_rescale;
         let maxk = self.order.min(hist.len());
         for k in found_order..=maxk {
             let key = &hist[hist.len() - k..];
             if let Some(ctx) = self.ctx[k].get_mut(key) {
-                ctx.bump(sym);
+                ctx.bump(sym, inc, rescale_at);
                 ctx.last_used = tick;
             } else {
                 let seed = if k == 0 {
-                    PPM_INC
+                    inc
                 } else {
                     let parent_key = &hist[hist.len() - (k - 1)..];
                     self.ctx[k - 1]
@@ -1144,9 +1165,9 @@ mod tests {
     fn successor_inheritance_tracks_parent_probability() {
         let mut parent = Ctx::default();
         for _ in 0..8 {
-            parent.bump(b'a');
+            parent.bump(b'a', PPM_INC, CTX_RESCALE);
         }
-        parent.bump(b'b');
+        parent.bump(b'b', PPM_INC, CTX_RESCALE);
         let common = successor_freq(&parent, b'a');
         let rare = successor_freq(&parent, b'b');
         assert!(common > rare, "common={common}, rare={rare}");
