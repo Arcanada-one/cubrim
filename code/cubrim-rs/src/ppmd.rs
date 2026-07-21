@@ -232,6 +232,16 @@ fn successor_freq(parent: &Ctx, sym: u8) -> u32 {
     }
 }
 
+const LOE_DIRECT_ORDER: usize = 5;
+const LOE_MID_ORDER: usize = 8;
+const LOE_MIN_MID_TOTAL: u32 = 32;
+const LOE_MIN_DEEP_TOTAL: u32 = 64;
+
+fn context_admitted(ctx: &Ctx, order: usize) -> bool {
+    order <= LOE_DIRECT_ORDER
+        || (order <= LOE_MID_ORDER && ctx.total >= LOE_MIN_MID_TOTAL)
+        || ctx.total >= LOE_MIN_DEEP_TOTAL
+}
 /// PPMd var.H SEE2 state: a decaying escape mean with an adaptive period.
 #[derive(Clone, Copy)]
 struct SeeState {
@@ -311,7 +321,7 @@ impl PpmModel {
         let mut k = self.order.min(hist.len());
         loop {
             let key = &hist[hist.len() - k..];
-            if let Some(ctx) = self.ctx[k].get(key) {
+            if let Some(ctx) = self.ctx[k].get(key).filter(|ctx| context_admitted(ctx, k)) {
                 let (run, base_esc) = escape_band(ctx, &excluded);
                 if base_esc > 0 {
                     let masked = excluded.iter().filter(|&&v| v).count();
@@ -365,7 +375,7 @@ impl PpmModel {
         let mut k = self.order.min(hist.len());
         loop {
             let key = &hist[hist.len() - k..];
-            if let Some(ctx) = self.ctx[k].get(key) {
+            if let Some(ctx) = self.ctx[k].get(key).filter(|ctx| context_admitted(ctx, k)) {
                 let (run, base_esc) = escape_band(ctx, &excluded);
                 if base_esc > 0 {
                     let masked = excluded.iter().filter(|&&v| v).count();
@@ -764,8 +774,21 @@ mod tests {
         assert_eq!(ctx.stats, vec![(b'x', 7)]);
         assert_eq!(ctx.total, 7);
     }
-    /// Step 4 self-probe (charged, real numbers). Not run by default — invoke:
-    ///   CUBR_PROBE_FILE=/path/to/dickens [CUBR_PROBE_LIMIT=N] \
+
+    #[test]
+    fn loe_skips_sparse_high_order_contexts() {
+        let sparse = Ctx::seeded(b'x', 4);
+        let mid = Ctx::seeded(b'x', 32);
+        let deep = Ctx::seeded(b'x', 64);
+        assert!(context_admitted(&sparse, 5));
+        assert!(!context_admitted(&sparse, 8));
+        assert!(context_admitted(&mid, 8));
+        assert!(!context_admitted(&mid, 12));
+        assert!(context_admitted(&deep, 12));
+    }
+
+    /// Step 4 self-probe (charged, real numbers). Not run by default -- invoke:
+    ///   CUBR_PROBE_FILE=/path/to/dickens [CUBR_PROBE_LIMIT=N]
     ///     cargo test --release -j4 ppmd::tests::self_probe -- --ignored --nocapture
     /// Reports the PPM charged ratio at several orders vs the incumbent Cubrim
     /// (`crate::encode` = competitive-min best = what Cubrim actually ships), and
