@@ -359,6 +359,81 @@ impl Apm {
     }
 }
 
+/// PPMII binary-context model (BinSumm) for *deterministic* contexts — those
+/// with exactly one stored symbol. Instead of the general method-C/SEE2 escape
+/// path (which pays a distinct-symbol escape frequency plus the symbol count),
+/// a deterministic context codes a single binary event "does the one symbol
+/// repeat?" through a probability pooled across all binary contexts that share
+/// `(count_bucket, order)`. Pooling by the symbol's own count is the precise
+/// indexing PPMd's BinSumm needs — a single shared state (the campaign's failed
+/// coarse binary-SSE) cannot tell a count-2 context from a count-1000 one.
+/// Orthogonal to LOE / inheritance / promotion (which shape the *stats*); this
+/// only changes how a one-symbol context's repeat/escape split is coded.
+const BIN_TOTAL: u32 = 1 << 12;
+const BIN_COUNT_BUCKETS: usize = 64;
+const BIN_CTX: usize = 16;
+const BIN_RATE: u32 = 5;
+
+struct BinModel {
+    t: Vec<u16>, // [BIN_COUNT_BUCKETS * BIN_CTX] 12-bit P(repeat)
+}
+
+impl BinModel {
+    fn new() -> Self {
+        let mut t = vec![0u16; BIN_COUNT_BUCKETS * BIN_CTX];
+        for i in 0..BIN_COUNT_BUCKETS {
+            // Higher accumulated count ⇒ higher prior P(repeat). Smooth curve
+            // i/(i+2), clamped to leave escape headroom on both ends.
+            let pm = (((i as u32 + 1) * BIN_TOTAL) / (i as u32 + 2)).clamp(2048, 4020);
+            for j in 0..BIN_CTX {
+                t[i * BIN_CTX + j] = pm as u16;
+            }
+        }
+        Self { t }
+    }
+
+    #[inline]
+    fn slot(i: usize, j: usize) -> usize {
+        i.min(BIN_COUNT_BUCKETS - 1) * BIN_CTX + j.min(BIN_CTX - 1)
+    }
+
+    /// 12-bit P(the one symbol repeats) for count bucket `i`, order bucket `j`.
+    #[inline]
+    fn predict(&self, i: usize, j: usize) -> u32 {
+        (self.t[Self::slot(i, j)] as u32).clamp(1, BIN_TOTAL - 1)
+    }
+
+    #[inline]
+    fn update(&mut self, i: usize, j: usize, repeated: bool) {
+        let s = Self::slot(i, j);
+        let g: i32 = if repeated { (BIN_TOTAL - 1) as i32 } else { 0 };
+        let cur = self.t[s] as i32;
+        self.t[s] = (cur + ((g - cur) >> BIN_RATE)) as u16;
+    }
+}
+
+/// Count bucket for a deterministic symbol's accumulated count (in `PPM_INC`
+/// units ⇒ roughly the number of observations).
+#[inline]
+fn bin_count_bucket(c: u32) -> usize {
+    (c >> 2).min((BIN_COUNT_BUCKETS - 1) as u32) as usize
+}
+
+/// Experimental probability-calibration levers, all off by default so the
+/// default path is byte-identical to the committed champion.
+#[derive(Clone, Copy)]
+struct Flags {
+    apm: bool,
+    bin: bool,
+}
+
+impl Flags {
+    const OFF: Flags = Flags {
+        apm: false,
+        bin: false,
+    };
+}
+
 /// Bounded-memory RESCALE policy (PPMII-style graceful reclamation).
 ///
 /// When the number of stored contexts reaches `max_ctx`, instead of the naive
@@ -426,6 +501,8 @@ struct PpmModel {
     /// Optional PAQ-style APM on the escape probability (chained after SEE2).
     /// `None` = exact champion behaviour (byte-identical wire).
     apm: Option<Apm>,
+    /// Optional PPMII binary-context (BinSumm) model for deterministic contexts.
+    bin: Option<BinModel>,
 }
 
 /// Number of APM contexts = escape probability calibration is keyed by order
@@ -435,10 +512,10 @@ const APM_CTX: usize = 16;
 
 impl PpmModel {
     fn new(order: usize) -> Self {
-        Self::new_bounded(order, MemCfg::DISABLED, false)
+        Self::new_bounded(order, MemCfg::DISABLED, Flags::OFF)
     }
 
-    fn new_bounded(order: usize, mem: MemCfg, apm_on: bool) -> Self {
+    fn new_bounded(order: usize, mem: MemCfg, flags: Flags) -> Self {
         Self {
             order,
             ctx: (0..=order).map(|_| BTreeMap::new()).collect(),
@@ -453,7 +530,8 @@ impl PpmModel {
             ideal_bits: 0.0,
             esc_bits: 0.0,
             uni_bits: 0.0,
-            apm: apm_on.then(|| Apm::new(APM_CTX)),
+            apm: flags.apm.then(|| Apm::new(APM_CTX)),
+            bin: flags.bin.then(BinModel::new),
         }
     }
 
@@ -535,49 +613,70 @@ impl PpmModel {
             if let Some(ctx) = self.ctx[k].get(key).filter(|ctx| context_admitted(ctx, k)) {
                 let (run, base_esc) = escape_band(ctx, &excluded);
                 if base_esc > 0 {
-                    let masked = excluded.iter().filter(|&&v| v).count();
-                    let bucket = see_bucket(
-                        k,
-                        self.order,
-                        masked,
-                        base_esc as usize,
-                        run as usize,
-                        0,
-                        CTX_RESCALE as usize,
-                    );
-                    let esc = self.see[bucket].predict(base_esc);
-                    let (esc2, total, apm_idx) = self.apm_escape(k, run, esc);
-                    let mut cum = 0u32;
-                    let mut found = None;
-                    for &(s, c) in &ctx.stats {
-                        if excluded[s as usize] {
-                            continue;
+                    if self.bin.is_some() && ctx.stats.len() == 1 && k >= 4 {
+                        // Deterministic (single-symbol) context → BinSumm binary
+                        // coding. `s0` is non-excluded here (base_esc > 0).
+                        let (s0, c) = ctx.stats[0];
+                        let i = bin_count_bucket(c);
+                        let j = k.min(BIN_CTX - 1);
+                        let pm = self.bin.as_ref().unwrap().predict(i, j);
+                        if s0 == sym {
+                            enc.encode(0, pm, BIN_TOTAL);
+                            self.ideal_bits += -((pm as f64) / (BIN_TOTAL as f64)).log2();
+                            self.bin.as_mut().unwrap().update(i, j, true);
+                            return k;
                         }
-                        if s == sym {
-                            found = Some((cum, c));
-                            break;
+                        enc.encode(pm, BIN_TOTAL - pm, BIN_TOTAL);
+                        let eb = -(((BIN_TOTAL - pm) as f64) / (BIN_TOTAL as f64)).log2();
+                        self.ideal_bits += eb;
+                        self.esc_bits += eb;
+                        self.bin.as_mut().unwrap().update(i, j, false);
+                        excluded[s0 as usize] = true;
+                    } else {
+                        let masked = excluded.iter().filter(|&&v| v).count();
+                        let bucket = see_bucket(
+                            k,
+                            self.order,
+                            masked,
+                            base_esc as usize,
+                            run as usize,
+                            0,
+                            CTX_RESCALE as usize,
+                        );
+                        let esc = self.see[bucket].predict(base_esc);
+                        let (esc2, total, apm_idx) = self.apm_escape(k, run, esc);
+                        let mut cum = 0u32;
+                        let mut found = None;
+                        for &(s, c) in &ctx.stats {
+                            if excluded[s as usize] {
+                                continue;
+                            }
+                            if s == sym {
+                                found = Some((cum, c));
+                                break;
+                            }
+                            cum += c;
                         }
-                        cum += c;
-                    }
-                    if let Some((cum, c)) = found {
-                        enc.encode(cum, c, total);
-                        self.ideal_bits += -((c as f64) / (total as f64)).log2();
-                        self.see[bucket].update_hit();
+                        if let Some((cum, c)) = found {
+                            enc.encode(cum, c, total);
+                            self.ideal_bits += -((c as f64) / (total as f64)).log2();
+                            self.see[bucket].update_hit();
+                            if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
+                                apm.update(idx, false);
+                            }
+                            return k;
+                        }
+                        enc.encode(run, esc2, total);
+                        let eb = -((esc2 as f64) / (total as f64)).log2();
+                        self.ideal_bits += eb;
+                        self.esc_bits += eb;
+                        self.see[bucket].update_escape(total);
                         if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
-                            apm.update(idx, false);
+                            apm.update(idx, true);
                         }
-                        return k;
-                    }
-                    enc.encode(run, esc2, total);
-                    let eb = -((esc2 as f64) / (total as f64)).log2();
-                    self.ideal_bits += eb;
-                    self.esc_bits += eb;
-                    self.see[bucket].update_escape(total);
-                    if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
-                        apm.update(idx, true);
-                    }
-                    for &(s, _) in &ctx.stats {
-                        excluded[s as usize] = true;
+                        for &(s, _) in &ctx.stats {
+                            excluded[s as usize] = true;
+                        }
                     }
                 }
             }
@@ -602,44 +701,60 @@ impl PpmModel {
             if let Some(ctx) = self.ctx[k].get(key).filter(|ctx| context_admitted(ctx, k)) {
                 let (run, base_esc) = escape_band(ctx, &excluded);
                 if base_esc > 0 {
-                    let masked = excluded.iter().filter(|&&v| v).count();
-                    let bucket = see_bucket(
-                        k,
-                        self.order,
-                        masked,
-                        base_esc as usize,
-                        run as usize,
-                        0,
-                        CTX_RESCALE as usize,
-                    );
-                    let esc = self.see[bucket].predict(base_esc);
-                    let (esc2, total, apm_idx) = self.apm_escape(k, run, esc);
-                    let f = dec.get_freq(total);
-                    if f < run {
-                        let mut cum = 0u32;
-                        for &(s, c) in &ctx.stats {
-                            if excluded[s as usize] {
-                                continue;
-                            }
-                            if f < cum + c {
-                                dec.decode(cum, c, total);
-                                self.see[bucket].update_hit();
-                                if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
-                                    apm.update(idx, false);
-                                }
-                                return (s, k);
-                            }
-                            cum += c;
+                    if self.bin.is_some() && ctx.stats.len() == 1 && k >= 4 {
+                        let (s0, c) = ctx.stats[0];
+                        let i = bin_count_bucket(c);
+                        let j = k.min(BIN_CTX - 1);
+                        let pm = self.bin.as_ref().unwrap().predict(i, j);
+                        let f = dec.get_freq(BIN_TOTAL);
+                        if f < pm {
+                            dec.decode(0, pm, BIN_TOTAL);
+                            self.bin.as_mut().unwrap().update(i, j, true);
+                            return (s0, k);
                         }
-                        unreachable!("PPM decode: f<run but no symbol matched");
-                    }
-                    dec.decode(run, esc2, total);
-                    self.see[bucket].update_escape(total);
-                    if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
-                        apm.update(idx, true);
-                    }
-                    for &(s, _) in &ctx.stats {
-                        excluded[s as usize] = true;
+                        dec.decode(pm, BIN_TOTAL - pm, BIN_TOTAL);
+                        self.bin.as_mut().unwrap().update(i, j, false);
+                        excluded[s0 as usize] = true;
+                    } else {
+                        let masked = excluded.iter().filter(|&&v| v).count();
+                        let bucket = see_bucket(
+                            k,
+                            self.order,
+                            masked,
+                            base_esc as usize,
+                            run as usize,
+                            0,
+                            CTX_RESCALE as usize,
+                        );
+                        let esc = self.see[bucket].predict(base_esc);
+                        let (esc2, total, apm_idx) = self.apm_escape(k, run, esc);
+                        let f = dec.get_freq(total);
+                        if f < run {
+                            let mut cum = 0u32;
+                            for &(s, c) in &ctx.stats {
+                                if excluded[s as usize] {
+                                    continue;
+                                }
+                                if f < cum + c {
+                                    dec.decode(cum, c, total);
+                                    self.see[bucket].update_hit();
+                                    if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
+                                        apm.update(idx, false);
+                                    }
+                                    return (s, k);
+                                }
+                                cum += c;
+                            }
+                            unreachable!("PPM decode: f<run but no symbol matched");
+                        }
+                        dec.decode(run, esc2, total);
+                        self.see[bucket].update_escape(total);
+                        if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
+                            apm.update(idx, true);
+                        }
+                        for &(s, _) in &ctx.stats {
+                            excluded[s as usize] = true;
+                        }
                     }
                 }
             }
@@ -737,7 +852,7 @@ fn uniform_rank(sym: u8, excluded: &[bool; 256]) -> (u32, u32) {
 
 /// Encode `data` with an order-`order` PPM. Wire: `[orig_len u64 BE][order u8][rc]`.
 fn ppm_encode(data: &[u8], order: usize) -> Vec<u8> {
-    ppm_encode_bounded(data, order, MemCfg::DISABLED, false).0
+    ppm_encode_bounded(data, order, MemCfg::DISABLED, Flags::OFF).0
 }
 
 /// Bounded-memory encode. Returns `(blob, rescale_events, peak_context_count,
@@ -749,11 +864,11 @@ fn ppm_encode_bounded(
     data: &[u8],
     order: usize,
     mem: MemCfg,
-    apm_on: bool,
+    flags: Flags,
 ) -> (Vec<u8>, u32, usize, f64, f64, f64) {
     let mut out = (data.len() as u64).to_be_bytes().to_vec();
     out.push(order as u8);
-    let mut model = PpmModel::new_bounded(order, mem, apm_on);
+    let mut model = PpmModel::new_bounded(order, mem, flags);
     let mut enc = RangeEncoder::new();
     for i in 0..data.len() {
         let fo = model.encode_symbol(&mut enc, &data[..i], data[i]);
@@ -772,13 +887,13 @@ fn ppm_encode_bounded(
 
 /// Decode a blob produced by [`ppm_encode`]. Fail-closed on a truncated header.
 fn ppm_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
-    ppm_decode_bounded(blob, MemCfg::DISABLED, false)
+    ppm_decode_bounded(blob, MemCfg::DISABLED, Flags::OFF)
 }
 
 /// Bounded-memory decode. The `mem` config and `apm_on` MUST match the ones used
 /// at encode time, so the deterministic LRU eviction and escape APM reclaim/
 /// refine identically and the round-trip stays byte-exact.
-fn ppm_decode_bounded(blob: &[u8], mem: MemCfg, apm_on: bool) -> Result<Vec<u8>, CubrimError> {
+fn ppm_decode_bounded(blob: &[u8], mem: MemCfg, flags: Flags) -> Result<Vec<u8>, CubrimError> {
     if blob.len() < 9 {
         return Err(CubrimError::Decode("MODE_PPMD: header truncated".into()));
     }
@@ -786,7 +901,7 @@ fn ppm_decode_bounded(blob: &[u8], mem: MemCfg, apm_on: bool) -> Result<Vec<u8>,
     let order = blob[8] as usize;
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
-    let mut model = PpmModel::new_bounded(order, mem, apm_on);
+    let mut model = PpmModel::new_bounded(order, mem, flags);
     let mut dec = RangeDecoder::new(&blob[9..]);
     for _ in 0..orig_len {
         let (sym, fo) = model.decode_symbol(&mut dec, &out);
@@ -1062,9 +1177,9 @@ mod tests {
     /// Round-trip through a memory-bounded PPM must stay byte-exact: the LRU
     /// eviction is a deterministic function of the processed history, so decode
     /// reclaims exactly the contexts encode did.
-    fn ppm_rt_bounded(data: &[u8], order: usize, mem: MemCfg, apm_on: bool) -> (usize, u32, usize) {
-        let (blob, rescales, peak, _, _, _) = ppm_encode_bounded(data, order, mem, apm_on);
-        let out = ppm_decode_bounded(&blob, mem, apm_on).expect("bounded ppm decode");
+    fn ppm_rt_bounded(data: &[u8], order: usize, mem: MemCfg, flags: Flags) -> (usize, u32, usize) {
+        let (blob, rescales, peak, _, _, _) = ppm_encode_bounded(data, order, mem, flags);
+        let out = ppm_decode_bounded(&blob, mem, flags).expect("bounded ppm decode");
         assert_eq!(
             out,
             data,
@@ -1089,7 +1204,7 @@ mod tests {
         for order in [4usize, 8, 16] {
             for halve in [false, true] {
                 let mem = MemCfg::bounded(2_000, 75, halve, 2);
-                let (_, rescales, peak) = ppm_rt_bounded(&data, order, mem, false);
+                let (_, rescales, peak) = ppm_rt_bounded(&data, order, mem, Flags::OFF);
                 assert!(
                     rescales > 0,
                     "cap must actually fire for order {order} halve={halve}"
@@ -1110,7 +1225,7 @@ mod tests {
         for order in [4usize, 8, 16] {
             let champ = ppm_encode(&text, order);
             let (bounded, rescales, _, _, _, _) =
-                ppm_encode_bounded(&text, order, MemCfg::DISABLED, false);
+                ppm_encode_bounded(&text, order, MemCfg::DISABLED, Flags::OFF);
             assert_eq!(
                 champ, bounded,
                 "DISABLED diverged from champion (order {order})"
@@ -1123,9 +1238,9 @@ mod tests {
     fn bounded_edge_cases_round_trip() {
         let mem = MemCfg::bounded(64, 50, true, 2);
         for order in [0usize, 2, 8] {
-            ppm_rt_bounded(b"", order, mem, false);
-            ppm_rt_bounded(b"A", order, mem, false);
-            ppm_rt_bounded(&[0x5Au8; 500], order, mem, false);
+            ppm_rt_bounded(b"", order, mem, Flags::OFF);
+            ppm_rt_bounded(b"A", order, mem, Flags::OFF);
+            ppm_rt_bounded(&[0x5Au8; 500], order, mem, Flags::OFF);
         }
     }
 
@@ -1147,8 +1262,24 @@ mod tests {
         }
         for order in [0usize, 4, 8, 16] {
             for data in [text.as_slice(), mixed.as_slice(), b"", b"A", &[7u8; 400]] {
-                let (blob, _, _, _, _, _) = ppm_encode_bounded(data, order, MemCfg::DISABLED, true);
-                let out = ppm_decode_bounded(&blob, MemCfg::DISABLED, true).expect("apm decode");
+                let (blob, _, _, _, _, _) = ppm_encode_bounded(
+                    data,
+                    order,
+                    MemCfg::DISABLED,
+                    Flags {
+                        apm: true,
+                        bin: false,
+                    },
+                );
+                let out = ppm_decode_bounded(
+                    &blob,
+                    MemCfg::DISABLED,
+                    Flags {
+                        apm: true,
+                        bin: false,
+                    },
+                )
+                .expect("apm decode");
                 assert_eq!(
                     out,
                     data,
@@ -1159,13 +1290,60 @@ mod tests {
         }
     }
 
+    /// The BinSumm deterministic-context model must keep round-trip byte-exact:
+    /// encode and decode take the identical binary branch (same one-symbol
+    /// contexts, same table index, same table state) so the coded probabilities
+    /// match on both sides across orders and edge cases.
+    #[test]
+    fn bin_round_trips_byte_exact() {
+        let bin = Flags {
+            apm: false,
+            bin: true,
+        };
+        let text = b"the quick brown fox jumps over the lazy dog. \
+                     she sells sea shells by the sea shore. "
+            .repeat(150);
+        let mut mixed = text.clone();
+        let mut x: u32 = 0x1357_9BDF;
+        for _ in 0..4000 {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            mixed.push((x >> 24) as u8);
+        }
+        for order in [0usize, 4, 8, 16] {
+            for data in [text.as_slice(), mixed.as_slice(), b"", b"A", &[9u8; 600]] {
+                let (blob, _, _, _, _, _) = ppm_encode_bounded(data, order, MemCfg::DISABLED, bin);
+                let out = ppm_decode_bounded(&blob, MemCfg::DISABLED, bin).expect("bin decode");
+                assert_eq!(
+                    out,
+                    data,
+                    "BinSumm RT cmp!=0 (order {order}, len {})",
+                    data.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bin_and_apm_compose_round_trip() {
+        let both = Flags {
+            apm: true,
+            bin: true,
+        };
+        let text = b"pack my box with five dozen liquor jugs. ".repeat(180);
+        for order in [4usize, 8, 16] {
+            let (blob, _, _, _, _, _) = ppm_encode_bounded(&text, order, MemCfg::DISABLED, both);
+            let out = ppm_decode_bounded(&blob, MemCfg::DISABLED, both).expect("both decode");
+            assert_eq!(out, text, "APM+BinSumm RT cmp!=0 (order {order})");
+        }
+    }
+
     #[test]
     fn apm_off_is_byte_identical_to_champion() {
         let text = b"the quick brown fox jumps over the lazy dog. ".repeat(200);
         for order in [4usize, 8, 16] {
             let champ = ppm_encode(&text, order);
             let (apm_off, _, _, _, _, _) =
-                ppm_encode_bounded(&text, order, MemCfg::DISABLED, false);
+                ppm_encode_bounded(&text, order, MemCfg::DISABLED, Flags::OFF);
             assert_eq!(
                 champ, apm_off,
                 "apm_on=false diverged from champion (order {order})"
@@ -1226,13 +1404,18 @@ mod tests {
             }
             None => MemCfg::DISABLED,
         };
-        let apm_on = std::env::var("CUBR_PPM_APM")
-            .map(|s| s == "1")
-            .unwrap_or(false);
+        let flags = Flags {
+            apm: std::env::var("CUBR_PPM_APM")
+                .map(|s| s == "1")
+                .unwrap_or(false),
+            bin: std::env::var("CUBR_PPM_BIN")
+                .map(|s| s == "1")
+                .unwrap_or(false),
+        };
         for order in orders {
             let (blob, rescales, peak, ideal_bits, esc_bits, uni_bits) =
-                ppm_encode_bounded(&data, order, mem, apm_on);
-            let out = ppm_decode_bounded(&blob, mem, apm_on).expect("decode");
+                ppm_encode_bounded(&data, order, mem, flags);
+            let out = ppm_decode_bounded(&blob, mem, flags).expect("decode");
             let rt = out == data;
             let p = blob.len();
             // Model-entropy floor vs actual bytes: (actual - ideal)/actual is the
