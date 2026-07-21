@@ -136,6 +136,7 @@ struct Mixer {
     shift: i32,
     set: usize,
     px: i32,
+    raw: i32, // unclamped (dot>>16) — for the FH2-06 quant-audit only
 }
 impl Mixer {
     fn new(nsets: usize, nin: usize, shift: i32) -> Self {
@@ -145,6 +146,7 @@ impl Mixer {
             shift,
             set: 0,
             px: PSCALE / 2,
+            raw: 0,
         }
     }
     #[inline]
@@ -155,6 +157,7 @@ impl Mixer {
             dot += self.w[self.set + i] as i64 * inp[i] as i64;
         }
         let x = (dot >> 16) as i32;
+        self.raw = x;
         self.px = lg.squash(x);
         x.clamp(-ST_MAX, ST_MAX)
     }
@@ -308,6 +311,10 @@ struct CmModel {
     pmix: i32,
     apm1_idx: usize,
     apm2_idx: usize,
+    // FH2-06 quant-audit (encode-path diagnostic; no wire effect)
+    audit: bool,
+    q_bits: f64,
+    i_bits: f64,
 }
 
 impl CmModel {
@@ -357,6 +364,9 @@ impl CmModel {
             pmix: 0,
             apm1_idx: 0,
             apm2_idx: 0,
+            audit: std::env::var("CM_AUDIT").map(|s| s == "1").unwrap_or(false),
+            q_bits: 0.0,
+            i_bits: 0.0,
         }
     }
 
@@ -456,6 +466,17 @@ impl CmModel {
     }
 
     fn update_bit(&mut self, y: i32) {
+        if self.audit {
+            // FH2-06: layer-2 mixer output — quantized (12-bit squash + ST_MAX
+            // clamp) vs the f64-ideal (unclamped logistic of the raw dot). The
+            // gap = exact ceiling recoverable by widening the stretch domain /
+            // raising probability resolution, per bit outcome.
+            let pq = (self.pmix as f64 / PSCALE as f64).clamp(1e-9, 1.0 - 1e-9);
+            let pi =
+                (1.0 / (1.0 + (-(self.l2.raw as f64) / ST_SCALE).exp())).clamp(1e-9, 1.0 - 1e-9);
+            self.q_bits += -if y == 1 { pq } else { 1.0 - pq }.log2();
+            self.i_bits += -if y == 1 { pi } else { 1.0 - pi }.log2();
+        }
         for m in 0..NL1 {
             self.l1[m].update(&self.st, y);
         }
@@ -500,6 +521,12 @@ impl CmModel {
 
 /// Encode `data`. Wire: `[orig_len u64 BE][bit-range-coded]`.
 pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
+    cm2_encode_audit(data).0
+}
+
+/// Encode, also returning the FH2-06 quant-audit `(quant_bits, ideal_bits)` (both
+/// 0 unless `CM_AUDIT=1`). The wire bytes are identical to [`cm2_encode`].
+pub(crate) fn cm2_encode_audit(data: &[u8]) -> (Vec<u8>, f64, f64) {
     let mut out = (data.len() as u64).to_be_bytes().to_vec();
     let mut model = CmModel::new();
     let mut enc = RangeEncoder::new();
@@ -522,7 +549,7 @@ pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
         model.end_byte(&buf);
     }
     out.extend_from_slice(&enc.finish());
-    out
+    (out, model.q_bits, model.i_bits)
 }
 
 /// Decode a blob produced by [`cm2_encode`]. Fail-closed on a truncated header.
@@ -618,12 +645,22 @@ mod tests {
             data.truncate(l.parse().expect("limit"));
         }
         let n = data.len() as f64;
-        let blob = cm2_encode(&data);
+        let (blob, q_bits, i_bits) = cm2_encode_audit(&data);
         let out = cm2_decode(&blob).expect("decode");
         let rt = out == data;
+        // FH2-06 quant-audit: recoverable ceiling from removing the mixer-output
+        // ST_MAX clamp + 12-bit squash quant (i.e. widening the stretch domain).
+        let q_bytes = q_bits / 8.0;
+        let i_bytes = i_bits / 8.0;
+        let ceiling_pct = if q_bytes > 0.0 {
+            (q_bytes - i_bytes) / (blob.len() as f64) * 100.0
+        } else {
+            0.0
+        };
         println!(
             "CM2-PROBE file={} n={} cm2={} ratio={:.9} rt_cmp0={} \
-             vs_champion_0.229919={:+.6} vs_floor_0.2253={:+.6}",
+             vs_champion_0.229919={:+.6} vs_floor_0.2253={:+.6} \
+             audit_q_bytes={:.0} audit_i_bytes={:.0} audit_ceiling_pct={:.4}",
             path,
             data.len(),
             blob.len(),
@@ -631,6 +668,9 @@ mod tests {
             rt,
             blob.len() as f64 / n - 0.229919,
             blob.len() as f64 / n - 0.2253,
+            q_bytes,
+            i_bytes,
+            ceiling_pct,
         );
         assert!(rt, "self-probe RT cmp!=0");
     }
