@@ -181,10 +181,14 @@ const CTX_RESCALE: u32 = 1 << 14;
 const PPM_INC: u32 = 4;
 
 /// One PPM context: (symbol, count) stats in deterministic insertion order.
+/// `last_used` is the model tick of the most recent update touching this context;
+/// it drives least-recently-used eviction under the bounded-memory RESCALE policy
+/// and is a pure function of the processed history (identical on encode/decode).
 #[derive(Default)]
 struct Ctx {
     stats: Vec<(u8, u32)>,
     total: u32,
+    last_used: u64,
 }
 
 impl Ctx {
@@ -192,6 +196,7 @@ impl Ctx {
         Self {
             stats: vec![(sym, freq.max(1))],
             total: freq.max(1),
+            last_used: 0,
         }
     }
 
@@ -298,21 +303,117 @@ fn see_bucket(
     (order.min(max_order) << 8) | (masked.min(15) << 4) | symbols.min(15)
 }
 
+/// Bounded-memory RESCALE policy (PPMII-style graceful reclamation).
+///
+/// When the number of stored contexts reaches `max_ctx`, instead of the naive
+/// full clear-and-restart (which destroys all learned statistics and regressed
+/// the ratio badly — see campaign log), we evict the least-recently-used
+/// contexts (orders `>= evict_min_order`) down to `low_mark`, keeping the hot,
+/// low-order backbone warm; and optionally halve all survivor counts (`halve`)
+/// to bias the model toward recent statistics on non-stationary input.
+///
+/// `DISABLED` (`max_ctx = usize::MAX`) is the exact champion behaviour: contexts
+/// are never evicted, so encode/decode wire bytes are byte-identical to the
+/// unbounded model.
+#[derive(Clone, Copy)]
+struct MemCfg {
+    max_ctx: usize,
+    low_mark: usize,
+    halve: bool,
+    evict_min_order: usize,
+}
+
+impl MemCfg {
+    const DISABLED: MemCfg = MemCfg {
+        max_ctx: usize::MAX,
+        low_mark: usize::MAX,
+        halve: false,
+        evict_min_order: 2,
+    };
+
+    /// A bounded config with a `low_mark` at `low_pct`% of `max_ctx`.
+    fn bounded(max_ctx: usize, low_pct: usize, halve: bool, evict_min_order: usize) -> Self {
+        let low_mark = (max_ctx / 100) * low_pct.min(100);
+        Self {
+            max_ctx,
+            low_mark: low_mark.max(1),
+            halve,
+            evict_min_order,
+        }
+    }
+
+    #[inline]
+    fn enabled(&self) -> bool {
+        self.max_ctx != usize::MAX
+    }
+}
+
 /// Variable-order PPM model with shared, bucketed secondary escape estimators.
 struct PpmModel {
     order: usize,
     ctx: Vec<BTreeMap<Vec<u8>, Ctx>>,
     see: Vec<SeeState>,
+    mem: MemCfg,
+    tick: u64,
+    n_ctx: usize,
+    peak_ctx: usize,
+    rescales: u32,
 }
 
 impl PpmModel {
     fn new(order: usize) -> Self {
+        Self::new_bounded(order, MemCfg::DISABLED)
+    }
+
+    fn new_bounded(order: usize, mem: MemCfg) -> Self {
         Self {
             order,
             ctx: (0..=order).map(|_| BTreeMap::new()).collect(),
             see: (0..((order + 1) << 8))
                 .map(|bucket| SeeState::with_init(5 * ((bucket & 15) as u32) + 10))
                 .collect(),
+            mem,
+            tick: 0,
+            n_ctx: 0,
+            peak_ctx: 0,
+            rescales: 0,
+        }
+    }
+
+    /// Graceful bounded-memory reclamation: evict the least-recently-used
+    /// contexts of order `>= mem.evict_min_order` down to `mem.low_mark`, then
+    /// optionally halve survivor counts. Deterministic in the processed history
+    /// (total order on `(last_used, order, key)`), so encode and decode reclaim
+    /// identically and round-trip stays byte-exact.
+    fn rescale_memory(&mut self) {
+        self.rescales += 1;
+        let mut cand: Vec<(u64, usize, &Vec<u8>)> = Vec::new();
+        for (k, map) in self.ctx.iter().enumerate() {
+            if k < self.mem.evict_min_order {
+                continue;
+            }
+            for (key, c) in map.iter() {
+                cand.push((c.last_used, k, key));
+            }
+        }
+        cand.sort_unstable();
+        let target = self.n_ctx.saturating_sub(self.mem.low_mark);
+        let victims: Vec<(usize, Vec<u8>)> = cand
+            .into_iter()
+            .take(target)
+            .map(|(_, k, key)| (k, key.clone()))
+            .collect();
+        for (k, key) in victims {
+            if self.ctx[k].remove(&key).is_some() {
+                self.n_ctx -= 1;
+            }
+        }
+        if self.mem.halve {
+            for map in self.ctx.iter_mut() {
+                for c in map.values_mut() {
+                    c.rescale();
+                }
+            }
         }
     }
 
@@ -439,11 +540,14 @@ impl PpmModel {
     }
 
     fn update(&mut self, hist: &[u8], sym: u8, found_order: usize) {
+        self.tick += 1;
+        let tick = self.tick;
         let maxk = self.order.min(hist.len());
         for k in found_order..=maxk {
             let key = &hist[hist.len() - k..];
             if let Some(ctx) = self.ctx[k].get_mut(key) {
                 ctx.bump(sym);
+                ctx.last_used = tick;
             } else {
                 let seed = if k == 0 {
                     PPM_INC
@@ -454,7 +558,16 @@ impl PpmModel {
                         .map(|parent| successor_freq(parent, sym))
                         .unwrap_or(1)
                 };
-                self.ctx[k].insert(key.to_vec(), Ctx::seeded(sym, seed));
+                if self.mem.enabled() && self.n_ctx >= self.mem.max_ctx {
+                    self.rescale_memory();
+                }
+                let mut c = Ctx::seeded(sym, seed);
+                c.last_used = tick;
+                self.ctx[k].insert(key.to_vec(), c);
+                self.n_ctx += 1;
+                if self.n_ctx > self.peak_ctx {
+                    self.peak_ctx = self.n_ctx;
+                }
             }
         }
     }
@@ -495,20 +608,33 @@ fn uniform_rank(sym: u8, excluded: &[bool; 256]) -> (u32, u32) {
 
 /// Encode `data` with an order-`order` PPM. Wire: `[orig_len u64 BE][order u8][rc]`.
 fn ppm_encode(data: &[u8], order: usize) -> Vec<u8> {
+    ppm_encode_bounded(data, order, MemCfg::DISABLED).0
+}
+
+/// Bounded-memory encode. Returns `(blob, rescale_events, peak_context_count)`.
+/// With `MemCfg::DISABLED` the wire bytes are byte-identical to [`ppm_encode`].
+fn ppm_encode_bounded(data: &[u8], order: usize, mem: MemCfg) -> (Vec<u8>, u32, usize) {
     let mut out = (data.len() as u64).to_be_bytes().to_vec();
     out.push(order as u8);
-    let mut model = PpmModel::new(order);
+    let mut model = PpmModel::new_bounded(order, mem);
     let mut enc = RangeEncoder::new();
     for i in 0..data.len() {
         let fo = model.encode_symbol(&mut enc, &data[..i], data[i]);
         model.update(&data[..i], data[i], fo);
     }
     out.extend_from_slice(&enc.finish());
-    out
+    (out, model.rescales, model.peak_ctx)
 }
 
 /// Decode a blob produced by [`ppm_encode`]. Fail-closed on a truncated header.
 fn ppm_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    ppm_decode_bounded(blob, MemCfg::DISABLED)
+}
+
+/// Bounded-memory decode. The `mem` config MUST match the one used at encode
+/// time, so the deterministic LRU eviction reclaims the same contexts and the
+/// round-trip stays byte-exact.
+fn ppm_decode_bounded(blob: &[u8], mem: MemCfg) -> Result<Vec<u8>, CubrimError> {
     if blob.len() < 9 {
         return Err(CubrimError::Decode("MODE_PPMD: header truncated".into()));
     }
@@ -516,7 +642,7 @@ fn ppm_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let order = blob[8] as usize;
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
-    let mut model = PpmModel::new(order);
+    let mut model = PpmModel::new_bounded(order, mem);
     let mut dec = RangeDecoder::new(&blob[9..]);
     for _ in 0..orig_len {
         let (sym, fo) = model.decode_symbol(&mut dec, &out);
@@ -787,6 +913,73 @@ mod tests {
         assert!(context_admitted(&deep, 12));
     }
 
+    // ── Bounded-memory RESCALE (PPMII-style graceful reclamation) ───────────
+
+    /// Round-trip through a memory-bounded PPM must stay byte-exact: the LRU
+    /// eviction is a deterministic function of the processed history, so decode
+    /// reclaims exactly the contexts encode did.
+    fn ppm_rt_bounded(data: &[u8], order: usize, mem: MemCfg) -> (usize, u32, usize) {
+        let (blob, rescales, peak) = ppm_encode_bounded(data, order, mem);
+        let out = ppm_decode_bounded(&blob, mem).expect("bounded ppm decode");
+        assert_eq!(
+            out, data,
+            "bounded PPM(order {order}) round-trip cmp!=0 for len {}",
+            data.len()
+        );
+        (blob.len(), rescales, peak)
+    }
+
+    #[test]
+    fn bounded_round_trips_with_eviction() {
+        // A tiny cap on high-entropy + structured text forces many eviction
+        // rounds; RT must remain byte-exact across orders and both halve modes.
+        let mut data = Vec::new();
+        let mut x: u32 = 0xC0FFEE11;
+        for i in 0..20_000u32 {
+            data.extend_from_slice(b"ctx-");
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            data.push((x >> 24) as u8);
+            data.push((i % 251) as u8);
+        }
+        for order in [4usize, 8, 16] {
+            for halve in [false, true] {
+                let mem = MemCfg::bounded(2_000, 75, halve, 2);
+                let (_, rescales, peak) = ppm_rt_bounded(&data, order, mem);
+                assert!(
+                    rescales > 0,
+                    "cap must actually fire for order {order} halve={halve}"
+                );
+                assert!(
+                    peak <= mem.max_ctx,
+                    "peak {peak} exceeded cap {} (order {order})",
+                    mem.max_ctx
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_disabled_is_byte_identical_to_champion() {
+        // The DISABLED config must reproduce the unbounded wire exactly.
+        let text = b"the quick brown fox jumps over the lazy dog. ".repeat(200);
+        for order in [4usize, 8, 16] {
+            let champ = ppm_encode(&text, order);
+            let (bounded, rescales, _) = ppm_encode_bounded(&text, order, MemCfg::DISABLED);
+            assert_eq!(champ, bounded, "DISABLED diverged from champion (order {order})");
+            assert_eq!(rescales, 0, "DISABLED must never rescale");
+        }
+    }
+
+    #[test]
+    fn bounded_edge_cases_round_trip() {
+        let mem = MemCfg::bounded(64, 50, true, 2);
+        for order in [0usize, 2, 8] {
+            ppm_rt_bounded(b"", order, mem);
+            ppm_rt_bounded(b"A", order, mem);
+            ppm_rt_bounded(&[0x5Au8; 500], order, mem);
+        }
+    }
+
     /// Step 4 self-probe (charged, real numbers). Not run by default -- invoke:
     ///   CUBR_PROBE_FILE=/path/to/dickens [CUBR_PROBE_LIMIT=N]
     ///     cargo test --release -j4 ppmd::tests::self_probe -- --ignored --nocapture
@@ -818,18 +1011,41 @@ mod tests {
             .ok()
             .map(|s| s.split(',').map(|x| x.trim().parse().unwrap()).collect())
             .unwrap_or_else(|| vec![3, 4, 5]);
+        // Bounded-memory RESCALE gauge knobs. Unset CUBR_PPM_MAXCTX ⇒ DISABLED
+        // ⇒ exact champion behaviour (byte-identical baseline).
+        let mem = match std::env::var("CUBR_PPM_MAXCTX").ok().and_then(|s| s.parse().ok()) {
+            Some(max_ctx) => {
+                let low_pct = std::env::var("CUBR_PPM_LOWPCT")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(75usize);
+                let halve = std::env::var("CUBR_PPM_HALVE").map(|s| s == "1").unwrap_or(false);
+                let emin = std::env::var("CUBR_PPM_EVICTMIN")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(2usize);
+                MemCfg::bounded(max_ctx, low_pct, halve, emin)
+            }
+            None => MemCfg::DISABLED,
+        };
         for order in orders {
-            let blob = ppm_encode(&data, order);
-            let out = ppm_decode(&blob).expect("decode");
+            let (blob, rescales, peak) = ppm_encode_bounded(&data, order, mem);
+            let out = ppm_decode_bounded(&blob, mem).expect("decode");
             let rt = out == data;
             let p = blob.len();
             println!(
-                "PROBE order={} ppm={} ratio={:.9} rt_cmp0={} beats_incumbent={}",
+                "PROBE order={} ppm={} ratio={:.9} rt_cmp0={} beats_incumbent={} \
+                 maxctx={} lowpct={} halve={} peak_ctx={} rescales={}",
                 order,
                 p,
                 p as f64 / n,
                 rt,
-                p < inc
+                p < inc,
+                if mem.enabled() { mem.max_ctx as i64 } else { -1 },
+                mem.low_mark,
+                mem.halve,
+                peak,
+                rescales,
             );
             assert!(rt, "self-probe RT cmp!=0 at order {order}");
         }
