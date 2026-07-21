@@ -58,38 +58,113 @@ impl Logistic {
     }
 }
 
-/// Hashed bit-probability table with a count-adaptive rate (lpaq counter).
-/// The count is capped at `lim`: a mature cell then adapts at a fixed floor rate
-/// `1/(lim+2)` — LOWER `lim` = faster ongoing adaptation (better on
-/// nonstationary data; the M4 lever), higher = smoother (stationary).
+/// Bit-history state-transition table `nex[state][bit]` over a 16×16 (n0,n1)
+/// grid: observing a bit increments its own bounded count and applies a
+/// NONSTATIONARY discount to the contradicting count (halving its excess above
+/// 2). This is what lets a cell forget stale statistics after a regime change.
+fn build_nex() -> Vec<[u8; 2]> {
+    let mut nex = vec![[0u8; 2]; 256];
+    for s in 0..256usize {
+        let n0 = (s >> 4) as i32;
+        let n1 = (s & 15) as i32;
+        // observe bit 1
+        let a1 = (n1 + 1).min(15);
+        let d0 = if n0 > 2 { 2 + ((n0 - 2) >> 1) } else { n0 };
+        nex[s][1] = ((d0 << 4) | a1) as u8;
+        // observe bit 0
+        let a0 = (n0 + 1).min(15);
+        let d1 = if n1 > 2 { 2 + ((n1 - 2) >> 1) } else { n1 };
+        nex[s][0] = ((a0 << 4) | d1) as u8;
+    }
+    nex
+}
+
+/// StateMap: state → adaptive P(bit==1), learned online with a count-scaled rate
+/// (fast when a state is fresh). 22-bit internal probability.
+struct StateMap {
+    t: Vec<u32>,
+    cnt: Vec<u16>,
+    cap: u16,
+}
+impl StateMap {
+    fn new(n: usize, cap: u16) -> Self {
+        Self {
+            t: vec![1u32 << 21; n], // 0.5
+            cnt: vec![0u16; n],
+            cap,
+        }
+    }
+    #[inline]
+    fn p12(&self, s: usize) -> i32 {
+        (self.t[s] >> 10) as i32 // -> 12-bit
+    }
+    #[inline]
+    fn upd(&mut self, s: usize, y: i32) {
+        let c = self.cnt[s].min(self.cap) as i64;
+        let cur = self.t[s] as i64;
+        let tgt = (y as i64) << 22;
+        self.t[s] = (cur + (tgt - cur) / (c + 2)) as u32;
+        if self.cnt[s] < self.cap {
+            self.cnt[s] += 1;
+        }
+    }
+}
+
+/// A context model emitting TWO predictions per cell (fed as two independent
+/// mixer inputs, the strong-CM way — the mixer weights each per context):
+///   1. a STATIONARY count-adaptive probability (`t`/`c`, rate 1/(count+2),
+///      count capped at `lim`) — converges to a stable estimate, best on
+///      stationary text;
+///   2. a NONSTATIONARY bit-history state (`st`) mapped through a `StateMap`
+///      (the lpaq/zpaq counter) — forgets stale statistics after a regime
+///      change, best on short/changing contexts.
+/// Keeping BOTH (rather than replacing #1 with #2) is regression-proof: the
+/// mixer can drive the nonstationary weight to zero where it hurts (large
+/// stationary streams) yet exploit it where it helps.
 struct Ctr {
     t: Vec<u16>,
     c: Vec<u8>,
+    st: Vec<u8>,
+    sm: StateMap,
     mask: usize,
     lim: i32,
 }
 impl Ctr {
-    fn new(bits: usize, lim: i32) -> Self {
+    fn new(bits: usize, lim: i32, sm_cap: i32) -> Self {
         Self {
             t: vec![(PSCALE / 2) as u16; 1usize << bits],
             c: vec![0u8; 1usize << bits],
+            st: vec![0u8; 1usize << bits],
+            sm: StateMap::new(256, sm_cap.clamp(2, 1023) as u16),
             mask: (1usize << bits) - 1,
             lim,
         }
     }
+    /// Predict: returns (stationary 12-bit prob, state-map 12-bit prob, state).
+    /// The state is fed back to [`Ctr::upd`].
     #[inline]
-    fn p(&self, cx: usize) -> i32 {
-        self.t[cx & self.mask] as i32
+    fn predict(&self, cx: usize) -> (i32, i32, u8) {
+        let i = cx & self.mask;
+        let s = self.st[i];
+        (
+            self.t[i] as i32,
+            self.sm.p12(s as usize).clamp(1, PSCALE - 1),
+            s,
+        )
     }
     #[inline]
-    fn upd(&mut self, cx: usize, y: i32) {
+    fn upd(&mut self, cx: usize, state: u8, y: i32, nex: &[[u8; 2]]) {
         let i = cx & self.mask;
+        // stationary count-adaptive counter (identical to the pre-StateMap codec)
         let cur = self.t[i] as i32;
         let cnt = self.c[i] as i32;
         self.t[i] = (cur + (y * PSCALE - cur) / (cnt + 2)).clamp(1, PSCALE - 1) as u16;
         if cnt < self.lim {
             self.c[i] = (cnt + 1) as u8;
         }
+        // nonstationary bit-history state machine + StateMap
+        self.sm.upd(state as usize, y);
+        self.st[i] = nex[state as usize][y as usize];
     }
 }
 
@@ -179,11 +254,17 @@ const NORD: usize = 12; // order-0..11
 const NSPARSE: usize = 3;
 const SP_I: usize = NORD; // 8,9,10
 const IND_I: usize = SP_I + NSPARSE; // 11
-const M1_I: usize = IND_I + 1; // 12  long match
-const M2_I: usize = M1_I + 1; // 13  short match
-const WORD_I: usize = M2_I + 1; // 14
-const NMODELS: usize = WORD_I + 1; // 15 model inputs
-const NIN: usize = NMODELS + 1; // 16 (bias at NIN-1)
+const M1_I: usize = IND_I + 1; //  long match
+const M2_I: usize = M1_I + 1; //  short match
+const WORD_I: usize = M2_I + 1;
+// Second (nonstationary state-map) prediction per counter model — appended so the
+// stationary block (0..=WORD_I) is byte-identical to the pre-dual codec.
+const SM_ORD_I: usize = WORD_I + 1; // NORD state-map order probs
+const SM_SP_I: usize = SM_ORD_I + NORD; // NSPARSE state-map sparse probs
+const SM_IND_I: usize = SM_SP_I + NSPARSE; // indirect state-map prob
+const SM_WORD_I: usize = SM_IND_I + 1; // word state-map prob
+const NMODELS: usize = SM_WORD_I + 1; // model inputs
+const NIN: usize = NMODELS + 1; // (bias at NIN-1)
 
 const TBITS: usize = 22;
 const IBITS: usize = 20; // indirect map bits
@@ -307,12 +388,17 @@ struct CmModel {
     ind_key: usize,
     ind_hist: usize,
     prev: usize,
+    nex: Vec<[u8; 2]>,
     // per-bit scratch
     st: [i32; NIN],
     cxs: [usize; NORD],
     spcx: [usize; NSPARSE],
     indcx: usize,
     word_cx: usize,
+    ostate: [u8; NORD],
+    spstate: [u8; NSPARSE],
+    indstate: u8,
+    wordstate: u8,
     pmix: i32,
     apm1_idx: usize,
     apm2_idx: usize,
@@ -331,17 +417,23 @@ impl CmModel {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(WSHIFT_DEFAULT);
+        // Stationary counter count-cap (higher = smoother, best on stationary
+        // text) and StateMap adaptation cap. Both env-tunable.
         let ctrlim: i32 = std::env::var("CM_CTRLIM")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(254);
+        let smcap: i32 = std::env::var("CM_SMCAP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1023);
         Self {
-            ord: (0..NORD).map(|_| Ctr::new(TBITS, ctrlim)).collect(),
-            sp: (0..NSPARSE).map(|_| Ctr::new(TBITS, ctrlim)).collect(),
-            ind: Ctr::new(TBITS, ctrlim),
+            ord: (0..NORD).map(|_| Ctr::new(TBITS, ctrlim, smcap)).collect(),
+            sp: (0..NSPARSE).map(|_| Ctr::new(TBITS, ctrlim, smcap)).collect(),
+            ind: Ctr::new(TBITS, ctrlim, smcap),
             ind_map: vec![0u32; 1usize << IBITS],
             ind_mask: (1usize << IBITS) - 1,
-            wtab: Ctr::new(TBITS, ctrlim),
+            wtab: Ctr::new(TBITS, ctrlim, smcap),
             word_hash: 0,
             m1: Match::new(M1_MIN),
             m2: Match::new(M2_MIN),
@@ -360,6 +452,7 @@ impl CmModel {
             apm1,
             apm2,
             lg,
+            nex: build_nex(),
             hk: [0; NORD],
             sphash: [0; NSPARSE],
             ind_key: 0,
@@ -370,6 +463,10 @@ impl CmModel {
             spcx: [0; NSPARSE],
             indcx: 0,
             word_cx: 0,
+            ostate: [0; NORD],
+            spstate: [0; NSPARSE],
+            indstate: 0,
+            wordstate: 0,
             pmix: 0,
             apm1_idx: 0,
             apm2_idx: 0,
@@ -432,23 +529,35 @@ impl CmModel {
         for k in 0..NORD {
             let cx = self.hk[k].wrapping_mul(0x2545_F491).wrapping_add(c0);
             self.cxs[k] = cx;
-            self.st[k] = self.lg.stretch(self.ord[k].p(cx));
+            let (ps, psm, s) = self.ord[k].predict(cx);
+            self.ostate[k] = s;
+            self.st[k] = self.lg.stretch(ps);
+            self.st[SM_ORD_I + k] = self.lg.stretch(psm);
         }
         for s in 0..NSPARSE {
             let cx = self.sphash[s].wrapping_mul(0x2545_F491).wrapping_add(c0);
             self.spcx[s] = cx;
-            self.st[SP_I + s] = self.lg.stretch(self.sp[s].p(cx));
+            let (ps, psm, stt) = self.sp[s].predict(cx);
+            self.spstate[s] = stt;
+            self.st[SP_I + s] = self.lg.stretch(ps);
+            self.st[SM_SP_I + s] = self.lg.stretch(psm);
         }
         let icx = self.ind_hist.wrapping_mul(0x2545_F491).wrapping_add(c0);
         self.indcx = icx;
-        self.st[IND_I] = self.lg.stretch(self.ind.p(icx));
+        let (ips, ipsm, ist) = self.ind.predict(icx);
+        self.indstate = ist;
+        self.st[IND_I] = self.lg.stretch(ips);
+        self.st[SM_IND_I] = self.lg.stretch(ipsm);
         self.st[M1_I] = self.m1.stretch_in(&self.lg, bit);
         self.st[M2_I] = self.m2.stretch_in(&self.lg, bit);
         let wcx = (self.word_hash as usize)
             .wrapping_mul(0x2545_F491)
             .wrapping_add(c0);
         self.word_cx = wcx;
-        self.st[WORD_I] = self.lg.stretch(self.wtab.p(wcx));
+        let (wps, wpsm, wst) = self.wtab.predict(wcx);
+        self.wordstate = wst;
+        self.st[WORD_I] = self.lg.stretch(wps);
+        self.st[SM_WORD_I] = self.lg.stretch(wpsm);
         self.st[NIN - 1] = 256; // bias
 
         // 2-layer mixer: NL1 context-specialised layer-1 mixers over all inputs,
@@ -491,13 +600,13 @@ impl CmModel {
         }
         self.l2.update(&self.l2in, y);
         for k in 0..NORD {
-            self.ord[k].upd(self.cxs[k], y);
+            self.ord[k].upd(self.cxs[k], self.ostate[k], y, &self.nex);
         }
         for s in 0..NSPARSE {
-            self.sp[s].upd(self.spcx[s], y);
+            self.sp[s].upd(self.spcx[s], self.spstate[s], y, &self.nex);
         }
-        self.ind.upd(self.indcx, y);
-        self.wtab.upd(self.word_cx, y);
+        self.ind.upd(self.indcx, self.indstate, y, &self.nex);
+        self.wtab.upd(self.word_cx, self.wordstate, y, &self.nex);
         self.m1.update(y);
         self.m2.update(y);
         self.apm1.upd(self.apm1_idx, y);
