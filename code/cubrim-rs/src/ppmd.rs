@@ -188,6 +188,13 @@ struct Ctx {
 }
 
 impl Ctx {
+    fn seeded(sym: u8, freq: u32) -> Self {
+        Self {
+            stats: vec![(sym, freq.max(1))],
+            total: freq.max(1),
+        }
+    }
+
     #[inline]
     fn bump(&mut self, sym: u8) {
         if let Some(e) = self.stats.iter_mut().find(|(s, _)| *s == sym) {
@@ -207,6 +214,21 @@ impl Ctx {
             t += *c;
         }
         self.total = t;
+    }
+}
+
+/// Initial frequency for a newly-created successor, derived from its suffix
+/// parent without copying the parent's symbol table (PPMd var.H update model).
+fn successor_freq(parent: &Ctx, sym: u8) -> u32 {
+    let Some((_, freq)) = parent.stats.iter().find(|(s, _)| *s == sym) else {
+        return 1;
+    };
+    let cf = freq.saturating_sub(1);
+    let s0 = parent.total.saturating_sub(cf).max(1);
+    1 + if 2 * cf <= s0 {
+        u32::from(5 * cf > s0)
+    } else {
+        (2 * cf + s0 - 1) / (2 * s0) + 1
     }
 }
 
@@ -413,16 +435,23 @@ impl PpmModel {
             if let Some(ctx) = self.ctx[k].get_mut(key) {
                 ctx.bump(sym);
             } else {
-                let mut c = Ctx::default();
-                c.bump(sym);
-                self.ctx[k].insert(key.to_vec(), c);
+                let seed = if k == 0 {
+                    PPM_INC
+                } else {
+                    let parent_key = &hist[hist.len() - (k - 1)..];
+                    self.ctx[k - 1]
+                        .get(parent_key)
+                        .map(|parent| successor_freq(parent, sym))
+                        .unwrap_or(1)
+                };
+                self.ctx[k].insert(key.to_vec(), Ctx::seeded(sym, seed));
             }
         }
     }
 }
 
 /// Method-C escape band over the non-excluded symbols of a context:
-/// returns `(run, esc)` where `run` = Σ non-excluded counts and `esc` = number
+/// returns `(run, esc)` where `run` = sum of non-excluded counts and `esc` = number
 /// of distinct non-excluded symbols (the method-C escape frequency).
 #[inline]
 fn escape_band(ctx: &Ctx, excluded: &[bool; 256]) -> (u32, u32) {
@@ -716,6 +745,25 @@ mod tests {
         ppm_rt(&data, 16);
     }
 
+    #[test]
+    fn successor_inheritance_tracks_parent_probability() {
+        let mut parent = Ctx::default();
+        for _ in 0..8 {
+            parent.bump(b'a');
+        }
+        parent.bump(b'b');
+        let common = successor_freq(&parent, b'a');
+        let rare = successor_freq(&parent, b'b');
+        assert!(common > rare, "common={common}, rare={rare}");
+        assert!(rare >= 1);
+    }
+
+    #[test]
+    fn inherited_context_seeds_only_target_symbol() {
+        let ctx = Ctx::seeded(b'x', 7);
+        assert_eq!(ctx.stats, vec![(b'x', 7)]);
+        assert_eq!(ctx.total, 7);
+    }
     /// Step 4 self-probe (charged, real numbers). Not run by default — invoke:
     ///   CUBR_PROBE_FILE=/path/to/dickens [CUBR_PROBE_LIMIT=N] \
     ///     cargo test --release -j4 ppmd::tests::self_probe -- --ignored --nocapture
