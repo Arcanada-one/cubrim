@@ -174,9 +174,12 @@ impl BitModel {
 
 use std::collections::BTreeMap;
 
-/// Per-context total cap — rescale when reached. Kept below the coder's
-/// `RC_BOT = 2^16` cap with headroom for the method-C escape band (≤ 256).
-const CTX_RESCALE: u32 = 1 << 14;
+/// Per-context total cap — rescale (halve counts) when reached. Kept below the
+/// coder's `RC_BOT = 2^16` cap with headroom for the method-C escape band (≤ 256).
+/// Tuned from 2^14 to 2^13: on full-dickens o8 the more frequent count-halving
+/// keeps the stats slightly fresher on the larger corpus (−39 B, RT cmp=0; inert
+/// at 1 MiB). Overridable via `CUBR_PPM_RESCALE`.
+const CTX_RESCALE: u32 = 1 << 13;
 /// Count increment per observation — the effective Laplace smoothing is
 /// `alpha = 1 / PPM_INC`. Tuned from 4 to 3 (softer smoothing) after a
 /// count-scaling sweep: on full-dickens o8 this improved the ratio from
