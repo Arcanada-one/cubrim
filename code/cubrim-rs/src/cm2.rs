@@ -59,17 +59,22 @@ impl Logistic {
 }
 
 /// Hashed bit-probability table with a count-adaptive rate (lpaq counter).
+/// The count is capped at `lim`: a mature cell then adapts at a fixed floor rate
+/// `1/(lim+2)` — LOWER `lim` = faster ongoing adaptation (better on
+/// nonstationary data; the M4 lever), higher = smoother (stationary).
 struct Ctr {
     t: Vec<u16>,
     c: Vec<u8>,
     mask: usize,
+    lim: i32,
 }
 impl Ctr {
-    fn new(bits: usize) -> Self {
+    fn new(bits: usize, lim: i32) -> Self {
         Self {
             t: vec![(PSCALE / 2) as u16; 1usize << bits],
             c: vec![0u8; 1usize << bits],
             mask: (1usize << bits) - 1,
+            lim,
         }
     }
     #[inline]
@@ -82,7 +87,7 @@ impl Ctr {
         let cur = self.t[i] as i32;
         let cnt = self.c[i] as i32;
         self.t[i] = (cur + (y * PSCALE - cur) / (cnt + 2)).clamp(1, PSCALE - 1) as u16;
-        if cnt < 254 {
+        if cnt < self.lim {
             self.c[i] = (cnt + 1) as u8;
         }
     }
@@ -326,13 +331,17 @@ impl CmModel {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(WSHIFT_DEFAULT);
+        let ctrlim: i32 = std::env::var("CM_CTRLIM")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(254);
         Self {
-            ord: (0..NORD).map(|_| Ctr::new(TBITS)).collect(),
-            sp: (0..NSPARSE).map(|_| Ctr::new(TBITS)).collect(),
-            ind: Ctr::new(TBITS),
+            ord: (0..NORD).map(|_| Ctr::new(TBITS, ctrlim)).collect(),
+            sp: (0..NSPARSE).map(|_| Ctr::new(TBITS, ctrlim)).collect(),
+            ind: Ctr::new(TBITS, ctrlim),
             ind_map: vec![0u32; 1usize << IBITS],
             ind_mask: (1usize << IBITS) - 1,
-            wtab: Ctr::new(TBITS),
+            wtab: Ctr::new(TBITS, ctrlim),
             word_hash: 0,
             m1: Match::new(M1_MIN),
             m2: Match::new(M2_MIN),
