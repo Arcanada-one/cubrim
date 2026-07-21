@@ -45,3 +45,5 @@ datarim/pub-consilium/
 # OS / editor
 .DS_Store
 *.swp
+cm_scope
+*.log
