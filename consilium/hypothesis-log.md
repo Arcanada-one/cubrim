@@ -1096,3 +1096,24 @@ created: 2026-06-17
 - **NEW-11 + FU-03 OLE/BIFF record split:** byte-exact record-stream decomposition for `kennedy.xls`; must beat rar `0.034542` after charging OLE/BIFF metadata and all residual records.
 - **NEW-02 + IW-04 measured PPMd selector:** implementation resolution of H-61 using a genuine PPMd order/memory oracle grid, not naive adaptive order-N; must push full-24 text below ppmd `0.2013791444312253`.
 - **STATUS:** existing cards remain OPEN/IN-WORK and unmeasured; no duplicate IDs, codec change, or DB write. Primary sources and complete falsification gates: `consilium/reports/CUBR-leader-gap-literature-resolution.md`.
+
+---
+
+## WAVE 2 (FH2-01..FH2-10) — свежие гипотезы, 2026-07-21 (Fable 5, research-only)
+
+Вторая волна свежих гипотез из научных источников 2020–2026 (arXiv/AAAI/COLM/ICLR/Hutter Prize/Meta OpenZL). Анти-дупликация: прочитаны hypothesis-log (H-01..H-65, coworker-выжимка), closed-branches (6 веток + auto-reject), FRESH-HYPOTHESES-fable5 (FH-01..FH-17 целиком), FH-18 (NO-GO, вывод «exe-гэп = класс LZ-бекенда»), FH-19 design (CM scaling), weakness-map, per-type-grid. Карточки: `consilium/reports/FH2-01.md .. FH2-10.md`. Только чтение+WebSearch+артефакт; кода/БД/git нет.
+
+- **FH2-01** — крошечный целочисленный RWKV/GRU-предиктор (int16, веса в бинаре, wire=0) как вход микшера CM; text vs ppmd; лит-якорь L3TC (AAAI-25)/MambaByte (COLM'24)/cmix-LSTM; оценка −2…−5% (грубая); probe: lstm-compress на dickens (часы) + Python int-GRU log-loss.
+- **FH2-02** — ∞-gram: онлайн суффиксный автомат = точная статистика контекста неограниченного порядка как вход CM; text/database (webster/nci); якорь Infini-gram (2024); −3…−8% на повторных (грубая); probe: Python-автомат + адаптивный log-loss (часы).
+- **FH2-03** — ROLZ/LZ77+CM гибридный rail (матчи LZMA-класса + CM-литералы + DP-parse из H-25i/j); exe vs 7z (mozilla −15.5% нужно) + binary; якорь RAZOR/orz (честно: ядро 2017-18) + OpenZL-принцип; probe: orz на mozilla/sao vs 7z-строки (часы, без кода).
+- **FH2-04** — similarity-переупорядочивание КРУПНЫХ сегментов (525 tar-членов mozilla; перестановка ≈660 Б оплачена — НЕ закрытая φ-ветка: по-сегментно, не по-значно); якорь fx2-cmix Article Ordering (Hutter Prize 2024); probe: пересборка tar + текущий CLI (часы).
+- **FH2-05** — пер-сегментный competitive-min (маршрутизация rail'ов внутри контейнера + продолжение CM-состояния по классу); exe/code; якорь OpenZL (2025, +15% к zstd); строго ≥0 по построению; probe: по-членный min на mozilla существующим CLI (часы, консервативная оценка).
+- **FH2-06** — аудит квантизационных потерь вероятностного тракта + 22–24-бит сквозная точность; якорь Nacrith (2026): CDF 2^16→2^24 снял ~75% floor-оверхеда; probe: инструментальный Σ−log2(p_квант) vs Σ−log2(p_идеал) — ТОЧНАЯ граница за полдня; координировать с 16-бит кодером Opus.
+- **FH2-07** — типизированные полевые субмодели для fixed-width записей (дельта ЗНАЧЕНИЯ поля как контекст; модель, НЕ transform — не реоткрытие H-40); binary vs 7z (sao +2.6%); якорь OpenZL-типизация; −2…−5% поверх FH-10 (грубая); probe: Python адаптивный кодер vs байтовый FH-10-вариант (часы).
+- **FH2-08** — классовые словные контексты (Brown-кластеры 256/1024 классов, таблица в бинаре, низкая кардинальность = анти-Gotcha-#9 по построению); text vs ppmd; якорь fx2-cmix NLP-компоненты (2024) + L3TC-словарь; −1.5…−3.5% на прозе (грубая); probe: готовые кластеры + адаптивный кодер на dickens (часы).
+- **FH2-09** — пер-файловое обучаемое контекст-дерево (JPEG XL MA-tree, ISO 2022) с оплаченной передачей дерева; image (ptt5 #5, +21.3% к xz); супермножество FH-13/14; probe: `cjxl -d 0` на ptt5/mr/x-ray (МИНУТЫ — самая дешёвая проба волны).
+- **FH2-10** — LLM-потолочная панель (SmolLM2/lstm-compress/ts_zip по 24 файлам): НЕ rail, измерительный инструмент распределения инженерии; якоря Language Modeling Is Compression (ICLR'24), Nacrith (0.9389 bpb enwik8 vs наш CM ~1.90).
+
+**Рекомендованная первая волна проб (по дешевизне × информативности):** (1) FH2-09 probe-1 — минуты (`cjxl` на ptt5); (2) FH2-06 аудит — полдня, точная граница, полезен и Opus'у; (3) FH2-03 probe-1 — часы (orz/RAZOR на mozilla: решает судьбу самой дорогой стройки волны); (4) FH2-04+FH2-05 совместная проба — часы (один и тот же по-членный разрез mozilla, обе гипотезы из одного скрипта); (5) FH2-02 Python-автомат на nci/webster. Нейрокарточки (FH2-01/10) — после операторского сигнала о GPU/времени.
+
+**Покрытие:** text — FH2-01/02/06/08(+10); exe — FH2-03/04/05; binary — FH2-03/07(+06); database — FH2-02; image — FH2-09; code — FH2-04/05/08. Инварианты: все карточки wire-чарджированы (Gotcha #6), без передаваемых по-значных перестановок (Gotcha #7; FH2-04 — по-сегментная, оплачена явно), пробы — реальные адаптивные кодеры (Gotcha #9), всё за competitive-min (ноль регрессии), целочисленный детерминизм (FH2-01 — int16 fixed-point, якорь arXiv 2601.10678).
