@@ -1,15 +1,15 @@
 //! MODE_CM2 — bit-level context-mixing codec (CM PoC, CUBR-0059 CM track).
 //!
-//! Phase 2: order-0..7 + 3 sparse (skip-gram) + 1 indirect (history-of-history)
-//! + 2 match models (long & short) + a word model, combined by an integer
-//! logistic mixer (256 weight-sets by prev-byte) refined by one gently-blended
-//! APM/SSE stage, coded per bit through the crate's carryless range coder in
-//! binary mode (12-bit probabilities).
+//! Phase 3: order-0..7 + 3 sparse (skip-gram) + 1 indirect (history-of-history)
+//! + 2 match models (long & short) + a word model, combined by a TWO-LAYER
+//! integer logistic mixer (NL1 context-specialised layer-1 mixers → a layer-2
+//! mixer over their outputs) refined by one gently-blended APM/SSE stage, coded
+//! per bit through the crate's carryless range coder in binary mode (12-bit).
 //!
-//! Full-dickens 0.231335 (RT cmp=0) — beats Phase-1 0.231880, still above the
-//! champion 0.229919 and the ppmd floor 0.2253. The added models help modestly;
-//! reaching the floor needs a proper 2-layer mixer + higher-resolution coder
-//! (bundled 16-bit + heavy-blend + 512-set attempts REGRESSED — see log).
+//! The 2-layer mixer is the decisive lever: full-dickens 0.231335 (single mixer)
+//! → 0.225995 (2-layer, RT cmp=0) — M1 (< champion 0.229919) achieved, a hair
+//! over the ppmd floor 0.2253. Reverted dead ends: 16-bit resolution (ST_MAX
+//! caps it), 512-set single mixer, heavy APM blend — all REGRESSED (see log).
 //!
 //! ALL prediction/mixing/adaptation is integer, so encode and decode — processing
 //! the identical byte sequence — build byte-exact identical state and the round
@@ -125,6 +125,47 @@ impl Apm {
     }
 }
 
+/// One logistic mixer layer: `nsets` weight-sets of `nin` fixed-point weights.
+/// `mix` returns the stretched output (for chaining into the next layer) and
+/// stashes the squashed prediction for the paired [`Mixer::update`] (each mixer
+/// is trained independently toward the bit, paq-style).
+struct Mixer {
+    w: Vec<i32>,
+    nin: usize,
+    shift: i32,
+    set: usize,
+    px: i32,
+}
+impl Mixer {
+    fn new(nsets: usize, nin: usize, shift: i32) -> Self {
+        Self {
+            w: vec![0i32; nsets * nin],
+            nin,
+            shift,
+            set: 0,
+            px: PSCALE / 2,
+        }
+    }
+    #[inline]
+    fn mix(&mut self, lg: &Logistic, inp: &[i32], ctx: usize) -> i32 {
+        self.set = ctx * self.nin;
+        let mut dot: i64 = 0;
+        for i in 0..self.nin {
+            dot += self.w[self.set + i] as i64 * inp[i] as i64;
+        }
+        let x = (dot >> 16) as i32;
+        self.px = lg.squash(x);
+        x.clamp(-ST_MAX, ST_MAX)
+    }
+    #[inline]
+    fn update(&mut self, inp: &[i32], y: i32) {
+        let err = y * PSCALE - self.px;
+        for i in 0..self.nin {
+            self.w[self.set + i] += (inp[i] * err) >> self.shift;
+        }
+    }
+}
+
 const NORD: usize = 8; // order-0..7
 const NSPARSE: usize = 3;
 const SP_I: usize = NORD; // 8,9,10
@@ -142,7 +183,7 @@ const M2_MIN: usize = 3;
 const WSHIFT_DEFAULT: i32 = 12;
 const MM_CAP: usize = 63;
 const APM_N: usize = 32;
-const NWSET: usize = 256; // mixer weight sets: prev-byte
+const NL1: usize = 4; // layer-1 mixers (distinct context views)
 
 struct Match {
     hash: Vec<u32>,
@@ -242,9 +283,12 @@ struct CmModel {
     word_hash: u32,
     m1: Match,
     m2: Match,
-    // mixer
-    w: Vec<i32>,
+    // 2-layer mixer
+    l1: Vec<Mixer>,
+    l2: Mixer,
     wshift: i32,
+    l2in: [i32; NL1 + 1],
+    mctx: [usize; NL1],
     // SSE chain
     apm1: Apm,
     apm2: Apm,
@@ -260,7 +304,6 @@ struct CmModel {
     spcx: [usize; NSPARSE],
     indcx: usize,
     word_cx: usize,
-    wset: usize,
     pmix: i32,
     apm1_idx: usize,
     apm2_idx: usize,
@@ -271,6 +314,10 @@ impl CmModel {
         let lg = Logistic::new();
         let apm1 = Apm::new(&lg, 256);
         let apm2 = Apm::new(&lg, 1024);
+        let ws: i32 = std::env::var("CM_WSHIFT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(WSHIFT_DEFAULT);
         Self {
             ord: (0..NORD).map(|_| Ctr::new(TBITS)).collect(),
             sp: (0..NSPARSE).map(|_| Ctr::new(TBITS)).collect(),
@@ -281,11 +328,18 @@ impl CmModel {
             word_hash: 0,
             m1: Match::new(M1_MIN),
             m2: Match::new(M2_MIN),
-            w: vec![0i32; NWSET * NIN],
-            wshift: std::env::var("CM_WSHIFT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(WSHIFT_DEFAULT),
+            // layer-1 mixers over NIN inputs, distinct context selectors; layer 2
+            // combines their NL1 stretched outputs (+bias).
+            l1: vec![
+                Mixer::new(256, NIN, ws),  // prev byte
+                Mixer::new(1024, NIN, ws), // order-2 hash
+                Mixer::new(64, NIN, ws),   // match state
+                Mixer::new(256, NIN, ws),  // partial byte c0
+            ],
+            l2: Mixer::new(64, NL1 + 1, ws),
+            wshift: ws,
+            l2in: [0; NL1 + 1],
+            mctx: [0; NL1],
             apm1,
             apm2,
             lg,
@@ -299,7 +353,6 @@ impl CmModel {
             spcx: [0; NSPARSE],
             indcx: 0,
             word_cx: 0,
-            wset: 0,
             pmix: 0,
             apm1_idx: 0,
             apm2_idx: 0,
@@ -378,13 +431,18 @@ impl CmModel {
         self.st[WORD_I] = self.lg.stretch(self.wtab.p(wcx));
         self.st[NIN - 1] = 256; // bias
 
-        // mixer: weight set = prev-byte (256 sets, like Phase 1)
-        self.wset = self.prev * NIN;
-        let mut dot: i64 = 0;
-        for i in 0..NIN {
-            dot += self.w[self.wset + i] as i64 * self.st[i] as i64;
+        // 2-layer mixer: NL1 context-specialised layer-1 mixers over all inputs,
+        // combined by a layer-2 mixer over their stretched outputs.
+        self.mctx[0] = self.prev;
+        self.mctx[1] = self.ind_key & 1023;
+        self.mctx[2] = ((self.m1.len.min(15) << 1) | (self.m1.active as usize)) & 63;
+        self.mctx[3] = c0 & 255;
+        for m in 0..NL1 {
+            self.l2in[m] = self.l1[m].mix(&self.lg, &self.st, self.mctx[m]);
         }
-        let pmix = self.lg.squash((dot >> 16) as i32);
+        self.l2in[NL1] = 256; // layer-2 bias
+        let _ = self.l2.mix(&self.lg, &self.l2in, self.prev & 63);
+        let pmix = self.l2.px;
         self.pmix = pmix;
 
         // SSE: single APM stage (prev byte), gently blended.
@@ -395,10 +453,10 @@ impl CmModel {
     }
 
     fn update_bit(&mut self, y: i32) {
-        let err = y * PSCALE - self.pmix;
-        for i in 0..NIN {
-            self.w[self.wset + i] += (self.st[i] * err) >> self.wshift;
+        for m in 0..NL1 {
+            self.l1[m].update(&self.st, y);
         }
+        self.l2.update(&self.l2in, y);
         for k in 0..NORD {
             self.ord[k].upd(self.cxs[k], y);
         }
