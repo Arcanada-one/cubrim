@@ -6,6 +6,7 @@
 //   decode(blob: &[u8]) -> Result<...>   — decompress; fail-closed on corrupt input
 
 pub mod bitpack;
+pub(crate) mod cm2;
 pub mod codec;
 pub mod config;
 pub mod cube;
