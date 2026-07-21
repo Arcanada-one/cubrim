@@ -303,6 +303,62 @@ fn see_bucket(
     (order.min(max_order) << 8) | (masked.min(15) << 4) | symbols.min(15)
 }
 
+/// PAQ-style Adaptive Probability Map (a.k.a. SSE): a secondary calibration
+/// stage applied to the escape probability AFTER SEE2. Each context row holds
+/// `APM_N + 1` interpolation knots over the 12-bit probability domain; a lookup
+/// linearly interpolates between the two knots bracketing the input probability,
+/// and the update nudges the nearer knot toward the observed outcome. This
+/// corrects systematic residual miscalibration in SEE2's escape estimate that a
+/// single estimator cannot (PAQ chains such maps for exactly this reason). It
+/// touches only the escape/hit mass split — orthogonal to the per-symbol context
+/// statistics (LOE / inheritance).
+const APM_N: usize = 24;
+const APM_RATE: u32 = 7;
+
+struct Apm {
+    t: Vec<u16>, // nctx rows of (APM_N + 1) 12-bit probabilities
+    nctx: usize,
+}
+
+impl Apm {
+    fn new(nctx: usize) -> Self {
+        let mut t = vec![0u16; nctx * (APM_N + 1)];
+        for c in 0..nctx {
+            for i in 0..=APM_N {
+                // Identity initialisation: knot i sits at its own probability, so
+                // an untrained APM is a no-op passthrough (no cold-start damage).
+                let p = ((i as u32 * 4096) / APM_N as u32).clamp(1, 4095);
+                t[c * (APM_N + 1) + i] = p as u16;
+            }
+        }
+        Self { t, nctx }
+    }
+
+    /// Refine 12-bit probability `p` in context `ctx`; returns `(refined_p, knot_idx)`
+    /// where `knot_idx` is the knot the paired [`Apm::update`] must nudge.
+    #[inline]
+    fn refine(&self, ctx: usize, p: u32) -> (u32, usize) {
+        debug_assert!(ctx < self.nctx);
+        let pos = p * APM_N as u32; // p/4096 scaled into [0, APM_N*4096)
+        let bin = (pos >> 12) as usize;
+        let frac = pos & 4095;
+        let base = ctx * (APM_N + 1) + bin;
+        let lo = self.t[base] as u32;
+        let hi = self.t[base + 1] as u32;
+        let refined = (lo * (4096 - frac) + hi * frac) >> 12;
+        let idx = base + if frac >= 2048 { 1 } else { 0 };
+        (refined.clamp(1, 4095), idx)
+    }
+
+    /// Nudge knot `idx` toward the outcome (`escaped` = escape actually occurred).
+    #[inline]
+    fn update(&mut self, idx: usize, escaped: bool) {
+        let g: i32 = if escaped { 4095 } else { 0 };
+        let cur = self.t[idx] as i32;
+        self.t[idx] = (cur + ((g - cur) >> APM_RATE)) as u16;
+    }
+}
+
 /// Bounded-memory RESCALE policy (PPMII-style graceful reclamation).
 ///
 /// When the number of stored contexts reaches `max_ctx`, instead of the naive
@@ -358,14 +414,31 @@ struct PpmModel {
     n_ctx: usize,
     peak_ctx: usize,
     rescales: u32,
+    /// Diagnostic only (never affects the wire): sum of -log2(p) over every
+    /// coded event under the model's assigned probabilities. Comparing this to
+    /// the actual blob size isolates pure range-coder rounding loss from model
+    /// loss. Written on the encode path only.
+    ideal_bits: f64,
+    /// Diagnostic bit-attribution (encode path only): bits spent on escapes and
+    /// on the order-(-1) uniform fallback. Hit bits = ideal_bits - esc - uniform.
+    esc_bits: f64,
+    uni_bits: f64,
+    /// Optional PAQ-style APM on the escape probability (chained after SEE2).
+    /// `None` = exact champion behaviour (byte-identical wire).
+    apm: Option<Apm>,
 }
+
+/// Number of APM contexts = escape probability calibration is keyed by order
+/// bucket (`k.min(APM_CTX - 1)`), so deterministic contexts (high order) and
+/// shallow contexts get separate calibration curves.
+const APM_CTX: usize = 16;
 
 impl PpmModel {
     fn new(order: usize) -> Self {
-        Self::new_bounded(order, MemCfg::DISABLED)
+        Self::new_bounded(order, MemCfg::DISABLED, false)
     }
 
-    fn new_bounded(order: usize, mem: MemCfg) -> Self {
+    fn new_bounded(order: usize, mem: MemCfg, apm_on: bool) -> Self {
         Self {
             order,
             ctx: (0..=order).map(|_| BTreeMap::new()).collect(),
@@ -377,6 +450,10 @@ impl PpmModel {
             n_ctx: 0,
             peak_ctx: 0,
             rescales: 0,
+            ideal_bits: 0.0,
+            esc_bits: 0.0,
+            uni_bits: 0.0,
+            apm: apm_on.then(|| Apm::new(APM_CTX)),
         }
     }
 
@@ -417,6 +494,39 @@ impl PpmModel {
         }
     }
 
+    /// Apply the escape APM (if enabled) to `(run, esc)`. Returns the coded
+    /// `(esc2, total2, knot_idx)`. `total2` is capped at `APM_TOTAL_CAP` so the
+    /// reused range coder's `total ≤ 2^16` invariant always holds. When the APM
+    /// is off, `esc2 == esc` and `total2 == run + esc` (byte-identical champion).
+    #[inline]
+    fn apm_escape(&self, k: usize, run: u32, esc: u32) -> (u32, u32, Option<usize>) {
+        const APM_TOTAL_CAP: u32 = 1 << 15;
+        match &self.apm {
+            None => (esc, run + esc, None),
+            Some(apm) => {
+                let total = run + esc;
+                let p = ((esc * 4096) / total).clamp(1, 4095);
+                // Context adds a signal SEE2 does not bucket on: run magnitude
+                // (populated vs sparse context) crossed with a coarse order band.
+                let run_band = if run >= 256 {
+                    2
+                } else if run >= 32 {
+                    1
+                } else {
+                    0
+                };
+                let ctx = (k.min(4) * 3 + run_band).min(APM_CTX - 1);
+                let (rp, idx) = apm.refine(ctx, p);
+                // esc' so that esc'/(run + esc') = rp/4096, run held fixed.
+                let mut esc2 = ((run as u64 * rp as u64) / (4096 - rp) as u64).max(1) as u32;
+                if run + esc2 > APM_TOTAL_CAP {
+                    esc2 = APM_TOTAL_CAP.saturating_sub(run).max(1);
+                }
+                (esc2, run + esc2, Some(idx))
+            }
+        }
+    }
+
     fn encode_symbol(&mut self, enc: &mut RangeEncoder, hist: &[u8], sym: u8) -> usize {
         let mut excluded = [false; 256];
         let mut k = self.order.min(hist.len());
@@ -436,7 +546,7 @@ impl PpmModel {
                         CTX_RESCALE as usize,
                     );
                     let esc = self.see[bucket].predict(base_esc);
-                    let total = run + esc;
+                    let (esc2, total, apm_idx) = self.apm_escape(k, run, esc);
                     let mut cum = 0u32;
                     let mut found = None;
                     for &(s, c) in &ctx.stats {
@@ -451,11 +561,21 @@ impl PpmModel {
                     }
                     if let Some((cum, c)) = found {
                         enc.encode(cum, c, total);
+                        self.ideal_bits += -((c as f64) / (total as f64)).log2();
                         self.see[bucket].update_hit();
+                        if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
+                            apm.update(idx, false);
+                        }
                         return k;
                     }
-                    enc.encode(run, esc, total);
+                    enc.encode(run, esc2, total);
+                    let eb = -((esc2 as f64) / (total as f64)).log2();
+                    self.ideal_bits += eb;
+                    self.esc_bits += eb;
                     self.see[bucket].update_escape(total);
+                    if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
+                        apm.update(idx, true);
+                    }
                     for &(s, _) in &ctx.stats {
                         excluded[s as usize] = true;
                     }
@@ -468,6 +588,9 @@ impl PpmModel {
         }
         let (rank, nfree) = uniform_rank(sym, &excluded);
         enc.encode(rank, 1, nfree);
+        let ub = -(1.0f64 / (nfree as f64)).log2();
+        self.ideal_bits += ub;
+        self.uni_bits += ub;
         0
     }
 
@@ -490,7 +613,7 @@ impl PpmModel {
                         CTX_RESCALE as usize,
                     );
                     let esc = self.see[bucket].predict(base_esc);
-                    let total = run + esc;
+                    let (esc2, total, apm_idx) = self.apm_escape(k, run, esc);
                     let f = dec.get_freq(total);
                     if f < run {
                         let mut cum = 0u32;
@@ -501,14 +624,20 @@ impl PpmModel {
                             if f < cum + c {
                                 dec.decode(cum, c, total);
                                 self.see[bucket].update_hit();
+                                if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
+                                    apm.update(idx, false);
+                                }
                                 return (s, k);
                             }
                             cum += c;
                         }
                         unreachable!("PPM decode: f<run but no symbol matched");
                     }
-                    dec.decode(run, esc, total);
+                    dec.decode(run, esc2, total);
                     self.see[bucket].update_escape(total);
+                    if let (Some(apm), Some(idx)) = (self.apm.as_mut(), apm_idx) {
+                        apm.update(idx, true);
+                    }
                     for &(s, _) in &ctx.stats {
                         excluded[s as usize] = true;
                     }
@@ -608,33 +737,48 @@ fn uniform_rank(sym: u8, excluded: &[bool; 256]) -> (u32, u32) {
 
 /// Encode `data` with an order-`order` PPM. Wire: `[orig_len u64 BE][order u8][rc]`.
 fn ppm_encode(data: &[u8], order: usize) -> Vec<u8> {
-    ppm_encode_bounded(data, order, MemCfg::DISABLED).0
+    ppm_encode_bounded(data, order, MemCfg::DISABLED, false).0
 }
 
-/// Bounded-memory encode. Returns `(blob, rescale_events, peak_context_count)`.
-/// With `MemCfg::DISABLED` the wire bytes are byte-identical to [`ppm_encode`].
-fn ppm_encode_bounded(data: &[u8], order: usize, mem: MemCfg) -> (Vec<u8>, u32, usize) {
+/// Bounded-memory encode. Returns `(blob, rescale_events, peak_context_count,
+/// ideal_bits)`. `ideal_bits` is the model-entropy lower bound (diagnostic; not
+/// on the wire). With `MemCfg::DISABLED` and `apm_on = false` the wire bytes are
+/// byte-identical to [`ppm_encode`].
+#[allow(clippy::type_complexity)]
+fn ppm_encode_bounded(
+    data: &[u8],
+    order: usize,
+    mem: MemCfg,
+    apm_on: bool,
+) -> (Vec<u8>, u32, usize, f64, f64, f64) {
     let mut out = (data.len() as u64).to_be_bytes().to_vec();
     out.push(order as u8);
-    let mut model = PpmModel::new_bounded(order, mem);
+    let mut model = PpmModel::new_bounded(order, mem, apm_on);
     let mut enc = RangeEncoder::new();
     for i in 0..data.len() {
         let fo = model.encode_symbol(&mut enc, &data[..i], data[i]);
         model.update(&data[..i], data[i], fo);
     }
     out.extend_from_slice(&enc.finish());
-    (out, model.rescales, model.peak_ctx)
+    (
+        out,
+        model.rescales,
+        model.peak_ctx,
+        model.ideal_bits,
+        model.esc_bits,
+        model.uni_bits,
+    )
 }
 
 /// Decode a blob produced by [`ppm_encode`]. Fail-closed on a truncated header.
 fn ppm_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
-    ppm_decode_bounded(blob, MemCfg::DISABLED)
+    ppm_decode_bounded(blob, MemCfg::DISABLED, false)
 }
 
-/// Bounded-memory decode. The `mem` config MUST match the one used at encode
-/// time, so the deterministic LRU eviction reclaims the same contexts and the
-/// round-trip stays byte-exact.
-fn ppm_decode_bounded(blob: &[u8], mem: MemCfg) -> Result<Vec<u8>, CubrimError> {
+/// Bounded-memory decode. The `mem` config and `apm_on` MUST match the ones used
+/// at encode time, so the deterministic LRU eviction and escape APM reclaim/
+/// refine identically and the round-trip stays byte-exact.
+fn ppm_decode_bounded(blob: &[u8], mem: MemCfg, apm_on: bool) -> Result<Vec<u8>, CubrimError> {
     if blob.len() < 9 {
         return Err(CubrimError::Decode("MODE_PPMD: header truncated".into()));
     }
@@ -642,7 +786,7 @@ fn ppm_decode_bounded(blob: &[u8], mem: MemCfg) -> Result<Vec<u8>, CubrimError> 
     let order = blob[8] as usize;
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
-    let mut model = PpmModel::new_bounded(order, mem);
+    let mut model = PpmModel::new_bounded(order, mem, apm_on);
     let mut dec = RangeDecoder::new(&blob[9..]);
     for _ in 0..orig_len {
         let (sym, fo) = model.decode_symbol(&mut dec, &out);
@@ -918,11 +1062,12 @@ mod tests {
     /// Round-trip through a memory-bounded PPM must stay byte-exact: the LRU
     /// eviction is a deterministic function of the processed history, so decode
     /// reclaims exactly the contexts encode did.
-    fn ppm_rt_bounded(data: &[u8], order: usize, mem: MemCfg) -> (usize, u32, usize) {
-        let (blob, rescales, peak) = ppm_encode_bounded(data, order, mem);
-        let out = ppm_decode_bounded(&blob, mem).expect("bounded ppm decode");
+    fn ppm_rt_bounded(data: &[u8], order: usize, mem: MemCfg, apm_on: bool) -> (usize, u32, usize) {
+        let (blob, rescales, peak, _, _, _) = ppm_encode_bounded(data, order, mem, apm_on);
+        let out = ppm_decode_bounded(&blob, mem, apm_on).expect("bounded ppm decode");
         assert_eq!(
-            out, data,
+            out,
+            data,
             "bounded PPM(order {order}) round-trip cmp!=0 for len {}",
             data.len()
         );
@@ -944,7 +1089,7 @@ mod tests {
         for order in [4usize, 8, 16] {
             for halve in [false, true] {
                 let mem = MemCfg::bounded(2_000, 75, halve, 2);
-                let (_, rescales, peak) = ppm_rt_bounded(&data, order, mem);
+                let (_, rescales, peak) = ppm_rt_bounded(&data, order, mem, false);
                 assert!(
                     rescales > 0,
                     "cap must actually fire for order {order} halve={halve}"
@@ -964,8 +1109,12 @@ mod tests {
         let text = b"the quick brown fox jumps over the lazy dog. ".repeat(200);
         for order in [4usize, 8, 16] {
             let champ = ppm_encode(&text, order);
-            let (bounded, rescales, _) = ppm_encode_bounded(&text, order, MemCfg::DISABLED);
-            assert_eq!(champ, bounded, "DISABLED diverged from champion (order {order})");
+            let (bounded, rescales, _, _, _, _) =
+                ppm_encode_bounded(&text, order, MemCfg::DISABLED, false);
+            assert_eq!(
+                champ, bounded,
+                "DISABLED diverged from champion (order {order})"
+            );
             assert_eq!(rescales, 0, "DISABLED must never rescale");
         }
     }
@@ -974,9 +1123,53 @@ mod tests {
     fn bounded_edge_cases_round_trip() {
         let mem = MemCfg::bounded(64, 50, true, 2);
         for order in [0usize, 2, 8] {
-            ppm_rt_bounded(b"", order, mem);
-            ppm_rt_bounded(b"A", order, mem);
-            ppm_rt_bounded(&[0x5Au8; 500], order, mem);
+            ppm_rt_bounded(b"", order, mem, false);
+            ppm_rt_bounded(b"A", order, mem, false);
+            ppm_rt_bounded(&[0x5Au8; 500], order, mem, false);
+        }
+    }
+
+    // ── Escape APM (PAQ-style SSE on the escape probability) ────────────────
+
+    /// The escape APM must keep round-trip byte-exact: encode and decode compute
+    /// the same refined escape mass and update the map identically, so the coded
+    /// distribution matches on both sides across orders and edge cases.
+    #[test]
+    fn apm_round_trips_byte_exact() {
+        let text = b"the quick brown fox jumps over the lazy dog. \
+                     PACK MY BOX WITH FIVE DOZEN LIQUOR JUGS. "
+            .repeat(120);
+        let mut mixed = text.clone();
+        let mut x: u32 = 0xA5A5_1234;
+        for _ in 0..3000 {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            mixed.push((x >> 24) as u8);
+        }
+        for order in [0usize, 4, 8, 16] {
+            for data in [text.as_slice(), mixed.as_slice(), b"", b"A", &[7u8; 400]] {
+                let (blob, _, _, _, _, _) = ppm_encode_bounded(data, order, MemCfg::DISABLED, true);
+                let out = ppm_decode_bounded(&blob, MemCfg::DISABLED, true).expect("apm decode");
+                assert_eq!(
+                    out,
+                    data,
+                    "APM RT cmp!=0 (order {order}, len {})",
+                    data.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn apm_off_is_byte_identical_to_champion() {
+        let text = b"the quick brown fox jumps over the lazy dog. ".repeat(200);
+        for order in [4usize, 8, 16] {
+            let champ = ppm_encode(&text, order);
+            let (apm_off, _, _, _, _, _) =
+                ppm_encode_bounded(&text, order, MemCfg::DISABLED, false);
+            assert_eq!(
+                champ, apm_off,
+                "apm_on=false diverged from champion (order {order})"
+            );
         }
     }
 
@@ -1013,13 +1206,18 @@ mod tests {
             .unwrap_or_else(|| vec![3, 4, 5]);
         // Bounded-memory RESCALE gauge knobs. Unset CUBR_PPM_MAXCTX ⇒ DISABLED
         // ⇒ exact champion behaviour (byte-identical baseline).
-        let mem = match std::env::var("CUBR_PPM_MAXCTX").ok().and_then(|s| s.parse().ok()) {
+        let mem = match std::env::var("CUBR_PPM_MAXCTX")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             Some(max_ctx) => {
                 let low_pct = std::env::var("CUBR_PPM_LOWPCT")
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(75usize);
-                let halve = std::env::var("CUBR_PPM_HALVE").map(|s| s == "1").unwrap_or(false);
+                let halve = std::env::var("CUBR_PPM_HALVE")
+                    .map(|s| s == "1")
+                    .unwrap_or(false);
                 let emin = std::env::var("CUBR_PPM_EVICTMIN")
                     .ok()
                     .and_then(|s| s.parse().ok())
@@ -1028,24 +1226,45 @@ mod tests {
             }
             None => MemCfg::DISABLED,
         };
+        let apm_on = std::env::var("CUBR_PPM_APM")
+            .map(|s| s == "1")
+            .unwrap_or(false);
         for order in orders {
-            let (blob, rescales, peak) = ppm_encode_bounded(&data, order, mem);
-            let out = ppm_decode_bounded(&blob, mem).expect("decode");
+            let (blob, rescales, peak, ideal_bits, esc_bits, uni_bits) =
+                ppm_encode_bounded(&data, order, mem, apm_on);
+            let out = ppm_decode_bounded(&blob, mem, apm_on).expect("decode");
             let rt = out == data;
             let p = blob.len();
+            // Model-entropy floor vs actual bytes: (actual - ideal)/actual is the
+            // pure range-coder overhead (rounding + 4-byte flush), separated from
+            // model loss. If this is tiny, the coder is already tight and the
+            // only remaining lever is model-side calibration (SSE/APM).
+            let ideal_bytes = ideal_bits / 8.0;
+            let coder_overhead = (p as f64 - ideal_bytes) / p as f64;
+            let esc_frac = esc_bits / ideal_bits;
+            let uni_frac = uni_bits / ideal_bits;
             println!(
                 "PROBE order={} ppm={} ratio={:.9} rt_cmp0={} beats_incumbent={} \
-                 maxctx={} lowpct={} halve={} peak_ctx={} rescales={}",
+                 maxctx={} lowpct={} halve={} peak_ctx={} rescales={} \
+                 ideal_bytes={:.1} coder_overhead={:.6} esc_frac={:.4} uni_frac={:.4}",
                 order,
                 p,
                 p as f64 / n,
                 rt,
                 p < inc,
-                if mem.enabled() { mem.max_ctx as i64 } else { -1 },
+                if mem.enabled() {
+                    mem.max_ctx as i64
+                } else {
+                    -1
+                },
                 mem.low_mark,
                 mem.halve,
                 peak,
                 rescales,
+                ideal_bytes,
+                coder_overhead,
+                esc_frac,
+                uni_frac,
             );
             assert!(rt, "self-probe RT cmp!=0 at order {order}");
         }
