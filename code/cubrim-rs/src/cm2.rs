@@ -308,7 +308,7 @@ const SM_WORD4_I: usize = WORD4_I + 1;
 const NMODELS: usize = SM_WORD4_I + 1; // model inputs
 const NIN: usize = NMODELS + 1; // (bias at NIN-1)
 
-const TBITS: usize = 26;
+const TBITS: usize = 27;
 const IBITS: usize = 20; // indirect map bits
 const M1_MIN: usize = 6;
 const M2_MIN: usize = 3;
