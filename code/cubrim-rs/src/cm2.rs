@@ -63,17 +63,47 @@ impl Logistic {
 /// NONSTATIONARY discount to the contradicting count (halving its excess above
 /// 2). This is what lets a cell forget stale statistics after a regime change.
 fn build_nex() -> Vec<[u8; 2]> {
+    // Nonstationary discount mode for the losing count (env CM_NEXMODE):
+    //   0 = halve excess above 2 (baseline);
+    //   1 = baseline, then bound the loser to winner+BND (faster forget when one
+    //       bit dominates — closer to a real lpaq state machine);
+    //   2 = aggressive: cap loser at 3 once the winner is confident (>=4).
+    // Default mode=1 bnd=0: bound the losing count to the (post-increment) winning
+    // count — a strongly-nonstationary state machine. The stationary counter
+    // already preserves balanced statistics, so the state-map input specialises
+    // in "what is happening now"; measured best on both dickens and enwik8.
+    let mode: i32 = std::env::var("CM_NEXMODE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let bnd: i32 = std::env::var("CM_NEXBND")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let discount = |loser: i32, winner_new: i32| -> i32 {
+        let mut d = if loser > 2 { 2 + ((loser - 2) >> 1) } else { loser };
+        match mode {
+            1 => d = d.min(winner_new + bnd),
+            2 => {
+                if winner_new >= 4 {
+                    d = d.min(3);
+                }
+            }
+            _ => {}
+        }
+        d.max(0)
+    };
     let mut nex = vec![[0u8; 2]; 256];
     for s in 0..256usize {
         let n0 = (s >> 4) as i32;
         let n1 = (s & 15) as i32;
         // observe bit 1
         let a1 = (n1 + 1).min(15);
-        let d0 = if n0 > 2 { 2 + ((n0 - 2) >> 1) } else { n0 };
+        let d0 = discount(n0, a1);
         nex[s][1] = ((d0 << 4) | a1) as u8;
         // observe bit 0
         let a0 = (n0 + 1).min(15);
-        let d1 = if n1 > 2 { 2 + ((n1 - 2) >> 1) } else { n1 };
+        let d1 = discount(n1, a0);
         nex[s][0] = ((a0 << 4) | d1) as u8;
     }
     nex
