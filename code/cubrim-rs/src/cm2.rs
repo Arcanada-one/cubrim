@@ -270,13 +270,16 @@ const SM_WORD2_I: usize = WORD2_I + 1; // state-map 2nd-word prob
 // 3rd word model: case-folded current word (The/the/THE share statistics).
 const WORD3_I: usize = SM_WORD2_I + 1;
 const SM_WORD3_I: usize = WORD3_I + 1;
-const NMODELS: usize = SM_WORD3_I + 1; // model inputs
+// 3rd (long) match model — catches long exact repeats (wiki markup/templates).
+const M3_I: usize = SM_WORD3_I + 1;
+const NMODELS: usize = M3_I + 1; // model inputs
 const NIN: usize = NMODELS + 1; // (bias at NIN-1)
 
 const TBITS: usize = 22;
 const IBITS: usize = 20; // indirect map bits
 const M1_MIN: usize = 6;
 const M2_MIN: usize = 3;
+const M3_MIN: usize = 12;
 const WSHIFT_DEFAULT: i32 = 12;
 const MM_CAP: usize = 63;
 const APM_N: usize = 32;
@@ -388,6 +391,7 @@ struct CmModel {
     word3state: u8,
     m1: Match,
     m2: Match,
+    m3: Match,
     // 2-layer mixer
     l1: Vec<Mixer>,
     l2: Mixer,
@@ -460,6 +464,7 @@ impl CmModel {
             word3state: 0,
             m1: Match::new(M1_MIN),
             m2: Match::new(M2_MIN),
+            m3: Match::new(M3_MIN),
             // layer-1 mixers over NIN inputs, distinct context selectors; layer 2
             // combines their NL1 stretched outputs (+bias).
             l1: vec![
@@ -546,6 +551,7 @@ impl CmModel {
         self.prev = if t > 0 { buf[t - 1] as usize } else { 0 };
         self.m1.start(buf);
         self.m2.start(buf);
+        self.m3.start(buf);
     }
 
     fn predict_bit(&mut self, c0: usize, bit: u32) -> i32 {
@@ -573,6 +579,7 @@ impl CmModel {
         self.st[SM_IND_I] = self.lg.stretch(ipsm);
         self.st[M1_I] = self.m1.stretch_in(&self.lg, bit);
         self.st[M2_I] = self.m2.stretch_in(&self.lg, bit);
+        self.st[M3_I] = self.m3.stretch_in(&self.lg, bit);
         let wcx = (self.word_hash as usize)
             .wrapping_mul(0x2545_F491)
             .wrapping_add(c0);
@@ -655,6 +662,7 @@ impl CmModel {
         self.wtab3.upd(self.word3_cx, self.word3state, y, &self.nex);
         self.m1.update(y);
         self.m2.update(y);
+        self.m3.update(y);
         self.apm1.upd(self.apm1_idx, y);
         if self.apm2_idx != usize::MAX {
             self.apm2.upd(self.apm2_idx, y);
@@ -689,6 +697,7 @@ impl CmModel {
         }
         self.m1.end(buf);
         self.m2.end(buf);
+        self.m3.end(buf);
     }
 }
 
