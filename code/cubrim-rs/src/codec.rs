@@ -19,13 +19,14 @@
 // For inputs <= 320 bytes, raw-store always fires.
 
 use crate::bitpack::{bitpack_decode, bitpack_encode, build_value_dict, compute_width};
+use crate::cm2::{cm2_decode, cm2_encode};
 use crate::config::{EncodeConfig, GapScheme, ValueScheme};
 use crate::cube::build_cube_with_params;
 use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
-    MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_COLUMNAR, MODE_CUBE, MODE_EXECM,
+    MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_CM2, MODE_COLUMNAR, MODE_CUBE, MODE_EXECM,
     MODE_LARGEBWT, MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_TARBCJ, MODE_VCF,
     VERSION,
 };
@@ -307,6 +308,13 @@ fn encode_with_config_inner(
                 if let Some(cm) = encode_cm(data, config) {
                     if cm.len() < best.len() {
                         best = cm;
+                    }
+                }
+                // MODE_CM2 strong context-mixing backend (gated to large
+                // text/xml/exe). Slow but a competitive min() — zero regression.
+                if let Some(cm2) = encode_cm2(data) {
+                    if cm2.len() < best.len() {
+                        best = cm2;
                     }
                 }
             }
@@ -3642,6 +3650,65 @@ fn decode_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     Ok(out)
 }
 
+// ---- MODE_CM2 (CUBR-0059 CM track): strong context-mixing backend ----
+
+/// Runtime gate for the (slow) MODE_CM2 codec: only try it where it is known to
+/// win — large text/xml (beats ppmd) or executables (beats 7z). Everything else
+/// is left to the fast modes. This is PURELY a runtime gate: competitive-min
+/// keeps `min(len)` regardless, so gating can never regress a file, only avoid
+/// wasting minutes on inputs CM2 would lose anyway.
+fn cm2_gate(data: &[u8]) -> bool {
+    let n = data.len();
+    if n < (1 << 18) {
+        return false; // < 256 KB — fast modes handle these; CM2 not worth the runtime
+    }
+    // text / xml: >=95% printable ASCII + whitespace over a 64 KB head sample
+    let head = &data[..n.min(1 << 16)];
+    let printable = head
+        .iter()
+        .filter(|&&b| b == 9 || b == 10 || b == 13 || (0x20..=0x7e).contains(&b))
+        .count();
+    if printable * 100 >= head.len() * 95 {
+        return true;
+    }
+    // executables: ELF / PE / Mach-O signature at the start OR embedded (a tar of
+    // executables like the `mozilla` corpus has ELF magic at member boundaries).
+    let scan = &data[..n.min(1 << 20)];
+    if scan.starts_with(b"MZ")
+        || scan.starts_with(&[0x7f, b'E', b'L', b'F'])
+        || scan.starts_with(&[0xCA, 0xFE, 0xBA, 0xBE])
+        || scan.starts_with(&[0xFE, 0xED, 0xFA, 0xCE])
+    {
+        return true;
+    }
+    scan.windows(4).any(|w| w == [0x7f, b'E', b'L', b'F'])
+}
+
+/// Competitive-min candidate: the MODE_CM2 strong context-mixing backend, gated
+/// to large text/xml/exe. Returns None when the gate rejects the input.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_CM2 1B] then the cm2 blob.
+fn encode_cm2(data: &[u8]) -> Option<Vec<u8>> {
+    if !cm2_gate(data) {
+        return None;
+    }
+    let cm = cm2_encode(data);
+    let mut out = Vec::with_capacity(6 + cm.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_CM2);
+    out.extend_from_slice(&cm);
+    Some(out)
+}
+
+/// Decode a MODE_CM2 container. Fail-closed on a truncated header.
+fn decode_cm2(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    // [MAGIC 4][VERSION 1][MODE_CM2 1][cm2 blob: orig_len 8B + coded]
+    if blob.len() < 6 + 8 {
+        return Err(CubrimError::Decode("MODE_CM2 container too short".into()));
+    }
+    cm2_decode(&blob[6..])
+}
+
 const RECORD_CM_HEADER_SIZE: usize = 24;
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -4242,6 +4309,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_CM {
             return decode_cm(blob);
+        }
+        if blob[5] == MODE_CM2 {
+            return decode_cm2(blob);
         }
         if blob[5] == MODE_LARGEBWT {
             return decode_large_bwt(blob);
@@ -9699,6 +9769,42 @@ pub(crate) fn lz_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
 mod tests {
     use super::*;
     use crate::header::VALUE_SCHEME_RLE_CODES;
+
+    /// WIRE verification: MODE_CM2 through the real top-level encode/decode
+    /// dispatch (not self_probe). RT cmp=0 is mandatory; also reports whether
+    /// competitive-min actually SELECTED MODE_CM2 and the achieved ratio.
+    /// Run: `CUBR_PROBE_FILE=path cargo test --release cm2_dispatch_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn cm2_dispatch_probe() {
+        let path = std::env::var("CUBR_PROBE_FILE").expect("set CUBR_PROBE_FILE");
+        let mut data = std::fs::read(&path).expect("read");
+        if let Ok(l) = std::env::var("CUBR_PROBE_LIMIT") {
+            data.truncate(l.parse().expect("limit"));
+        }
+        let n = data.len();
+        let blob = encode(&data);
+        let out = decode(&blob).expect("decode");
+        let rt = out == data;
+        let mode = if blob.len() >= 6 && blob[0..4] == MAGIC && blob[4] == VERSION {
+            blob[5]
+        } else {
+            255
+        };
+        let selected_cm2 = mode == MODE_CM2;
+        println!(
+            "CM2-DISPATCH file={} n={} blob={} ratio={:.9} rt_cmp0={} mode={} selected_cm2={} gate={}",
+            path,
+            n,
+            blob.len(),
+            blob.len() as f64 / n as f64,
+            rt,
+            mode,
+            selected_cm2,
+            cm2_gate(&data),
+        );
+        assert!(rt, "dispatch RT cmp!=0");
+    }
 
     #[test]
     fn test_bcj_sparc_round_trip() {

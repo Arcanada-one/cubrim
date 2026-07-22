@@ -162,6 +162,14 @@ pub const MODE_EXECM: u8 = 14;
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_TARBCJ 1B][orig_len 4B BE] then nested sub-blob.
 pub const MODE_TARBCJ: u8 = 15;
 
+/// Strong context-mixing backend (CUBR-0059 CM track): a bit-level integer
+/// context-mixing codec (dual counters, bit-history state machine, 2-layer
+/// mixer, adaptive hash tables). Gated to large text/xml/exe inputs in
+/// competitive-min (it is slow), where it beats ppmd (text) and 7z (exe).
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_CM2 1B] then the cm2 blob
+/// ([orig_len 8B BE][bit-range-coded]).
+pub const MODE_CM2: u8 = 16;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).
