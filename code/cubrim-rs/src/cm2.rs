@@ -302,7 +302,10 @@ const WORD3_I: usize = SM_WORD2_I + 1;
 const SM_WORD3_I: usize = WORD3_I + 1;
 // 3rd (long) match model — catches long exact repeats (wiki markup/templates).
 const M3_I: usize = SM_WORD3_I + 1;
-const NMODELS: usize = M3_I + 1; // model inputs
+// 4th word model: case-folded word bigram (prev-word-lc x current-word-lc).
+const WORD4_I: usize = M3_I + 1;
+const SM_WORD4_I: usize = WORD4_I + 1;
+const NMODELS: usize = SM_WORD4_I + 1; // model inputs
 const NIN: usize = NMODELS + 1; // (bias at NIN-1)
 
 const TBITS: usize = 22;
@@ -419,6 +422,10 @@ struct CmModel {
     word_lc: u32,
     word3_cx: usize,
     word3state: u8,
+    wtab4: Ctr,
+    prev_word_lc: u32,
+    word4_cx: usize,
+    word4state: u8,
     m1: Match,
     m2: Match,
     m3: Match,
@@ -492,6 +499,10 @@ impl CmModel {
             word_lc: 0,
             word3_cx: 0,
             word3state: 0,
+            wtab4: Ctr::new(TBITS, ctrlim, smcap),
+            prev_word_lc: 0,
+            word4_cx: 0,
+            word4state: 0,
             m1: Match::new(M1_MIN),
             m2: Match::new(M2_MIN),
             m3: Match::new(M3_MIN),
@@ -642,6 +653,18 @@ impl CmModel {
         self.word3state = w3st;
         self.st[WORD3_I] = self.lg.stretch(w3ps);
         self.st[SM_WORD3_I] = self.lg.stretch(w3psm);
+        // 4th word model: case-folded word bigram.
+        let w4cx = (self
+            .prev_word_lc
+            .wrapping_mul(0x9E37_79B1)
+            .wrapping_add(self.word_lc) as usize)
+            .wrapping_mul(0x2545_F491)
+            .wrapping_add(c0);
+        self.word4_cx = w4cx;
+        let (w4ps, w4psm, w4st) = self.wtab4.predict(w4cx);
+        self.word4state = w4st;
+        self.st[WORD4_I] = self.lg.stretch(w4ps);
+        self.st[SM_WORD4_I] = self.lg.stretch(w4psm);
         self.st[NIN - 1] = 256; // bias
 
         // 2-layer mixer: NL1 context-specialised layer-1 mixers over all inputs,
@@ -693,6 +716,7 @@ impl CmModel {
         self.wtab.upd(self.word_cx, self.wordstate, y, &self.nex);
         self.wtab2.upd(self.word2_cx, self.word2state, y, &self.nex);
         self.wtab3.upd(self.word3_cx, self.word3state, y, &self.nex);
+        self.wtab4.upd(self.word4_cx, self.word4state, y, &self.nex);
         self.m1.update(y);
         self.m2.update(y);
         self.m3.update(y);
@@ -724,6 +748,7 @@ impl CmModel {
             // word boundary: remember the just-completed word for the bigram model
             if self.word_hash != 0 {
                 self.prev_word = self.word_hash;
+                self.prev_word_lc = self.word_lc;
             }
             self.word_hash = 0;
             self.word_lc = 0;
