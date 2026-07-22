@@ -1,16 +1,24 @@
 //! MODE_CM2 — bit-level context-mixing codec (CM PoC, CUBR-0059 CM track).
 //!
-//! Phase 3: order-0..11 + 3 sparse (skip-gram) + 1 indirect (history-of-history)
-//! + 2 match models (long & short) + a word model, combined by a TWO-LAYER
-//! integer logistic mixer (NL1 context-specialised layer-1 mixers → a layer-2
-//! mixer over their outputs) refined by a 2-stage APM/SSE chain, coded per bit
-//! through the crate's carryless range coder in binary mode (12-bit).
+//! Models (each context model emits a DUAL prediction — a stationary
+//! count-adaptive probability AND a nonstationary lpaq/zpaq bit-history state via
+//! a StateMap — as two independent mixer inputs): order-0..11, 6 sparse
+//! (skip-gram), 1 indirect (history-of-history, order-2 keyed), 3 match models
+//! (min-len 12/6/3), 4 word models (current word, prev×current bigram,
+//! case-folded word, case-folded bigram). Combined by a TWO-LAYER integer
+//! logistic mixer: 5 context-specialised layer-1 mixers (prev-byte / order-2 /
+//! match-state / partial-byte / order-3) → a layer-2 mixer over their outputs,
+//! refined by a 2-stage APM/SSE chain, coded per bit through the crate's
+//! carryless range coder in binary mode (12-bit). Hash tables are sized to the
+//! input length (tbits = clamp(ceil(log2(len))+3, 18, 27)).
 //!
-//! The 2-layer mixer is the decisive lever. Full-dickens trajectory (RT cmp=0):
-//! single mixer 0.231335 → 2-layer 0.225303 → +order-8..11 +2-stage-SSE 0.224491
-//! — M1 (< champion 0.229919) and M2 (< ppmd floor 0.225342) both achieved.
-//! enwik8-head 0.226235. Reverted dead ends: 16-bit resolution (ST_MAX caps it),
-//! 512-set single mixer, heavy APM blend — all REGRESSED (see log).
+//! Full trajectory (RT cmp=0): the decisive levers were the dual counter, a
+//! strongly-nonstationary bit-history state machine, the 5th mixer view, and
+//! larger hash tables (collision reduction at scale). full-dickens 0.231335 →
+//! 0.211565; enwik8-head 0.234742 → 0.200615 (BELOW the ppmd text floor
+//! 0.201379). Reverted dead ends (see log): straight StateMap replacement,
+//! 2nd indirect (Gotcha #9), 6th mixer, order-12/13, richer l2 context, a 3rd
+//! APM, 16-bit resolution — all REGRESSED.
 //!
 //! ALL prediction/mixing/adaptation is integer, so encode and decode — processing
 //! the identical byte sequence — build byte-exact identical state and the round
