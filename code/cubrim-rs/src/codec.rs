@@ -3652,36 +3652,53 @@ fn decode_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 
 // ---- MODE_CM2 (CUBR-0059 CM track): strong context-mixing backend ----
 
-/// Runtime gate for the (slow) MODE_CM2 codec: only try it where it is known to
-/// win — large text/xml (beats ppmd) or executables (beats 7z). Everything else
-/// is left to the fast modes. This is PURELY a runtime gate: competitive-min
-/// keeps `min(len)` regardless, so gating can never regress a file, only avoid
-/// wasting minutes on inputs CM2 would lose anyway.
+/// Runtime gate for the (slow) MODE_CM2 codec. CM2 wins on data with real
+/// structure (text/xml, executables, code, databases, structured binary) and
+/// loses on near-random / already-compressed data. Rather than fragile magic
+/// detection (the earlier ELF/MZ-at-offset scan missed `mozilla`, a tar whose
+/// PE members start at non-zero offsets), gate on order-0 byte ENTROPY of a
+/// representative strided sample: try CM2 iff the input is large (>=256 KB) and
+/// not near-random (< 7.7 bits/byte). This catches every compressible type
+/// (mozilla exe code ~6 bits/byte included) and skips only inputs CM2 cannot
+/// beat anyway. It is PURELY an encode-time runtime gate — the decoder reads the
+/// mode byte, never this function, so the f64 math cannot affect the round trip;
+/// and competitive-min keeps `min(len)` regardless, so gating never regresses a
+/// file, it only avoids wasting minutes on incompressible inputs.
 fn cm2_gate(data: &[u8]) -> bool {
     let n = data.len();
     if n < (1 << 18) {
         return false; // < 256 KB — fast modes handle these; CM2 not worth the runtime
     }
-    // text / xml: >=95% printable ASCII + whitespace over a 64 KB head sample
-    let head = &data[..n.min(1 << 16)];
-    let printable = head
-        .iter()
-        .filter(|&&b| b == 9 || b == 10 || b == 13 || (0x20..=0x7e).contains(&b))
-        .count();
-    if printable * 100 >= head.len() * 95 {
-        return true;
+    cm2_sample_entropy(data) < 7.7
+}
+
+/// Order-0 byte entropy (bits/byte) over a strided sample across the whole input
+/// (strided so a heterogeneous container like a tar-of-executables is sampled
+/// representatively, not just its header region).
+fn cm2_sample_entropy(data: &[u8]) -> f64 {
+    let n = data.len();
+    let target: usize = 1 << 18; // ~256 K samples
+    let stride = (n / target).max(1);
+    let mut freq = [0u32; 256];
+    let mut count = 0u32;
+    let mut i = 0;
+    while i < n {
+        freq[data[i] as usize] += 1;
+        count += 1;
+        i += stride;
     }
-    // executables: ELF / PE / Mach-O signature at the start OR embedded (a tar of
-    // executables like the `mozilla` corpus has ELF magic at member boundaries).
-    let scan = &data[..n.min(1 << 20)];
-    if scan.starts_with(b"MZ")
-        || scan.starts_with(&[0x7f, b'E', b'L', b'F'])
-        || scan.starts_with(&[0xCA, 0xFE, 0xBA, 0xBE])
-        || scan.starts_with(&[0xFE, 0xED, 0xFA, 0xCE])
-    {
-        return true;
+    if count == 0 {
+        return 8.0;
     }
-    scan.windows(4).any(|w| w == [0x7f, b'E', b'L', b'F'])
+    let inv = 1.0 / count as f64;
+    let mut ent = 0.0;
+    for &f in freq.iter() {
+        if f > 0 {
+            let p = f as f64 * inv;
+            ent -= p * p.log2();
+        }
+    }
+    ent
 }
 
 /// Competitive-min candidate: the MODE_CM2 strong context-mixing backend, gated
@@ -9793,7 +9810,7 @@ mod tests {
         };
         let selected_cm2 = mode == MODE_CM2;
         println!(
-            "CM2-DISPATCH file={} n={} blob={} ratio={:.9} rt_cmp0={} mode={} selected_cm2={} gate={}",
+            "CM2-DISPATCH file={} n={} blob={} ratio={:.9} rt_cmp0={} mode={} selected_cm2={} gate={} entropy={:.4}",
             path,
             n,
             blob.len(),
@@ -9802,6 +9819,7 @@ mod tests {
             mode,
             selected_cm2,
             cm2_gate(&data),
+            cm2_sample_entropy(&data),
         );
         assert!(rt, "dispatch RT cmp!=0");
     }
