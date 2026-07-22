@@ -305,6 +305,15 @@ fn encode_with_config_inner(
                         best = s;
                     }
                 }
+                // CUBR-0061 (FH-10): record-aware CM (MODE_RECORDCM), the live
+                // per-type binary #1. Detector-gated via soa_detect_width;
+                // competitive min() — kept only when strictly smaller, so
+                // non-record files stay byte-identical and no file regresses.
+                if let Some(rc) = encode_record_cm(data, config) {
+                    if rc.len() < best.len() {
+                        best = rc;
+                    }
+                }
                 if let Some(cm) = encode_cm(data, config) {
                     if cm.len() < best.len() {
                         best = cm;
@@ -3728,10 +3737,22 @@ fn decode_cm2(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 
 const RECORD_CM_HEADER_SIZE: usize = 24;
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn encode_record_cm_probe(data: &[u8]) -> Option<Vec<u8>> {
     let width = soa_detect_width(data)?;
     build_record_cm_blob(data, width)
+}
+
+/// CUBR-0061: dispatcher-facing record-aware CM candidate. Mirrors `encode_soa`'s
+/// large-file gate (only runs on inputs strictly larger than `cube_size_limit`) as
+/// defense-in-depth so the record-CM encode cannot fire on sub-limit inputs even if
+/// called outside the large branch. The `soa_detect_width` gate inside the probe keeps
+/// it off non-record data; competitive `min(len)` at the call site keeps it off any file
+/// where it does not strictly win.
+fn encode_record_cm(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    if data.len() <= config.cube_size_limit() {
+        return None;
+    }
+    encode_record_cm_probe(data)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -9786,6 +9807,44 @@ pub(crate) fn lz_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
 mod tests {
     use super::*;
     use crate::header::VALUE_SCHEME_RLE_CODES;
+
+    // CUBR-0061 (FH-10) fixture: a fixed-width record stream (record-cm favourable).
+    fn fh10_record_fixture(width: usize, rows: usize, tail: usize) -> Vec<u8> {
+        let mut data = Vec::with_capacity(width * rows + tail);
+        for row in 0..rows {
+            for col in 0..width {
+                let base = col
+                    .wrapping_mul(73)
+                    .wrapping_add(col.wrapping_mul(col).wrapping_mul(11)) as u8;
+                data.push(base.wrapping_add((row / (col % 7 + 3)) as u8));
+            }
+        }
+        for i in 0..tail {
+            data.push((i.wrapping_mul(31)) as u8);
+        }
+        data
+    }
+
+    /// FH-10 integration proof: on a fixed-record stream the DEFAULT `encode()`
+    /// must select MODE_RECORDCM and round-trip exactly — i.e. the record-CM
+    /// default candidate is wired (the live per-type binary #1, composed here
+    /// alongside MODE_CM2).
+    #[test]
+    fn fh10_selected_and_roundtrips_via_default_encode() {
+        let data = fh10_record_fixture(28, 5000, 0); // 140_000 B > cube_size_limit
+        assert!(data.len() > EncodeConfig::v1_default().cube_size_limit());
+        assert_eq!(soa_detect_width(&data), Some(28));
+        let blob = encode(&data);
+        assert_eq!(
+            blob[5], MODE_RECORDCM,
+            "record-cm must win the default competition on a fixed-record stream"
+        );
+        assert_eq!(
+            decode(&blob).expect("record-cm decode via default CLI"),
+            data,
+            "record-cm RT via default CLI must be byte-exact"
+        );
+    }
 
     /// WIRE verification: MODE_CM2 through the real top-level encode/decode
     /// dispatch (not self_probe). RT cmp=0 is mandatory; also reports whether
