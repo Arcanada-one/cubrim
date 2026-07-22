@@ -308,7 +308,16 @@ const SM_WORD4_I: usize = WORD4_I + 1;
 const NMODELS: usize = SM_WORD4_I + 1; // model inputs
 const NIN: usize = NMODELS + 1; // (bias at NIN-1)
 
-const TBITS: usize = 27;
+const TBITS_MAX: usize = 27; // hash-table cap (~12 GB/model at the max)
+/// Size the per-model hash tables to the input length: ceil(log2(len)) + 3,
+/// clamped to [18, TBITS_MAX]. Large files (enwik8, dickens) get the full 27
+/// (the collision-free ratio win); small files use small tables (no memory /
+/// init-time waste). The decoder derives the identical value from `orig_len` in
+/// the wire header, so the round trip stays byte-exact.
+fn tbits_for(len: usize) -> usize {
+    let ceil_log2 = (usize::BITS - (len.max(2) - 1).leading_zeros()) as usize;
+    (ceil_log2 + 3).clamp(18, TBITS_MAX)
+}
 const IBITS: usize = 20; // indirect map bits
 const M1_MIN: usize = 6;
 const M2_MIN: usize = 3;
@@ -332,10 +341,10 @@ struct Match {
     active: bool,
 }
 impl Match {
-    fn new(minlen: usize) -> Self {
+    fn new(minlen: usize, tbits: usize) -> Self {
         Self {
-            hash: vec![0u32; 1usize << TBITS],
-            mask: (1usize << TBITS) - 1,
+            hash: vec![0u32; 1usize << tbits],
+            mask: (1usize << tbits) - 1,
             ptr: 0,
             len: 0,
             prob: vec![(PSCALE * 3 / 4) as u16; MM_CAP + 1],
@@ -465,7 +474,7 @@ struct CmModel {
 }
 
 impl CmModel {
-    fn new() -> Self {
+    fn new(tbits: usize) -> Self {
         let lg = Logistic::new();
         let apm1 = Apm::new(&lg, 256);
         let apm2 = Apm::new(&lg, 1024);
@@ -484,28 +493,28 @@ impl CmModel {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1023);
         Self {
-            ord: (0..NORD).map(|_| Ctr::new(TBITS, ctrlim, smcap)).collect(),
-            sp: (0..NSPARSE).map(|_| Ctr::new(TBITS, ctrlim, smcap)).collect(),
-            ind: Ctr::new(TBITS, ctrlim, smcap),
+            ord: (0..NORD).map(|_| Ctr::new(tbits, ctrlim, smcap)).collect(),
+            sp: (0..NSPARSE).map(|_| Ctr::new(tbits, ctrlim, smcap)).collect(),
+            ind: Ctr::new(tbits, ctrlim, smcap),
             ind_map: vec![0u32; 1usize << IBITS],
             ind_mask: (1usize << IBITS) - 1,
-            wtab: Ctr::new(TBITS, ctrlim, smcap),
+            wtab: Ctr::new(tbits, ctrlim, smcap),
             word_hash: 0,
-            wtab2: Ctr::new(TBITS, ctrlim, smcap),
+            wtab2: Ctr::new(tbits, ctrlim, smcap),
             prev_word: 0,
             word2_cx: 0,
             word2state: 0,
-            wtab3: Ctr::new(TBITS, ctrlim, smcap),
+            wtab3: Ctr::new(tbits, ctrlim, smcap),
             word_lc: 0,
             word3_cx: 0,
             word3state: 0,
-            wtab4: Ctr::new(TBITS, ctrlim, smcap),
+            wtab4: Ctr::new(tbits, ctrlim, smcap),
             prev_word_lc: 0,
             word4_cx: 0,
             word4state: 0,
-            m1: Match::new(M1_MIN),
-            m2: Match::new(M2_MIN),
-            m3: Match::new(M3_MIN),
+            m1: Match::new(M1_MIN, tbits),
+            m2: Match::new(M2_MIN, tbits),
+            m3: Match::new(M3_MIN, tbits),
             // layer-1 mixers over NIN inputs, distinct context selectors; layer 2
             // combines their NL1 stretched outputs (+bias).
             l1: vec![
@@ -770,7 +779,7 @@ pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
 /// 0 unless `CM_AUDIT=1`). The wire bytes are identical to [`cm2_encode`].
 pub(crate) fn cm2_encode_audit(data: &[u8]) -> (Vec<u8>, f64, f64) {
     let mut out = (data.len() as u64).to_be_bytes().to_vec();
-    let mut model = CmModel::new();
+    let mut model = CmModel::new(tbits_for(data.len()));
     let mut enc = RangeEncoder::new();
     let mut buf: Vec<u8> = Vec::with_capacity(data.len());
     for &byte in data {
@@ -802,7 +811,7 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let orig_len = u64::from_be_bytes(blob[..8].try_into().unwrap());
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
-    let mut model = CmModel::new();
+    let mut model = CmModel::new(tbits_for(orig_len as usize));
     let mut dec = RangeDecoder::new(&blob[8..]);
     for _ in 0..orig_len {
         model.start_byte(&out);
