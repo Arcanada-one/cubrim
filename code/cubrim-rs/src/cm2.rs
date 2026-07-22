@@ -316,7 +316,7 @@ const M3_MIN: usize = 12;
 const WSHIFT_DEFAULT: i32 = 12;
 const MM_CAP: usize = 63;
 const APM_N: usize = 32;
-const NL1: usize = 4; // layer-1 mixers (distinct context views)
+const NL1: usize = 5; // layer-1 mixers (distinct context views)
 
 struct Match {
     hash: Vec<u32>,
@@ -513,6 +513,7 @@ impl CmModel {
                 Mixer::new(1024, NIN, ws), // order-2 hash
                 Mixer::new(64, NIN, ws),   // match state
                 Mixer::new(256, NIN, ws),  // partial byte c0
+                Mixer::new(1024, NIN, ws), // order-3 hash
             ],
             l2: Mixer::new(64, NL1 + 1, ws),
             wshift: ws,
@@ -673,6 +674,7 @@ impl CmModel {
         self.mctx[1] = self.ind_key & 1023;
         self.mctx[2] = ((self.m1.len.min(15) << 1) | (self.m1.active as usize)) & 63;
         self.mctx[3] = c0 & 255;
+        self.mctx[4] = self.hk[3] & 1023; // order-3 hash
         for m in 0..NL1 {
             self.l2in[m] = self.l1[m].mix(&self.lg, &self.st, self.mctx[m]);
         }
