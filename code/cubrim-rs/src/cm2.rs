@@ -263,7 +263,11 @@ const SM_ORD_I: usize = WORD_I + 1; // NORD state-map order probs
 const SM_SP_I: usize = SM_ORD_I + NORD; // NSPARSE state-map sparse probs
 const SM_IND_I: usize = SM_SP_I + NSPARSE; // indirect state-map prob
 const SM_WORD_I: usize = SM_IND_I + 1; // word state-map prob
-const NMODELS: usize = SM_WORD_I + 1; // model inputs
+// 2nd word model (previous-word × current-word bigram context) — appended so all
+// prior indices stay stable.
+const WORD2_I: usize = SM_WORD_I + 1; // stationary 2nd-word prob
+const SM_WORD2_I: usize = WORD2_I + 1; // state-map 2nd-word prob
+const NMODELS: usize = SM_WORD2_I + 1; // model inputs
 const NIN: usize = NMODELS + 1; // (bias at NIN-1)
 
 const TBITS: usize = 22;
@@ -371,6 +375,10 @@ struct CmModel {
     ind_mask: usize,
     wtab: Ctr,
     word_hash: u32,
+    wtab2: Ctr,
+    prev_word: u32,
+    word2_cx: usize,
+    word2state: u8,
     m1: Match,
     m2: Match,
     // 2-layer mixer
@@ -435,6 +443,10 @@ impl CmModel {
             ind_mask: (1usize << IBITS) - 1,
             wtab: Ctr::new(TBITS, ctrlim, smcap),
             word_hash: 0,
+            wtab2: Ctr::new(TBITS, ctrlim, smcap),
+            prev_word: 0,
+            word2_cx: 0,
+            word2state: 0,
             m1: Match::new(M1_MIN),
             m2: Match::new(M2_MIN),
             // layer-1 mixers over NIN inputs, distinct context selectors; layer 2
@@ -558,6 +570,18 @@ impl CmModel {
         self.wordstate = wst;
         self.st[WORD_I] = self.lg.stretch(wps);
         self.st[SM_WORD_I] = self.lg.stretch(wpsm);
+        // 2nd word model: previous completed word × current partial word.
+        let w2cx = (self
+            .prev_word
+            .wrapping_mul(0x9E37_79B1)
+            .wrapping_add(self.word_hash) as usize)
+            .wrapping_mul(0x2545_F491)
+            .wrapping_add(c0);
+        self.word2_cx = w2cx;
+        let (w2ps, w2psm, w2st) = self.wtab2.predict(w2cx);
+        self.word2state = w2st;
+        self.st[WORD2_I] = self.lg.stretch(w2ps);
+        self.st[SM_WORD2_I] = self.lg.stretch(w2psm);
         self.st[NIN - 1] = 256; // bias
 
         // 2-layer mixer: NL1 context-specialised layer-1 mixers over all inputs,
@@ -607,6 +631,7 @@ impl CmModel {
         }
         self.ind.upd(self.indcx, self.indstate, y, &self.nex);
         self.wtab.upd(self.word_cx, self.wordstate, y, &self.nex);
+        self.wtab2.upd(self.word2_cx, self.word2state, y, &self.nex);
         self.m1.update(y);
         self.m2.update(y);
         self.apm1.upd(self.apm1_idx, y);
@@ -630,6 +655,10 @@ impl CmModel {
                 .wrapping_mul(0x6F4A_7C13)
                 .wrapping_add(b as u32 + 1);
         } else {
+            // word boundary: remember the just-completed word for the bigram model
+            if self.word_hash != 0 {
+                self.prev_word = self.word_hash;
+            }
             self.word_hash = 0;
         }
         self.m1.end(buf);
