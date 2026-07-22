@@ -281,7 +281,7 @@ impl Mixer {
 }
 
 const NORD: usize = 12; // order-0..11
-const NSPARSE: usize = 3;
+const NSPARSE: usize = 6;
 const SP_I: usize = NORD; // 8,9,10
 const IND_I: usize = SP_I + NSPARSE; // 11
 const M1_I: usize = IND_I + 1; //  long match
@@ -571,6 +571,9 @@ impl CmModel {
         self.sphash[0] = g(1, 3); // skip t-2
         self.sphash[1] = g(1, 4); // skip t-2,t-3
         self.sphash[2] = g(2, 4); // skip t-1,t-3
+        self.sphash[3] = g(2, 3); // t-2,t-3 (skip t-1)
+        self.sphash[4] = g(1, 5); // t-1,t-5
+        self.sphash[5] = g(3, 5); // t-3,t-5
                                   // indirect: history-of-history keyed by the order-2 context
         self.ind_key = if t >= 2 {
             Self::bhash(0x2222_3333, &buf[t - 2..t]) & self.ind_mask
