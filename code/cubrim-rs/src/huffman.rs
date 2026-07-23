@@ -256,7 +256,8 @@ pub(crate) fn huffman_decode(
     }
 
     let data = &blob[offset..];
-    let mut result = Vec::with_capacity(count);
+    // QA-F-005 fail-closed: cap the pre-allocation for an attacker-controlled count.
+    let mut result = Vec::with_capacity(count.min(crate::codec::DECODE_PREALLOC_CAP));
     let mut bit_pos = 0usize; // current bit position in the bitstream (MSB-first)
 
     while result.len() < count {

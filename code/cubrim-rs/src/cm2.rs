@@ -32,6 +32,16 @@ use crate::error::CubrimError;
 
 const PBITS: u32 = 12;
 const PSCALE: i32 = 1 << PBITS; // 4096
+
+// QA-F-001 fail-closed decode guards (branch F adversarial-QA).
+// Maximum output bytes produced without the range decoder consuming a new input byte. A
+// valid stream never rides longer than the renormalization run-length: with PSCALE=4096
+// and the mixer/APM predictions clamped to ST_MAX, the per-symbol probability stays bounded
+// away from 1, so renorm reads recur within well under ~6 KB even for maximally-compressible
+// data. 64 KiB is an ~11x safety margin and bounds a truncated stream's fabricated output
+// (and decode time) to 64 KiB before it fails closed.
+const CM2_STALL_LIMIT: u64 = 1 << 16;
+
 const ST_MAX: i32 = 2047; // stretch domain [-2047, 2047]
 const ST_SCALE: f64 = 256.0; // ln-scale: stretch(1..PSCALE-1) spans ≈ [-ST_MAX, ST_MAX]
 
@@ -817,10 +827,28 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         return Err(CubrimError::Decode("MODE_CM2: header truncated".into()));
     }
     let orig_len = u64::from_be_bytes(blob[..8].try_into().unwrap());
+    // QA-F-001 fail-closed guard (part 1 — decompression-bomb cap): a corrupt MODE_CM2
+    // blob can carry an attacker-controlled orig_len up to 2^64. Reject anything beyond a
+    // sane absolute maximum before allocating or looping, so the classic 2^64 claim fails
+    // in O(1) instead of driving an unbounded loop + OOM.
+    if orig_len > crate::codec::MAX_DECODE_LEN as u64 {
+        return Err(CubrimError::Decode(format!(
+            "MODE_CM2: orig_len {orig_len} exceeds maximum {}",
+            crate::codec::MAX_DECODE_LEN
+        )));
+    }
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
     let mut model = CmModel::new(tbits_for(orig_len as usize));
     let mut dec = RangeDecoder::new(&blob[8..]);
+    // QA-F-001 fail-closed guard (part 2 — stall detector): once the coded stream is
+    // exhausted the range decoder only reads zero-padding and stops consuming input, yet
+    // the loop would keep fabricating bytes toward orig_len. Track output produced since
+    // the decoder last consumed a real input byte; a valid stream never stalls beyond the
+    // renormalization run-length (a few KB even for maximally-compressible data), so a long
+    // stall means the stream is truncated/corrupt -> fail closed with Err.
+    let mut last_progress = dec.progress();
+    let mut stall: u64 = 0;
     for _ in 0..orig_len {
         model.start_byte(&out);
         let mut c0 = 1usize;
@@ -841,6 +869,19 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         out.push(byte);
         model.end_byte(&out);
+        // Stall accounting (QA-F-001 part 2).
+        let p = dec.progress();
+        if p != last_progress {
+            last_progress = p;
+            stall = 0;
+        } else {
+            stall += 1;
+            if stall > CM2_STALL_LIMIT {
+                return Err(CubrimError::Decode(
+                    "MODE_CM2: coded stream exhausted before orig_len bytes decoded".into(),
+                ));
+            }
+        }
     }
     Ok(out)
 }
@@ -864,6 +905,59 @@ mod tests {
         rt(b"the quick brown fox jumps over the lazy dog. "
             .repeat(50)
             .as_slice());
+    }
+
+    // QA-F-001 (branch F adversarial-QA): a MODE_CM2 blob whose 8-byte orig_len header
+    // claims a gigantic length but whose coded stream is short must fail-closed with Err
+    // in bounded time/memory — NOT hang or grow `out` toward OOM. Regression guard for the
+    // fixed unbounded length-driven decode loop.
+    #[test]
+    fn cm2_decode_bogus_orig_len_is_err_not_oom() {
+        // orig_len = u64::MAX, followed by a tiny coded stub.
+        let mut blob = vec![0xFFu8; 8];
+        blob.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44]);
+        let r = cm2_decode(&blob);
+        assert!(
+            r.is_err(),
+            "cm2_decode must reject bogus orig_len, got Ok(len={})",
+            r.map(|v| v.len()).unwrap_or(0)
+        );
+    }
+
+    // QA-F-001: orig_len UNDER the absolute cap but with a truncated coded stream must
+    // also fail closed via the stall detector (bounded work), not hang or grow unbounded.
+    #[test]
+    fn cm2_decode_truncated_stream_stalls_to_err() {
+        // Valid blob for a compressible input, then rewrite orig_len to a large value
+        // (< CM2_MAX_DECODE_LEN) the short coded stream cannot satisfy.
+        let mut blob = cm2_encode(&vec![0u8; 4096]);
+        let bogus: u64 = 1 << 30; // 1 GiB claimed, well under the 1 TiB cap
+        blob[..8].copy_from_slice(&bogus.to_be_bytes());
+        let r = cm2_decode(&blob);
+        assert!(
+            r.is_err(),
+            "truncated CM2 stream must fail closed, got Ok(len={})",
+            r.map(|v| v.len()).unwrap_or(0)
+        );
+    }
+
+    // The exhaustion guard must never break a VALID round-trip: for real blobs the coded
+    // stream is long enough that input_exhausted() only trips (if ever) after the final
+    // byte is emitted. Exercise a range of sizes incl. the highly-compressible tail where
+    // the decoder rides closest to the end of input.
+    #[test]
+    fn cm2_guard_preserves_valid_roundtrip() {
+        for d in [
+            vec![],
+            vec![0u8; 1],
+            vec![0u8; 4096],           // maximally compressible — shortest coded stream
+            vec![0x5Au8; 1000],
+            b"lorem ipsum dolor sit amet ".repeat(200),
+        ] {
+            let blob = cm2_encode(&d);
+            let out = cm2_decode(&blob).expect("valid cm2 blob must decode");
+            assert_eq!(out, d, "guard broke valid RT for len {}", d.len());
+        }
     }
 
     #[test]
