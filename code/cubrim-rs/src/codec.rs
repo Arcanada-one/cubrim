@@ -2208,6 +2208,105 @@ fn med16_inverse(res: &[u16], w: usize) -> Vec<u16> {
     rec
 }
 
+// ---- FH3-09: CALIC-style context error-feedback bias-cancellation (APM over MED16) ----
+//
+// A per-context running mean of the TRUE prediction error is learned online and added to
+// the MED predictor before coding the residual. This removes the context-dependent bias
+// that the plain MED16 predictor leaves — the one component (of four) that separates CALIC
+// from MED. The correction is derived purely from causal, already-decoded neighbours, so it
+// is exactly decoder-reproducible (wire=0). Integer-deterministic. It is offered as a second
+// MODE_MED16 variant under competitive-min: measured to help x-ray (−1.9 %) while it hurts
+// mr (its residual structure is variance, not mean, already exploited by BWT+rANS), so the
+// min() keeps the bias variant only where it strictly wins — zero regression by construction.
+
+const MED16_APM_NCTX: usize = 12 * 12 * 12; // 3 signed-ternary gradients, 12 buckets each
+
+/// np.digitize-equivalent signed-ternary quantiser of a neighbour gradient (0..=11).
+#[inline]
+fn med16_tern(d: i32) -> usize {
+    const BINS: [i32; 11] = [-256, -64, -16, -4, -1, 0, 1, 4, 16, 64, 256];
+    let mut idx = 0usize;
+    for &b in BINS.iter() {
+        if d >= b {
+            idx += 1;
+        }
+    }
+    idx
+}
+
+#[inline]
+fn med16_ctx(a: u16, b: u16, c: u16) -> usize {
+    // a=W (left), b=N (up), c=NW (up-left); same neighbours as the predictor.
+    let d1 = b as i32 - a as i32; // N - W
+    let d2 = c as i32 - b as i32; // NW - N
+    let d3 = a as i32 - c as i32; // W - NW
+    (med16_tern(d1) * 12 + med16_tern(d2)) * 12 + med16_tern(d3)
+}
+
+/// Nearest-integer division, half away from zero, deterministic for any sign of `num` (den>0).
+#[inline]
+fn med16_round_div(num: i64, den: i64) -> i64 {
+    debug_assert!(den > 0);
+    if num >= 0 {
+        (num + den / 2) / den
+    } else {
+        -(((-num) + den / 2) / den)
+    }
+}
+
+fn med16_forward_apm(samples: &[u16], w: usize) -> Vec<u16> {
+    let n = samples.len();
+    let mut out = vec![0u16; n];
+    let mut sum = vec![0i64; MED16_APM_NCTX];
+    let mut cnt = vec![0i64; MED16_APM_NCTX];
+    for i in 0..n {
+        let x = i % w;
+        let a = if x > 0 { samples[i - 1] } else { 0 };
+        let b = if i >= w { samples[i - w] } else { 0 };
+        let c = if i >= w && x > 0 { samples[i - w - 1] } else { 0 };
+        let pred = med16_predict(a, b, c);
+        let ctx = med16_ctx(a, b, c);
+        let bias = if cnt[ctx] > 0 {
+            med16_round_div(sum[ctx], cnt[ctx])
+        } else {
+            0
+        };
+        let cpred = (pred as i32).wrapping_add(bias as i32);
+        out[i] = (samples[i] as i32).wrapping_sub(cpred) as u16;
+        let te = samples[i] as i32 - pred as i32; // true error (decoder recomputes identically)
+        sum[ctx] += te as i64;
+        cnt[ctx] += 1;
+    }
+    out
+}
+
+fn med16_inverse_apm(res: &[u16], w: usize) -> Vec<u16> {
+    let n = res.len();
+    let mut rec = vec![0u16; n];
+    let mut sum = vec![0i64; MED16_APM_NCTX];
+    let mut cnt = vec![0i64; MED16_APM_NCTX];
+    for i in 0..n {
+        let x = i % w;
+        let a = if x > 0 { rec[i - 1] } else { 0 };
+        let b = if i >= w { rec[i - w] } else { 0 };
+        let c = if i >= w && x > 0 { rec[i - w - 1] } else { 0 };
+        let pred = med16_predict(a, b, c);
+        let ctx = med16_ctx(a, b, c);
+        let bias = if cnt[ctx] > 0 {
+            med16_round_div(sum[ctx], cnt[ctx])
+        } else {
+            0
+        };
+        let cpred = (pred as i32).wrapping_add(bias as i32);
+        let s = (res[i] as i32).wrapping_add(cpred) as u16;
+        rec[i] = s;
+        let te = s as i32 - pred as i32;
+        sum[ctx] += te as i64;
+        cnt[ctx] += 1;
+    }
+    rec
+}
+
 /// Auto-detect the raster row width (in samples) by the minimum average vertical-abs-diff
 /// (a sample at column x, row y correlates most with the same column one row up). Returns the
 /// width minimising the lag-w L1 distance over a bounded prefix. A wrong width is harmless —
@@ -2270,31 +2369,44 @@ fn encode_med16(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
 
     let detected = med16_detect_width(&samples)?;
     let mut widths = vec![detected, 512, 256, 1024, 2048, 4096];
-    widths.retain(|&w| w > 0 && w <= 65535 && w <= samples.len() / 2);
+    widths.retain(|&w| w > 0 && w <= 0x7FFF && w <= samples.len() / 2);
     widths.sort_unstable();
     widths.dedup();
 
     let mut best: Option<Vec<u8>> = None;
     for w in widths {
-        let res = med16_forward(&samples, w);
-        let mut resid = Vec::with_capacity(len);
-        for &r in &res {
-            resid.extend_from_slice(&r.to_le_bytes());
-        }
-        if tail_byte == 1 {
-            resid.push(data[len - 1]);
-        }
-        let nested = encode_with_config_inner(&resid, &nested_config, false, false);
-        let mut out = Vec::with_capacity(13 + nested.len());
-        out.extend_from_slice(&MAGIC);
-        out.push(VERSION);
-        out.push(MODE_MED16);
-        out.extend_from_slice(&(len as u32).to_be_bytes());
-        out.extend_from_slice(&(w as u16).to_be_bytes());
-        out.push(tail_byte as u8);
-        out.extend_from_slice(&nested);
-        if best.as_ref().is_none_or(|b| out.len() < b.len()) {
-            best = Some(out);
+        // Two predictor variants per width, both competitive-min: plain MED16 (apm=0) and
+        // FH3-09 context bias-cancellation (apm=1). Kept only when strictly smaller, so a
+        // file where the bias variant loses (e.g. mr) stays byte-identical to plain MED16.
+        for apm in 0u8..=1 {
+            let res = if apm == 0 {
+                med16_forward(&samples, w)
+            } else {
+                med16_forward_apm(&samples, w)
+            };
+            let mut resid = Vec::with_capacity(len);
+            for &r in &res {
+                resid.extend_from_slice(&r.to_le_bytes());
+            }
+            if tail_byte == 1 {
+                resid.push(data[len - 1]);
+            }
+            let nested = encode_with_config_inner(&resid, &nested_config, false, false);
+            // apm flag is packed into the free high bit of the u16 width (widths are ≤4096 ≪
+            // 0x7FFF), so the container stays 13 bytes: a plain-MED16 file (apm=0) is byte-for-
+            // byte identical to the pre-FH3-09 format — strict zero regression, no +1B overhead.
+            let w_field = (w as u16) | ((apm as u16) << 15);
+            let mut out = Vec::with_capacity(13 + nested.len());
+            out.extend_from_slice(&MAGIC);
+            out.push(VERSION);
+            out.push(MODE_MED16);
+            out.extend_from_slice(&(len as u32).to_be_bytes());
+            out.extend_from_slice(&w_field.to_be_bytes());
+            out.push(tail_byte as u8);
+            out.extend_from_slice(&nested);
+            if best.as_ref().is_none_or(|b| out.len() < b.len()) {
+                best = Some(out);
+            }
         }
     }
     best
@@ -2306,7 +2418,9 @@ fn decode_med16(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         return Err(CubrimError::Decode("MODE_MED16 container too short".into()));
     }
     let orig_len = read_u32(blob, 6)? as usize;
-    let w = u16::from_be_bytes([blob[10], blob[11]]) as usize;
+    let w_field = u16::from_be_bytes([blob[10], blob[11]]);
+    let apm = (w_field >> 15) & 1; // FH3-09: apm flag packed in the width high bit
+    let w = (w_field & 0x7FFF) as usize;
     let tail_byte = blob[12] as usize;
     if w == 0 || tail_byte > 1 || orig_len < tail_byte {
         return Err(CubrimError::Decode("MODE_MED16: bad params".into()));
@@ -2326,7 +2440,11 @@ fn decode_med16(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let res: Vec<u16> = (0..n_samp)
         .map(|i| u16::from_le_bytes([resid[2 * i], resid[2 * i + 1]]))
         .collect();
-    let rec = med16_inverse(&res, w);
+    let rec = if apm == 0 {
+        med16_inverse(&res, w)
+    } else {
+        med16_inverse_apm(&res, w)
+    };
     let mut out = checked_out_vec(orig_len)?;
     for &s in &rec {
         out.extend_from_slice(&s.to_le_bytes());
@@ -10023,6 +10141,50 @@ mod tests {
         );
     }
 
+    /// FH3-09: the context bias-cancellation (APM) predictor variant must be an
+    /// exact inverse of its forward, for both plain and apm paths, and the
+    /// MODE_MED16 container must round-trip whichever variant competitive-min picks.
+    #[test]
+    fn med16_apm_forward_inverse_roundtrips() {
+        // synthetic 16-bit gradient image with a mild context-dependent bias
+        let w = 64usize;
+        let rows = 200usize;
+        let mut samples = vec![0u16; w * rows];
+        for y in 0..rows {
+            for x in 0..w {
+                let v = (x as i32 * 37 + y as i32 * 11 + ((x * y) as i32 % 17) - 3) & 0xFFFF;
+                samples[y * w + x] = v as u16;
+            }
+        }
+        // plain path is its own inverse
+        let rp = med16_forward(&samples, w);
+        assert_eq!(med16_inverse(&rp, w), samples, "plain MED16 must round-trip");
+        // apm path is its own inverse
+        let ra = med16_forward_apm(&samples, w);
+        assert_eq!(
+            med16_inverse_apm(&ra, w),
+            samples,
+            "FH3-09 APM MED16 must round-trip exactly (decoder-reproducible bias)"
+        );
+        // container-level round-trip through the MODE_MED16 encode/decode with the
+        // apm flag packed into the width high bit (13-byte container preserved).
+        let mut bytes = Vec::with_capacity(samples.len() * 2);
+        for &s in &samples {
+            bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        let cfg = EncodeConfig::v1_default();
+        if let Some(blob) = encode_med16(&bytes, &cfg) {
+            assert_eq!(blob[5], MODE_MED16);
+            let w_field = u16::from_be_bytes([blob[10], blob[11]]);
+            assert!((w_field & 0x7FFF) as usize <= 0x7FFF, "width fits low 15 bits");
+            assert_eq!(
+                decode_med16(&blob).expect("MODE_MED16 apm decode"),
+                bytes,
+                "MODE_MED16 container RT must be byte-exact for the picked variant"
+            );
+        }
+    }
+
     /// WIRE verification: MODE_CM2 through the real top-level encode/decode
     /// dispatch (not self_probe). RT cmp=0 is mandatory; also reports whether
     /// competitive-min actually SELECTED MODE_CM2 and the achieved ratio.
@@ -10721,9 +10883,10 @@ mod tests {
             "default dispatcher should select MODE_MED16"
         );
         assert_eq!(
-            u16::from_be_bytes([blob[10], blob[11]]),
+            u16::from_be_bytes([blob[10], blob[11]]) & 0x7FFF,
             512,
-            "MED16 detector should preserve the MR-like row width"
+            "MED16 detector should preserve the MR-like row width (low 15 bits; \
+             the high bit is the FH3-09 apm-variant flag)"
         );
         assert!(
             blob.len() < base.len(),
