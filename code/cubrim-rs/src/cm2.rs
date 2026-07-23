@@ -931,7 +931,9 @@ mod tests {
         // Valid blob for a compressible input, then rewrite orig_len to a large value
         // (< CM2_MAX_DECODE_LEN) the short coded stream cannot satisfy.
         let mut blob = cm2_encode(&vec![0u8; 4096]);
-        let bogus: u64 = 1 << 30; // 1 GiB claimed, well under the 1 TiB cap
+        // Claim more than the coded stream can supply (but small enough that the CM model
+        // sizing stays cheap for the test); the stall detector must still fail it closed.
+        let bogus: u64 = 200_000;
         blob[..8].copy_from_slice(&bogus.to_be_bytes());
         let r = cm2_decode(&blob);
         assert!(

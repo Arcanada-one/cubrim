@@ -7489,14 +7489,19 @@ impl<'a> RangeDecoder<'a> {
             pos,
         }
     }
-    /// Number of input bytes consumed so far (monotonic). Length-driven decode loops
-    /// use this to detect a stalled decoder: once the real coded stream is exhausted the
-    /// renormalizer only ever reads zero-padding, so `progress()` stops advancing while
-    /// the loop keeps fabricating output. A guard on "output bytes produced since the last
-    /// progress advance" bounds that fabrication (QA-F-001 fail-closed).
+    /// Number of REAL input bytes consumed so far (monotonic, saturating at the end of the
+    /// coded stream). Length-driven decode loops use this to detect a stalled decoder: once
+    /// the real coded stream is exhausted the renormalizer only ever reads zero-padding, so
+    /// `progress()` stops advancing while the loop keeps fabricating output. A guard on
+    /// "output bytes produced since the last progress advance" bounds that fabrication
+    /// (QA-F-001 fail-closed).
+    ///
+    /// The clamp is load-bearing: `decode()` advances `pos` unconditionally while reading
+    /// zero-padding past the buffer end, so an unclamped `pos` would keep advancing forever
+    /// and the stall guard could never fire.
     #[inline]
     pub(crate) fn progress(&self) -> usize {
-        self.pos
+        self.pos.min(self.buf.len())
     }
     #[inline]
     pub(crate) fn get_freq(&self, total: u32) -> u32 {
@@ -9972,6 +9977,36 @@ mod tests {
             r.is_err(),
             "inflated MODE_CUBE L must fail closed, got Ok(len={})",
             r.map(|v| v.len()).unwrap_or(0)
+        );
+    }
+
+    // QA-F-001 ROOT-CAUSE guard (branch A review): `RangeDecoder::decode` advances `pos`
+    // unconditionally while reading zero-padding past the buffer end. `progress()` MUST
+    // therefore saturate at the real stream length — otherwise it keeps advancing forever,
+    // the "no progress" condition is unreachable, and every stall detector built on it is
+    // INERT (that defect shipped in the first QA-F-001 fix: a truncated stream with a
+    // sub-cap orig_len returned Ok(garbage) instead of Err). This test pins the invariant
+    // directly so a future refactor cannot silently re-introduce an unfirable guard.
+    #[test]
+    fn range_decoder_progress_saturates_past_input_end() {
+        let buf = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let mut dec = RangeDecoder::new(&buf);
+        // Drive many decode steps: far more renormalizations than the buffer can feed.
+        for _ in 0..10_000 {
+            let pf = 2048u32; // mid probability -> forces regular renormalization
+            let f = dec.get_freq(4096);
+            if f < pf {
+                dec.decode(0, pf, 4096);
+            } else {
+                dec.decode(pf, 4096 - pf, 4096);
+            }
+        }
+        assert!(
+            dec.progress() <= buf.len(),
+            "progress() must saturate at the real input length, got {} for a {}-byte buffer \
+             — an unclamped value makes every stall guard unfirable",
+            dec.progress(),
+            buf.len()
         );
     }
 
