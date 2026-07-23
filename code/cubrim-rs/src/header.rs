@@ -170,6 +170,15 @@ pub const MODE_TARBCJ: u8 = 15;
 /// ([orig_len 8B BE][bit-range-coded]).
 pub const MODE_CM2: u8 = 16;
 
+/// GeoCM image codec (D→A port of cubr2-geocm v6): detected native-axis (stride)
+/// neighbour contexts feeding an integer logistic mixer + APM through a carryless
+/// binary range coder. Gated to image-like inputs (strong byte-periodicity, bounded
+/// size) in competitive-min; dominates the image class (ptt5/x-ray/mr) where a
+/// detected vertical axis carries structure no 1D rail model sees. Integer-
+/// deterministic, fail-closed (inner CG2 container carries its own FNV-1a-64 checksum).
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_GEOCM 1B] then the self-contained CG2 blob.
+pub const MODE_GEOCM: u8 = 17;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).

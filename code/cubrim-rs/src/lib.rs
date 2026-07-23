@@ -12,6 +12,7 @@ pub mod config;
 pub mod cube;
 pub mod distance_map;
 pub mod domainize;
+pub(crate) mod geocm;
 pub mod error;
 pub mod header;
 pub(crate) mod huffman;

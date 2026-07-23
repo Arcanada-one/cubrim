@@ -27,8 +27,8 @@ use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
     MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_CM2, MODE_COLUMNAR, MODE_CUBE, MODE_EXECM,
-    MODE_LARGEBWT, MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_TARBCJ, MODE_VCF,
-    VERSION,
+    MODE_GEOCM, MODE_LARGEBWT, MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_TARBCJ,
+    MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
@@ -333,6 +333,14 @@ fn encode_with_config_inner(
                 if let Some(m) = encode_med16(data, config) {
                     if m.len() < best.len() {
                         best = m;
+                    }
+                }
+                // MODE_GEOCM (D→A port): geo-context image codec, gated to periodic
+                // image-like inputs. Competitive min() — kept only when strictly
+                // smaller, so no non-image file can regress.
+                if let Some(g) = encode_geocm(data, config) {
+                    if g.len() < best.len() {
+                        best = g;
                     }
                 }
                 if let Some(b) = encode_bcj(data, config) {
@@ -2163,6 +2171,35 @@ fn decode_chunked(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 // on non-matching inputs because encode_with_config_inner keeps them only when
 // strictly smaller than base.
 // ============================================================================
+
+// ---- MODE_GEOCM (D→A port of cubr2-geocm v6): geo-context image codec ----
+
+/// Wrap the self-contained GeoCM (CG2) blob in the shipped container. Gated to
+/// image-like inputs and returned as a competitive-min candidate (kept only when
+/// strictly smaller), so no non-image file can regress. The inner CG2 container
+/// carries its own FNV-1a-64 checksum → fail-closed decode.
+fn encode_geocm(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
+    if data.len() <= config.cube_size_limit() {
+        return None;
+    }
+    if !crate::geocm::should_try(data) {
+        return None;
+    }
+    let inner = crate::geocm::encode(data);
+    let mut out = Vec::with_capacity(6 + inner.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_GEOCM);
+    out.extend_from_slice(&inner);
+    Some(out)
+}
+
+fn decode_geocm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    if blob.len() < 6 {
+        return Err(CubrimError::Decode("MODE_GEOCM container too short".into()));
+    }
+    crate::geocm::decode(&blob[6..]).map_err(|e| CubrimError::Decode(format!("GeoCM: {e:?}")))
+}
 
 // ---- MODE_MED16 (H-60/H-63): 16-bit grayscale image MED predictor ----
 
@@ -4526,6 +4563,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_CM2 {
             return decode_cm2(blob);
+        }
+        if blob[5] == MODE_GEOCM {
+            return decode_geocm(blob);
         }
         if blob[5] == MODE_LARGEBWT {
             return decode_large_bwt(blob);
@@ -10183,6 +10223,42 @@ mod tests {
                 "MODE_MED16 container RT must be byte-exact for the picked variant"
             );
         }
+    }
+
+    /// FH3-09b (D→A GeoCM port): a strongly periodic 2-D image must round-trip
+    /// byte-exact through the wired MODE_GEOCM competitive-min path, and the inner
+    /// CG2 checksum must make a corrupted payload fail closed (never silently wrong).
+    #[test]
+    fn geocm_roundtrips_and_fails_closed() {
+        // synthetic bilevel-ish raster: 216-byte rows with mild row-to-row similarity,
+        // strong enough that should_try() fires and GeoCM wins competitive-min.
+        let w = 216usize;
+        let rows = 900usize;
+        let mut data = Vec::with_capacity(w * rows);
+        for y in 0..rows {
+            for x in 0..w {
+                let v = if ((x / 8) + (y / 4)) % 3 == 0 { 0u8 } else { 0xFF };
+                data.push(v ^ (((x * 31 + y) % 7 == 0) as u8));
+            }
+        }
+        assert!(crate::geocm::should_try(&data), "gate should fire on a periodic raster");
+        // The GeoCM candidate itself must round-trip through the SHIPPED MODE_GEOCM
+        // container + dispatch (independent of whether it wins the top-level min()).
+        let inner = crate::geocm::encode(&data);
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&MAGIC);
+        blob.push(VERSION);
+        blob.push(MODE_GEOCM);
+        blob.extend_from_slice(&inner);
+        assert_eq!(blob[5], MODE_GEOCM);
+        assert_eq!(decode(&blob).expect("GeoCM RT"), data, "GeoCM round-trip must be byte-exact");
+        // fail-closed: corrupt the inner CG2 FNV-1a-64 checksum field (shipped offset
+        // 6 + CG2 header offset 13) -> decode must reject rather than return wrong data.
+        let mut bad = blob.clone();
+        bad[6 + 13] ^= 0xFF;
+        assert!(decode(&bad).is_err(), "corrupted GeoCM checksum must fail closed");
+        // top-level competitive-min still round-trips (some mode wins; it is byte-exact).
+        assert_eq!(decode(&encode(&data)).expect("top RT"), data);
     }
 
     /// WIRE verification: MODE_CM2 through the real top-level encode/decode
