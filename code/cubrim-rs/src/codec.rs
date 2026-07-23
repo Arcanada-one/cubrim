@@ -39,6 +39,46 @@ use crate::rle::{
     rle_size,
 };
 
+/// QA-F-001/002 fail-closed decode guards (branch F adversarial-QA).
+///
+/// Absolute upper bound on any header-declared decompressed length. Every mode stores an
+/// output length (orig_len / count / L) that an attacker can inflate up to 2^32–2^64 in a
+/// corrupt blob; the decoders then `Vec::with_capacity(that)` (upfront-allocation abort —
+/// e.g. `memory allocation of 429496729500 bytes failed`) and/or loop that many times. No
+/// legitimate Cubrim payload — the tool reads the whole input into RAM to compress it —
+/// approaches this cap, so rejecting anything larger is a pure fail-closed win with zero
+/// round-trip impact. The real memory/time bound comes from DECODE_PREALLOC_CAP plus the
+/// per-mode content checks; this cap only rejects absurd claims cheaply, so it is set
+/// generously (1 TiB) to keep zero-regression headroom for large legitimate inputs.
+pub(crate) const MAX_DECODE_LEN: usize = 1 << 40; // 1 TiB
+
+/// Soft pre-allocation ceiling. `with_capacity` is only a performance hint, so capping it
+/// never changes decoded output — it just prevents a header-declared (but not-yet-verified)
+/// length from forcing a giant reservation before a single byte is validated. The vector
+/// still grows to the real size as decoding proceeds.
+pub(crate) const DECODE_PREALLOC_CAP: usize = 1 << 20; // 1 MiB
+
+/// Absolute ceiling on MODE_CUBE L. Unlike the container modes, the legacy single-block
+/// cube path materializes O(L) coordinates up front (24·L bytes for the Vec<Vec<usize>> of
+/// phi coordinates) — it cannot pre-alloc-cap that, so L itself must be bounded. The encoder
+/// only emits MODE_CUBE for inputs within cube_size_limit (b² — 65536 at the b=256 default),
+/// so 256 Mi is a large margin over any realistic single cube while keeping the worst-case
+/// materialization bounded. The tighter per-blob bound L ≤ bᴺ (header-declared capacity) is
+/// applied alongside this.
+pub(crate) const MAX_CUBE_L: usize = 1 << 28; // 256 Mi values
+
+/// Fail-closed output-vector constructor: reject an implausible declared length up front,
+/// otherwise reserve a bounded amount and let the vector grow as real bytes are decoded.
+#[inline]
+pub(crate) fn checked_out_vec(declared_len: usize) -> Result<Vec<u8>, CubrimError> {
+    if declared_len > MAX_DECODE_LEN {
+        return Err(CubrimError::Decode(format!(
+            "declared output length {declared_len} exceeds maximum {MAX_DECODE_LEN}"
+        )));
+    }
+    Ok(Vec::with_capacity(declared_len.min(DECODE_PREALLOC_CAP)))
+}
+
 /// R7: Header overhead bound constant. Calibrated for v1-defaults.
 /// fixed(13) + count(4) + b_k(4) + schemes(3) + n_distinct(2) +
 /// inverse_dict(256) + traversal_phi(2) + gap_counts(4) = 288 bytes max for N=2.
@@ -174,7 +214,7 @@ fn rle_codes_decode(
     offset: usize,
     count: usize,
 ) -> Result<(Vec<usize>, usize), CubrimError> {
-    let mut codes = Vec::with_capacity(count);
+    let mut codes = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut pos = offset;
     while codes.len() < count {
         if pos + 3 > blob.len() {
@@ -1536,7 +1576,7 @@ fn decode_vcf(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     }
 
     // Rebuild the file: preamble + data rows.
-    let mut out = Vec::with_capacity(orig_len);
+    let mut out = checked_out_vec(orig_len)?;
     out.extend_from_slice(&preamble);
     for v in 0..n_var {
         out.push(b'\n');
@@ -1831,7 +1871,7 @@ fn decode_binfloat(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     }
 
     // Re-interleave struct-of-arrays back to array-of-structs.
-    let mut out = Vec::with_capacity(orig_len);
+    let mut out = checked_out_vec(orig_len)?;
     for r in 0..m {
         for col in &cols {
             out.extend_from_slice(&col[r].to_le_bytes());
@@ -1952,6 +1992,17 @@ fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let seq_format = blob[18];
     let lit_kind = blob[19];
     let lit_len = rd(20);
+    // QA-F-004 fail-closed guard: n_tokens/n_matches are attacker-controlled u32 counts that
+    // drive Vec<usize> allocations (8 bytes each) inside lz_decode_token_streams and the rANS
+    // decoders. A corrupt header (e.g. n_matches=4.28e9) otherwise forces a multi-GB
+    // allocation abort. Every token emits >=1 output byte and matches are a subset of tokens,
+    // so the invariant n_matches <= n_tokens <= orig_len holds for any valid blob; combined
+    // with the orig_len cap this bounds every count-driven allocation.
+    if orig_len > MAX_DECODE_LEN || n_tokens > orig_len || n_matches > n_tokens {
+        return Err(CubrimError::Decode(format!(
+            "MODE_LZ: invalid counts (orig_len={orig_len}, n_tokens={n_tokens}, n_matches={n_matches})"
+        )));
+    }
     let n_lits = n_tokens.saturating_sub(n_matches);
     let mut pos = LZ_HEADER_SIZE;
     if pos + lit_len > blob.len() {
@@ -1976,7 +2027,7 @@ fn decode_lz_prepass(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     };
     pos += lit_len;
 
-    let mut out: Vec<u8> = Vec::with_capacity(orig_len);
+    let mut out: Vec<u8> = checked_out_vec(orig_len)?;
     // Reconstruct the (literal, match) interleaving. The two token formats produce
     // the same logical sequence — H-25g's combined format yields per-match literal
     // run-lengths directly; the separate-stream format yields per-token flags.
@@ -2276,7 +2327,7 @@ fn decode_med16(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         .map(|i| u16::from_le_bytes([resid[2 * i], resid[2 * i + 1]]))
         .collect();
     let rec = med16_inverse(&res, w);
-    let mut out = Vec::with_capacity(orig_len);
+    let mut out = checked_out_vec(orig_len)?;
     for &s in &rec {
         out.extend_from_slice(&s.to_le_bytes());
     }
@@ -3596,7 +3647,14 @@ fn decode_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let orig_len = read_u64(blob, 6)? as usize;
     let block_size = read_u32(blob, 14)? as usize;
     let n_blocks = read_u32(blob, 18)? as usize;
-    if block_size == 0 || n_blocks == 0 || n_blocks > (orig_len + block_size - 1) / block_size {
+    // QA-F-002: the encoder always writes block_size == CM_BLOCK_SIZE (build_cm_blob), so
+    // require it. This bounds per-block raw_len to CM_BLOCK_SIZE (an attacker-controlled u32
+    // block_size otherwise drives cm_decompress_block into a multi-GB allocation abort), and
+    // together with the MAX_DECODE_LEN cap keeps a corrupt header from forcing OOM.
+    if block_size != CM_BLOCK_SIZE
+        || n_blocks == 0
+        || n_blocks > (orig_len + block_size - 1) / block_size
+    {
         return Err(CubrimError::Decode("MODE_CM: bad block framing".into()));
     }
     let expected_blocks = if orig_len == 0 {
@@ -3631,7 +3689,7 @@ fn decode_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             "MODE_CM: payload length mismatch".into(),
         ));
     }
-    let mut out = Vec::with_capacity(orig_len);
+    let mut out = checked_out_vec(orig_len)?;
     let mut off = table_len;
     for (i, (len, hash)) in entries.into_iter().enumerate() {
         let remaining = orig_len - out.len();
@@ -3841,7 +3899,7 @@ fn decode_record_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             "MODE_RECORDCM payload length mismatch".into(),
         ));
     }
-    let mut out = Vec::with_capacity(orig_len);
+    let mut out = checked_out_vec(orig_len)?;
     let mut payload_pos = table_end;
     for (index, (comp_len, expected_hash)) in entries.into_iter().enumerate() {
         let end = payload_pos
@@ -3968,7 +4026,7 @@ fn decode_exe_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             "MODE_EXECM payload length mismatch".into(),
         ));
     }
-    let mut filtered = Vec::with_capacity(orig_len);
+    let mut filtered = checked_out_vec(orig_len)?;
     let mut payload_pos = table_end;
     for (index, (comp_len, expected_hash)) in entries.into_iter().enumerate() {
         let end = payload_pos
@@ -4110,7 +4168,7 @@ fn decode_large_bwt(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         ));
     }
 
-    let mut out = Vec::with_capacity(orig_len);
+    let mut out = checked_out_vec(orig_len)?;
     let mut off = table_len;
     for (i, (raw_len, primary, comp_len, hash)) in entries.into_iter().enumerate() {
         let end = off + comp_len;
@@ -4283,7 +4341,7 @@ fn decode_biff(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let tail = &blob[off..];
 
     let mut used = vec![0usize; n_groups];
-    let mut out = Vec::with_capacity(orig_len);
+    let mut out = checked_out_vec(orig_len)?;
     for &id in &keys {
         let id = id as usize;
         let (record_type, payload_len, count, planes) = &groups[id];
@@ -4417,6 +4475,28 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         return Err(CubrimError::Decode(format!(
             "axis_gap_counts length != N={}",
             n
+        )));
+    }
+
+    // QA-F-003 fail-closed guard: the MODE_CUBE reconstruction materializes O(L) coordinates
+    // (`(0..l).map(phi).collect::<Vec<Vec<usize>>>()`) and an L-byte output buffer. `l` is an
+    // attacker-controlled u32 (up to 4.29e9), so a corrupt header would drive a multi-GB
+    // allocation abort (`memory allocation of N bytes failed`) instead of a clean Err. Two
+    // bounds that every valid blob satisfies: (1) L cannot exceed the cube capacity b^N the
+    // header itself declares (phi(i) is only defined for i < b^N; the encoder maps exactly L
+    // values into that cube), and (2) an absolute ceiling for this legacy single-block path.
+    let cube_capacity = (b as u64).checked_pow(n as u32).unwrap_or(u64::MAX);
+    if (l as u64) > cube_capacity || l > MAX_CUBE_L {
+        return Err(CubrimError::Decode(format!(
+            "MODE_CUBE: L={l} exceeds cube capacity b^N ({cube_capacity}) or max {MAX_CUBE_L}"
+        )));
+    }
+    // `count` (coded-value count) drives the value-stream decoders (bitpack/RLE/huffman),
+    // some of which — e.g. a width-0 bitpack of a constant stream — do not self-terminate on
+    // input exhaustion. It can never exceed L (one code per emitted value), so bound it here.
+    if count > l {
+        return Err(CubrimError::Decode(format!(
+            "MODE_CUBE: count={count} exceeds L={l}"
         )));
     }
 
@@ -5116,12 +5196,21 @@ pub(crate) fn context_huffman_decode(
     // 3. Decode bitstream.
     let bitstream_offset = pos;
     let mut bit_pos: usize = 0; // position in bits from bitstream_offset
-    let mut decoded: Vec<usize> = Vec::with_capacity(count);
+    let mut decoded: Vec<usize> = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut prev_ctx: u16 = 0;
 
     for _ in 0..count {
         let table_idx = ctx_idx.get(&prev_ctx).copied().unwrap_or(fallback_idx);
-        let decode_table = &ctx_tables[table_idx].1;
+        // QA-F-006 fail-closed: guard an out-of-range (attacker-controlled) table index.
+        let decode_table = &ctx_tables
+            .get(table_idx)
+            .ok_or_else(|| {
+                CubrimError::Decode(format!(
+                    "EntropyContext: table index {table_idx} out of range (have {})",
+                    ctx_tables.len()
+                ))
+            })?
+            .1;
 
         // Try increasing lengths until we find a match.
         let mut codeword: u32 = 0;
@@ -5661,7 +5750,7 @@ pub(crate) fn order2_context_huffman_decode(
     // ── Decode bitstream ──────────────────────────────────────────────────────
     let bitstream_offset = pos;
     let mut bit_pos: usize = 0;
-    let mut decoded: Vec<usize> = Vec::with_capacity(count);
+    let mut decoded: Vec<usize> = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
 
     // Maintain rolling context (two previously decoded values).
     // SYNC NOTE: sentinel values and update order here MUST match `order2_ctx_at` (encoder side).
@@ -5687,7 +5776,18 @@ pub(crate) fn order2_context_huffman_decode(
             .or_else(|| order1_map.get(&ctx_p1).copied())
             .unwrap_or(order0_idx);
 
-        let decode_table = &decode_tables[table_idx].decode_map;
+        // QA-F-006 fail-closed: table_idx comes from header-derived maps (and the order-0
+        // fallback index); a corrupt blob can point it past the decoded table set (e.g. an
+        // empty decode_tables with a nonzero count). Bounds-check instead of panicking.
+        let decode_table = &decode_tables
+            .get(table_idx)
+            .ok_or_else(|| {
+                CubrimError::Decode(format!(
+                    "EntropyContext2: table index {table_idx} out of range (have {})",
+                    decode_tables.len()
+                ))
+            })?
+            .decode_map;
 
         // Huffman decode: try increasing lengths.
         let mut codeword: u32 = 0;
@@ -6627,11 +6727,13 @@ pub(crate) fn rans_order1_decode(
         | (payload[3] as u32) << 24;
     cursor += 4;
 
-    let mut result = Vec::with_capacity(count);
+    let mut result = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut prev_ctx: u16 = 0;
     for _ in 0..count {
+        // QA-F-006 fail-closed: fall back on an out-of-range (corrupt) table index rather
+        // than panicking; valid blobs always index in range, so this is a no-op for them.
         let table = match ctx_idx.get(&prev_ctx) {
-            Some(&idx) => &tables[idx],
+            Some(&idx) => tables.get(idx).unwrap_or(&fallback_table),
             None => &fallback_table,
         };
         let slot = x & mask;
@@ -6805,7 +6907,7 @@ pub(crate) fn rans_order0_decode(
         | (payload[3] as u32) << 24;
     cursor += 4;
 
-    let mut result = Vec::with_capacity(count);
+    let mut result = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     for _ in 0..count {
         let slot = x & mask;
         let s = slot_to_sym[slot as usize] as usize;
@@ -6980,11 +7082,18 @@ fn order2_select<'a>(
     p2: u16,
     p1: u16,
 ) -> &'a RansCtxTable {
+    // QA-F-006 fail-closed: a corrupt header can place an index past the decoded table set.
+    // Fall back to the fallback table instead of panicking on an out-of-range index; valid
+    // blobs always have in-range indices, so this is a no-op for correct input.
     if let Some(&i) = o2_idx.get(&(p2, p1)) {
-        return &o2_tables[i];
+        if let Some(t) = o2_tables.get(i) {
+            return t;
+        }
     }
     if let Some(&i) = o1_idx.get(&p1) {
-        return &o1_tables[i];
+        if let Some(t) = o1_tables.get(i) {
+            return t;
+        }
     }
     fallback
 }
@@ -7201,7 +7310,7 @@ fn order2_rans_decode(
         | (payload[3] as u32) << 24;
     cursor += 4;
 
-    let mut result = Vec::with_capacity(count);
+    let mut result = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut p2: u16 = 0;
     let mut p1: u16 = 0;
     for _ in 0..count {
@@ -7380,6 +7489,15 @@ impl<'a> RangeDecoder<'a> {
             pos,
         }
     }
+    /// Number of input bytes consumed so far (monotonic). Length-driven decode loops
+    /// use this to detect a stalled decoder: once the real coded stream is exhausted the
+    /// renormalizer only ever reads zero-padding, so `progress()` stops advancing while
+    /// the loop keeps fabricating output. A guard on "output bytes produced since the last
+    /// progress advance" bounds that fabrication (QA-F-001 fail-closed).
+    #[inline]
+    pub(crate) fn progress(&self) -> usize {
+        self.pos
+    }
     #[inline]
     pub(crate) fn get_freq(&self, total: u32) -> u32 {
         let r = self.range / total;
@@ -7497,7 +7615,7 @@ fn adaptive_range_o1_decode(
     let a = n_distinct;
     let mut models: Vec<AdaptModel> = (0..a).map(|_| AdaptModel::new(a)).collect();
     let mut dec = RangeDecoder::new(payload);
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut prev = 0usize;
     for _ in 0..count {
         let total = models[prev].total;
@@ -7762,7 +7880,7 @@ fn cm_pure_o1_encode(seq_codes: &[usize], a: usize, inc: u32) -> Vec<u8> {
 fn cm_pure_o1_decode(payload: &[u8], count: usize, a: usize, inc: u32) -> Vec<usize> {
     let mut ctx: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
     let mut dec = CmRangeDecoder::new(payload);
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut prev = 0usize;
     for _ in 0..count {
         let total = ctx[prev].total;
@@ -7891,7 +8009,7 @@ fn cm_mix_decode(payload: &[u8], count: usize, a: usize, inc: u32, lr: f64) -> V
     let mut w: f64 = 0.5;
     let mut qfreq = vec![0u32; a];
     let mut dec = CmRangeDecoder::new(payload);
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut prev = 0usize;
     for _ in 0..count {
         cm_mix_table(&freq1[prev], tot1[prev], &freq0, tot0, w, a, &mut qfreq);
@@ -8279,7 +8397,7 @@ fn gm_mix_decode(
     let mut ex = vec![0.0f64; a];
     let mut q = vec![0u32; a];
     let mut dec = CmRangeDecoder::new(payload);
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut prev2 = 0usize;
     let mut prev1 = 0usize;
     for _ in 0..count {
@@ -9753,7 +9871,7 @@ pub(crate) fn lz_rans_decode(
         lz_decode_token_streams(blob, pos, n_tokens, n_matches)?;
     pos += consumed;
 
-    let mut out: Vec<usize> = Vec::with_capacity(count);
+    let mut out: Vec<usize> = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut li = 0usize;
     let mut mi = 0usize;
     for &flag in &flags {
@@ -9807,6 +9925,65 @@ pub(crate) fn lz_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
 mod tests {
     use super::*;
     use crate::header::VALUE_SCHEME_RLE_CODES;
+
+    // QA-F-002 (branch F adversarial-QA): a malformed MODE_CM blob whose header inflates
+    // orig_len (via an attacker-controlled block_size) must fail closed with Err in bounded
+    // memory — NOT abort with `memory allocation of N bytes failed`. Regression guard for
+    // the fixed upfront `Vec::with_capacity(orig_len)` OOM and the block_size validation.
+    #[test]
+    fn decode_cm_bogus_framing_is_err_not_oom() {
+        let block_size: u32 = 0xFFFF_FFFF;
+        let n_blocks: u32 = 100;
+        let orig_len: u64 = n_blocks as u64 * block_size as u64; // 429.5 GB
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&MAGIC);
+        blob.push(VERSION);
+        blob.push(MODE_CM);
+        blob.extend_from_slice(&orig_len.to_be_bytes());
+        blob.extend_from_slice(&block_size.to_be_bytes());
+        blob.extend_from_slice(&n_blocks.to_be_bytes());
+        for _ in 0..n_blocks {
+            blob.extend_from_slice(&0u32.to_be_bytes()); // comp_len
+            blob.extend_from_slice(&0u64.to_be_bytes()); // hash
+        }
+        let r = decode_cm(&blob);
+        assert!(
+            r.is_err(),
+            "malformed MODE_CM must fail closed, got Ok(len={})",
+            r.map(|v| v.len()).unwrap_or(0)
+        );
+    }
+
+    // QA-F-003 (branch F adversarial-QA): a MODE_CUBE blob whose 32-bit L header is inflated
+    // must fail closed with Err — NOT abort via a multi-GB `Vec<Vec<usize>>` materialization
+    // (`memory allocation of N bytes failed`). Encode a real cube blob, then rewrite L to a
+    // value far above the cube capacity b^N and assert decode rejects it in bounded memory.
+    #[test]
+    fn decode_cube_inflated_l_is_err_not_oom() {
+        // A ~1 KiB compressible input encodes to a single-block MODE_CUBE blob.
+        let data: Vec<u8> = (0..1024).map(|i| (i % 7) as u8).collect();
+        let mut blob = encode(&data);
+        assert_eq!(blob[5], MODE_CUBE, "fixture must be a MODE_CUBE blob");
+        assert_eq!(decode(&blob).unwrap(), data, "sanity: fixture round-trips");
+        // L lives at bytes [9..13] (u32 BE). Inflate it to ~2.16e9 (the fuzzer's value).
+        blob[9..13].copy_from_slice(&0x8100_1770u32.to_be_bytes());
+        let r = decode(&blob);
+        assert!(
+            r.is_err(),
+            "inflated MODE_CUBE L must fail closed, got Ok(len={})",
+            r.map(|v| v.len()).unwrap_or(0)
+        );
+    }
+
+    // The MAX_DECODE_LEN cap must reject an absurd declared length up front without
+    // allocating it, while checked_out_vec preserves normal small allocations.
+    #[test]
+    fn checked_out_vec_rejects_absurd_len() {
+        assert!(checked_out_vec(usize::MAX).is_err());
+        assert!(checked_out_vec(MAX_DECODE_LEN + 1).is_err());
+        assert_eq!(checked_out_vec(0).unwrap().len(), 0);
+        assert!(checked_out_vec(1024).is_ok());
+    }
 
     // CUBR-0061 (FH-10) fixture: a fixed-width record stream (record-cm favourable).
     fn fh10_record_fixture(width: usize, rows: usize, tail: usize) -> Vec<u8> {

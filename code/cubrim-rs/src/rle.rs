@@ -165,7 +165,9 @@ pub fn packed_nibble_decode(
     offset: usize,
     n_gaps: usize,
 ) -> Result<(Vec<usize>, usize), CubrimError> {
-    let mut gaps = Vec::with_capacity(n_gaps);
+    // QA-F-005 fail-closed: cap the pre-allocation for an attacker-controlled n_gaps
+    // (the loop below fails closed via decode_varint once `data` is exhausted).
+    let mut gaps = Vec::with_capacity(n_gaps.min(crate::codec::DECODE_PREALLOC_CAP));
     let mut pos = offset;
     for _ in 0..n_gaps {
         let (val, consumed) = decode_varint(data, pos)?;
