@@ -1,6 +1,6 @@
 [package]
 name = "cubrim"
-version = "0.1.0-cubr0043"
+version = "0.3.0"
 edition = "2021"
 description = "Cubrim archiver — lossless compression library and CLI"
 repository = "https://github.com/Arcanada-one/cubrim"
