@@ -3244,10 +3244,12 @@ struct CmRecordState {
     previous_ctx: usize,
     mixer_base: usize,
     mixer_pr: i32,
+    cur_offset: usize,
+    sse: bool,
 }
 
 impl CmRecordState {
-    fn new(width: usize, position_base: usize) -> Self {
+    fn new(width: usize, position_base: usize, sse: bool) -> Self {
         Self {
             width,
             position_base,
@@ -3259,6 +3261,8 @@ impl CmRecordState {
             previous_ctx: 0,
             mixer_base: 0,
             mixer_pr: 2048,
+            cur_offset: 0,
+            sse,
         }
     }
 }
@@ -3306,6 +3310,7 @@ struct CmPredictor {
     apm2: CmApm,
     apm3: CmApm,
     apm4: CmApm,
+    apm5: CmApm,
     hist: Vec<u8>,
     pb: usize,
     pb2: usize,
@@ -3328,6 +3333,7 @@ struct CmPredictor {
     apm2_last: usize,
     apm3_last: usize,
     apm4_last: usize,
+    apm5_last: usize,
     record: Option<CmRecordState>,
     exe: Option<CmExeState>,
 }
@@ -3336,8 +3342,8 @@ impl CmPredictor {
         Self::new_inner(None, None)
     }
 
-    fn new_record(width: usize, position_base: usize) -> Self {
-        Self::new_inner(Some(CmRecordState::new(width, position_base)), None)
+    fn new_record(width: usize, position_base: usize, sse: bool) -> Self {
+        Self::new_inner(Some(CmRecordState::new(width, position_base, sse)), None)
     }
 
     fn new_exe(position_base: usize) -> Self {
@@ -3377,6 +3383,7 @@ impl CmPredictor {
             apm2: CmApm::new(1024),
             apm3: CmApm::new(1 << 14),
             apm4: CmApm::new(16 * 256),
+            apm5: CmApm::new(4096),
             hist: Vec::new(),
             pb: 0,
             pb2: 0,
@@ -3399,6 +3406,7 @@ impl CmPredictor {
             apm2_last: 0,
             apm3_last: 0,
             apm4_last: 0,
+            apm5_last: 0,
             record,
             exe,
         }
@@ -3460,6 +3468,7 @@ impl CmPredictor {
             let (pr, base) = record.mixer.mix(offset * 8 + bitpos, &record.st);
             record.mixer_base = base;
             record.mixer_pr = pr;
+            record.cur_offset = offset * 8 + bitpos;
             pr
         } else if let Some(exe) = &mut self.exe {
             let local_pos = self.hist.len();
@@ -3509,7 +3518,24 @@ impl CmPredictor {
         let q3 = self.apm3.pp(q2, c2, &self.stretch, &mut self.apm3_last);
         let mmc = (self.mm_len.min(15) * 256 + (c0 & 255)) as usize;
         let q4 = self.apm4.pp(q3, mmc, &self.stretch, &mut self.apm4_last);
-        (pr + q2 + q3 * 2 + q4 * 4) >> 3
+        let base = (pr + q2 + q3 * 2 + q4 * 4) >> 3;
+        // PORT-B binary-micro: per-offset SSE — a final APM keyed by (offset*8+bitpos)
+        // within the record period. Gated on `record.sse` so the OFF variant returns
+        // `base` byte-identical to champion RECORDCM; the encoder competes ON vs OFF and
+        // keeps min (zero regression by construction). Record path only.
+        match self.record.as_ref().and_then(|r| {
+            if r.sse {
+                Some(r.cur_offset & 4095)
+            } else {
+                None
+            }
+        }) {
+            Some(octx) => {
+                let q5 = self.apm5.pp(base, octx, &self.stretch, &mut self.apm5_last);
+                (base + q5 * 3) >> 2
+            }
+            None => base,
+        }
     }
     #[inline]
     fn update(&mut self, bit: i32) {
@@ -3539,6 +3565,9 @@ impl CmPredictor {
         self.apm2.upd(self.apm2_last, bit);
         self.apm3.upd(self.apm3_last, bit);
         self.apm4.upd(self.apm4_last, bit);
+        if self.record.as_ref().is_some_and(|r| r.sse) {
+            self.apm5.upd(self.apm5_last, bit);
+        }
         self.c0 = (self.c0 << 1) | bit as usize;
         if self.c0 >= 256 {
             let byte = (self.c0 & 0xFF) as u8;
@@ -3686,8 +3715,8 @@ fn cm_decompress_block_scaled(
     Ok(out)
 }
 
-fn record_cm_compress_block(data: &[u8], width: usize, position_base: usize) -> Vec<u8> {
-    let mut p = CmPredictor::new_record(width, position_base);
+fn record_cm_compress_block(data: &[u8], width: usize, position_base: usize, sse: bool) -> Vec<u8> {
+    let mut p = CmPredictor::new_record(width, position_base, sse);
     let mut enc = CmEncoder::new();
     for &byte in data {
         for k in (0..8).rev() {
@@ -3706,8 +3735,9 @@ fn record_cm_decompress_block(
     expected_len: usize,
     width: usize,
     position_base: usize,
+    sse: bool,
 ) -> Result<Vec<u8>, CubrimError> {
-    let mut p = CmPredictor::new_record(width, position_base);
+    let mut p = CmPredictor::new_record(width, position_base, sse);
     let mut dec = CmDecoder::new(comp)?;
     let mut out = Vec::with_capacity(expected_len);
     for _ in 0..expected_len {
@@ -3969,10 +3999,14 @@ fn encode_record_cm(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn build_record_cm_blob(data: &[u8], width: usize) -> Option<Vec<u8>> {
-    if !(4..=64).contains(&width) || data.len() / width < 8 {
-        return None;
-    }
+/// PORT-B binary-micro: bit 15 of the u16 width field carries the per-offset SSE
+/// flag. width is 4..=64 (7 bits) so bit 15 is free — the 24-byte header size is
+/// preserved, and an SSE-OFF blob is byte-identical to the pre-SSE champion format.
+const RECORD_CM_SSE_FLAG: u16 = 1 << 15;
+
+/// Build one RECORDCM blob with SSE either on or off. SSE-off reproduces the
+/// champion byte-for-byte (the predictor's per-offset APM is gated on `sse`).
+fn build_record_cm_blob_variant(data: &[u8], width: usize, sse: bool) -> Option<Vec<u8>> {
     let blocks: Vec<&[u8]> = data.chunks(CM_BLOCK_SIZE).collect();
     if blocks.is_empty() || blocks.len() > u32::MAX as usize {
         return None;
@@ -3981,7 +4015,7 @@ fn build_record_cm_blob(data: &[u8], width: usize) -> Option<Vec<u8>> {
     let mut entries = Vec::with_capacity(blocks.len());
     for (index, block) in blocks.into_iter().enumerate() {
         let position_base = index.checked_mul(CM_BLOCK_SIZE)?;
-        let comp = record_cm_compress_block(block, width, position_base);
+        let comp = record_cm_compress_block(block, width, position_base, sse);
         if comp.len() > u32::MAX as usize {
             return None;
         }
@@ -3997,7 +4031,8 @@ fn build_record_cm_blob(data: &[u8], width: usize) -> Option<Vec<u8>> {
     out.extend_from_slice(&(data.len() as u64).to_be_bytes());
     out.extend_from_slice(&(CM_BLOCK_SIZE as u32).to_be_bytes());
     out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
-    out.extend_from_slice(&(width as u16).to_be_bytes());
+    let width_field = (width as u16) | if sse { RECORD_CM_SSE_FLAG } else { 0 };
+    out.extend_from_slice(&width_field.to_be_bytes());
     for (len, hash) in &entries {
         out.extend_from_slice(&len.to_be_bytes());
         out.extend_from_slice(&hash.to_be_bytes());
@@ -4006,6 +4041,20 @@ fn build_record_cm_blob(data: &[u8], width: usize) -> Option<Vec<u8>> {
         out.extend_from_slice(&comp);
     }
     Some(out)
+}
+
+/// Competitive min of the plain (SSE-off) and per-offset-SSE (SSE-on) RECORDCM
+/// blobs. The plain blob equals the champion exactly, so min(plain, sse) can never
+/// regress a file; SSE only wins where it is strictly smaller (binary/database).
+fn build_record_cm_blob(data: &[u8], width: usize) -> Option<Vec<u8>> {
+    if !(4..=64).contains(&width) || data.len() / width < 8 {
+        return None;
+    }
+    let plain = build_record_cm_blob_variant(data, width, false)?;
+    match build_record_cm_blob_variant(data, width, true) {
+        Some(sse) if sse.len() < plain.len() => Some(sse),
+        _ => Some(plain),
+    }
 }
 
 fn decode_record_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
@@ -4018,7 +4067,9 @@ fn decode_record_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         .map_err(|_| CubrimError::Decode("MODE_RECORDCM orig_len exceeds usize".into()))?;
     let block_size = read_u32(blob, 14)? as usize;
     let n_blocks = read_u32(blob, 18)? as usize;
-    let width = u16::from_be_bytes([blob[22], blob[23]]) as usize;
+    let width_field = u16::from_be_bytes([blob[22], blob[23]]);
+    let sse = (width_field & RECORD_CM_SSE_FLAG) != 0;
+    let width = (width_field & !RECORD_CM_SSE_FLAG) as usize;
     if block_size != CM_BLOCK_SIZE
         || !(4..=64).contains(&width)
         || n_blocks == 0
@@ -4066,6 +4117,7 @@ fn decode_record_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             raw_len,
             width,
             index * block_size,
+            sse,
         )?;
         if block.len() != raw_len || cm_hash64(&block) != expected_hash {
             return Err(CubrimError::Decode(
@@ -11014,7 +11066,8 @@ mod tests {
         assert_eq!(soa_detect_width(&data), Some(28));
         let blob = encode_record_cm_probe(&data).expect("fixed records must reach FH-10");
         assert_eq!(blob[5], MODE_RECORDCM);
-        assert_eq!(u16::from_be_bytes([blob[22], blob[23]]), 28);
+        // width lives in the low 15 bits; bit 15 is the PORT-B per-offset SSE flag.
+        assert_eq!(u16::from_be_bytes([blob[22], blob[23]]) & !RECORD_CM_SSE_FLAG, 28);
         assert_eq!(decode(&blob).expect("record-CM decode"), data);
     }
 
