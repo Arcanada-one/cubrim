@@ -6,9 +6,9 @@ use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "cubrim")]
-#[command(version, about = "Cubrim lossless compressor and .cbr archiver")]
+#[command(version, about = "Cubrim — lossless compressor and .cbr archiver")]
 #[command(
-    after_help = "Examples:\n  cubrim compress input.bin input.cub\n  cubrim decompress input.cub restored.bin\n  cubrim a archive.cbr dir file.txt\n  cubrim x archive.cbr -o restored\n  cubrim l archive.cbr\n  cubrim t archive.cbr"
+    after_help = "Examples:\n  cubrim compress report.pdf report.pdf.cub    # compress a single file\n  cubrim decompress report.pdf.cub report.pdf  # restore it (byte-exact)\n  cubrim a backup.cbr photos/ notes.txt        # create a .cbr archive\n  cubrim x backup.cbr -o restored/             # extract an archive\n  cubrim l backup.cbr                          # list archive contents\n  cubrim t backup.cbr                          # verify without extracting\n\nExit codes: 0 success, 1 usage error, 2 integrity/corrupt input, 3 I/O error.\nNote: Cubrim is tuned for files larger than ~64 KB; tiny files may not shrink."
 )]
 pub struct Cli {
     #[arg(long, help = "Show the Cubrim license terms and exit")]
@@ -26,9 +26,9 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    #[command(alias = "c", about = "Compress one file to a legacy Cubrim blob")]
+    #[command(alias = "c", about = "Compress a single file into a Cubrim (.cub) file")]
     Compress(CompressArgs),
-    #[command(alias = "d", about = "Decompress one legacy Cubrim blob")]
+    #[command(alias = "d", about = "Restore a single file from a Cubrim (.cub) file")]
     Decompress(DecompressArgs),
     #[command(alias = "a", about = "Create a .cbr archive from files or directories")]
     Add(AddArgs),
@@ -45,22 +45,29 @@ pub enum Commands {
 
 #[derive(Debug, Args)]
 pub struct CompressArgs {
+    /// File to compress.
     pub input: PathBuf,
+    /// Destination for the compressed output (conventionally *.cub).
     pub output: PathBuf,
-    #[arg(long)]
-    pub raw_store_bound: Option<usize>,
-    #[arg(long)]
-    pub b: Option<usize>,
-    #[arg(long)]
-    pub n: Option<usize>,
-    #[arg(long, value_enum)]
-    pub gap_scheme: Option<GapSchemeArg>,
-    #[arg(long, value_enum)]
-    pub value_scheme: Option<ValueSchemeArg>,
-    #[arg(long)]
-    pub min_ctx_count: Option<u16>,
+    /// Suppress the per-file statistics line on stderr.
     #[arg(short, long)]
     pub quiet: bool,
+    // ---- Advanced research knobs (hidden from --help; the default already
+    // selects the competitive-min champion path per file). Overriding these
+    // is for reproducing research sweeps only and can produce non-champion
+    // output. Round-trip stays byte-exact regardless. ----
+    #[arg(long, hide = true)]
+    pub raw_store_bound: Option<usize>,
+    #[arg(long, hide = true)]
+    pub b: Option<usize>,
+    #[arg(long, hide = true)]
+    pub n: Option<usize>,
+    #[arg(long, value_enum, hide = true)]
+    pub gap_scheme: Option<GapSchemeArg>,
+    #[arg(long, value_enum, hide = true)]
+    pub value_scheme: Option<ValueSchemeArg>,
+    #[arg(long, hide = true)]
+    pub min_ctx_count: Option<u16>,
 }
 
 impl CompressArgs {

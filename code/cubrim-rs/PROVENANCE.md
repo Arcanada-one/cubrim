@@ -1,22 +1,50 @@
 # Cubrim CLI Provenance
 
-Release: CUBR-0043
+Release line: **Cubrim-2 industrial** (world-benchmark champion, DB meta 12).
 
-This source package is the clean release source for the Cubrim CLI that follows
-the CUBR-0043 world-benchmark work.
+## Benchmarked codec
 
-Benchmark evidence:
+The compression/decompression codec shipped by this CLI is the champion measured
+in the world benchmark and published to the results database:
 
-- Benchmark binary: `/tmp/cubrim-cm-20260706T1230Z` on dev-ai
-- Benchmark binary SHA256: `1d23cfc597172910e1090c80c4fd8c8fd49590ffafad5bf1f3874ad38bfc7b4d`
-- Benchmark run: `CUBR-0043-full24-cm19-p27b-corrected`
-- Base git commit: `a86beed805bc0196801b79d58c675620cd019a7e`
-- Benchmark CM patch SHA256: `d884695e155f86475130ce323dba64eb0bdd547e66df3b93a73a4a7bb40259f3`
-- Local audit report: `/home/dev/cubr-master-audit/p4/P4.1a-source-provenance-report.md`
+- Champion codec commit: `6eaefad7e165cd74f7d660aeb6d0828bfbe12c41`
+- Benchmark / DB snapshot: meta `12`, task `CUBR-0064-full24-cm2-retained-min`
+  (published 2026-07-22, `is_current = 1`)
+- Corpus: the 24-file world corpus (silesia / enwik8 / canterbury), 6 types
+  (text, code, exe, binary, image, database)
+- Round-trip: byte-exact (`cmp = 0`) on every measured file; competitive-min
+  (the encoder emits `min` over its schemes plus a scheme byte, so the default
+  path is always the smallest — see `src/config.rs` and Gotcha #4)
 
-The original benchmark source was not committed at measurement time. This P4
-release source preserves the benchmarked CM code and should be treated as the
-canonical clean source for future reproducible builds.
+## Industrial release surface
+
+This release branch (`research/cubr-branch-C-industrial`) adds **only** the
+user-facing industrial surface on top of the champion commit:
+
+- CLI ergonomics (`src/cli.rs`, `src/main.rs`): decluttered `--help` (research
+  knobs hidden), human-readable stats line with separate compress/decompress
+  timing and throughput, documented exit codes.
+- Docs, smoke tests, and the macOS build/packaging scripts.
+
+**No codec file is modified.** `src/codec.rs`, `src/cm2.rs`, `src/config.rs`,
+`src/header.rs`, `src/huffman.rs`, `src/cube.rs`, `src/phi.rs`,
+`src/distance_map.rs`, `src/rle.rs`, `src/bitpack.rs` are byte-identical to
+`6eaefad`. The wire-format version byte (`header.rs: VERSION = 1`) is a hardcoded
+constant independent of the package version, so the compressed byte stream is
+identical to the benchmarked binary. This is verified by the `differential`
+test suite and by direct byte comparison of compressed output.
+
+## Reproducing the release build
+
+```sh
+# Confirm no codec file diverges from the champion commit (must print nothing):
+git diff --name-only 6eaefad7e165cd74f7d660aeb6d0828bfbe12c41 -- \
+  code/cubrim-rs/src/codec.rs code/cubrim-rs/src/cm2.rs \
+  code/cubrim-rs/src/config.rs code/cubrim-rs/src/header.rs
+
+# Build toolchain used for this handoff: rustc 1.97.1 (stable).
+cargo build --release
+```
 
 ## License
 

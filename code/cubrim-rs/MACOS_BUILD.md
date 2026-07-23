@@ -78,8 +78,9 @@ cmp /tmp/cubrim-smoke.txt /tmp/cubrim-smoke.out
 ./dist/macos/cubrim-macos-universal --version
 ```
 
-The compress command should print `ratio=...` and `time_ms=...`; decompress should
-print `time_ms=...`.
+The compress command prints a `compressed: … ratio … MB/s compress … ms` line;
+decompress prints a `decompressed: … MB/s decompress … ms` line. `cmp` must exit 0
+(byte-exact round trip).
 
 ## Deployment Notes
 

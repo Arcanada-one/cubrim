@@ -2,8 +2,14 @@
 
 Cubrim supports two formats:
 
-- Legacy single-file Cubrim blobs from `compress` / `decompress`.
+- Single-file Cubrim (`.cub`) files from `compress` / `decompress` — this is the
+  benchmarked champion codec (competitive-min: the encoder tries several schemes
+  per file and keeps the smallest, so the default already gives the best ratio).
 - `.cbr` archives for multiple files and directories.
+
+Cubrim is tuned for files larger than about 64 KB. Very small inputs may not
+shrink (the round trip is still byte-exact and the output is never more than a
+small header larger than the input).
 
 ## License Gate
 
@@ -33,7 +39,9 @@ cubrim d input.cub restored.bin
 cubrim x input.cub restored.bin
 ```
 
-The single-file commands call the existing codec API and preserve the legacy byte stream.
+The compress command prints a one-line summary to stderr — original and
+compressed size, ratio, throughput, and the compress time. Decompress prints its
+own throughput and time. Pass `-q`/`--quiet` to suppress it.
 
 ## Archives
 

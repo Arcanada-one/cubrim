@@ -58,17 +58,27 @@ fn run(cli: Cli) -> Result<(), AppError> {
                     std::fs::write(&args.output, &blob)
                         .map(|_| {
                             if !args.quiet {
+                                let secs = started.elapsed().as_secs_f64();
                                 let ratio = if data.is_empty() {
                                     0.0
                                 } else {
                                     blob.len() as f64 / data.len() as f64
                                 };
+                                let note = if data.is_empty() {
+                                    String::new()
+                                } else if ratio >= 1.0 {
+                                    " (stored; input not compressible)".to_string()
+                                } else {
+                                    format!(" ({:.2}x smaller)", 1.0 / ratio)
+                                };
                                 eprintln!(
-                                    "compressed: {} bytes -> {} bytes ratio={:.6} time_ms={}",
+                                    "compressed: {} -> {} bytes  ratio {:.4}{}  {}  compress {}",
                                     data.len(),
                                     blob.len(),
                                     ratio,
-                                    started.elapsed().as_millis()
+                                    note,
+                                    fmt_throughput(data.len(), secs),
+                                    fmt_ms(secs),
                                 );
                             }
                         })
@@ -85,11 +95,13 @@ fn run(cli: Cli) -> Result<(), AppError> {
                     Ok(data) => std::fs::write(&args.output, &data)
                         .map(|_| {
                             if !args.quiet {
+                                let secs = started.elapsed().as_secs_f64();
                                 eprintln!(
-                                    "decompressed: {} bytes -> {} bytes time_ms={}",
+                                    "decompressed: {} -> {} bytes  {}  decompress {}",
                                     blob.len(),
                                     data.len(),
-                                    started.elapsed().as_millis()
+                                    fmt_throughput(data.len(), secs),
+                                    fmt_ms(secs),
                                 );
                             }
                         })
@@ -106,6 +118,28 @@ fn run(cli: Cli) -> Result<(), AppError> {
         None => Err(AppError::usage(
             "no command supplied; run `cubrim --help` for usage",
         )),
+    }
+}
+
+/// Human-readable wall-clock duration for the stats line.
+fn fmt_ms(secs: f64) -> String {
+    let ms = secs * 1000.0;
+    if ms < 1.0 {
+        format!("{:.2} ms", ms)
+    } else if ms < 10000.0 {
+        format!("{} ms", ms.round() as u64)
+    } else {
+        format!("{:.1} s", secs)
+    }
+}
+
+/// Throughput in decimal MB/s (bytes / 1e6 / seconds). Returns "-" when the
+/// elapsed time is too small to measure meaningfully.
+fn fmt_throughput(bytes: usize, secs: f64) -> String {
+    if secs <= 0.0005 || bytes == 0 {
+        "- MB/s".to_string()
+    } else {
+        format!("{:.1} MB/s", (bytes as f64 / 1.0e6) / secs)
     }
 }
 
