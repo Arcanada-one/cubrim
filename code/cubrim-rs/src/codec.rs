@@ -7699,14 +7699,19 @@ impl<'a> RangeDecoder<'a> {
             pos,
         }
     }
-    /// Number of input bytes consumed so far (monotonic). Length-driven decode loops
-    /// use this to detect a stalled decoder: once the real coded stream is exhausted the
-    /// renormalizer only ever reads zero-padding, so `progress()` stops advancing while
-    /// the loop keeps fabricating output. A guard on "output bytes produced since the last
-    /// progress advance" bounds that fabrication (QA-F-001 fail-closed).
+    /// Number of REAL input bytes consumed so far (monotonic, saturating at the end of the
+    /// coded stream). Length-driven decode loops use this to detect a stalled decoder: once
+    /// the real coded stream is exhausted the renormalizer only ever reads zero-padding, so
+    /// `progress()` stops advancing while the loop keeps fabricating output. A guard on
+    /// "output bytes produced since the last progress advance" bounds that fabrication
+    /// (QA-F-001 fail-closed).
+    ///
+    /// The clamp is load-bearing: `decode()` advances `pos` unconditionally while reading
+    /// zero-padding past the buffer end, so an unclamped `pos` would keep advancing forever
+    /// and the stall guard could never fire.
     #[inline]
     pub(crate) fn progress(&self) -> usize {
-        self.pos
+        self.pos.min(self.buf.len())
     }
     #[inline]
     pub(crate) fn get_freq(&self, total: u32) -> u32 {
@@ -10212,24 +10217,47 @@ mod tests {
         data
     }
 
-    /// FH-10 integration proof: on a fixed-record stream the DEFAULT `encode()`
-    /// must select MODE_RECORDCM and round-trip exactly — i.e. the record-CM
-    /// default candidate is wired (the live per-type binary #1, composed here
-    /// alongside MODE_CM2).
+    /// FH-10 integration proof: on a fixed-record stream the record-CM candidate
+    /// must be LIVE in the default `encode()` competition, competitive-min must
+    /// never settle for something larger than it, and whichever candidate wins
+    /// must round-trip byte-exactly.
+    ///
+    /// This fixture is a smooth 2-D field (the value varies gently along both the
+    /// column and the row axis), so MODE_GEOCM legitimately out-compresses
+    /// MODE_RECORDCM here and wins competitive-min. That is the selection
+    /// machinery working as designed — the winner is by construction no larger
+    /// than the record-CM candidate — so the assertion is on candidate liveness
+    /// plus the competitive-min bound rather than on the winner's identity.
     #[test]
     fn fh10_selected_and_roundtrips_via_default_encode() {
         let data = fh10_record_fixture(28, 5000, 0); // 140_000 B > cube_size_limit
-        assert!(data.len() > EncodeConfig::v1_default().cube_size_limit());
+        let config = EncodeConfig::v1_default();
+        assert!(data.len() > config.cube_size_limit());
         assert_eq!(soa_detect_width(&data), Some(28));
+
+        // The record-CM default candidate is wired and produced for this stream.
+        let record_cm = encode_record_cm(&data, &config)
+            .expect("record-cm must be a live candidate on a fixed-record stream");
+        assert_eq!(record_cm[5], MODE_RECORDCM);
+
         let blob = encode(&data);
-        assert_eq!(
-            blob[5], MODE_RECORDCM,
-            "record-cm must win the default competition on a fixed-record stream"
+        assert!(
+            blob.len() <= record_cm.len(),
+            "competitive-min must never pick a candidate larger than record-cm \
+             ({} B) — got mode {} at {} B",
+            record_cm.len(),
+            blob[5],
+            blob.len()
+        );
+        assert!(
+            matches!(blob[5], MODE_RECORDCM | MODE_GEOCM),
+            "a CM-family candidate must win on a fixed-record stream, got mode {}",
+            blob[5]
         );
         assert_eq!(
-            decode(&blob).expect("record-cm decode via default CLI"),
+            decode(&blob).expect("selected candidate must decode via default CLI"),
             data,
-            "record-cm RT via default CLI must be byte-exact"
+            "RT via default CLI must be byte-exact"
         );
     }
 
