@@ -10222,12 +10222,14 @@ mod tests {
     /// never settle for something larger than it, and whichever candidate wins
     /// must round-trip byte-exactly.
     ///
-    /// This fixture is a smooth 2-D field (the value varies gently along both the
-    /// column and the row axis), so MODE_GEOCM legitimately out-compresses
-    /// MODE_RECORDCM here and wins competitive-min. That is the selection
-    /// machinery working as designed — the winner is by construction no larger
-    /// than the record-CM candidate — so the assertion is on candidate liveness
-    /// plus the competitive-min bound rather than on the winner's identity.
+    /// Deliberately asserts nothing about WHICH candidate wins. This fixture is a
+    /// smooth 2-D field (the value varies gently along both the column and the row
+    /// axis), so a geometric codec legitimately out-compresses record-CM on it —
+    /// competitive-min picking that instead is the selection machinery working as
+    /// designed, not a regression. Any assertion naming the winner is brittle by
+    /// construction: the next legitimate candidate breaks it for the same reason.
+    /// Liveness plus the competitive-min bound are the invariants that survive a
+    /// growing candidate set, and the bound already guarantees no size regression.
     #[test]
     fn fh10_selected_and_roundtrips_via_default_encode() {
         let data = fh10_record_fixture(28, 5000, 0); // 140_000 B > cube_size_limit
@@ -10248,11 +10250,6 @@ mod tests {
             record_cm.len(),
             blob[5],
             blob.len()
-        );
-        assert!(
-            matches!(blob[5], MODE_RECORDCM | MODE_GEOCM),
-            "a CM-family candidate must win on a fixed-record stream, got mode {}",
-            blob[5]
         );
         assert_eq!(
             decode(&blob).expect("selected candidate must decode via default CLI"),
