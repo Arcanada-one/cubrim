@@ -33,14 +33,19 @@ Codec: champion commit `6eaefad` (DB meta 12,
 - `PROVENANCE.md` updated to the meta-12 champion (`6eaefad`) with an explicit
   no-codec-file-changed guarantee.
 
-### Known limitations (documented, not regressions)
+### Known limitations (documented, not regressions — see README performance profile)
 - Cubrim is tuned for inputs larger than ~64 KB. Files below the cube size
-  limit (b² = 65536 bytes) fall back to a light path and may not shrink (round
-  trip stays byte-exact; output never exceeds input + a small header). Improving
-  small-file ratio would be a codec change (out of scope for this industrial
-  branch; flagged to the codec branches).
-- The context-mixing (CM) codec is compute-heavy: compressing large,
-  incompressible inputs can take minutes. Decompression is much faster. Use
-  `--quiet` in scripts; wall-clock timing is reported per operation.
+  limit (b² = 65536 bytes) fall back to a light path and may not shrink — a 5 KB
+  text file compresses to ~0.90 where gzip‑9 reaches ~0.39. Round trip stays
+  byte-exact; output never exceeds input + a small header. Improving small-file
+  ratio would be a codec change (out of scope for this industrial branch;
+  flagged to the codec branches).
+- The context-mixing (CM) codec is compute-heavy and its compress time grows
+  super-linearly: measured ~0.2 s at 100 KB, ~37 s at 1 MB, ~4–6 min at 2 MB
+  (multi-core). Files beyond a few MB are impractical for interactive use.
+  Decompression is much faster. Peak memory plateaus in the ~1 GB range (bounded
+  by the CM model size, not linear in file size; `CUBR_THREADS` does not reduce
+  it). Practical sweet spot: ~100 KB – 1 MB. Wall-clock timing is reported per
+  operation; use `--quiet` in scripts.
 
 [Keep a Changelog]: https://keepachangelog.com/

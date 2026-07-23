@@ -63,3 +63,17 @@ must never silently change the compressed byte stream.
 
 - [ ] Tag the release commit; attach SHA-256 to the release notes.
 - [ ] Update `[BUILD-C]` status with the shipped SHA and artifact location.
+
+## Future enhancements (NOT release blockers — do not implement without codec-branch sign-off)
+
+- **`--fast` / automatic large-input mode.** Compress time grows super-linearly
+  (see the performance profile); files beyond a few MB are impractical
+  interactively. A future option could auto-fall-back to a fast codec above an
+  input-size threshold. This is a **codec change** (branch A/B domain) and MUST
+  be kept strictly separate from the benchmark path — the world benchmark keeps
+  the full context-mixing codec, or the #1 ratio ranking breaks. Ship the honest
+  speed profile in the docs now; treat the guard as an optional later feature.
+- **Small-input ratio.** Inputs below ~64 KB skip the strong entropy path and can
+  lose to gzip. Extending competitive-min to small inputs is a zero-regression
+  codec change (all 24 benchmark files are >64 KB, so numbers are unaffected) —
+  also branch A/B domain.
