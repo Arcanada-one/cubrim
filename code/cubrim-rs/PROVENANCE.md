@@ -16,6 +16,29 @@ in the world benchmark and published to the results database:
   (the encoder emits `min` over its schemes plus a scheme byte, so the default
   path is always the smallest — see `src/config.rs` and Gotcha #4)
 
+### What "champion" means precisely (published leaderboard vs shipped binary)
+
+The published meta-12 leaderboard ratio for each file is a **per-file retained
+minimum across two rails**: the prior verified live snapshot (meta 9) and the
+real 24-file CLI run at `6eaefad` (plain `cubrim compress`, no flags). Of the 24
+files, **15 take the new `6eaefad` value and 9 retain the better historical
+(meta 9) value**.
+
+Therefore the downloadable `6eaefad` binary, run with the default
+`cubrim compress`, reproduces the published leaderboard **exactly for the 15
+"new" files**, and produces `6eaefad`'s own (marginally larger) output for the 9
+"retained" files. The binary is always the honest `6eaefad` codec; the leaderboard
+is a cross-rail best-of, so the leaderboard's aggregate is at or below what the
+shipped binary alone produces. Notably the `binary` type is borderline: the raw
+`6eaefad` value was marginally above the retained rail, so the shipped binary's
+own aggregate for some types (binary in particular) may sit slightly behind the
+published cross-rail leaderboard. Marketing must cite the leaderboard as the
+cross-rail result, not claim the single downloadable binary reproduces every
+published number. The default `cubrim compress` engages the full CM2 competitive
+path for inputs above the 64 KB block size; earlier research notes about a
+"bitpack default" predate the `6eaefad` integration that wired CM2 into the
+default.
+
 ## Industrial release surface
 
 This release branch (`research/cubr-branch-C-industrial`) adds **only** the
