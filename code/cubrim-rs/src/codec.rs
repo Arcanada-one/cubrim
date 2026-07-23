@@ -374,6 +374,15 @@ fn encode_with_config_inner(
                         best = cm2;
                     }
                 }
+                // BCJ transform composed with the CM2 backend. `encode_bcj`'s nested
+                // encode runs with the recursion guard set, which excludes CM2, so this
+                // pairing is otherwise unreachable. Arch-gated + strict min() ⇒ every
+                // non-executable and every non-winning input stays byte-identical.
+                if let Some(bc) = encode_bcj_cm2(data) {
+                    if bc.len() < best.len() {
+                        best = bc;
+                    }
+                }
             }
 
             if let Some(h) = lz_handle {
@@ -2615,6 +2624,44 @@ fn encode_bcj(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
         _ => return None,
     }
     let nested = encode_with_config_inner(&filtered, config, false, false);
+    let mut out = Vec::with_capacity(11 + nested.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_BCJ);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.push(arch);
+    out.extend_from_slice(&nested);
+    Some(out)
+}
+
+/// Composed BCJ + MODE_CM2 competitive-min candidate.
+///
+/// `encode_bcj` nests `encode_with_config_inner(.., try_binfloat = false, ..)`, and that
+/// flag doubles as the heavy-transform recursion guard — it disables the whole block that
+/// holds `encode_cm2`. The BCJ transform therefore could never be followed by the CM2
+/// backend, which is why the arch-filter increment over CM2 was structurally unreachable
+/// rather than merely unmeasured. This candidate composes them directly.
+///
+/// Wire format is the EXISTING `MODE_BCJ` container nesting a `MODE_CM2` blob: `decode_bcj`
+/// already routes the nested bytes through `decode`, which dispatches on the nested mode
+/// byte, so no decoder or wire change is needed.
+///
+/// Regression-proof by construction: returns `None` unless architecture detection fires
+/// (so non-executables are never touched) and the CM2 gate accepts the filtered stream;
+/// the caller keeps it only when strictly smaller. All transforms are integer-only.
+fn encode_bcj_cm2(data: &[u8]) -> Option<Vec<u8>> {
+    if data.len() > u32::MAX as usize {
+        return None; // orig_len is a u32 field in the MODE_BCJ container
+    }
+    let arch = bcj_detect_arch(data)?;
+    let mut filtered = data.to_vec();
+    match arch {
+        1 => bcj_x86(&mut filtered, true),
+        2 => bcj_arm64(&mut filtered, true),
+        3 => bcj_sparc(&mut filtered, true),
+        _ => return None,
+    }
+    let nested = encode_cm2(&filtered)?;
     let mut out = Vec::with_capacity(11 + nested.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
@@ -10448,6 +10495,73 @@ mod tests {
         assert_eq!(blob[5], MODE_BCJ);
         assert_eq!(blob[10], 3);
         assert_eq!(decode(&blob).expect("BCJ container must decode"), elf);
+    }
+
+    /// An x86-64 ELF whose CALL sites all target the SAME absolute address: every stored
+    /// rel32 differs, but the BCJ transform converts them into one repeated constant, so
+    /// the filtered stream is strictly more modellable than the raw one.
+    fn bcj_favourable_x86_elf(len: usize) -> Vec<u8> {
+        let mut elf = vec![0u8; len];
+        elf[0..4].copy_from_slice(b"\x7FELF");
+        elf[5] = 1; // ELFDATA2LSB
+        elf[18..20].copy_from_slice(&0x3Eu16.to_le_bytes()); // EM_X86_64
+        const TARGET: u32 = 0x1000;
+        let mut pos = 64;
+        while pos + 5 <= len {
+            elf[pos] = 0xE8;
+            let rel = TARGET.wrapping_sub((pos as u32).wrapping_add(5));
+            elf[pos + 1..pos + 5].copy_from_slice(&rel.to_le_bytes());
+            pos += 16;
+        }
+        elf
+    }
+
+    #[test]
+    fn test_bcj_cm2_composed_candidate_round_trips_and_engages() {
+        // > 256 KiB so the CM2 gate accepts the input.
+        let elf = bcj_favourable_x86_elf(300_000);
+
+        let blob = encode_bcj_cm2(&elf).expect("x86 ELF must reach the BCJ+CM2 candidate");
+        assert_eq!(blob[5], MODE_BCJ, "outer container is MODE_BCJ");
+        assert_eq!(blob[10], 1, "x86 arch tag");
+        assert_eq!(blob[16], MODE_CM2, "nested container is MODE_CM2");
+
+        // Round-trip through the real decoder: decode_bcj routes the nested blob through
+        // `decode`, which dispatches on the nested mode byte. No decoder change required.
+        assert_eq!(
+            decode(&blob).expect("BCJ+CM2 container must decode"),
+            elf,
+            "round-trip must be lossless"
+        );
+
+        // The composition must actually beat the CM2 backend alone on BCJ-favourable code,
+        // otherwise the candidate is dead weight.
+        let cm2_only = encode_cm2(&elf).expect("CM2 gate must accept the fixture");
+        assert!(
+            blob.len() < cm2_only.len(),
+            "BCJ+CM2 ({}) must beat CM2 alone ({})",
+            blob.len(),
+            cm2_only.len()
+        );
+
+        // And the public encode path must still round-trip whatever it selects.
+        let public = encode(&elf);
+        assert_eq!(decode(&public).expect("public blob decodes"), elf);
+    }
+
+    #[test]
+    fn test_bcj_cm2_declines_non_executable() {
+        // Non-executable input: architecture detection must refuse, so the candidate never
+        // participates and such files stay byte-identical to the pre-change encoder.
+        let mut data = vec![0u8; 300_000];
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i.wrapping_mul(37).wrapping_add(i / 512)) as u8;
+        }
+        assert!(bcj_detect_arch(&data).is_none(), "fixture is not an executable");
+        assert!(
+            encode_bcj_cm2(&data).is_none(),
+            "BCJ+CM2 must not fire on non-executables"
+        );
     }
 
     #[test]
