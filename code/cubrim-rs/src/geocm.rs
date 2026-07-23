@@ -1,9 +1,9 @@
-//! GeoCM image codec — port of cubr2-geocm v6 (frozen tag A-port-ref-image = b799a3c).
-//! Detected native-axis (stride) neighbour contexts feeding an integer logistic mixer +
-//! APM through a carryless binary range coder. Integer-deterministic, fail-closed
+//! GeoCM image codec — port of cubr2-geocm v13 (frozen tag research-final-v13 = 42118aa).
+//! Detected native-axis (stride) neighbour + match-model contexts feeding an integer logistic
+//! mixer + APM chain through a carryless binary range coder. Integer-deterministic, fail-closed
 //! (self-describing CG2 container with an FNV-1a-64 checksum verified after decode),
-//! competitive-min internally (RAW/O1/GEO/GEOA/MIX) and wrapped as a MODE_GEOCM candidate.
-#![allow(clippy::needless_range_loop, dead_code)]
+//! competitive-min internally and wrapped as a MODE_GEOCM candidate. Second-wave port over v6.
+#![allow(clippy::needless_range_loop, dead_code, clippy::too_many_arguments)]
 
 // ==================== rc (carryless binary range coder) ====================
 // Carryless binary range coder (LZMA-style), integer-only, deterministic.
@@ -286,6 +286,154 @@ pub fn detect_strides(data: &[u8], k: usize) -> Vec<u32> {
     scored.into_iter().take(k).map(|(_, s)| s as u32).collect()
 }
 
+/// Second-axis (slice) stride: best multiple k*s1 (k >= 2) by sampled
+/// byte-equality. Returns 0 when no meaningful second axis exists.
+pub fn detect_slice_stride(data: &[u8], s1: usize) -> u32 {
+    let n = data.len();
+    if s1 < 2 || n < s1 * 8 {
+        return 0;
+    }
+    let max_k = 4096usize.min((n - 1) / s1);
+    if max_k < 2 {
+        return 0;
+    }
+    let mut best_score: u64 = 0;
+    let mut best_s: usize = 0;
+    for k in 2..=max_k {
+        let s = k * s1;
+        let avail = n - s;
+        let step = (avail / 65536).max(1);
+        let mut eq: u64 = 0;
+        let mut cnt: u64 = 0;
+        let mut i = 0usize;
+        while i < avail {
+            if data[i] == data[i + s] {
+                eq += 1;
+            }
+            cnt += 1;
+            i += step;
+        }
+        let score = eq * (1 << 20) / cnt.max(1);
+        if score > best_score {
+            best_score = score;
+            best_s = s;
+        }
+    }
+    best_s as u32
+}
+
+// ==================== match_model ====================
+// Match model (LZ-style) as a mixer input: hash of the last MM_ORDER bytes
+// points at the previous occurrence; while the match holds, the next byte's
+// bits are predicted with a confidence learned per match-length bucket.
+// Integer-only; encoder and decoder run the identical causal state machine
+// over the already-decoded history, so no positions are ever transmitted
+// (BWT-class escape from the Gotcha-#7 map tax: the "coordinate" is derived,
+// not stored).
+
+
+pub const MM_HBITS: u32 = 20;
+pub const MM_ORDER: usize = 6;
+
+pub struct MatchModel {
+    ht: Vec<u32>,
+    ptr: usize,
+    len: u32,
+    probs: [u16; 128], // [len_bucket 0..63][predicted bit]
+    pred: u8,
+    valid: bool,
+    bucket: usize,
+    pb: u8,
+    idx: usize,
+    active_bit: bool,
+}
+
+impl MatchModel {
+    pub fn new() -> Self {
+        MatchModel {
+            ht: vec![0; 1 << MM_HBITS],
+            ptr: 0,
+            len: 0,
+            probs: [PINIT; 128],
+            pred: 0,
+            valid: false,
+            bucket: 0,
+            pb: 0,
+            idx: 0,
+            active_bit: false,
+        }
+    }
+
+    #[inline]
+    fn hash_at(hist: &[u8], pos: usize) -> usize {
+        let mut h: u32 = 0x811c_9dc5;
+        for k in (pos - MM_ORDER)..pos {
+            h = (h ^ hist[k] as u32).wrapping_mul(16_777_619);
+        }
+        (h >> (32 - MM_HBITS)) as usize
+    }
+
+    pub fn byte_start(&mut self, hist: &[u8], i: usize) {
+        if self.len == 0 && i >= MM_ORDER {
+            let j = self.ht[Self::hash_at(hist, i)] as usize;
+            if j > 0 && j < i {
+                self.ptr = j;
+                self.len = 1;
+            }
+        }
+        if self.len > 0 {
+            self.pred = hist[self.ptr];
+            self.valid = true;
+            self.bucket = self.len.min(63) as usize;
+        } else {
+            self.valid = false;
+        }
+    }
+
+    /// Stretched prediction for bit k of the current byte (0 = neutral).
+    #[inline]
+    pub fn bit_pred(&mut self, tabs: &Tables, k: u32) -> i32 {
+        if !self.valid || self.len == 0 {
+            self.active_bit = false;
+            return 0;
+        }
+        self.pb = (self.pred >> k) & 1;
+        self.idx = self.bucket * 2 + self.pb as usize;
+        let pc = self.probs[self.idx]; // P(actual bit == predicted bit)
+        let p1: u16 = if self.pb == 1 { pc } else { PMAX - pc };
+        self.active_bit = true;
+        tabs.stretch[p1.clamp(1, (PMAX - 1) as u16) as usize]
+    }
+
+    #[inline]
+    pub fn bit_update(&mut self, bit: u8) {
+        if !self.active_bit {
+            return;
+        }
+        let hit = (bit == self.pb) as u8;
+        update(&mut self.probs[self.idx], hit);
+        if hit == 0 {
+            self.valid = false;
+        }
+    }
+
+    /// `hist` must already include byte `i`.
+    pub fn byte_end(&mut self, hist: &[u8], i: usize) {
+        if self.len > 0 {
+            if hist[i] == self.pred {
+                self.len += 1;
+                self.ptr += 1;
+            } else {
+                self.len = 0;
+            }
+        }
+        let pos = i + 1;
+        if pos >= MM_ORDER {
+            self.ht[Self::hash_at(hist, pos)] = pos as u32;
+        }
+    }
+}
+
 // ==================== codec ====================
 // M1 — GeoCM(image2d) MVP codec.
 //
@@ -311,8 +459,8 @@ pub fn detect_strides(data: &[u8], k: usize) -> Vec<u32> {
 // champion 0.754 bpb.
 
 
-pub const MAGIC: [u8; 4] = *b"CG2\x03";
-pub const HEADER_LEN: usize = 26;
+pub const MAGIC: [u8; 4] = *b"CG2\x07";
+pub const HEADER_LEN: usize = 30;
 pub const MODE_RAW: u8 = 0;
 pub const MODE_GEO: u8 = 1;
 pub const MODE_O1: u8 = 2;
@@ -337,7 +485,7 @@ pub fn fnv64(data: &[u8]) -> u64 {
     h
 }
 
-fn header(mode: u8, orig_len: u64, check: u64, stride: u32, cfg: u8) -> Vec<u8> {
+fn header(mode: u8, orig_len: u64, check: u64, stride: u32, cfg: u8, stride2: u32) -> Vec<u8> {
     let mut h = Vec::with_capacity(HEADER_LEN);
     h.extend_from_slice(&MAGIC);
     h.push(mode);
@@ -345,6 +493,7 @@ fn header(mode: u8, orig_len: u64, check: u64, stride: u32, cfg: u8) -> Vec<u8> 
     h.extend_from_slice(&check.to_le_bytes());
     h.extend_from_slice(&stride.to_le_bytes());
     h.push(cfg);
+    h.extend_from_slice(&stride2.to_le_bytes());
     h
 }
 
@@ -419,8 +568,10 @@ fn ctx_geo(hist: &[u8], i: usize, s: usize) -> usize {
 
 // ---------------- MODE_MIX: logistic mixing of 6 geo/1D models ----------------
 
-const NM: usize = 8;
-const MIX_NCTX: [usize; NM] = [256, 256, 256, 4096, 256, 256, 65536, 65536];
+const NTAB: usize = 10;
+const NM: usize = NTAB + 1; // + match model input
+const MIX_NCTX: [usize; NTAB] =
+    [256, 256, 256, 4096, 256, 256, 65536, 65536, 256, 4096];
 
 #[inline]
 fn med_u8(a: i32, b: i32, c: i32) -> usize {
@@ -429,7 +580,7 @@ fn med_u8(a: i32, b: i32, c: i32) -> usize {
 
 /// Contexts for the 6 mixed models; depends only on already-decoded bytes.
 #[inline]
-fn mix_ctxs(hist: &[u8], i: usize, s: usize, ctx: &mut [usize; NM]) {
+fn mix_ctxs(hist: &[u8], i: usize, s: usize, s2: usize, ctx: &mut [usize; NTAB]) {
     let prev = if i > 0 { hist[i - 1] as i32 } else { 0 };
     let t2 = if i > 1 { hist[i - 2] as i32 } else { 0 };
     let ab = if i >= s { hist[i - s] as i32 } else { 0 };
@@ -443,6 +594,8 @@ fn mix_ctxs(hist: &[u8], i: usize, s: usize, ctx: &mut [usize; NM]) {
     ctx[5] = med_u8(t2, ab, ab2);
     ctx[6] = (prev as usize) * 256 + t2 as usize;
     ctx[7] = (ab as usize) * 256 + t2 as usize;
+    ctx[8] = if s2 > 0 && i >= s2 { hist[i - s2] as usize } else { 0 };
+    ctx[9] = (i % s).min(4095); // offset-in-record (RECORDCM mo analogue)
 }
 
 struct MixState {
@@ -451,6 +604,8 @@ struct MixState {
     mixer: Mixer,
     apm: Apm,
     apm2: Apm,
+    apm3: Apm, // per-offset SSE (record classes, cfg&4)
+    mm: MatchModel,
 }
 
 impl MixState {
@@ -459,32 +614,43 @@ impl MixState {
         let tabs = Tables::new();
         let apm = Apm::new(256, &tabs);
         let apm2 = Apm::new(256, &tabs);
+        let apm3 = Apm::new(256, &tabs);
         MixState {
             tabs,
             probs: MIX_NCTX.iter().map(|&n| vec![PINIT; n * 256]).collect(),
-            mixer: Mixer::new(512, NM),
+            mixer: Mixer::new(1024, NM),
             apm,
             apm2,
+            apm3,
+            mm: MatchModel::new(),
         }
     }
 }
 
-fn encode_stream_mix(data: &[u8], s: usize, cfg: u8) -> Vec<u8> {
+fn encode_stream_mix(data: &[u8], s: usize, s2: usize, cfg: u8) -> Vec<u8> {
     let mut st = MixState::new(cfg);
     let mut enc = RcEnc::new();
-    let mut ctx = [0usize; NM];
+    let mut ctx = [0usize; NTAB];
     let mut stv = [0i32; NM];
     for i in 0..data.len() {
-        mix_ctxs(data, i, s, &mut ctx);
+        mix_ctxs(data, i, s, s2, &mut ctx);
+        st.mm.byte_start(data, i);
         let x = data[i];
         let mut node: usize = 1;
         for k in (0..8).rev() {
             let bit = (x >> k) & 1;
-            for m in 0..NM {
+            for m in 0..NTAB {
                 let pm = st.probs[m][ctx[m] * 256 + node];
                 stv[m] = st.tabs.stretch[pm as usize];
             }
-            let set = if cfg & 1 != 0 { node + ((i & 1) << 8) } else { node };
+            stv[NTAB] = st.mm.bit_pred(&st.tabs, k);
+            let set = if cfg & 4 != 0 {
+                node + (((i % s) & 3) << 8)
+            } else if cfg & 1 != 0 {
+                node + ((i & 1) << 8)
+            } else {
+                node
+            };
             let (p, _) = st.mixer.predict(&st.tabs, set, &stv);
             let pa = st.apm.pp(&st.tabs, p, ctx[0]);
             let pf1 = (((p as u32) + 3 * (pa as u32)) >> 2).clamp(1, 4095) as u16;
@@ -494,17 +660,28 @@ fn encode_stream_mix(data: &[u8], s: usize, cfg: u8) -> Vec<u8> {
             } else {
                 pf1
             };
+            let pf = if cfg & 8 != 0 {
+                let pa3 = st.apm3.pp(&st.tabs, pf, (i % s).min(255));
+                (((pf as u32) + 3 * (pa3 as u32)) >> 2).clamp(1, 4095) as u16
+            } else {
+                pf
+            };
             enc.encode_bit(pf, bit);
             st.apm.update(bit);
             if cfg & 2 != 0 {
                 st.apm2.update(bit);
             }
+            if cfg & 8 != 0 {
+                st.apm3.update(bit);
+            }
+            st.mm.bit_update(bit);
             st.mixer.update(set, &stv, p, bit);
-            for m in 0..NM {
+            for m in 0..NTAB {
                 update(&mut st.probs[m][ctx[m] * 256 + node], bit);
             }
             node = (node << 1) | bit as usize;
         }
+        st.mm.byte_end(data, i);
     }
     enc.finish()
 }
@@ -513,22 +690,31 @@ fn decode_stream_mix(
     payload: &[u8],
     orig_len: usize,
     s: usize,
+    s2: usize,
     cfg: u8,
 ) -> Result<Vec<u8>, CodecError> {
     let mut st = MixState::new(cfg);
     let mut dec = RcDec::new(payload).ok_or(CodecError::Truncated)?;
     let mut out: Vec<u8> = Vec::with_capacity(orig_len);
-    let mut ctx = [0usize; NM];
+    let mut ctx = [0usize; NTAB];
     let mut stv = [0i32; NM];
     for i in 0..orig_len {
-        mix_ctxs(&out, i, s, &mut ctx);
+        mix_ctxs(&out, i, s, s2, &mut ctx);
+        st.mm.byte_start(&out, i);
         let mut node: usize = 1;
-        for _ in 0..8 {
-            for m in 0..NM {
+        for k in (0..8u32).rev() {
+            for m in 0..NTAB {
                 let pm = st.probs[m][ctx[m] * 256 + node];
                 stv[m] = st.tabs.stretch[pm as usize];
             }
-            let set = if cfg & 1 != 0 { node + ((i & 1) << 8) } else { node };
+            stv[NTAB] = st.mm.bit_pred(&st.tabs, k);
+            let set = if cfg & 4 != 0 {
+                node + (((i % s) & 3) << 8)
+            } else if cfg & 1 != 0 {
+                node + ((i & 1) << 8)
+            } else {
+                node
+            };
             let (p, _) = st.mixer.predict(&st.tabs, set, &stv);
             let pa = st.apm.pp(&st.tabs, p, ctx[0]);
             let pf1 = (((p as u32) + 3 * (pa as u32)) >> 2).clamp(1, 4095) as u16;
@@ -538,20 +724,43 @@ fn decode_stream_mix(
             } else {
                 pf1
             };
+            let pf = if cfg & 8 != 0 {
+                let pa3 = st.apm3.pp(&st.tabs, pf, (i % s).min(255));
+                (((pf as u32) + 3 * (pa3 as u32)) >> 2).clamp(1, 4095) as u16
+            } else {
+                pf
+            };
             let bit = dec.decode_bit(pf);
             st.apm.update(bit);
             if cfg & 2 != 0 {
                 st.apm2.update(bit);
             }
+            if cfg & 8 != 0 {
+                st.apm3.update(bit);
+            }
+            st.mm.bit_update(bit);
             st.mixer.update(set, &stv, p, bit);
-            for m in 0..NM {
+            for m in 0..NTAB {
                 update(&mut st.probs[m][ctx[m] * 256 + node], bit);
             }
             node = (node << 1) | bit as usize;
         }
         out.push((node & 0xFF) as u8);
+        st.mm.byte_end(&out, i);
     }
     Ok(out)
+}
+
+
+fn run_candidate(data: &[u8], mode: u8, s: u32, s2: u32, cfg: u8) -> Vec<u8> {
+    let su = s as usize;
+    match mode {
+        MODE_O1 => encode_stream(data, 256, |h, i| ctx_o1(h, i)),
+        MODE_GEO => encode_stream(data, 4096, |h, i| ctx_geo(h, i, su)),
+        MODE_GEOA => encode_stream(data, 256, |h, i| ctx_geoa(h, i, su)),
+        MODE_MIX => encode_stream_mix(data, su, s2 as usize, cfg),
+        _ => unreachable!("run_candidate: raw is not a coded candidate"),
+    }
 }
 
 pub fn encode(data: &[u8]) -> Vec<u8> {
@@ -561,46 +770,77 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     let mut best_mode = MODE_RAW;
     let mut best_stride: u32 = 0;
     let mut best_cfg: u8 = 0;
+    let mut best_stride2: u32 = 0;
     let mut best_payload: Vec<u8> = data.to_vec();
 
     if !data.is_empty() {
-        // candidate: O1
-        let o1 = encode_stream(data, 256, |h, i| ctx_o1(h, i));
-        if o1.len() < best_payload.len() {
-            best_mode = MODE_O1;
-            best_stride = 0;
-            best_payload = o1;
-        }
-        // candidates: GEO over top detected strides
-        for s in detect_strides(data, 3) {
+        // Candidate plan: (mode, stride, stride2, cfg)
+        let mut plan: Vec<(u8, u32, u32, u8)> = vec![(MODE_O1, 0, 0, 0)];
+        let top = detect_strides(data, 3);
+        for (rank, &s) in top.iter().enumerate() {
             let su = s as usize;
             if su < 2 || su >= data.len() {
                 continue;
             }
-            let geo = encode_stream(data, 4096, |h, i| ctx_geo(h, i, su));
-            if geo.len() < best_payload.len() {
-                best_mode = MODE_GEO;
-                best_stride = s;
-                best_payload = geo;
-            }
-            let geoa = encode_stream(data, 256, |h, i| ctx_geoa(h, i, su));
-            if geoa.len() < best_payload.len() {
-                best_mode = MODE_GEOA;
-                best_stride = s;
-                best_payload = geoa;
-            }
-            for cfg in [0u8, 3u8] {
-                let mixed = encode_stream_mix(data, su, cfg);
-                if mixed.len() < best_payload.len() {
-                    best_mode = MODE_MIX;
-                    best_stride = s;
-                    best_cfg = cfg;
-                    best_payload = mixed;
+            plan.push((MODE_GEO, s, 0, 0));
+            plan.push((MODE_GEOA, s, 0, 0));
+            if rank < 2 {
+                let s2 = detect_slice_stride(data, su);
+                for cfg in [0u8, 3u8, 4u8, 12u8] {
+                    plan.push((MODE_MIX, s, s2, cfg));
                 }
             }
         }
+        // I3 prefix pruning: rank candidates on a 1 MiB prefix, keep only
+        // those within 5% of the prefix winner (always >= 1 survivor).
+        const PREFIX: usize = 1 << 20;
+        if data.len() > PREFIX * 2 && plan.len() > 2 {
+            let pre = &data[..PREFIX];
+            let mut costs: Vec<(usize, usize)> = std::thread::scope(|scope| {
+                let handles: Vec<_> = plan
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, &(mode, s, s2, cfg))| {
+                        scope.spawn(move || {
+                            (run_candidate(pre, mode, s, s2, cfg).len(), idx)
+                        })
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+            let best_pc = costs.iter().map(|&(c, _)| c).min().unwrap();
+            let cut = best_pc + best_pc / 20; // +5%
+            costs.retain(|&(c, _)| c <= cut);
+            costs.sort_by_key(|&(c, i)| (c, i));
+            let keep: Vec<usize> = costs.iter().map(|&(_, i)| i).collect();
+            plan = keep.iter().map(|&i| plan[i]).collect();
+        }
+        // full passes for survivors in parallel; deterministic selection by
+        // (payload_len, plan_index) regardless of thread completion order
+        let results: Vec<(usize, Vec<u8>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = plan
+                .iter()
+                .enumerate()
+                .map(|(idx, &(mode, s, s2, cfg))| {
+                    scope.spawn(move || (idx, run_candidate(data, mode, s, s2, cfg)))
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let mut ranked: Vec<&(usize, Vec<u8>)> = results.iter().collect();
+        ranked.sort_by_key(|(idx, payload)| (payload.len(), *idx));
+        if let Some((idx, payload)) = ranked.first() {
+            if payload.len() < best_payload.len() {
+                let (mode, s, s2, cfg) = plan[*idx];
+                best_mode = mode;
+                best_stride = s;
+                best_stride2 = s2;
+                best_cfg = cfg;
+                best_payload = payload.clone();
+            }
+        }
     }
-    let mut out = header(best_mode, n, check, best_stride, best_cfg);
+    let mut out = header(best_mode, n, check, best_stride, best_cfg, best_stride2);
     out.extend_from_slice(&best_payload);
     out
 }
@@ -617,6 +857,7 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CodecError> {
     let check = u64::from_le_bytes(blob[13..21].try_into().unwrap());
     let stride = u32::from_le_bytes(blob[21..25].try_into().unwrap()) as usize;
     let cfg = blob[25];
+    let stride2 = u32::from_le_bytes(blob[26..30].try_into().unwrap()) as usize;
     let payload = &blob[HEADER_LEN..];
 
     let out = match mode {
@@ -649,7 +890,10 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CodecError> {
             if stride < 2 || stride >= orig_len {
                 return Err(CodecError::BadStride);
             }
-            decode_stream_mix(payload, orig_len, stride, cfg)?
+            if stride2 != 0 && (stride2 < 2 || stride2 >= orig_len) {
+                return Err(CodecError::BadStride);
+            }
+            decode_stream_mix(payload, orig_len, stride, stride2, cfg)?
         }
         m => return Err(CodecError::BadMode(m)),
     };
@@ -661,10 +905,9 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CodecError> {
 
 // ==================== shipped-rail gate ====================
 
-/// Performance gate for the shipped competitive-min: run GeoCM only on image-like
-/// inputs (a strongly periodic native byte-axis, bounded size). Correctness never
-/// depends on this — competitive-min discards GeoCM whenever it is not strictly
-/// smaller — so this only avoids wasting encode time on non-periodic / huge inputs.
+/// Performance gate for the shipped competitive-min: run GeoCM only on image-like inputs
+/// (a strongly periodic native byte-axis, bounded size). Correctness never depends on this —
+/// competitive-min discards GeoCM whenever it is not strictly smaller.
 pub fn should_try(data: &[u8]) -> bool {
     let n = data.len();
     if n < 8192 || n > 12_000_000 {
@@ -689,11 +932,6 @@ pub fn should_try(data: &[u8]) -> bool {
         }
         scores.push(if cnt > 0 { eq * (1 << 20) / cnt } else { 0 });
     }
-    // Absolute best-stride byte-equality autocorrelation separates the image class
-    // (measured: ptt5 0.918, x-ray 0.456, mr 0.332 of 2^20) from non-image inputs
-    // (ooffice 0.096, dickens 0.074). A run-heavy bilevel fax (ptt5) is FLAT across
-    // strides so a prominence test would miss it; the absolute floor catches it while
-    // still rejecting text/exe. 0.15 * 2^20 sits with wide margin on both sides.
     let best = *scores.iter().max().unwrap_or(&0);
     best >= (1u64 << 20) * 15 / 100
 }
