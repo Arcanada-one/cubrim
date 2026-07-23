@@ -42,6 +42,24 @@ const PSCALE: i32 = 1 << PBITS; // 4096
 // (and decode time) to 64 KiB before it fails closed.
 const CM2_STALL_LIMIT: u64 = 1 << 16;
 
+// QA-F-007 expansion bound: the declared orig_len sizes BOTH the output vector and the CM
+// hash tables (`tbits_for(orig_len)`, up to TBITS_MAX=27 ≈ multi-GB) — and it did so BEFORE
+// any content was validated, so a 214-byte crafted blob drove RSS to 6.3 GB and only failed
+// closed afterwards (on a memory-limited host: OOM before Err). A real coded stream of
+// `coded_len` bytes cannot expand past a bounded factor, so reject any claim beyond it up
+// front — this also closes the CM2 model-amplification (a big model now requires
+// proportionally many real coded bytes).
+//
+// Calibrated by measurement, not guesswork (cm2_encoder_output_satisfies_expansion_bound
+// pins it): the worst real CM2 ratios are all-zeros/short-period repeats, which asymptote
+// around ~2400x (zeros 64K 1820x, 1M 2346x, 8M 2387x — only +1.7% for 8x the size).
+// 10000x is a >4x margin over the measured worst, so no legitimate high-ratio input is
+// rejected, while the practical amplification from a tiny blob is gone.
+const CM2_MAX_EXPANSION: u64 = 10_000;
+/// Additive slack so short streams (whose model is still warming up, hence a low ratio)
+/// and the minimal-blob edge are never rejected.
+const CM2_EXPANSION_SLACK: u64 = 1 << 16;
+
 const ST_MAX: i32 = 2047; // stretch domain [-2047, 2047]
 const ST_SCALE: f64 = 256.0; // ln-scale: stretch(1..PSCALE-1) spans ≈ [-ST_MAX, ST_MAX]
 
@@ -837,6 +855,19 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             crate::codec::MAX_DECODE_LEN
         )));
     }
+    // QA-F-007 expansion bound — MUST precede the output and model allocations below, since
+    // both are sized from `orig_len`. Anything the coded stream cannot plausibly expand into
+    // is rejected in O(1), before a single byte is reserved.
+    let coded_len = (blob.len() - 8) as u64;
+    let max_plausible = coded_len
+        .saturating_mul(CM2_MAX_EXPANSION)
+        .saturating_add(CM2_EXPANSION_SLACK);
+    if orig_len > max_plausible {
+        return Err(CubrimError::Decode(format!(
+            "MODE_CM2: orig_len {orig_len} implausible for {coded_len} coded bytes \
+             (max {max_plausible} at {CM2_MAX_EXPANSION}x expansion)"
+        )));
+    }
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
     let mut model = CmModel::new(tbits_for(orig_len as usize));
@@ -895,6 +926,81 @@ mod tests {
         let out = cm2_decode(&blob).expect("cm2 decode");
         assert_eq!(out, data, "CM2 round-trip cmp!=0 for len {}", data.len());
         blob.len()
+    }
+
+
+    /// QA-F-007 calibration guard: every blob the ENCODER can produce must satisfy the
+    /// decoder's expansion bound. This is what makes CM2_MAX_EXPANSION safe — if a future
+    /// model change pushes real ratios past it, this test fails instead of silently
+    /// rejecting legitimate files at decode time. Reports the margin so drift is visible.
+    #[test]
+    fn cm2_encoder_output_satisfies_expansion_bound() {
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("zeros_4k", vec![0u8; 4096]),
+            ("zeros_64k", vec![0u8; 65536]),
+            ("zeros_256k", vec![0u8; 256 * 1024]),
+            ("const_128k", vec![0x5Au8; 128 * 1024]),
+            ("rep2_128k", (0..(128 * 1024)).map(|i| (i % 2) as u8).collect()),
+            ("rep16_128k", (0..(128 * 1024)).map(|i| (i % 16) as u8).collect()),
+            ("text_128k", b"the quick brown fox. ".iter().cloned().cycle().take(128 * 1024).collect()),
+        ];
+        let mut worst_ratio = 0f64;
+        for (name, data) in cases {
+            let blob = cm2_encode(&data);
+            let coded = (blob.len() - 8) as u64;
+            let bound = coded
+                .saturating_mul(CM2_MAX_EXPANSION)
+                .saturating_add(CM2_EXPANSION_SLACK);
+            let ratio = data.len() as f64 / coded.max(1) as f64;
+            if ratio > worst_ratio {
+                worst_ratio = ratio;
+            }
+            assert!(
+                data.len() as u64 <= bound,
+                "{name}: encoder produced orig={} from coded={coded}, exceeding the decoder \
+                 bound {bound} (ratio {ratio:.1} vs CM2_MAX_EXPANSION {CM2_MAX_EXPANSION})",
+                data.len()
+            );
+        }
+        assert!(
+            worst_ratio * 2.0 < CM2_MAX_EXPANSION as f64,
+            "measured worst ratio {worst_ratio:.1} leaves under 2x margin below \
+             CM2_MAX_EXPANSION {CM2_MAX_EXPANSION} — re-calibrate before shipping"
+        );
+    }
+
+    /// QA-F-007: a tiny blob claiming a huge orig_len must be rejected BEFORE the output and
+    /// CM-model allocations (which are sized from orig_len). Repro of the 214-byte blob that
+    /// drove RSS to 6.3 GB and only failed closed afterwards.
+    #[test]
+    fn cm2_decode_implausible_expansion_is_err_before_alloc() {
+        let mut blob = 5_000_000_000u64.to_be_bytes().to_vec();
+        blob.extend_from_slice(&[0xA5u8; 200]); // 206 coded bytes total container payload
+        let r = cm2_decode(&blob);
+        let e = r.expect_err("implausible expansion must be rejected");
+        assert!(
+            e.to_string().contains("implausible"),
+            "expected the expansion bound to fire, got: {e}"
+        );
+    }
+
+    /// The stall guard protects a limit of CM2_STALL_LIMIT (65536) output bytes, but the
+    /// shipped valid-RT test only covered 4096 bytes — structurally unable to execute the
+    /// path it guards. This exercises a valid, maximally-compressible stream whose output is
+    /// well ABOVE the stall limit (so long no-progress runs really occur) and whose ratio is
+    /// near the measured worst case, proving neither the stall guard nor the expansion bound
+    /// false-fires on legitimate high-ratio data.
+    #[test]
+    fn cm2_valid_high_ratio_above_stall_limit_round_trips() {
+        for data in [
+            vec![0u8; 128 * 1024],
+            (0..(128 * 1024)).map(|i| (i % 2) as u8).collect::<Vec<u8>>(),
+        ] {
+            assert!(data.len() as u64 > CM2_STALL_LIMIT, "fixture must exceed the guarded limit");
+            let blob = cm2_encode(&data);
+            let out = cm2_decode(&blob).expect("valid high-ratio blob must decode");
+            assert_eq!(out, data, "valid RT broken for len {}", data.len());
+        }
     }
 
     #[test]
