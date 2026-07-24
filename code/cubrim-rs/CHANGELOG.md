@@ -21,6 +21,13 @@ fixed while proving the merge.
 - **`MODE_RECORDCM` per-offset SSE variant**, competed against the plain
   record-CM candidate. Measured sao **0.525384**. The SSE flag is carried in
   bit 15 of the record-width field.
+- **BCJ branch-conversion composed with the CM2 backend** as a competitive-min
+  candidate for executables: architecture detection selects the branch filter,
+  whose output is then coded by CM2 and nested in the existing `MODE_BCJ`
+  container. The wire format and the decoder are unchanged. Measured ooffice
+  **0.286639** (1763460 B, down from 1991681 B), moving the executable-type
+  aggregate to **0.244212**. Inputs with no detected architecture are untouched —
+  mozilla is byte-identical at 12247649 B, the candidate simply does not fire.
 
 ### Security
 

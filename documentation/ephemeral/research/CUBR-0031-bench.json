@@ -1,7 +1,7 @@
 {
   "task":"CUBR-0031",
   "scheme":"BwtEntropy vs EntropyContext (T4)",
-  "code_sha":"5f6d1a35122618ae2f39ece23be1beb9208406cf",
+  "code_sha":"4ca42bb845fdbe706e66820e3840567955013ea0",
   "corpus_total":116992,
   "original_corpus_total":51456,
   "new_file_size":65536,
