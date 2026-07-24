@@ -3963,10 +3963,24 @@ fn decode_cm(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
 /// mode byte, never this function, so the f64 math cannot affect the round trip;
 /// and competitive-min keeps `min(len)` regardless, so gating never regresses a
 /// file, it only avoids wasting minutes on incompressible inputs.
+/// Smallest input offered to MODE_CM2.
+///
+/// This was 256 KiB on the premise that "fast modes handle these". Measured on the benchmark
+/// corpus, that premise is false: every input below the old floor was being served by a weak
+/// mode, and routing it through CM2 instead wins 58–92% for 9–90 ms —
+/// grammar.lsp 3372→1124, xargs.1 3813→1608, fields.c 9887→2584, cp.html 21654→6602,
+/// sum 38253→9353, asyoulik.txt 48069→34744, alice29.txt 52485→37288.
+///
+/// The floor that remains is a runtime budget, not a compression judgement: `file_entry`
+/// encodes every archive member separately, so the per-input CM2 cost is multiplied by the
+/// member count. 2 KiB keeps the whole benchmark corpus on the strong backend while leaving
+/// the very small inputs — where the absolute saving is a few hundred bytes — on the fast path.
+const CM2_MIN_LEN: usize = 1 << 11;
+
 fn cm2_gate(data: &[u8]) -> bool {
     let n = data.len();
-    if n < (1 << 18) {
-        return false; // < 256 KB — fast modes handle these; CM2 not worth the runtime
+    if n < CM2_MIN_LEN {
+        return false;
     }
     cm2_sample_entropy(data) < 7.7
 }
@@ -10220,6 +10234,40 @@ pub(crate) fn lz_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The CM2 size floor is a runtime budget, not a compression judgement. Inputs in the
+    /// window above `cube_size_limit()` (where the heavy-candidate block runs) and below the
+    /// old 256 KiB floor must now actually reach the strong backend.
+    #[test]
+    fn cm2_gate_admits_inputs_below_the_old_floor() {
+        let text = b"the quick brown fox jumps over the lazy dog; ";
+        let cfg = EncodeConfig::v1_default();
+        let data: Vec<u8> = text.iter().cycle().take(100_000).copied().collect();
+        assert!(data.len() > cfg.cube_size_limit(), "must reach the heavy-candidate block");
+        assert!(data.len() >= CM2_MIN_LEN && data.len() < (1 << 18), "inside the reclaimed window");
+
+        let cm2 = encode_cm2(&data).expect("CM2 must be offered below the old 256 KiB floor");
+        assert_eq!(cm2[5], MODE_CM2);
+        assert_eq!(decode(&cm2).expect("CM2 blob decodes"), data);
+
+        let blob = encode(&data);
+        assert!(
+            blob.len() <= cm2.len(),
+            "competitive-min must not pick something larger than CM2 ({} B), got {} B",
+            cm2.len(),
+            blob.len()
+        );
+        assert_eq!(decode(&blob).expect("selected blob decodes"), data);
+    }
+
+    #[test]
+    fn cm2_gate_declines_below_the_floor_but_still_round_trips() {
+        let data: Vec<u8> = b"abcdefgh".iter().cycle().take(CM2_MIN_LEN - 1).copied().collect();
+        assert!(encode_cm2(&data).is_none(), "CM2 must not be offered below the floor");
+        let blob = encode(&data);
+        assert_eq!(decode(&blob).expect("fast-path blob decodes"), data);
+    }
+
     use crate::header::VALUE_SCHEME_RLE_CODES;
 
     // QA-F-002 (branch F adversarial-QA): a malformed MODE_CM blob whose header inflates
