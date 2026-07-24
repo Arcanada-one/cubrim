@@ -344,6 +344,16 @@ const SM_WORD4_I: usize = WORD4_I + 1;
 const NMODELS: usize = SM_WORD4_I + 1; // model inputs
 const NIN: usize = NMODELS + 1; // (bias at NIN-1)
 
+// FH4-03 column-position model — a VARIANT-only pair of inputs appended after
+// every existing model, so the default configuration keeps each index and its
+// mixer input count bit-for-bit unchanged (the mixers read only their own `nin`).
+// Enabled only when a record delimiter with stable spacing is detected.
+const COL_I: usize = NMODELS; // stationary column prob
+const SM_COL_I: usize = COL_I + 1; // state-map column prob
+const NIN_COL: usize = SM_COL_I + 1 + 1; // + bias
+const NIN_MAX: usize = NIN_COL;
+const COL_CAP: usize = 63; // bytes-since-delimiter cap (Gotcha #9: keep cells learnable)
+
 const TBITS_MAX: usize = 27; // hash-table cap (~12 GB/model at the max)
 /// Size the per-model hash tables to the input length: ceil(log2(len)) + 3,
 /// clamped to [18, TBITS_MAX]. Large files (enwik8, dickens) get the full 27
@@ -474,6 +484,14 @@ struct CmModel {
     m1: Match,
     m2: Match,
     m3: Match,
+    // FH4-03 column-position model — None on the default path
+    col: Option<Ctr>,
+    col_delim: u8,
+    col_pos: usize,
+    col_hash: usize,
+    col_cx: usize,
+    col_state: u8,
+    nin: usize,
     // 2-layer mixer
     l1: Vec<Mixer>,
     l2: Mixer,
@@ -491,7 +509,7 @@ struct CmModel {
     prev: usize,
     nex: Vec<[u8; 2]>,
     // per-bit scratch
-    st: [i32; NIN],
+    st: [i32; NIN_MAX],
     cxs: [usize; NORD],
     spcx: [usize; NSPARSE],
     indcx: usize,
@@ -511,6 +529,13 @@ struct CmModel {
 
 impl CmModel {
     fn new(tbits: usize) -> Self {
+        Self::new_with_col(tbits, None)
+    }
+
+    /// `col_delim = Some(d)` enables the FH4-03 column-position model keyed on
+    /// bytes-since-`d`. `None` reproduces the default model set exactly.
+    fn new_with_col(tbits: usize, col_delim: Option<u8>) -> Self {
+        let nin = if col_delim.is_some() { NIN_COL } else { NIN };
         let lg = Logistic::new();
         let apm1 = Apm::new(&lg, 256);
         let apm2 = Apm::new(&lg, 1024);
@@ -551,14 +576,21 @@ impl CmModel {
             m1: Match::new(M1_MIN, tbits),
             m2: Match::new(M2_MIN, tbits),
             m3: Match::new(M3_MIN, tbits),
+            col: col_delim.map(|_| Ctr::new(tbits, ctrlim, smcap)),
+            col_delim: col_delim.unwrap_or(0),
+            col_pos: 0,
+            col_hash: 0,
+            col_cx: 0,
+            col_state: 0,
+            nin,
             // layer-1 mixers over NIN inputs, distinct context selectors; layer 2
             // combines their NL1 stretched outputs (+bias).
             l1: vec![
-                Mixer::new(256, NIN, ws),  // prev byte
-                Mixer::new(1024, NIN, ws), // order-2 hash
-                Mixer::new(64, NIN, ws),   // match state
-                Mixer::new(256, NIN, ws),  // partial byte c0
-                Mixer::new(1024, NIN, ws), // order-3 hash
+                Mixer::new(256, nin, ws),  // prev byte
+                Mixer::new(1024, nin, ws), // order-2 hash
+                Mixer::new(64, nin, ws),   // match state
+                Mixer::new(256, nin, ws),  // partial byte c0
+                Mixer::new(1024, nin, ws), // order-3 hash
             ],
             l2: Mixer::new(64, NL1 + 1, ws),
             wshift: ws,
@@ -573,7 +605,7 @@ impl CmModel {
             ind_key: 0,
             ind_hist: 0,
             prev: 0,
-            st: [0; NIN],
+            st: [0; NIN_MAX],
             cxs: [0; NORD],
             spcx: [0; NSPARSE],
             indcx: 0,
@@ -639,6 +671,13 @@ impl CmModel {
         };
         self.ind_hist = self.ind_map[self.ind_key] as usize;
         self.prev = if t > 0 { buf[t - 1] as usize } else { 0 };
+        // FH4-03: column context = (bytes since the record delimiter, previous byte).
+        // The probe measured this pair as the carrier — position alone was weaker.
+        if self.col.is_some() {
+            self.col_hash = (self.col_pos.min(COL_CAP))
+                .wrapping_mul(0x9E37_79B1)
+                .wrapping_add(self.prev.wrapping_mul(0x85EB_CA77));
+        }
         self.m1.start(buf);
         self.m2.start(buf);
         self.m3.start(buf);
@@ -711,7 +750,17 @@ impl CmModel {
         self.word4state = w4st;
         self.st[WORD4_I] = self.lg.stretch(w4ps);
         self.st[SM_WORD4_I] = self.lg.stretch(w4psm);
-        self.st[NIN - 1] = 256; // bias
+        // FH4-03: column-position inputs sit after every default model, so the
+        // bias moves to nin-1 and the default layout is untouched.
+        if let Some(col) = self.col.as_mut() {
+            let ccx = self.col_hash.wrapping_mul(0x2545_F491).wrapping_add(c0);
+            self.col_cx = ccx;
+            let (cps, cpsm, cst) = col.predict(ccx);
+            self.col_state = cst;
+            self.st[COL_I] = self.lg.stretch(cps);
+            self.st[SM_COL_I] = self.lg.stretch(cpsm);
+        }
+        self.st[self.nin - 1] = 256; // bias
 
         // 2-layer mixer: NL1 context-specialised layer-1 mixers over all inputs,
         // combined by a layer-2 mixer over their stretched outputs.
@@ -764,6 +813,9 @@ impl CmModel {
         self.wtab2.upd(self.word2_cx, self.word2state, y, &self.nex);
         self.wtab3.upd(self.word3_cx, self.word3state, y, &self.nex);
         self.wtab4.upd(self.word4_cx, self.word4state, y, &self.nex);
+        if let Some(col) = self.col.as_mut() {
+            col.upd(self.col_cx, self.col_state, y, &self.nex);
+        }
         self.m1.update(y);
         self.m2.update(y);
         self.m3.update(y);
@@ -776,6 +828,14 @@ impl CmModel {
     fn end_byte(&mut self, buf: &[u8]) {
         let t = buf.len() - 1;
         let b = buf[t];
+        // FH4-03: advance the within-record position (reset on the delimiter).
+        if self.col.is_some() {
+            self.col_pos = if b == self.col_delim {
+                0
+            } else {
+                self.col_pos.saturating_add(1)
+            };
+        }
         // indirect map: fold the new byte into this order-2 context's history
         let h = (self.ind_map[self.ind_key])
             .wrapping_mul(0x6F4A_7C13)
@@ -808,14 +868,99 @@ impl CmModel {
 
 /// Encode `data`. Wire: `[orig_len u64 BE][bit-range-coded]`.
 pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
-    cm2_encode_audit(data).0
+    let base = cm2_encode_variant(data, None);
+    // FH4-03: competitive-min. The column variant ships only when it is strictly
+    // smaller, so adding it cannot regress any input — the gate above merely
+    // avoids paying for a candidate that has no chance.
+    let mut best = base;
+    for d in detect_col_delims(data) {
+        let alt = cm2_encode_variant(data, Some(d));
+        if alt.len() < best.len() {
+            best = alt;
+        }
+    }
+    best
 }
 
 /// Encode, also returning the FH2-06 quant-audit `(quant_bits, ideal_bits)` (both
 /// 0 unless `CM_AUDIT=1`). The wire bytes are identical to [`cm2_encode`].
+// FH4-03 wire packing. MAX_DECODE_LEN is 1<<40, so the top bits of the 8-byte
+// length header are unused: bit 63 flags the column model and bits 48..55 carry
+// its delimiter. A blob written without the model leaves both zero, so every
+// archive produced before this existed still decodes byte-identically.
+const CM2_COL_FLAG: u64 = 1 << 63;
+const CM2_COL_DELIM_SHIFT: u32 = 48;
+const CM2_LEN_MASK: u64 = (1u64 << 48) - 1;
+
+/// FH4-03 gate: propose record-delimiter candidates whose spacing is regular
+/// enough that a within-record position is a meaningful context.
+///
+/// Returns up to `MAX` candidates, best (most regular) first. Precision is NOT
+/// required: the encoder competes every candidate and keeps the winner, recording
+/// its delimiter in the header, so a bad proposal costs encode time and never
+/// ratio. The gate therefore errs toward proposing — a threshold tight enough to
+/// be "correct" silently dropped nci, whose newline spacing varies more than a
+/// strict regularity test allows (CV 0.64) yet still carries a 5% column signal.
+fn detect_col_delims(data: &[u8]) -> Vec<u8> {
+    const SAMPLE: usize = 1 << 18;
+    const MAX: usize = 2;
+    let s = &data[..data.len().min(SAMPLE)];
+    if s.len() < 4096 {
+        return Vec::new();
+    }
+    let mut count = [0u32; 256];
+    for &b in s {
+        count[b as usize] += 1;
+    }
+    let mut scored: Vec<(f64, u8)> = Vec::new();
+    for cand in 0..256usize {
+        if (count[cand] as usize) < 32 {
+            continue;
+        }
+        let mean = s.len() as f64 / count[cand] as f64;
+        if !(4.0..=512.0).contains(&mean) {
+            continue;
+        }
+        let (mut prev, mut sum, mut sumsq, mut k) = (0usize, 0f64, 0f64, 0usize);
+        for (i, &b) in s.iter().enumerate() {
+            if b as usize == cand {
+                let g = (i - prev) as f64;
+                sum += g;
+                sumsq += g * g;
+                k += 1;
+                prev = i;
+            }
+        }
+        if k < 32 {
+            continue;
+        }
+        let m = sum / k as f64;
+        let var = (sumsq / k as f64 - m * m).max(0.0);
+        let cv = var.sqrt() / m.max(1.0);
+        if cv <= 1.2 {
+            scored.push((cv, cand as u8));
+        }
+    }
+    scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap().then(a.1.cmp(&b.1)));
+    scored.into_iter().take(MAX).map(|(_, d)| d).collect()
+}
+
+
 pub(crate) fn cm2_encode_audit(data: &[u8]) -> (Vec<u8>, f64, f64) {
-    let mut out = (data.len() as u64).to_be_bytes().to_vec();
-    let mut model = CmModel::new(tbits_for(data.len()));
+    cm2_encode_audit_variant(data, None)
+}
+
+fn cm2_encode_variant(data: &[u8], col_delim: Option<u8>) -> Vec<u8> {
+    cm2_encode_audit_variant(data, col_delim).0
+}
+
+fn cm2_encode_audit_variant(data: &[u8], col_delim: Option<u8>) -> (Vec<u8>, f64, f64) {
+    let mut hdr = data.len() as u64;
+    if let Some(d) = col_delim {
+        hdr |= CM2_COL_FLAG | ((d as u64) << CM2_COL_DELIM_SHIFT);
+    }
+    let mut out = hdr.to_be_bytes().to_vec();
+    let mut model = CmModel::new_with_col(tbits_for(data.len()), col_delim);
     let mut enc = RangeEncoder::new();
     let mut buf: Vec<u8> = Vec::with_capacity(data.len());
     for &byte in data {
@@ -844,7 +989,15 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     if blob.len() < 8 {
         return Err(CubrimError::Decode("MODE_CM2: header truncated".into()));
     }
-    let orig_len = u64::from_be_bytes(blob[..8].try_into().unwrap());
+    // FH4-03: unpack the column-model flag/delimiter first, so every guard below
+    // sees the true declared length and not the packed word.
+    let raw = u64::from_be_bytes(blob[..8].try_into().unwrap());
+    let col_delim = if raw & CM2_COL_FLAG != 0 {
+        Some(((raw >> CM2_COL_DELIM_SHIFT) & 0xFF) as u8)
+    } else {
+        None
+    };
+    let orig_len = raw & CM2_LEN_MASK;
     // QA-F-001 fail-closed guard (part 1 — decompression-bomb cap): a corrupt MODE_CM2
     // blob can carry an attacker-controlled orig_len up to 2^64. Reject anything beyond a
     // sane absolute maximum before allocating or looping, so the classic 2^64 claim fails
@@ -870,7 +1023,7 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     }
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
-    let mut model = CmModel::new(tbits_for(orig_len as usize));
+    let mut model = CmModel::new_with_col(tbits_for(orig_len as usize), col_delim);
     let mut dec = RangeDecoder::new(&blob[8..]);
     // QA-F-001 fail-closed guard (part 2 — stall detector): once the coded stream is
     // exhausted the range decoder only reads zero-padding and stops consuming input, yet
