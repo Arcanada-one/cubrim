@@ -45,6 +45,16 @@ a clean error. All six defects now fail closed in bounded time and memory:
 Preallocation caps are hints only — decoded output is byte-identical for every
 valid archive, and the guards only enforce invariants that hold for all of them.
 
+- `MODE_CM2` expansion bound, enforced **before** any allocation: a declared output
+  length must be plausible for the number of coded bytes actually present
+  (`orig_len <= coded_len * 10000 + 65536`). The factor is calibrated against
+  measured encoder output — the worst real compression ratios asymptote near 2400x,
+  leaving more than 4x headroom — and a calibration test asserts the encoder stays
+  more than 2x clear of the bound, so a future model change fails loudly instead of
+  silently narrowing the margin. A 214-byte hostile archive that previously drove
+  6.3 GB of resident memory over more than a minute is now rejected in 0.00 s at
+  3.9 MB.
+
 ### Fixed
 
 - **The `MODE_CM2` stall detector could never fire.** It compared the range
