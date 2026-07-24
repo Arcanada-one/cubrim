@@ -4,6 +4,33 @@ All notable changes to the Cubrim compressor and CLI are recorded here.
 Ratios quoted below are measured on the frozen benchmark corpus with the
 binary built from this revision — never estimated.
 
+## [0.3.2] — 2026-07-24
+
+Reopens the sub-64 KiB encode path to the CM2 backend and corrects the published
+sub-floor benchmark cells so every leaderboard number is reproducible by this
+binary. A competitive-min change: a mode is kept only when strictly smaller, so no
+input can regress.
+
+### Changed
+
+- **Sub-64 KiB freeze reopened for the CM2 backend.** Inputs at or below the v1
+  64 KiB cube limit may now be offered to CM2 as a competitive-min candidate
+  (previously the freeze fell straight through to weaker modes). The on-wire
+  VERSION byte is unchanged — small inputs use the existing `MODE_CM2` container
+  and decode under v1; archives written for inputs above 64 KiB remain
+  byte-identical, so old archives and cross-version reads still round-trip
+  (RT cmp=0 on all 24 corpus files). Measured strict wins: cp.html 6624 → 6574,
+  sum 10542 → 9353.
+
+### Fixed
+
+- **Reproducible provenance for the tiny text/code cells.** The leaderboard
+  previously carried grammar.lsp / xargs.1 / fields.c cells produced by an older
+  backend that this binary does not reach, so they were not reproducible from any
+  released source. They are corrected to the values this binary actually produces
+  (grammar.lsp 1124, xargs.1 1607, fields.c 2570). All six benchmark types remain
+  strict #1; the leaderboard now equals `cubrim` built from this tag.
+
 ## [0.3.1] — 2026-07-24
 
 Two compression levers added on top of 0.3.0, both competitive-min variants that
