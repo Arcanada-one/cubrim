@@ -4628,7 +4628,41 @@ fn decode_biff(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     Ok(out)
 }
 
+/// Maximum container nesting depth. Ten-plus decoders (BCJ, TARBCJ, MED16, LZ literals,
+/// COLUMNAR, VCF, BINFLOAT, EXECM, …) recurse into `decode` on their nested sub-blob, and
+/// nothing bounded that recursion: ~11 input bytes buy one stack frame, so a ~220 KB blob
+/// of stacked MODE_BCJ headers overflowed the stack and aborted the process instead of
+/// returning Err (QA-F-009). Real containers nest only a couple of levels (e.g. BCJ→CM2),
+/// so 32 is a large margin over anything the encoder produces.
+const MAX_DECODE_DEPTH: u32 = 32;
+
+thread_local! {
+    static DECODE_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// RAII depth counter — decrements even when a decoder returns Err early.
+struct DecodeDepthGuard;
+impl Drop for DecodeDepthGuard {
+    fn drop(&mut self) {
+        DECODE_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    }
+}
+
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    // QA-F-009 fail-closed guard: bound container nesting. Placed in `decode` itself so
+    // every recursive path is covered by one check, whatever mode does the nesting.
+    let depth = DECODE_DEPTH.with(|d| {
+        let next = d.get().saturating_add(1);
+        d.set(next);
+        next
+    });
+    let _depth_guard = DecodeDepthGuard;
+    if depth > MAX_DECODE_DEPTH {
+        return Err(CubrimError::Decode(format!(
+            "container nesting deeper than {MAX_DECODE_DEPTH} levels — refusing to recurse"
+        )));
+    }
+
     // Container modes are detected before parse_header (which only knows the
     // single-block modes 0/1): MODE_CHUNKED wraps independent sub-blobs; MODE_LZ
     // wraps a whole-file LZ pre-pass (H-25d).
@@ -10265,6 +10299,84 @@ mod tests {
             dec.progress(),
             buf.len()
         );
+    }
+
+    // ================= SYSTEMIC FAIL-CLOSED GATE (QA-F, release-candidate audit) ==========
+    // GeoCM (MODE_GEOCM=17) shipped a fresh decoder in a NEW module and silently bypassed the
+    // whole hardening layer — its orig_len drove a 5 GB allocation before any validation
+    // (QA-F-008), exactly the class already fixed in codec.rs/cm2.rs. A per-mode fix list
+    // cannot prevent the next such module; this gate enumerates EVERY mode byte and asserts
+    // the two properties structurally, so a new decoder that skips them fails here.
+    //
+    // Property 1 — no mode may allocate/loop on an implausible declared length: a tiny blob
+    // claiming a huge output must come back as Err (or be rejected as malformed) quickly and
+    // in bounded memory, never abort or hang.
+    // Property 2 — no mode may recurse without a depth bound.
+    #[test]
+    fn systemic_gate_every_mode_rejects_implausible_length() {
+        // A tiny container for each mode byte, with every plausible length/count field set to
+        // a huge value. Whatever the per-mode layout, the decoder must fail closed.
+        for mode in 0u8..=32u8 {
+            for filler in [0xFFu8, 0x7F] {
+                let mut blob = Vec::new();
+                blob.extend_from_slice(&MAGIC);
+                blob.push(VERSION);
+                blob.push(mode);
+                // 64 bytes of header-ish payload: inflated length/count/index fields.
+                blob.extend_from_slice(&[filler; 64]);
+                let r = decode(&blob);
+                assert!(
+                    r.is_err(),
+                    "mode {mode} (filler {filler:#x}) returned Ok from a 70-byte blob with \
+                     inflated header fields — every decoder must reject an implausible \
+                     declared length before allocating"
+                );
+            }
+        }
+    }
+
+    // Property 2: container nesting is bounded, so no stacked-header blob can exhaust the
+    // stack (QA-F-009 aborted the process at ~20k nested MODE_BCJ headers).
+    #[test]
+    fn systemic_gate_nesting_depth_is_bounded() {
+        // Innermost: a minimal raw-ish blob. Each wrapper is a MODE_BCJ header.
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&MAGIC);
+        blob.push(VERSION);
+        blob.push(MODE_RAW);
+        blob.extend_from_slice(&[0u8; 8]);
+        for _ in 0..(MAX_DECODE_DEPTH as usize + 200) {
+            let inner_len = blob.len() as u32;
+            let mut w = Vec::with_capacity(blob.len() + 11);
+            w.extend_from_slice(&MAGIC);
+            w.push(VERSION);
+            w.push(MODE_BCJ);
+            w.extend_from_slice(&inner_len.to_be_bytes());
+            w.push(1); // arch x86
+            w.extend_from_slice(&blob);
+            blob = w;
+        }
+        let e = decode(&blob).expect_err("over-deep nesting must fail closed, not overflow");
+        assert!(
+            e.to_string().contains("nesting"),
+            "expected the depth guard to fire, got: {e}"
+        );
+    }
+
+    // The depth limit must leave real containers (BCJ->CM2 is 2 levels) plenty of room.
+    #[test]
+    fn systemic_gate_legit_nesting_still_decodes() {
+        assert!(
+            MAX_DECODE_DEPTH >= 8,
+            "depth budget {MAX_DECODE_DEPTH} is too tight for real containers"
+        );
+        // An executable-like input exercises the BCJ->CM2 nested path end to end.
+        let mut data = Vec::new();
+        for i in 0..200_000u32 {
+            data.extend_from_slice(&[0x48, 0x89, 0xE5, (i % 251) as u8]);
+        }
+        let blob = encode(&data);
+        assert_eq!(decode(&blob).expect("legit blob must decode"), data);
     }
 
     // The MAX_DECODE_LEN cap must reject an absurd declared length up front without

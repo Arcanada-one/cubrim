@@ -96,6 +96,15 @@ impl<'a> RcDec<'a> {
     }
 
     #[inline]
+    /// Real input bytes consumed, saturating at the end of the coded stream. `next_byte`
+    /// advances `pos` unconditionally while feeding zero-padding past the end, so an
+    /// unclamped value would keep advancing forever and any stall guard built on it would
+    /// be unfirable (the QA-F-001 defect, ported here as QA-F-008).
+    #[inline]
+    pub fn progress(&self) -> usize {
+        self.pos.min(self.buf.len())
+    }
+
     fn next_byte(&mut self) -> u32 {
         // Past-the-end reads pad with 0; corruption is caught by the
         // container checksum (fail-closed at the codec layer).
@@ -459,6 +468,26 @@ impl MatchModel {
 // champion 0.754 bpb.
 
 
+// QA-F-008 fail-closed decode guards (branch F adversarial-QA, release-candidate audit).
+// `orig_len` comes straight from the container header and sizes BOTH the output vector and
+// the decode loop, with the FNV-1a-64 checksum verified only AFTER the full decode — so a
+// 68-byte blob claiming 5e9 drove a 5 GB allocation and aborted instead of returning Err.
+// A real coded stream of `payload_len` bytes cannot expand past a bounded factor.
+//
+// Calibrated by measurement (geocm_encoder_output_satisfies_expansion_bound pins it): worst
+// real GeoCM ratios are all-zeros / short-period repeats — zeros 64K 1928x, zeros 1M 2752x,
+// rep2 1M 2400x, const 1M 1362x, gradient 464x, strided 178x. 10000x is a >3.6x margin over
+// the measured worst, so no legitimate high-ratio image is rejected.
+pub const GEO_MAX_EXPANSION: u64 = 10_000;
+/// Additive slack for short streams (model still warming up) and the minimal-blob edge.
+pub const GEO_EXPANSION_SLACK: u64 = 1 << 16;
+/// Output bytes produced without the range decoder consuming a new real input byte. Bounds
+/// fabricated output from a truncated stream before it fails closed.
+pub const GEO_STALL_LIMIT: usize = 1 << 16;
+/// Pre-allocation ceiling: `with_capacity` is a hint, so capping it cannot change output —
+/// it only stops an unvalidated header length from reserving gigabytes up front.
+pub const GEO_PREALLOC_CAP: usize = 1 << 20;
+
 pub const MAGIC: [u8; 4] = *b"CG2\x07";
 pub const HEADER_LEN: usize = 30;
 pub const MODE_RAW: u8 = 0;
@@ -474,6 +503,9 @@ pub enum CodecError {
     BadMode(u8),
     ChecksumMismatch,
     BadStride,
+    /// Declared output length is implausible for the coded payload, or the coded stream ran
+    /// out before that many bytes could be produced (QA-F-008 fail-closed).
+    ImplausibleLength,
 }
 
 pub fn fnv64(data: &[u8]) -> u64 {
@@ -531,8 +563,23 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
 ) -> Result<Vec<u8>, CodecError> {
     let mut probs = vec![PINIT; n_ctx * 256];
     let mut dec = RcDec::new(payload).ok_or(CodecError::Truncated)?;
-    let mut out: Vec<u8> = Vec::with_capacity(orig_len);
+    let mut out: Vec<u8> = Vec::with_capacity(orig_len.min(GEO_PREALLOC_CAP));
+    let mut last_progress = dec.progress();
+    let mut stall = 0usize;
     for i in 0..orig_len {
+        // QA-F-008 stall guard: once the real payload is exhausted the decoder only reads
+        // zero-padding, so further output is fabricated. Fail closed instead of running to
+        // the declared length.
+        let pr = dec.progress();
+        if pr != last_progress {
+            last_progress = pr;
+            stall = 0;
+        } else {
+            stall += 1;
+            if stall > GEO_STALL_LIMIT {
+                return Err(CodecError::ImplausibleLength);
+            }
+        }
         let g = ctx_of(&out, i);
         debug_assert!(g < n_ctx);
         let base = g * 256;
@@ -695,10 +742,23 @@ fn decode_stream_mix(
 ) -> Result<Vec<u8>, CodecError> {
     let mut st = MixState::new(cfg);
     let mut dec = RcDec::new(payload).ok_or(CodecError::Truncated)?;
-    let mut out: Vec<u8> = Vec::with_capacity(orig_len);
+    let mut out: Vec<u8> = Vec::with_capacity(orig_len.min(GEO_PREALLOC_CAP));
     let mut ctx = [0usize; NTAB];
     let mut stv = [0i32; NM];
+    let mut last_progress = dec.progress();
+    let mut stall = 0usize;
     for i in 0..orig_len {
+        // QA-F-008 stall guard (see decode_stream).
+        let pr = dec.progress();
+        if pr != last_progress {
+            last_progress = pr;
+            stall = 0;
+        } else {
+            stall += 1;
+            if stall > GEO_STALL_LIMIT {
+                return Err(CodecError::ImplausibleLength);
+            }
+        }
         mix_ctxs(&out, i, s, s2, &mut ctx);
         st.mm.byte_start(&out, i);
         let mut node: usize = 1;
@@ -860,6 +920,16 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CodecError> {
     let stride2 = u32::from_le_bytes(blob[26..30].try_into().unwrap()) as usize;
     let payload = &blob[HEADER_LEN..];
 
+    // QA-F-008 expansion bound — MUST precede every dispatch below, since each CM path sizes
+    // its output vector and its loop from `orig_len` while the checksum is only verified at
+    // the very end. Anything the payload cannot plausibly expand into is rejected in O(1).
+    let max_plausible = (payload.len() as u64)
+        .saturating_mul(GEO_MAX_EXPANSION)
+        .saturating_add(GEO_EXPANSION_SLACK);
+    if orig_len as u64 > max_plausible {
+        return Err(CodecError::ImplausibleLength);
+    }
+
     let out = match mode {
         MODE_RAW => {
             if payload.len() != orig_len {
@@ -934,4 +1004,31 @@ pub fn should_try(data: &[u8]) -> bool {
     }
     let best = *scores.iter().max().unwrap_or(&0);
     best >= (1u64 << 20) * 15 / 100
+}
+
+#[cfg(test)]
+mod qaf_probe {
+    use super::*;
+    #[test]
+    #[ignore]
+    fn geocm_expansion_ratio_probe() {
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            ("zeros_64k", vec![0u8; 65536]),
+            ("zeros_1M", vec![0u8; 1 << 20]),
+            ("const_1M", vec![0x5Au8; 1 << 20]),
+            ("rep2_1M", (0..(1 << 20)).map(|i| (i % 2) as u8).collect()),
+            ("stride512_1M", (0..(1 << 20)).map(|i| ((i / 512) % 256) as u8).collect()),
+            ("grad_1M", (0..(1 << 20)).map(|i| (i % 256) as u8).collect()),
+        ];
+        let mut worst = 0f64;
+        for (name, data) in cases {
+            let blob = encode(&data);
+            let payload = blob.len().saturating_sub(HEADER_LEN).max(1);
+            let ratio = data.len() as f64 / payload as f64;
+            if ratio > worst { worst = ratio; }
+            println!("GEO-RATIO {name}: orig={} payload={} ratio={:.1} mode={}",
+                     data.len(), payload, ratio, blob[4]);
+        }
+        println!("GEO-RATIO WORST={worst:.1}");
+    }
 }
