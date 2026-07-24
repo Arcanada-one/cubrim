@@ -4,6 +4,33 @@ All notable changes to the Cubrim compressor and CLI are recorded here.
 Ratios quoted below are measured on the frozen benchmark corpus with the
 binary built from this revision — never estimated.
 
+## [0.3.1] — 2026-07-24
+
+Two compression levers added on top of 0.3.0, both competitive-min variants that
+cannot regress any input.
+
+### Added
+
+- **Column-position model in the CM2 backend.** A within-record position context
+  (bytes since a detected record delimiter, capped at 63) joins the CM2 mixture as
+  a competitive-min variant. Offered only when a delimiter with regular spacing is
+  detected; the winning delimiter is recorded in two spare high bits of the length
+  header, so archives written without it decode byte-identically. Measured
+  full-corpus (real CLI, RT cmp=0, zero regression): database aggregate
+  0.088723 → 0.085764 (nci −2.73%, osdb −3.76%), text 0.148891 → 0.146154, and a
+  binary spreadsheet (kennedy.xls −1.39%). The effect reaches any file whose
+  winning mode is CM2 and which carries record structure.
+
+### Changed
+
+- **The MODE_CM2 size floor drops from 256 KiB to 2 KiB.** The floor was a runtime
+  "not worth it" heuristic, but it also gated the strong backend out of inputs it
+  compresses far better, so the published sub-floor cells were unreproducible.
+  Inputs in the (64 KiB, 256 KiB) window now reach CM2 as a competitive-min
+  candidate. Measured: asyoulik.txt 48069 → 34529, alice29.txt 52485 → 36912 (both
+  the column model and the reopened floor apply). Inputs at or below the 64 KiB v1
+  freeze are structurally untouched.
+
 ## [0.3.0] — 2026-07-23
 
 First consolidated release candidate: three independently developed, orthogonal
