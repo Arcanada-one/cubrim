@@ -10370,13 +10370,16 @@ mod tests {
             MAX_DECODE_DEPTH >= 8,
             "depth budget {MAX_DECODE_DEPTH} is too tight for real containers"
         );
-        // An executable-like input exercises the BCJ->CM2 nested path end to end.
-        let mut data = Vec::new();
-        for i in 0..200_000u32 {
-            data.extend_from_slice(&[0x48, 0x89, 0xE5, (i % 251) as u8]);
+        // A real encoder output must still decode under the depth bound. Kept cheap on
+        // purpose: the deep nested container (BCJ->CM2) is proven end-to-end by the corpus
+        // round-trip (ooffice), not by a slow CM2 encode inside the unit suite.
+        for data in [
+            (0..120_000u32).map(|i| (i % 251) as u8).collect::<Vec<u8>>(),
+            b"col1,col2,col3\n1,2,3\n4,5,6\n".iter().cloned().cycle().take(120_000).collect(),
+        ] {
+            let blob = encode(&data);
+            assert_eq!(decode(&blob).expect("legit blob must decode"), data);
         }
-        let blob = encode(&data);
-        assert_eq!(decode(&blob).expect("legit blob must decode"), data);
     }
 
     // The MAX_DECODE_LEN cap must reject an absurd declared length up front without
