@@ -219,11 +219,14 @@ fn bench_cubr0031_large_block() {
         let bwt_blob = encode_bwt(&data);
         let t4_blob = encode_t4(&data);
 
-        // T4 must match CUBR-0028 known baseline
-        assert_eq!(
-            t4_blob.len(),
-            f.t4_bytes,
-            "T4 size mismatch for '{}': measured {} vs expected {}",
+        // Regression guard (reoriented): the ≤64 KB encode freeze is open, so the default
+        // competitive encoder may now select a strictly smaller mode (MODE_CM2) than the
+        // frozen T4 baseline on a compressible small file. Enforce "never larger than the
+        // frozen T4 baseline" (zero regression) instead of exact-byte equality; the
+        // round-trip check below already guarantees losslessness.
+        assert!(
+            t4_blob.len() <= f.t4_bytes,
+            "size regression for '{}': measured {} exceeds frozen T4 baseline {}",
             f.name,
             t4_blob.len(),
             f.t4_bytes
@@ -237,9 +240,12 @@ fn bench_cubr0031_large_block() {
         orig_t4_total += t4_blob.len();
     }
 
-    assert_eq!(
-        orig_t4_total, ORIGINAL_T4_TOTAL_BYTES,
-        "Original T4 total mismatch: {orig_t4_total} != {ORIGINAL_T4_TOTAL_BYTES}"
+    // Reoriented (≤64 KB freeze open): the competitive encoder may select MODE_CM2 on the
+    // compressible small files, so the summed T4 total is now ≤ the frozen baseline. Enforce
+    // "never larger than the frozen T4 total" (zero regression) instead of exact equality.
+    assert!(
+        orig_t4_total <= ORIGINAL_T4_TOTAL_BYTES,
+        "Original T4 total regression: {orig_t4_total} exceeds frozen baseline {ORIGINAL_T4_TOTAL_BYTES}"
     );
     println!("  Original 7 files: T4={orig_t4_total}  BWT={orig_bwt_total}  [baseline verified]");
     println!();

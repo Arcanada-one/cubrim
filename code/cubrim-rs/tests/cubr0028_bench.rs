@@ -151,11 +151,14 @@ fn bench_cubr0028_bwt_aggregate() {
         let t4_blob = encode_t4(&data);
         let bwt_blob = encode_bwt(&data);
 
-        // Sanity check: T4 matches known baseline.
-        assert_eq!(
-            t4_blob.len(),
-            f.t4_bytes,
-            "T4 size mismatch for '{}': measured {} vs expected {}",
+        // Regression guard (reoriented): the ≤64 KB encode freeze is open, so the default
+        // competitive encoder may now select a strictly smaller mode (MODE_CM2) than the
+        // frozen T4 baseline on a compressible small file (sparse_clustered/text/log_like).
+        // Enforce "never larger than the frozen T4 baseline" (zero regression) instead of
+        // exact-byte equality; Step 1 above already guarantees lossless round-trip.
+        assert!(
+            t4_blob.len() <= f.t4_bytes,
+            "size regression for '{}': measured {} exceeds frozen T4 baseline {}",
             f.name,
             t4_blob.len(),
             f.t4_bytes

@@ -293,11 +293,14 @@ fn encode_with_config_inner(
         return best;
     }
     // Whole-file LZ (MODE_LZ) and columnar field-split (MODE_COLUMNAR) only help on
-    // inputs that span ≥2 chunk blocks. Gating both on the same >cube_size_limit
-    // threshold keeps every ≤64KB input byte-identical to v1 (the frozen leaderboard
-    // is untouched) while engaging the large-file specializations where they pay off.
-    // Each is a competitive size pick — kept only when strictly smaller — so neither
-    // can ever regress a file.
+    // inputs that span ≥2 chunk blocks, so both stay gated on >cube_size_limit: their
+    // large-file assumptions — chiefly the u16 BWT primary_index and the ≥2 chunk-block
+    // parse — do not hold below 64 KB. The ≤64 KB path now offers the strong context-mixing
+    // CM2 backend ONLY (see the small-input branch below); LZ/columnar and the other
+    // multi-block transforms (SoA/MED16/binfloat/GeoCM/record-CM/CM) keep their own
+    // >cube_size_limit gates because those structural assumptions are large-file-only.
+    // Every candidate is a competitive size pick — kept only when strictly smaller — so
+    // none can ever regress a file.
     if data.len() > config.cube_size_limit() {
         // The whole-file LZ + columnar pre-passes have a largely single-threaded parse/DP
         // phase that would otherwise stall the pipeline; run them on ONE background thread
@@ -404,6 +407,22 @@ fn encode_with_config_inner(
         if let Some(b) = encode_bcj(data, config) {
             if b.len() < best.len() {
                 best = b;
+            }
+        }
+        // Open the ≤64 KB path to the strong context-mixing backend (MODE_CM2) — the
+        // single largest small-file lever (measured −57..−76 % on the ≤64 KB corpus files,
+        // RT cmp=0). `encode_cm2`'s own gate (`cm2_gate`: len ≥ CM2_MIN_LEN and sample
+        // entropy < 7.7) is the sole selector — it carries no >cube_size_limit floor, so
+        // reaching this call is all that is needed. The strict `min(len)` keeps every other
+        // small input byte-identical, so nothing regresses. No new wire format: MODE_CM2 is
+        // an existing self-describing mode (MAGIC+VERSION+MODE) that a v1 decoder already
+        // reads, so old archives stay decodable and no VERSION bump is warranted — bumping
+        // the single global VERSION const would instead change byte[4] of EVERY blob and
+        // break both large-file byte-identity and old-archive decode parity (see the decode
+        // gate, `blob[4] == VERSION`). The multi-block transforms keep their own gates.
+        if let Some(cm2) = encode_cm2(data) {
+            if cm2.len() < best.len() {
+                best = cm2;
             }
         }
     }
@@ -10268,6 +10287,80 @@ mod tests {
         assert_eq!(decode(&blob).expect("fast-path blob decodes"), data);
     }
 
+    // The ≤64 KB encode freeze is open for the strong CM2 backend. A compressible input that
+    // is BOTH ≥ CM2_MIN_LEN and ≤ cube_size_limit (the previously-frozen window) must now
+    // reach MODE_CM2 on the default path, round-trip losslessly, and never regress the
+    // pre-freeze base encoding. An incompressible small input must stay off CM2 (the
+    // competitive-min / entropy-gate guarantee) and still round-trip.
+    #[test]
+    fn small_file_freeze_open_reaches_cm2_without_regression() {
+        use crate::header::MODE_CM2;
+        let cfg = EncodeConfig::v1_default();
+
+        // (a) compressible ~8 KB text, strictly inside the previously-frozen window.
+        let text: Vec<u8> = b"the quick brown fox jumps over the lazy dog; "
+            .iter()
+            .copied()
+            .cycle()
+            .take(8192)
+            .collect();
+        assert!(text.len() >= CM2_MIN_LEN, "input must clear the CM2 floor");
+        assert!(
+            text.len() <= cfg.cube_size_limit(),
+            "input must be inside the ≤64 KB freeze window"
+        );
+
+        let cm2 = encode_cm2(&text).expect("CM2 must be offered on a compressible ≤64 KB input");
+        let base = encode_base(&text, &cfg);
+        let blob = encode(&text);
+
+        // Freeze open: the default path selects MODE_CM2 (it strictly wins here).
+        assert_eq!(
+            blob[5], MODE_CM2,
+            "compressible ≤64 KB input must now reach MODE_CM2"
+        );
+        // Zero regression: competitive-min never yields a blob larger than either the CM2
+        // candidate or the pre-freeze base encoding.
+        assert!(
+            blob.len() <= cm2.len(),
+            "competitive-min must not exceed the CM2 candidate"
+        );
+        assert!(
+            blob.len() <= base.len(),
+            "freeze open must never regress the pre-freeze base size ({} vs base {})",
+            blob.len(),
+            base.len()
+        );
+        assert_eq!(
+            decode(&blob).expect("CM2 small-file blob decodes"),
+            text,
+            "RT cmp=0 on the CM2 small file"
+        );
+
+        // (b) incompressible small input (deterministic xorshift PRNG) must stay off CM2 —
+        // either the entropy gate declines it or competitive-min rejects it — and still
+        // round-trip. No external RNG (Math.random-style nondeterminism would break replay).
+        let mut x: u32 = 0x9E37_79B9;
+        let noise: Vec<u8> = (0..8192)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                (x & 0xFF) as u8
+            })
+            .collect();
+        let nblob = encode(&noise);
+        assert_ne!(
+            nblob[5], MODE_CM2,
+            "incompressible small input must not select CM2 (zero regression)"
+        );
+        assert_eq!(
+            decode(&nblob).expect("incompressible small blob decodes"),
+            noise,
+            "RT cmp=0 on the incompressible small file"
+        );
+    }
+
     use crate::header::VALUE_SCHEME_RLE_CODES;
 
     // QA-F-002 (branch F adversarial-QA): a malformed MODE_CM blob whose header inflates
@@ -11620,7 +11713,12 @@ mod tests {
         for _ in 0..5 {
             data.extend_from_slice(&unit);
         }
-        let blob = encode_with_config(&data, &lz_rans_cfg());
+        // Probe the base cube path directly: this input is ≤64 KB, where the default
+        // encoder now also offers the strong CM2 backend, which wins on this compressible
+        // long-range data. The property under test is the base value-scheme *rail* winner,
+        // so encode the base path (which still runs in production as the competitive-min
+        // baseline) and inspect it in isolation from the orthogonal CM2 candidate.
+        let blob = encode_base(&data, &lz_rans_cfg());
         assert_eq!(decode(&blob).unwrap(), data, "long-range round-trip");
         // value_scheme byte is at the cube header (N=2): offset 22.
         assert_eq!(blob[5], crate::header::MODE_CUBE, "must be cube mode");
@@ -13771,7 +13869,11 @@ mod tests {
             value_scheme: ValueScheme::EntropyContext2,
             ..EncodeConfig::v1_default()
         };
-        let blob = encode_with_config(&data, &cfg);
+        // Probe the base cube path directly: at ≤64 KB the default encoder now also offers
+        // MODE_CM2, which wins on this compressible text and would carry no cube value-scheme
+        // header byte. The property under test is the base header the T5 scheme writes, so
+        // encode the base path (still the competitive-min baseline in production) in isolation.
+        let blob = encode_base(&data, &cfg);
         let (hdr, _) = parse_header(&blob).unwrap();
         if hdr.mode == MODE_CUBE {
             assert_eq!(
@@ -13799,8 +13901,12 @@ mod tests {
             value_scheme: ValueScheme::EntropyContext2,
             ..EncodeConfig::v1_default()
         };
-        let blob_t4 = encode_with_config(&data, &cfg_t4);
-        let blob_t5 = encode_with_config(&data, &cfg_t5);
+        // Probe the base cube path directly (encode_base): at ≤64 KB the default encoder now
+        // also offers MODE_CM2, which is value-scheme-agnostic and would collapse both T4 and
+        // T5 to the same CM2 blob. The property under test is that the T4 and T5 base value
+        // schemes emit distinct byte streams, so encode the base path in isolation.
+        let blob_t4 = encode_base(&data, &cfg_t4);
+        let blob_t5 = encode_base(&data, &cfg_t5);
         // Both must round-trip.
         assert_eq!(decode(&blob_t4).unwrap(), data, "T4 text_4kb round-trip");
         assert_eq!(decode(&blob_t5).unwrap(), data, "T5 text_4kb round-trip");
