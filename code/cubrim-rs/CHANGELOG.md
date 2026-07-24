@@ -62,6 +62,20 @@ valid archive, and the guards only enforce invariants that hold for all of them.
   6.3 GB of resident memory over more than a minute is now rejected in 0.00 s at
   3.9 MB.
 
+- **`MODE_GEOCM` expansion bound**, enforced ahead of every dispatch. The image
+  codec is a separate module and so sat outside the `MODE_CM2` bound above: its
+  declared length sized both the output vector and the model tables before any
+  content was validated. The factor is calibrated the same way, against a measured
+  worst ratio of 2752x. A 68-byte hostile archive is now rejected in 0.00 s at
+  3.9 MB, and its range decoder gained the same saturating progress counter and
+  stall detector.
+- **Container nesting depth limit (32).** Modes that wrap a nested sub-blob could
+  be chained by a crafted archive until the decoder exhausted the stack and the
+  process died on a signal rather than returning an error. A depth counter inside
+  `decode` now covers every recursive path at once: a 451-byte archive nesting 40
+  branch-filter containers returns a clean error instead of crashing, while the
+  legitimate two-level nesting the executable path relies on is unaffected.
+
 ### Fixed
 
 - **The `MODE_CM2` stall detector could never fire.** It compared the range
