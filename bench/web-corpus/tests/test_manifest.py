@@ -1,7 +1,10 @@
 import hashlib
+import importlib.util
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -39,11 +42,54 @@ REQUIRED_FIELDS = {
     "redistributable",
 }
 
+VERIFIER_SPEC = importlib.util.spec_from_file_location(
+    "web_corpus_verify_manifest",
+    CORPUS_ROOT / "verify_manifest.py",
+)
+VERIFIER = importlib.util.module_from_spec(VERIFIER_SPEC)
+VERIFIER_SPEC.loader.exec_module(VERIFIER)
+
 
 def load_manifest():
     if not MANIFEST_PATH.is_file():
         raise AssertionError(f"missing manifest: {MANIFEST_PATH}")
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+
+def write_manifest_and_checksum(corpus_root, manifest):
+    canonical = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    (corpus_root / "manifest.v1.json").write_bytes(canonical)
+    digest = hashlib.sha256(canonical).hexdigest()
+    (corpus_root / "MANIFEST.sha256").write_text(
+        f"{digest}  bench/web-corpus/manifest.v1.json\n",
+        encoding="ascii",
+    )
+
+
+def copy_corpus_to_temporary_repository(temporary_directory):
+    repository_root = Path(temporary_directory)
+    corpus_root = repository_root / "bench" / "web-corpus"
+    shutil.copytree(
+        CORPUS_ROOT,
+        corpus_root,
+        ignore=shutil.ignore_patterns("tests", "__pycache__"),
+    )
+    return repository_root, corpus_root
+
+
+def run_verifier(repository_root, corpus_root):
+    return subprocess.run(
+        [sys.executable, str(corpus_root / "verify_manifest.py"), "--check"],
+        cwd=repository_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 class WebCorpusManifestTests(unittest.TestCase):
@@ -110,15 +156,72 @@ class WebCorpusManifestTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(canonical).hexdigest(), checksum_parts[0])
 
     def test_stdlib_verifier_accepts_frozen_corpus(self):
-        completed = subprocess.run(
-            [sys.executable, str(CORPUS_ROOT / "verify_manifest.py"), "--check"],
-            cwd=CORPUS_ROOT.parents[1],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        completed = run_verifier(CORPUS_ROOT.parents[1], CORPUS_ROOT)
         self.assertEqual(0, completed.returncode, completed.stderr or completed.stdout)
         self.assertIn("verified 8 samples", completed.stdout)
+
+    def test_verifier_rejects_parent_traversal_path(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository_root, corpus_root = copy_corpus_to_temporary_repository(
+                temporary_directory
+            )
+            escaped_payload = corpus_root / "escaped.html"
+            escaped_payload.write_bytes(
+                (corpus_root / "payloads" / "document.small.html").read_bytes()
+            )
+            manifest = json.loads(
+                (corpus_root / "manifest.v1.json").read_text(encoding="utf-8")
+            )
+            manifest["samples"][0]["path"] = "payloads/../escaped.html"
+            write_manifest_and_checksum(corpus_root, manifest)
+
+            completed = run_verifier(repository_root, corpus_root)
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("normalized path beneath payloads/", completed.stderr)
+
+    def test_verifier_rejects_symlink_escaping_payload_root(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository_root, corpus_root = copy_corpus_to_temporary_repository(
+                temporary_directory
+            )
+            escaped_payload = repository_root / "escaped.html"
+            escaped_payload.write_bytes(
+                (corpus_root / "payloads" / "document.small.html").read_bytes()
+            )
+            symlink_path = corpus_root / "payloads" / "escaped.html"
+            symlink_path.symlink_to(escaped_payload)
+            manifest = json.loads(
+                (corpus_root / "manifest.v1.json").read_text(encoding="utf-8")
+            )
+            manifest["samples"][0]["path"] = "payloads/escaped.html"
+            write_manifest_and_checksum(corpus_root, manifest)
+
+            completed = run_verifier(repository_root, corpus_root)
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("path escapes payloads/", completed.stderr)
+
+    def test_size_classification_includes_every_boundary_and_rejects_outliers(self):
+        expected_classes = {
+            1_024: "small",
+            10_240: "small",
+            10_241: "medium",
+            262_144: "medium",
+            262_145: "large",
+            2_097_152: "large",
+        }
+        for byte_count, expected_class in expected_classes.items():
+            with self.subTest(byte_count=byte_count):
+                self.assertEqual(
+                    expected_class,
+                    VERIFIER.classify_size(byte_count),
+                )
+
+        for byte_count in (1_023, 2_097_153):
+            with self.subTest(byte_count=byte_count):
+                with self.assertRaises(VERIFIER.VerificationError):
+                    VERIFIER.classify_size(byte_count)
 
 
 if __name__ == "__main__":

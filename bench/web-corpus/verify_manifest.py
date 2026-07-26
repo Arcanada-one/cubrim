@@ -68,6 +68,18 @@ def require(condition, message):
         raise VerificationError(message)
 
 
+def classify_size(byte_count):
+    """Return the inclusive corpus size class for a byte count."""
+    require(
+        isinstance(byte_count, int) and not isinstance(byte_count, bool),
+        "byte_count must be an integer",
+    )
+    for size_class, (lower, upper) in SIZE_CLASS_BOUNDS.items():
+        if lower <= byte_count <= upper:
+            return size_class
+    raise VerificationError("byte_count is outside the supported size classes")
+
+
 def load_manifest():
     try:
         manifest_bytes = MANIFEST_PATH.read_bytes()
@@ -134,14 +146,10 @@ def verify_sample(sample, index):
         and SHA256_PATTERN.fullmatch(sample["sha256"]) is not None,
         f"{label}.sha256 must be a lowercase SHA-256 digest",
     )
+    expected_size_class = classify_size(sample["byte_count"])
     require(
-        sample["size_class"] in SIZE_CLASS_BOUNDS,
-        f"{label}.size_class is unknown",
-    )
-    lower, upper = SIZE_CLASS_BOUNDS[sample["size_class"]]
-    require(
-        lower <= sample["byte_count"] <= upper,
-        f"{label}.byte_count is outside its size class",
+        sample["size_class"] == expected_size_class,
+        f"{label}.size_class does not match byte_count",
     )
 
     manifest_path = sample["path"]
