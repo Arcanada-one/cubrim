@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import math
 import os
@@ -594,13 +593,7 @@ def _summary_rows(
                 },
                 "sample_count": len(values),
                 "trial_numbers": trial_numbers,
-                "values_sha256": hashlib.sha256(
-                    json.dumps(
-                        values,
-                        separators=(",", ":"),
-                        allow_nan=False,
-                    ).encode("utf-8")
-                ).hexdigest(),
+                "values_sha256": stable_fingerprint(values),
             }
         )
     return summaries

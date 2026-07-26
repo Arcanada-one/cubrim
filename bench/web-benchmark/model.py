@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
+import struct
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +18,10 @@ PHASE_A_WARMUPS = 3
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 CODE_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+CANONICAL_KEY_RE = re.compile(r"^[\x20-\x7e]+$")
+MAX_SAFE_INTEGER = (1 << 53) - 1
+FLOAT64_TAG = "$float64"
+CANONICAL_FINGERPRINT_CONTRACT = "cubrim-canonical-json-v1"
 
 
 class RoundTripError(ValueError):
@@ -200,8 +207,68 @@ def require_finite_nonnegative(value: object, label: str) -> float:
     return number
 
 
-def stable_fingerprint(value: object) -> str:
-    import json
+def canonical_json_bytes(value: object) -> bytes:
+    """Encode the cross-runtime ``cubrim-canonical-json-v1`` contract.
 
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    Object keys are printable ASCII, reserved ``$float64`` is rejected, and
+    keys are sorted lexically. Safe integers remain JSON numbers. Integral
+    finite floats normalize to safe integers; other finite floats normalize to
+    ``{"$float64": "<big-endian IEEE-754 binary64 hex>"}``. Arrays preserve
+    order, strings use UTF-8 without ASCII escaping, and unsupported,
+    nonfinite, or JavaScript-unsafe values fail closed.
+    """
+
+    normalized = _canonical_value(value)
+    return json.dumps(
+        normalized,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _canonical_value(value: object) -> object:
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("canonical strings must be valid UTF-8") from exc
+        return value
+    if isinstance(value, int):
+        if abs(value) > MAX_SAFE_INTEGER:
+            raise ValueError("canonical integers must be JavaScript-safe")
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("canonical floats must be finite")
+        if value.is_integer():
+            integer = int(value)
+            if abs(integer) > MAX_SAFE_INTEGER:
+                raise ValueError("canonical integral floats must be JavaScript-safe")
+            return integer
+        return {FLOAT64_TAG: struct.pack(">d", value).hex()}
+    if isinstance(value, (list, tuple)):
+        return [_canonical_value(item) for item in value]
+    if isinstance(value, Mapping):
+        keys = list(value)
+        if any(
+            not isinstance(key, str)
+            or not CANONICAL_KEY_RE.fullmatch(key)
+            or key == FLOAT64_TAG
+            for key in keys
+        ):
+            raise ValueError(
+                "canonical object keys must be printable ASCII and not reserved"
+            )
+        normalized = {}
+        for key in sorted(keys):
+            normalized[key] = _canonical_value(value[key])
+        return normalized
+    raise ValueError(f"unsupported canonical value type: {type(value).__name__}")
+
+
+def stable_fingerprint(value: object) -> str:
+    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
