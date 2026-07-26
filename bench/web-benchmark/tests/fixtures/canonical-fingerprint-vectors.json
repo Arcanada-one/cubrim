@@ -1,0 +1,41 @@
+{
+  "contract": "cubrim-canonical-json-v1",
+  "vectors": [
+    {
+      "name": "integral-admission-floats",
+      "input": {
+        "environment": {
+          "admission": {
+            "accepted": true,
+            "load_1m": 1.0,
+            "temperature_c": 40.0
+          },
+          "affinity": [0, 1],
+          "code_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "cpu": "x86_64",
+          "os": "Linux"
+        }
+      },
+      "canonical_json": "{\"environment\":{\"admission\":{\"accepted\":true,\"load_1m\":1,\"temperature_c\":40},\"affinity\":[0,1],\"code_sha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"cpu\":\"x86_64\",\"os\":\"Linux\"}}",
+      "sha256": "d95c50d30e9e88adab27f1cb986420a001da835dee48889d8d7ebde58d0c8bd7"
+    },
+    {
+      "name": "nonintegral-ieee754-and-unicode",
+      "input": {
+        "fraction": 0.1,
+        "negative": -2.5,
+        "unicode": "Кубрим"
+      },
+      "canonical_json": "{\"fraction\":{\"$float64\":\"3fb999999999999a\"},\"negative\":{\"$float64\":\"c004000000000000\"},\"unicode\":\"Кубрим\"}",
+      "sha256": "3918402b8e03dc3160a58e6c2106ae339009fa63cb3a3cfa76b1db33be08305e"
+    },
+    {
+      "name": "nested-values",
+      "input": {
+        "nested": [1.0, 0.1, null, true]
+      },
+      "canonical_json": "{\"nested\":[1,{\"$float64\":\"3fb999999999999a\"},null,true]}",
+      "sha256": "0af6a3eb21c762e5fb13d0fe6f6cc5ccf5c923db9f07c1cab8a182c78f4a8299"
+    }
+  ]
+}
