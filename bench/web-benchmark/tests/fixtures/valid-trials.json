@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "scope": "resource_codec",
+  "environment": {
+    "code_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "host": "Arcana-DEVS",
+    "cpu": "fixture-cpu",
+    "os": "fixture-os",
+    "affinity": [0],
+    "admission": {
+      "load_1m": 0.1,
+      "temperature_c": 40.0,
+      "accepted": true
+    }
+  },
+  "resource_results": [
+    {
+      "sample_id": "sample-a",
+      "codec_key": "gzip",
+      "trial_no": 1,
+      "randomized_order": 4,
+      "runner_code_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "codec_code_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "original_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "compressed_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "decoded_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "original_bytes": 100,
+      "compressed_bytes": 10,
+      "decoded_bytes": 100,
+      "roundtrip_exact": true,
+      "metrics": {
+        "compressed_bytes": 10,
+        "compression_duration": 1,
+        "decompression_duration": 0.5,
+        "peak_memory": 4096
+      }
+    },
+    {
+      "sample_id": "sample-a",
+      "codec_key": "gzip",
+      "trial_no": 2,
+      "randomized_order": 2,
+      "runner_code_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "codec_code_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "original_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "compressed_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "decoded_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "original_bytes": 100,
+      "compressed_bytes": 20,
+      "decoded_bytes": 100,
+      "roundtrip_exact": true,
+      "metrics": {
+        "compressed_bytes": 20,
+        "compression_duration": 2,
+        "decompression_duration": 1,
+        "peak_memory": 4096
+      }
+    },
+    {
+      "sample_id": "sample-a",
+      "codec_key": "gzip",
+      "trial_no": 3,
+      "randomized_order": 1,
+      "runner_code_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "codec_code_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "original_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "compressed_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "decoded_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "original_bytes": 100,
+      "compressed_bytes": 30,
+      "decoded_bytes": 100,
+      "roundtrip_exact": true,
+      "metrics": {
+        "compressed_bytes": 30,
+        "compression_duration": 3,
+        "decompression_duration": 1.5,
+        "peak_memory": 4096
+      }
+    },
+    {
+      "sample_id": "sample-a",
+      "codec_key": "gzip",
+      "trial_no": 4,
+      "randomized_order": 5,
+      "runner_code_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "codec_code_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "original_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "compressed_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "decoded_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "original_bytes": 100,
+      "compressed_bytes": 40,
+      "decoded_bytes": 100,
+      "roundtrip_exact": true,
+      "metrics": {
+        "compressed_bytes": 40,
+        "compression_duration": 4,
+        "decompression_duration": 2,
+        "peak_memory": 4096
+      }
+    },
+    {
+      "sample_id": "sample-a",
+      "codec_key": "gzip",
+      "trial_no": 5,
+      "randomized_order": 3,
+      "runner_code_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "codec_code_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "original_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "compressed_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "decoded_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "original_bytes": 100,
+      "compressed_bytes": 50,
+      "decoded_bytes": 100,
+      "roundtrip_exact": true,
+      "metrics": {
+        "compressed_bytes": 50,
+        "compression_duration": 5,
+        "decompression_duration": 2.5,
+        "peak_memory": 4096
+      }
+    }
+  ],
+  "page_results": {
+    "explicit_wasm_application": [],
+    "transparent_http_page": []
+  }
+}

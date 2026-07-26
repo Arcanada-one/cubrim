@@ -1,0 +1,121 @@
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+BENCH_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BENCH_DIR))
+
+from adapters import adapter_for
+from capabilities import (
+    PHASE_A_CODECS,
+    energy_capability,
+    first_decoded_byte_ms,
+    validate_codec_attribution,
+)
+
+
+class AttributionGateTests(unittest.TestCase):
+    def test_phase_a_allowlist_is_exact(self):
+        self.assertEqual(PHASE_A_CODECS, ("gzip", "brotli", "zstd"))
+
+    def test_cubrim_web_requires_a_real_profile_capability(self):
+        with self.assertRaisesRegex(ValueError, "real Web Profile"):
+            validate_codec_attribution("Cubrim-Web", {})
+        with self.assertRaisesRegex(ValueError, "real Web Profile"):
+            validate_codec_attribution(
+                "Cubrim-Web",
+                {"web_profile": True, "web_profile_version": "pending"},
+            )
+
+        validate_codec_attribution(
+            "Cubrim-Web",
+            {
+                "web_profile": True,
+                "web_profile_version": "1",
+                "encode": True,
+                "decode": True,
+            },
+        )
+
+    def test_codec_argv_matches_the_preregistered_commands(self):
+        path = Path("/tmp/input.bin")
+        self.assertEqual(adapter_for("gzip").compress_argv(path), ("gzip", "-9", "-c", str(path)))
+        self.assertEqual(adapter_for("gzip").decompress_argv(path), ("gzip", "-d", "-c", str(path)))
+        self.assertEqual(
+            adapter_for("brotli").compress_argv(path),
+            ("brotli", "--quality=11", "--stdout", str(path)),
+        )
+        self.assertEqual(
+            adapter_for("brotli").decompress_argv(path),
+            ("brotli", "--decompress", "--stdout", str(path)),
+        )
+        self.assertEqual(
+            adapter_for("zstd").compress_argv(path),
+            ("zstd", "-19", "--quiet", "--stdout", str(path)),
+        )
+        self.assertEqual(
+            adapter_for("zstd").decompress_argv(path),
+            ("zstd", "--decompress", "--quiet", "--stdout", str(path)),
+        )
+
+    def test_installed_releases_map_to_verified_upstream_source_commits(self):
+        expected = {
+            "gzip": "80006351d3bb5d9099b74c41fefd6649424a9a28",
+            "brotli": "ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
+            "zstd": "63779c798237346c2b245c546c40b72a5a5913fe",
+        }
+        for codec, source_commit in expected.items():
+            with self.subTest(codec=codec):
+                identity = adapter_for(codec).identity()
+                self.assertEqual(identity.codec_code_sha, source_commit)
+                self.assertIn(source_commit, identity.source_reference)
+                self.assertRegex(identity.binary_sha256, r"^[0-9a-f]{64}$")
+
+    def test_cli_or_package_version_mismatch_fails_closed(self):
+        with patch("adapters._tool_version", return_value="gzip 9.99"):
+            with self.assertRaisesRegex(ValueError, "version mismatch"):
+                adapter_for("gzip").identity()
+        with patch(
+            "adapters._package_provenance",
+            return_value=("gzip", "1.12-unknown"),
+        ):
+            with self.assertRaisesRegex(ValueError, "package mismatch"):
+                adapter_for("gzip").identity()
+
+    def test_first_decoded_byte_requires_incremental_nonempty_output(self):
+        with self.assertRaisesRegex(ValueError, "incremental"):
+            first_decoded_byte_ms(False, 100, [(200, b"payload")])
+        with self.assertRaisesRegex(ValueError, "non-empty"):
+            first_decoded_byte_ms(True, 100, [(200, b""), (300, b"")])
+
+        self.assertEqual(
+            first_decoded_byte_ms(True, 100, [(150, b""), (350_100, b"x")]),
+            0.35,
+        )
+
+    def test_energy_requires_readable_rapl_and_calibration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            counter = Path(directory) / "energy_uj"
+            counter.write_text("12345\n", encoding="utf-8")
+            self.assertIsNone(energy_capability(counter, None))
+            capability = energy_capability(
+                counter,
+                {"baseline_joules": 0.01, "batch_duration_ms": 250},
+            )
+            self.assertEqual(capability["counter_path"], str(counter))
+            self.assertEqual(capability["initial_energy_uj"], 12345)
+
+            counter.write_text("not-a-number\n", encoding="utf-8")
+            self.assertIsNone(
+                energy_capability(
+                    counter,
+                    {"baseline_joules": 0.01, "batch_duration_ms": 250},
+                )
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
