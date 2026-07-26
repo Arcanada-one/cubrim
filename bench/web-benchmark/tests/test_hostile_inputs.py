@@ -14,7 +14,31 @@ sys.path.insert(0, str(BENCH_DIR))
 from model import enforce_size_limits, resolve_contained
 from run import RedactedJournal, load_samples
 from adapters import SubprocessExecutor
-from sandbox_exec import CODEC_ENV
+import sandbox_exec
+from sandbox_exec import CODEC_ENV, MANDATORY_NETWORK_SYSCALLS
+
+
+class FakeCFunction:
+    def __init__(self, implementation):
+        self.implementation = implementation
+
+    def __call__(self, *args):
+        return self.implementation(*args)
+
+
+class FakeSeccompLibrary:
+    def __init__(self, unresolved: bytes):
+        self.released = False
+        self.seccomp_init = FakeCFunction(lambda _action: 1)
+        self.seccomp_rule_add = FakeCFunction(lambda *_args: 0)
+        self.seccomp_syscall_resolve_name = FakeCFunction(
+            lambda name: -1 if name == unresolved else 1
+        )
+        self.seccomp_load = FakeCFunction(lambda _context: 0)
+        self.seccomp_release = FakeCFunction(self._release)
+
+    def _release(self, _context):
+        self.released = True
 
 
 class HostileInputTests(unittest.TestCase):
@@ -64,13 +88,11 @@ class HostileInputTests(unittest.TestCase):
         except (OSError, PermissionError):
             self.skipTest("user systemd PrivateNetwork sandbox is unavailable")
         code = (
-            "import socket,sys\n"
+            "import errno,socket,sys\n"
             "try:\n"
-            "    sock=socket.socket()\n"
-            "    sock.settimeout(0.2)\n"
-            "    sock.connect(('1.1.1.1',53))\n"
-            "except OSError:\n"
-            "    sys.exit(0)\n"
+            "    socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n"
+            "except OSError as exc:\n"
+            "    sys.exit(0 if exc.errno == errno.EPERM else 8)\n"
             "sys.exit(7)\n"
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -88,6 +110,22 @@ class HostileInputTests(unittest.TestCase):
                 "e3b0c44298fc1c149afbf4c8996fb924"
                 "27ae41e4649b934ca495991b7852b855",
             )
+
+    def test_seccomp_fails_closed_when_any_mandatory_syscall_is_unresolved(self):
+        for syscall in MANDATORY_NETWORK_SYSCALLS:
+            with self.subTest(syscall=syscall):
+                library = FakeSeccompLibrary(unresolved=syscall)
+                with unittest.mock.patch.object(
+                    sandbox_exec.ctypes,
+                    "CDLL",
+                    return_value=library,
+                ):
+                    with self.assertRaisesRegex(
+                        OSError,
+                        f"resolve mandatory network syscall {syscall.decode('ascii')}",
+                    ):
+                        sandbox_exec._install_network_seccomp()
+                self.assertTrue(library.released)
 
     def test_paths_must_remain_inside_the_corpus_root(self):
         with tempfile.TemporaryDirectory() as directory:

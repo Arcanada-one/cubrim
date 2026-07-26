@@ -20,6 +20,20 @@ CODEC_ENV = {
     "LANG": "C",
     "PATH": "/usr/bin:/bin",
 }
+MANDATORY_NETWORK_SYSCALLS = (
+    b"socket",
+    b"socketpair",
+    b"connect",
+    b"bind",
+    b"listen",
+    b"accept",
+    b"accept4",
+    b"sendto",
+    b"sendmsg",
+    b"recvfrom",
+    b"recvmsg",
+    b"shutdown",
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -65,23 +79,13 @@ def _install_network_seccomp() -> None:
     if not context:
         raise OSError("cannot initialize seccomp network policy")
     try:
-        for syscall in (
-            b"socket",
-            b"socketpair",
-            b"connect",
-            b"bind",
-            b"listen",
-            b"accept",
-            b"accept4",
-            b"sendto",
-            b"sendmsg",
-            b"recvfrom",
-            b"recvmsg",
-            b"shutdown",
-        ):
+        for syscall in MANDATORY_NETWORK_SYSCALLS:
             number = library.seccomp_syscall_resolve_name(syscall)
             if number < 0:
-                continue
+                raise OSError(
+                    "cannot resolve mandatory network syscall "
+                    f"{syscall.decode('ascii')}"
+                )
             if library.seccomp_rule_add(context, deny, number, 0) != 0:
                 raise OSError(f"cannot deny network syscall {syscall.decode('ascii')}")
         if library.seccomp_load(context) != 0:

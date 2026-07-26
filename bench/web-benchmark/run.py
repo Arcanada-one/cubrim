@@ -292,7 +292,7 @@ class PhaseARunner:
     ) -> dict[str, object]:
         self._run_timing = {"started_at": utc_now(), "completed_at": ""}
         admission = self.environment.get("admission")
-        if isinstance(admission, dict) and admission.get("accepted") is not True:
+        if not isinstance(admission, dict) or admission.get("accepted") is not True:
             self.journal.write("failed_admission", {})
             raise RuntimeError("host admission rejected the benchmark run")
         self.output_root.mkdir(parents=True, exist_ok=True)

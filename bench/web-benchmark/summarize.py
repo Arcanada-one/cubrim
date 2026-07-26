@@ -17,7 +17,13 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable
 
 from capabilities import PHASE_A_CODECS
-from model import CODE_SHA_RE, SHA256_RE, require_finite_nonnegative, stable_fingerprint
+from model import (
+    CODE_SHA_RE,
+    SHA256_RE,
+    hash_file,
+    require_finite_nonnegative,
+    stable_fingerprint,
+)
 
 
 PHASE_A_METRICS = (
@@ -26,6 +32,22 @@ PHASE_A_METRICS = (
     "compression_duration",
     "decompression_duration",
     "peak_memory",
+)
+CANONICAL_MANIFEST_PATH = (
+    Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v1.json"
+)
+CANONICAL_MANIFEST_SHA256 = (
+    "9a0fcb56b9af5c98cd987d1ad289f5adde4b073480646fb472d784b0bbf58599"
+)
+CANONICAL_SAMPLE_IDENTITIES = (
+    ("html-small-v1", "payloads/document.small.html"),
+    ("css-medium-v1", "payloads/styles.medium.css"),
+    ("javascript-small-v1", "payloads/app.small.js"),
+    ("source-map-small-v1", "payloads/app.small.js.map"),
+    ("json-api-large-v1", "payloads/api-response.large.json"),
+    ("svg-medium-v1", "payloads/vector.medium.svg"),
+    ("wasm-small-v1", "payloads/module.small.wasm"),
+    ("woff2-medium-inter-latin-v20", "payloads/inter-latin.medium.woff2"),
 )
 RESOURCE_METRIC_UNITS = {
     "compressed_bytes": "bytes",
@@ -147,6 +169,7 @@ def verify_bundle(
     bundle: dict[str, object],
     *,
     require_summaries: bool = True,
+    require_canonical_corpus: bool = False,
 ) -> None:
     _require_exact_fields(bundle, TOP_LEVEL_FIELDS, "bundle")
     if bundle["schema_version"] != 1 or bundle["scope"] != "resource_codec":
@@ -156,6 +179,8 @@ def verify_bundle(
     run_timing = _verify_run_timing(bundle["run_timing"])
     _verify_environment(bundle["environment"])
     samples = _verify_corpus(bundle["corpus"])
+    if require_canonical_corpus:
+        _verify_canonical_corpus(bundle["corpus"])
     tools = _verify_toolchain(bundle["toolchain"])
     protocol = _verify_protocol(bundle["protocol"])
     _verify_applicability(bundle["applicability"])
@@ -283,6 +308,27 @@ def _verify_corpus(value: object) -> dict[str, dict[str, object]]:
     return samples
 
 
+def _verify_canonical_corpus(value: object) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("production bundle requires the canonical corpus")
+    if hash_file(CANONICAL_MANIFEST_PATH) != CANONICAL_MANIFEST_SHA256:
+        raise ValueError("checked-in canonical manifest does not match its pinned digest")
+    manifest = json.loads(CANONICAL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    rows = value["samples"]
+    identities = tuple((row["sample_id"], row["path"]) for row in rows)
+    if (
+        value["manifest_name"] != CANONICAL_MANIFEST_PATH.name
+        or value["manifest_sha256"] != CANONICAL_MANIFEST_SHA256
+        or value["manifest_schema_version"] != manifest["schema_version"]
+        or value["sample_count"] != len(CANONICAL_SAMPLE_IDENTITIES)
+        or identities != CANONICAL_SAMPLE_IDENTITIES
+        or rows != manifest["samples"]
+    ):
+        raise ValueError(
+            "production bundle corpus does not match the canonical manifest and samples"
+        )
+
+
 def _verify_toolchain(value: object) -> dict[str, dict[str, object]]:
     if not isinstance(value, list) or len(value) != len(PHASE_A_CODECS):
         raise ValueError("toolchain must contain exactly the Phase A codecs")
@@ -354,8 +400,14 @@ def _verify_protocol(value: object) -> dict[str, object]:
     _require_exact_fields(value, PROTOCOL_FIELDS, "protocol")
     if value["codecs"] != list(PHASE_A_CODECS):
         raise ValueError("protocol codec allowlist is invalid")
-    if value["warmups"] != 3 or value["trials_per_cell"] != 30:
-        raise ValueError("protocol requires exactly 3 warmups and 30 trials")
+    trials_per_cell = value["trials_per_cell"]
+    if (
+        value["warmups"] != 3
+        or isinstance(trials_per_cell, bool)
+        or not isinstance(trials_per_cell, int)
+        or trials_per_cell < 30
+    ):
+        raise ValueError("protocol requires exactly 3 warmups and at least 30 trials")
     if isinstance(value["randomized_order_seed"], bool) or not isinstance(
         value["randomized_order_seed"], int
     ):
@@ -422,7 +474,7 @@ def _verify_trials(
         if (
             isinstance(trial["trial_no"], bool)
             or not isinstance(trial["trial_no"], int)
-            or not 1 <= trial["trial_no"] <= 30
+            or not 1 <= trial["trial_no"] <= protocol["trials_per_cell"]
         ):
             raise ValueError("trial number is outside Phase A")
         key = (sample_id, codec_key, trial["trial_no"])
@@ -442,14 +494,17 @@ def _verify_trials(
             environment["code_sha"],
             run_timing,
         )
-    expected_trials = set(range(1, 31))
+    expected_trials = set(range(1, protocol["trials_per_cell"] + 1))
     for sample_id in samples:
         for codec_key in PHASE_A_CODECS:
             if cell_trials[(sample_id, codec_key)] != expected_trials:
                 raise ValueError(
-                    f"sample/codec cell requires 30 distinct trials: {sample_id}/{codec_key}"
+                    "sample/codec cell requires the complete configured trial set: "
+                    f"{sample_id}/{codec_key}"
                 )
-    expected_orders = set(range(1, len(samples) * len(tools) * 30 + 1))
+    expected_orders = set(
+        range(1, len(samples) * len(tools) * protocol["trials_per_cell"] + 1)
+    )
     if orders != expected_orders:
         raise ValueError("trial randomized order does not cover the complete schedule")
 
@@ -543,19 +598,28 @@ def finalize_bundle(
     *,
     seed: int = 74074,
     bootstrap_iterations: int = 5_000,
+    require_canonical_corpus: bool = False,
 ) -> dict[str, object]:
     finalized = copy.deepcopy(bundle)
     finalized["protocol"]["randomized_order_seed"] = seed
     finalized["protocol"]["bootstrap_iterations"] = bootstrap_iterations
     finalized["protocol"]["bootstrap_confidence"] = 0.95
     finalized["resource_summaries"] = []
-    verify_bundle(finalized, require_summaries=False)
+    verify_bundle(
+        finalized,
+        require_summaries=False,
+        require_canonical_corpus=require_canonical_corpus,
+    )
     finalized["resource_summaries"] = _summary_rows(
         finalized["resource_results"],
         seed=seed,
         bootstrap_iterations=bootstrap_iterations,
     )
-    verify_bundle(finalized, require_summaries=True)
+    verify_bundle(
+        finalized,
+        require_summaries=True,
+        require_canonical_corpus=require_canonical_corpus,
+    )
     return finalized
 
 
@@ -862,11 +926,16 @@ def main() -> int:
         bundle,
         seed=args.seed,
         bootstrap_iterations=args.bootstrap_iterations,
+        require_canonical_corpus=args.bundle is not None,
     )
     if args.bundle is not None:
         _atomic_write_json(path, finalized)
         verified = json.loads(path.read_text(encoding="utf-8"))
-        verify_bundle(verified, require_summaries=True)
+        verify_bundle(
+            verified,
+            require_summaries=True,
+            require_canonical_corpus=True,
+        )
         print(
             json.dumps(
                 {

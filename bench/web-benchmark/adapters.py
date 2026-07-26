@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -365,6 +367,13 @@ class SubprocessExecutor:
 
     @staticmethod
     def verify_network_sandbox() -> None:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM):
+                pass
+        except OSError as exc:
+            raise PermissionError(
+                "host cannot establish the unsandboxed socket baseline"
+            ) from exc
         completed = subprocess.run(
             (
                 "systemd-run",
@@ -388,13 +397,11 @@ class SubprocessExecutor:
         if completed.returncode != 0:
             raise PermissionError("user systemd PrivateNetwork sandbox is unavailable")
         network_probe = (
-            "import socket,sys\n"
+            "import errno,socket,sys\n"
             "try:\n"
-            "    sock=socket.socket()\n"
-            "    sock.settimeout(0.2)\n"
-            "    sock.connect(('1.1.1.1',53))\n"
-            "except OSError:\n"
-            "    sys.exit(0)\n"
+            "    socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n"
+            "except OSError as exc:\n"
+            f"    sys.exit(0 if exc.errno == {errno.EPERM} else 8)\n"
             "sys.exit(7)\n"
         )
         with tempfile.TemporaryDirectory(prefix="network-sandbox-probe-") as directory:

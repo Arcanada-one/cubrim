@@ -319,6 +319,33 @@ class RunnerTests(unittest.TestCase):
             record = json.loads(journal.path.read_text(encoding="utf-8"))
             self.assertEqual(record, {"reason": "failed_admission"})
 
+    def test_missing_or_non_object_host_admission_fails_before_execution(self):
+        for environment in ({}, {"admission": None}, {"admission": []}):
+            with self.subTest(environment=environment):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    journal = RedactedJournal(root / "journal" / "voids.jsonl")
+                    executor = FakeExecutor(self.payload)
+                    runner = PhaseARunner(
+                        corpus_root=root,
+                        output_root=root / "out",
+                        journal=journal,
+                        runner_code_sha="a" * 40,
+                        environment=environment,
+                        config=RunnerConfig(),
+                        executor=executor,
+                    )
+                    with (
+                        patch.object(executor, "compress") as compress,
+                        patch.object(executor, "decompress") as decompress,
+                        self.assertRaisesRegex(RuntimeError, "admission"),
+                    ):
+                        runner.execute((self.sample,), (FakeAdapter(),))
+                    compress.assert_not_called()
+                    decompress.assert_not_called()
+                    record = json.loads(journal.path.read_text(encoding="utf-8"))
+                    self.assertEqual(record, {"reason": "failed_admission"})
+
 
 if __name__ == "__main__":
     unittest.main()

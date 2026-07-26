@@ -9,6 +9,10 @@ from pathlib import Path
 
 
 BENCH_DIR = Path(__file__).resolve().parents[1]
+CANONICAL_MANIFEST = BENCH_DIR.parent / "web-corpus" / "manifest.v1.json"
+CANONICAL_MANIFEST_SHA256 = (
+    "9a0fcb56b9af5c98cd987d1ad289f5adde4b073480646fb472d784b0bbf58599"
+)
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "valid-trials.json"
 sys.path.insert(0, str(BENCH_DIR))
 
@@ -164,6 +168,50 @@ def canonical_bundle():
     return summarize.finalize_bundle(bundle, bootstrap_iterations=100)
 
 
+def canonical_production_bundle(trials_per_cell=30):
+    bundle = canonical_bundle()
+    manifest = json.loads(CANONICAL_MANIFEST.read_text(encoding="utf-8"))
+    templates = {
+        (trial["codec_key"], trial["trial_no"]): trial
+        for trial in bundle["resource_results"]
+    }
+    trials = []
+    order = 0
+    for sample in manifest["samples"]:
+        for trial_no in range(1, trials_per_cell + 1):
+            for codec in ("gzip", "brotli", "zstd"):
+                order += 1
+                template_trial_no = ((trial_no - 1) % 30) + 1
+                trial = deepcopy(templates[(codec, template_trial_no)])
+                trial.update(
+                    {
+                        "sample_id": sample["sample_id"],
+                        "trial_no": trial_no,
+                        "randomized_order": order,
+                        "original_sha256": sample["sha256"],
+                        "compressed_sha256": f"{order:064x}",
+                        "decoded_sha256": sample["sha256"],
+                        "original_bytes": sample["byte_count"],
+                        "decoded_bytes": sample["byte_count"],
+                    }
+                )
+                trial["metrics"]["compression_ratio"] = (
+                    trial["compressed_bytes"] / sample["byte_count"]
+                )
+                trials.append(trial)
+    bundle["corpus"] = {
+        "manifest_name": CANONICAL_MANIFEST.name,
+        "manifest_sha256": CANONICAL_MANIFEST_SHA256,
+        "manifest_schema_version": manifest["schema_version"],
+        "sample_count": len(manifest["samples"]),
+        "samples": manifest["samples"],
+    }
+    bundle["resource_results"] = trials
+    bundle["resource_summaries"] = []
+    bundle["protocol"]["trials_per_cell"] = trials_per_cell
+    return bundle
+
+
 class SummarizeTests(unittest.TestCase):
     def setUp(self):
         self.bundle = canonical_bundle()
@@ -258,8 +306,57 @@ class SummarizeTests(unittest.TestCase):
     def test_verify_requires_thirty_distinct_trials_per_sample_codec(self):
         incomplete = deepcopy(self.bundle)
         incomplete["resource_results"] = incomplete["resource_results"][:-1]
-        with self.assertRaisesRegex(ValueError, "30 distinct"):
+        with self.assertRaisesRegex(ValueError, "complete configured"):
             verify_bundle(incomplete)
+
+    def test_production_verifier_pins_canonical_manifest_and_sample_identity(self):
+        production = canonical_production_bundle()
+        summarize.verify_bundle(
+            production,
+            require_summaries=False,
+            require_canonical_corpus=True,
+        )
+        self.assertEqual(len(production["resource_results"]), 8 * 3 * 30)
+
+        mutations = (
+            ("digest", lambda value: value["corpus"].__setitem__("manifest_sha256", "f" * 64)),
+            ("count", lambda value: value["corpus"].__setitem__("sample_count", 7)),
+            (
+                "sample ID",
+                lambda value: value["corpus"]["samples"][0].__setitem__(
+                    "sample_id", "substitute"
+                ),
+            ),
+            (
+                "sample path",
+                lambda value: value["corpus"]["samples"][0].__setitem__(
+                    "path", "payloads/substitute.bin"
+                ),
+            ),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label):
+                invalid = deepcopy(production)
+                mutate(invalid)
+                with self.assertRaisesRegex(ValueError, "canonical|sample count"):
+                    summarize.verify_bundle(
+                        invalid,
+                        require_summaries=False,
+                        require_canonical_corpus=True,
+                    )
+
+    def test_fixture_verification_remains_synthetic_and_flexible(self):
+        verify_bundle(self.bundle, require_summaries=True)
+        self.assertEqual(self.bundle["corpus"]["sample_count"], 1)
+
+    def test_production_verifier_accepts_more_than_thirty_trials_per_cell(self):
+        production = canonical_production_bundle(trials_per_cell=31)
+        summarize.verify_bundle(
+            production,
+            require_summaries=False,
+            require_canonical_corpus=True,
+        )
+        self.assertEqual(len(production["resource_results"]), 8 * 3 * 31)
 
     def test_verify_rejects_stale_or_selective_summary(self):
         self.assertTrue(hasattr(summarize, "finalize_bundle"))
@@ -280,7 +377,7 @@ class SummarizeTests(unittest.TestCase):
     def test_bundle_cli_atomically_updates_the_same_bundle_without_losing_trials(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "phase-a.json"
-            raw = deepcopy(self.bundle)
+            raw = canonical_production_bundle()
             raw["resource_summaries"] = []
             path.write_text(json.dumps(raw), encoding="utf-8")
             original_trials = deepcopy(raw["resource_results"])
@@ -303,13 +400,43 @@ class SummarizeTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             finalized = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(finalized["resource_results"], original_trials)
-            verify_bundle(finalized, require_summaries=True)
+            verify_bundle(
+                finalized,
+                require_summaries=True,
+                require_canonical_corpus=True,
+            )
+            self.assertEqual(len(finalized["resource_results"]), 8 * 3 * 30)
             self.assertFalse(list(path.parent.glob(".phase-a.json.*.tmp")))
+
+    def test_bundle_cli_rejects_synthetic_corpus_without_overwriting_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "phase-a.json"
+            synthetic = deepcopy(self.bundle)
+            synthetic["resource_summaries"] = []
+            original = json.dumps(synthetic, sort_keys=True)
+            path.write_text(original, encoding="utf-8")
+            completed = subprocess.run(
+                (
+                    sys.executable,
+                    str(BENCH_DIR / "summarize.py"),
+                    "--verify",
+                    "--bundle",
+                    str(path),
+                ),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                cwd=directory,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("canonical", completed.stderr)
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_bundle_cli_rejects_partial_trial_without_overwriting_input(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "phase-a.json"
-            invalid = deepcopy(self.bundle)
+            invalid = canonical_production_bundle()
             invalid["resource_summaries"] = []
             del invalid["resource_results"][0]["metrics"]["compression_ratio"]
             original = json.dumps(invalid, sort_keys=True)
