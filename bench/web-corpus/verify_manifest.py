@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path, PurePosixPath
@@ -13,7 +14,8 @@ CORPUS_ROOT = Path(__file__).resolve().parent
 REPOSITORY_ROOT = CORPUS_ROOT.parents[1]
 MANIFEST_PATH = CORPUS_ROOT / "manifest.v1.json"
 CHECKSUM_PATH = CORPUS_ROOT / "MANIFEST.sha256"
-PAYLOADS_ROOT = (CORPUS_ROOT / "payloads").resolve()
+PAYLOADS_DIRECTORY = CORPUS_ROOT / "payloads"
+PAYLOADS_ROOT = PAYLOADS_DIRECTORY.resolve()
 MANIFEST_REPOSITORY_PATH = "bench/web-corpus/manifest.v1.json"
 
 EXPECTED_MEDIA_FAMILIES = {
@@ -190,6 +192,35 @@ def verify_sample(sample, index):
     return payload_path
 
 
+def inventory_payload_paths():
+    """Return every regular-file and symlink path without following symlinks."""
+    require(
+        not PAYLOADS_DIRECTORY.is_symlink(),
+        "payloads/ root must not be a symlink",
+    )
+    require(PAYLOADS_DIRECTORY.is_dir(), "payloads/ root must be a directory")
+    inventory = set()
+
+    def walk(directory):
+        try:
+            with os.scandir(directory) as entries:
+                for entry in sorted(entries, key=lambda item: item.name):
+                    relative_path = Path(entry.path).relative_to(CORPUS_ROOT).as_posix()
+                    if entry.is_symlink():
+                        inventory.add(relative_path)
+                    elif entry.is_file(follow_symlinks=False):
+                        inventory.add(relative_path)
+                    elif entry.is_dir(follow_symlinks=False):
+                        walk(Path(entry.path))
+        except OSError as error:
+            raise VerificationError(
+                f"cannot inventory payload directory {directory}: {error}"
+            ) from error
+
+    walk(PAYLOADS_DIRECTORY)
+    return inventory
+
+
 def verify():
     manifest, manifest_bytes = load_manifest()
     verify_checksum(manifest_bytes)
@@ -210,6 +241,18 @@ def verify():
     require(
         len(resolved_paths) == len(set(resolved_paths)),
         "payload paths must resolve to unique files",
+    )
+    payload_inventory = inventory_payload_paths()
+    manifest_path_set = set(manifest_paths)
+    unmanifested_paths = sorted(payload_inventory - manifest_path_set)
+    missing_paths = sorted(manifest_path_set - payload_inventory)
+    require(
+        not unmanifested_paths,
+        "unmanifested payload paths: " + ", ".join(unmanifested_paths),
+    )
+    require(
+        not missing_paths,
+        "manifest paths absent from payload inventory: " + ", ".join(missing_paths),
     )
     require(
         {sample["media_family"] for sample in samples} == EXPECTED_MEDIA_FAMILIES,

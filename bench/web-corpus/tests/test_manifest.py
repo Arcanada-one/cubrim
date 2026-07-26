@@ -202,6 +202,25 @@ class WebCorpusManifestTests(unittest.TestCase):
         self.assertNotEqual(0, completed.returncode)
         self.assertIn("path escapes payloads/", completed.stderr)
 
+    def test_verifier_rejects_unmanifested_payloads_at_any_depth(self):
+        for extra_path in (
+            Path("unmanifested.bin"),
+            Path("nested") / "unmanifested.bin",
+        ):
+            with self.subTest(extra_path=extra_path):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    repository_root, corpus_root = copy_corpus_to_temporary_repository(
+                        temporary_directory
+                    )
+                    unmanifested_payload = corpus_root / "payloads" / extra_path
+                    unmanifested_payload.parent.mkdir(parents=True, exist_ok=True)
+                    unmanifested_payload.write_bytes(b"not listed in manifest")
+
+                    completed = run_verifier(repository_root, corpus_root)
+
+                self.assertNotEqual(0, completed.returncode)
+                self.assertIn("unmanifested payload paths", completed.stderr)
+
     def test_size_classification_includes_every_boundary_and_rejects_outliers(self):
         expected_classes = {
             1_024: "small",
