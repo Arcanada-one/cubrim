@@ -29,6 +29,10 @@ class BenchmarkSample:
     byte_count: int
     media_type: str
     size_class: str
+    media_family: str = "fixture"
+    source_ref: str = "inline-fixture"
+    license_id: str = "NOASSERTION"
+    redistributable: bool = False
 
     def __post_init__(self) -> None:
         if not IDENTIFIER_RE.fullmatch(self.sample_id):
@@ -37,6 +41,23 @@ class BenchmarkSample:
             raise ValueError("sample SHA-256 must be 64 lowercase hex characters")
         if self.byte_count < 0:
             raise ValueError("sample byte_count must be nonnegative")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                self.path,
+                self.media_type,
+                self.size_class,
+                self.media_family,
+                self.source_ref,
+                self.license_id,
+            )
+        ):
+            raise ValueError("sample provenance fields must be non-empty strings")
+        if not isinstance(self.redistributable, bool):
+            raise ValueError("sample redistributable must be boolean")
+
+    def as_json(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -68,8 +89,9 @@ class TrialRecord:
     codec_key: str
     trial_no: int
     randomized_order: int
+    measured_at: str
     runner_code_sha: str
-    codec_code_sha: str
+    codec_build_provenance_sha256: str
     environment_fingerprint: str
     tool_fingerprint: str
     tool_version: str
@@ -85,10 +107,10 @@ class TrialRecord:
     metrics: dict[str, float | int]
 
     def __post_init__(self) -> None:
-        for code_sha in (self.runner_code_sha, self.codec_code_sha):
-            if not CODE_SHA_RE.fullmatch(code_sha):
-                raise ValueError("trial code SHA must be 40 or 64 lowercase hex characters")
+        if not CODE_SHA_RE.fullmatch(self.runner_code_sha):
+            raise ValueError("runner code SHA must be 40 or 64 lowercase hex characters")
         for digest in (
+            self.codec_build_provenance_sha256,
             self.tool_binary_sha256,
             self.original_sha256,
             self.compressed_sha256,
@@ -102,6 +124,17 @@ class TrialRecord:
             raise RoundTripError("decoded hash does not match original")
         if self.original_bytes != self.decoded_bytes:
             raise RoundTripError("decoded size does not match original")
+        expected_metrics = {
+            "compressed_bytes",
+            "compression_ratio",
+            "compression_duration",
+            "decompression_duration",
+            "peak_memory",
+        }
+        if set(self.metrics) != expected_metrics:
+            raise ValueError("Phase A trial metrics must be exactly the required five metrics")
+        for name, value in self.metrics.items():
+            require_finite_nonnegative(value, name)
 
     def as_json(self) -> dict[str, Any]:
         value = asdict(self)

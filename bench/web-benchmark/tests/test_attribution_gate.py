@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -8,7 +9,8 @@ from unittest.mock import patch
 BENCH_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH_DIR))
 
-from adapters import adapter_for
+import adapters
+from adapters import SubprocessExecutor, adapter_for
 from capabilities import (
     PHASE_A_CODECS,
     energy_capability,
@@ -61,7 +63,7 @@ class AttributionGateTests(unittest.TestCase):
             ("zstd", "--decompress", "--quiet", "--stdout", str(path)),
         )
 
-    def test_installed_releases_map_to_verified_upstream_source_commits(self):
+    def test_installed_releases_keep_upstream_and_build_provenance_distinct(self):
         expected = {
             "gzip": "80006351d3bb5d9099b74c41fefd6649424a9a28",
             "brotli": "ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
@@ -70,9 +72,50 @@ class AttributionGateTests(unittest.TestCase):
         for codec, source_commit in expected.items():
             with self.subTest(codec=codec):
                 identity = adapter_for(codec).identity()
-                self.assertEqual(identity.codec_code_sha, source_commit)
-                self.assertIn(source_commit, identity.source_reference)
+                self.assertFalse(hasattr(identity, "codec_code_sha"))
+                self.assertEqual(identity.upstream_release_sha, source_commit)
+                self.assertIn(source_commit, identity.upstream_source_reference)
                 self.assertRegex(identity.binary_sha256, r"^[0-9a-f]{64}$")
+                self.assertTrue(hasattr(adapters, "compute_build_provenance_sha256"))
+                self.assertEqual(
+                    identity.codec_build_provenance_sha256,
+                    adapters.compute_build_provenance_sha256(identity),
+                )
+                self.assertRegex(identity.codec_build_provenance_sha256, r"^[0-9a-f]{64}$")
+
+    def test_executor_replaces_path_lookup_with_the_resolved_hashed_binary(self):
+        adapter = adapter_for("gzip")
+        identity = adapter.identity()
+        source = Path("/tmp/input.bin")
+        self.assertTrue(hasattr(SubprocessExecutor, "exact_argv"))
+        with tempfile.TemporaryDirectory() as directory:
+            swapped = Path(directory) / "gzip"
+            swapped.write_text("#!/bin/false\n", encoding="utf-8")
+            swapped.chmod(0o755)
+            with patch.dict(os.environ, {"PATH": directory}):
+                argv = SubprocessExecutor.exact_argv(
+                    adapter.compress_argv(source),
+                    identity,
+                )
+        self.assertEqual(argv[0], identity.binary_path)
+        self.assertEqual(argv[1:], ("-9", "-c", str(source)))
+
+    def test_network_sandbox_command_has_process_tree_timeout_and_private_network(self):
+        executor = SubprocessExecutor(timeout_seconds=2)
+        self.assertTrue(hasattr(executor, "sandbox_command"))
+        command = executor.sandbox_command(
+            ("/usr/bin/gzip", "-9", "-c", "/tmp/input.bin"),
+            Path("/tmp/trial/output.bin"),
+            Path("/tmp/trial/status.json"),
+            Path("/tmp/trial/time.txt"),
+            Path("/tmp/trial/stderr.txt"),
+        )
+        joined = "\n".join(command)
+        self.assertEqual(command[0], "systemd-run")
+        self.assertIn("PrivateNetwork=yes", joined)
+        self.assertIn("KillMode=control-group", joined)
+        self.assertIn("RuntimeMaxSec=2s", joined)
+        self.assertNotIn("shell", joined.casefold())
 
     def test_cli_or_package_version_mismatch_fails_closed(self):
         with patch("adapters._tool_version", return_value="gzip 9.99"):

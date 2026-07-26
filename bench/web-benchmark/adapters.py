@@ -4,17 +4,32 @@ from __future__ import annotations
 
 import os
 import re
-import resource
 import shutil
 import subprocess
+import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from capabilities import PHASE_A_CODECS, require_phase_a_codec
-from model import CODE_SHA_RE, hash_file
+from model import CODE_SHA_RE, SHA256_RE, hash_file, stable_fingerprint
+
+
+MINIMAL_ENV = {
+    "LC_ALL": "C",
+    "LANG": "C",
+    "PATH": "/usr/bin:/bin",
+}
+SYSTEMD_ENV = {
+    **MINIMAL_ENV,
+    **{
+        key: os.environ[key]
+        for key in ("DBUS_SESSION_BUS_ADDRESS", "HOME", "LOGNAME", "USER", "XDG_RUNTIME_DIR")
+        if key in os.environ
+    },
+}
+INNER_HELPER = Path(__file__).with_name("sandbox_exec.py").resolve()
 
 
 @dataclass(frozen=True)
@@ -23,48 +38,77 @@ class ToolIdentity:
     version: str
     binary_path: str
     binary_sha256: str
-    codec_code_sha: str
     flags: tuple[str, ...]
-    source_reference: str = "test-fixture"
-    package_version: str = "test-fixture"
+    binary_package: str
+    binary_package_version: str
+    source_package: str
+    source_package_version: str
+    upstream_release_sha: str
+    upstream_source_reference: str
+    codec_build_provenance_sha256: str
+
+    def as_json(self, capabilities: dict[str, bool]) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "version": self.version,
+            "binary_path": self.binary_path,
+            "binary_sha256": self.binary_sha256,
+            "flags": list(self.flags),
+            "capabilities": dict(sorted(capabilities.items())),
+            "binary_package": self.binary_package,
+            "binary_package_version": self.binary_package_version,
+            "source_package": self.source_package,
+            "source_package_version": self.source_package_version,
+            "upstream_release_sha": self.upstream_release_sha,
+            "upstream_source_reference": self.upstream_source_reference,
+            "codec_build_provenance_sha256": self.codec_build_provenance_sha256,
+        }
 
 
 @dataclass(frozen=True)
 class ReleasePin:
     cli_version: str
-    package_source: str
-    package_version: str
-    source_commit: str
-    source_reference: str
+    binary_package: str
+    binary_package_version: str
+    source_package: str
+    source_package_version: str
+    upstream_release_sha: str
+    upstream_source_reference: str
 
 
 RELEASE_PINS = {
     "gzip": ReleasePin(
         cli_version="gzip 1.12",
-        package_source="gzip",
-        package_version="1.12-1ubuntu3.2",
-        source_commit="80006351d3bb5d9099b74c41fefd6649424a9a28",
-        source_reference=(
+        binary_package="gzip",
+        binary_package_version="1.12-1ubuntu3.2",
+        source_package="gzip",
+        source_package_version="1.12-1ubuntu3.2",
+        upstream_release_sha="80006351d3bb5d9099b74c41fefd6649424a9a28",
+        upstream_source_reference=(
             "https://git.savannah.gnu.org/cgit/gzip.git/commit/"
             "?id=80006351d3bb5d9099b74c41fefd6649424a9a28"
         ),
     ),
     "brotli": ReleasePin(
         cli_version="brotli 1.1.0",
-        package_source="brotli",
-        package_version="1.1.0-2build2",
-        source_commit="ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
-        source_reference=(
+        binary_package="brotli",
+        binary_package_version="1.1.0-2build2",
+        source_package="brotli",
+        source_package_version="1.1.0-2build2",
+        upstream_release_sha="ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
+        upstream_source_reference=(
             "https://github.com/google/brotli/commit/"
             "ed738e842d2fbdf2d6459e39267a633c4a9b2f5d"
         ),
     ),
     "zstd": ReleasePin(
         cli_version="*** Zstandard CLI (64-bit) v1.5.5, by Yann Collet ***",
-        package_source="libzstd",
-        package_version="1.5.5+dfsg2-2build1.1",
-        source_commit="63779c798237346c2b245c546c40b72a5a5913fe",
-        source_reference=(
+        binary_package="zstd",
+        binary_package_version="1.5.5+dfsg2-2build1.1",
+        source_package="libzstd",
+        source_package_version="1.5.5+dfsg2-2build1.1",
+        upstream_release_sha="63779c798237346c2b245c546c40b72a5a5913fe",
+        upstream_source_reference=(
             "https://github.com/facebook/zstd/commit/"
             "63779c798237346c2b245c546c40b72a5a5913fe"
         ),
@@ -105,28 +149,65 @@ class CodecAdapter:
             raise ValueError(
                 f"{self.name} version mismatch: expected {pin.cli_version!r}, got {version!r}"
             )
-        package_source, package_version = _package_provenance(self.name)
-        if (package_source, package_version) != (
-            pin.package_source,
-            pin.package_version,
-        ):
+        package = _package_provenance(self.name)
+        expected_package = (
+            pin.binary_package,
+            pin.binary_package_version,
+            pin.source_package,
+            pin.source_package_version,
+        )
+        if package != expected_package:
+            actual = " ".join(package)
+            expected = " ".join(expected_package)
             raise ValueError(
-                f"{self.name} package mismatch: expected "
-                f"{pin.package_source} {pin.package_version}, got "
-                f"{package_source} {package_version}"
+                f"{self.name} package mismatch: expected {expected}, got {actual}"
             )
-        if not CODE_SHA_RE.fullmatch(pin.source_commit):
-            raise ValueError(f"{self.name} release pin has an invalid source commit")
+        if not CODE_SHA_RE.fullmatch(pin.upstream_release_sha):
+            raise ValueError(f"{self.name} upstream release pin is invalid")
+        identity_without_digest = {
+            "name": self.name,
+            "version": version,
+            "binary_sha256": binary_sha256,
+            "flags": list(self.flags),
+            "binary_package": package[0],
+            "binary_package_version": package[1],
+            "source_package": package[2],
+            "source_package_version": package[3],
+            "upstream_release_sha": pin.upstream_release_sha,
+            "upstream_source_reference": pin.upstream_source_reference,
+        }
+        build_digest = stable_fingerprint(identity_without_digest)
         return ToolIdentity(
             name=self.name,
             version=version,
             binary_path=str(resolved),
             binary_sha256=binary_sha256,
-            codec_code_sha=pin.source_commit,
             flags=self.flags,
-            source_reference=pin.source_reference,
-            package_version=package_version,
+            binary_package=package[0],
+            binary_package_version=package[1],
+            source_package=package[2],
+            source_package_version=package[3],
+            upstream_release_sha=pin.upstream_release_sha,
+            upstream_source_reference=pin.upstream_source_reference,
+            codec_build_provenance_sha256=build_digest,
         )
+
+
+def compute_build_provenance_sha256(identity: ToolIdentity) -> str:
+    return stable_fingerprint(
+        {
+            "name": identity.name,
+            "version": identity.version,
+            "binary_sha256": identity.binary_sha256,
+            "flags": list(identity.flags),
+            "binary_package": identity.binary_package,
+            "binary_package_version": identity.binary_package_version,
+            "source_package": identity.source_package,
+            "source_package_version": identity.source_package_version,
+            "upstream_release_sha": identity.upstream_release_sha,
+            "upstream_source_reference": identity.upstream_source_reference,
+        }
+    )
 
 
 def _gzip() -> CodecAdapter:
@@ -173,58 +254,181 @@ class SubprocessExecutor:
         self.timeout_seconds = timeout_seconds
         self.max_output_bytes = max_output_bytes
 
-    def compress(self, adapter: CodecAdapter, source: Path, target: Path) -> ProcessMeasurement:
-        return self._run(adapter.compress_argv(source), target)
+    def compress(
+        self,
+        adapter: CodecAdapter,
+        identity: ToolIdentity,
+        source: Path,
+        target: Path,
+    ) -> ProcessMeasurement:
+        return self._run(self.exact_argv(adapter.compress_argv(source), identity), target)
 
-    def decompress(self, adapter: CodecAdapter, source: Path, target: Path) -> ProcessMeasurement:
-        return self._run(adapter.decompress_argv(source), target)
+    def decompress(
+        self,
+        adapter: CodecAdapter,
+        identity: ToolIdentity,
+        source: Path,
+        target: Path,
+    ) -> ProcessMeasurement:
+        return self._run(self.exact_argv(adapter.decompress_argv(source), identity), target)
+
+    @staticmethod
+    def exact_argv(argv: tuple[str, ...], identity: ToolIdentity) -> tuple[str, ...]:
+        if not argv or argv[0] != identity.name:
+            raise ValueError("codec argv does not match the measured tool identity")
+        binary = Path(identity.binary_path).resolve(strict=True)
+        if hash_file(binary) != identity.binary_sha256:
+            raise ValueError("resolved codec binary changed after provenance capture")
+        return (str(binary), *argv[1:])
+
+    def sandbox_command(
+        self,
+        argv: tuple[str, ...],
+        target: Path,
+        status_path: Path,
+        time_path: Path,
+        stderr_path: Path,
+    ) -> tuple[str, ...]:
+        timeout = f"{self.timeout_seconds:g}s"
+        return (
+            "systemd-run",
+            "--user",
+            "--wait",
+            "--collect",
+            "--quiet",
+            "--service-type=exec",
+            "--property=PrivateNetwork=yes",
+            "--property=KillMode=control-group",
+            f"--property=RuntimeMaxSec={timeout}",
+            "--property=TimeoutStopSec=2s",
+            "--property=NoNewPrivileges=yes",
+            "--",
+            str(Path(sys.executable).resolve()),
+            str(INNER_HELPER),
+            "--output",
+            str(target),
+            "--status",
+            str(status_path),
+            "--time-report",
+            str(time_path),
+            "--stderr",
+            str(stderr_path),
+            "--max-output-bytes",
+            str(self.max_output_bytes),
+            "--",
+            *argv,
+        )
 
     def _run(self, argv: tuple[str, ...], target: Path) -> ProcessMeasurement:
         target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            prefix="gnu-time-",
-            suffix=".txt",
-            dir=target.parent,
-            delete=False,
-        ) as time_handle:
-            time_path = Path(time_handle.name)
+        time_path = target.parent / f".{target.name}.time"
+        status_path = target.parent / f".{target.name}.status.json"
+        stderr_path = target.parent / f".{target.name}.stderr"
         try:
-            started_ns = time.monotonic_ns()
-            with target.open("wb") as output:
-                completed = subprocess.run(
-                    (
-                        "/usr/bin/time",
-                        "--verbose",
-                        "--output",
-                        str(time_path),
-                        "--",
-                        *argv,
-                    ),
-                    stdout=output,
-                    stderr=subprocess.PIPE,
-                    check=False,
-                    timeout=self.timeout_seconds,
-                    env={**os.environ, "LC_ALL": "C"},
-                    preexec_fn=self._limit_output_file_size,
-                )
-            finished_ns = time.monotonic_ns()
-            if completed.returncode != 0:
-                stderr = completed.stderr.decode("utf-8", errors="replace")[:500]
-                raise RuntimeError(f"codec exited {completed.returncode}: {stderr}")
-            peak_rss_bytes = _parse_peak_rss(time_path.read_text(encoding="utf-8"))
-            return ProcessMeasurement(
-                duration_ns=finished_ns - started_ns,
-                peak_rss_bytes=peak_rss_bytes,
-                output_sha256=hash_file(target),
+            command = self.sandbox_command(
+                argv,
+                target,
+                status_path,
+                time_path,
+                stderr_path,
             )
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=self.timeout_seconds + 10,
+                env=SYSTEMD_ENV,
+            )
+            if not status_path.is_file():
+                if completed.returncode != 0:
+                    raise TimeoutError("sandboxed codec exceeded its runtime or failed closed")
+                raise RuntimeError("sandboxed codec omitted its status record")
+            status = _load_status(status_path)
+            if completed.returncode != 0 or status["returncode"] != 0:
+                raise RuntimeError(f"codec exited {status['returncode']}")
+            peak_rss_bytes = _parse_peak_rss(time_path.read_text(encoding="utf-8"))
+            output_sha256 = hash_file(target, max_bytes=self.max_output_bytes)
+            if output_sha256 != status["output_sha256"]:
+                raise ValueError("sandbox helper output hash mismatch")
+            return ProcessMeasurement(
+                duration_ns=status["duration_ns"],
+                peak_rss_bytes=peak_rss_bytes,
+                output_sha256=output_sha256,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("systemd sandbox did not stop within its outer timeout") from exc
         finally:
             time_path.unlink(missing_ok=True)
+            status_path.unlink(missing_ok=True)
+            stderr_path.unlink(missing_ok=True)
 
-    def _limit_output_file_size(self) -> None:
-        resource.setrlimit(
-            resource.RLIMIT_FSIZE,
-            (self.max_output_bytes, self.max_output_bytes),
+    @staticmethod
+    def verify_network_sandbox() -> None:
+        completed = subprocess.run(
+            (
+                "systemd-run",
+                "--user",
+                "--wait",
+                "--collect",
+                "--quiet",
+                "--property=PrivateNetwork=yes",
+                "--property=KillMode=control-group",
+                "--property=RuntimeMaxSec=5s",
+                "--property=NoNewPrivileges=yes",
+                "--",
+                "/usr/bin/true",
+            ),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=10,
+            env=SYSTEMD_ENV,
         )
+        if completed.returncode != 0:
+            raise PermissionError("user systemd PrivateNetwork sandbox is unavailable")
+        network_probe = (
+            "import socket,sys\n"
+            "try:\n"
+            "    sock=socket.socket()\n"
+            "    sock.settimeout(0.2)\n"
+            "    sock.connect(('1.1.1.1',53))\n"
+            "except OSError:\n"
+            "    sys.exit(0)\n"
+            "sys.exit(7)\n"
+        )
+        with tempfile.TemporaryDirectory(prefix="network-sandbox-probe-") as directory:
+            try:
+                SubprocessExecutor(
+                    timeout_seconds=2,
+                    max_output_bytes=4096,
+                )._run(
+                    (
+                        str(Path(sys.executable).resolve()),
+                        "-c",
+                        network_probe,
+                    ),
+                    Path(directory) / "output.bin",
+                )
+            except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
+                raise PermissionError(
+                    "codec network sandbox failed its egress-denial probe"
+                ) from exc
+
+
+def _load_status(path: Path) -> dict[str, int | str]:
+    import json
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if set(value) != {"duration_ns", "output_sha256", "returncode"}:
+        raise ValueError("sandbox status record has unexpected fields")
+    if not isinstance(value["duration_ns"], int) or value["duration_ns"] < 0:
+        raise ValueError("sandbox duration is invalid")
+    if not isinstance(value["returncode"], int):
+        raise ValueError("sandbox return code is invalid")
+    if not SHA256_RE.fullmatch(str(value["output_sha256"])):
+        raise ValueError("sandbox output hash is invalid")
+    return value
 
 
 def _parse_peak_rss(report: str) -> int:
@@ -242,7 +446,7 @@ def _tool_version(name: str, binary: Path) -> str:
         stderr=subprocess.STDOUT,
         check=False,
         timeout=5,
-        env={**os.environ, "LC_ALL": "C"},
+        env=MINIMAL_ENV,
     )
     if completed.returncode != 0:
         raise RuntimeError(f"{name} --version exited {completed.returncode}")
@@ -252,12 +456,12 @@ def _tool_version(name: str, binary: Path) -> str:
     return first_line[0].strip()
 
 
-def _package_provenance(name: str) -> tuple[str, str]:
+def _package_provenance(name: str) -> tuple[str, str, str, str]:
     completed = subprocess.run(
         (
             "dpkg-query",
             "-W",
-            "-f=${source:Package}\t${Version}",
+            "-f=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}",
             name,
         ),
         stdout=subprocess.PIPE,
@@ -265,11 +469,11 @@ def _package_provenance(name: str) -> tuple[str, str]:
         check=False,
         timeout=5,
         text=True,
-        env={**os.environ, "LC_ALL": "C"},
+        env=MINIMAL_ENV,
     )
     if completed.returncode != 0:
         raise RuntimeError(f"cannot resolve package provenance for {name}")
     parts = completed.stdout.strip().split("\t")
-    if len(parts) != 2 or not all(parts):
+    if len(parts) != 4 or not all(parts):
         raise RuntimeError(f"invalid package provenance for {name}")
-    return parts[0], parts[1]
+    return parts[0], parts[1], parts[2], parts[3]

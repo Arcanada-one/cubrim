@@ -11,10 +11,11 @@ import random
 import re
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from adapters import CodecAdapter, SubprocessExecutor, phase_a_adapters
+from adapters import CodecAdapter, SubprocessExecutor, ToolIdentity, phase_a_adapters
 from capabilities import PHASE_A_CODECS, energy_capability
 from model import (
     CODE_SHA_RE,
@@ -31,6 +32,19 @@ from model import (
 
 SAFE_JOURNAL_FIELDS = ("sample_id", "codec_key", "trial_no", "randomized_order")
 SAFE_REASON_RE = re.compile(r"^[a-z0-9_]+$")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MANIFEST_SAMPLE_FIELDS = {
+    "sample_id",
+    "path",
+    "sha256",
+    "byte_count",
+    "media_type",
+    "size_class",
+    "media_family",
+    "source_ref",
+    "license_id",
+    "redistributable",
+}
 
 
 class RedactedJournal:
@@ -60,6 +74,7 @@ class PhaseARunner:
         environment: dict[str, object],
         config: RunnerConfig,
         executor: SubprocessExecutor,
+        manifest_path: Path | None = None,
     ):
         if not CODE_SHA_RE.fullmatch(runner_code_sha):
             raise ValueError("runner code SHA must be 40 or 64 lowercase hex characters")
@@ -70,6 +85,10 @@ class PhaseARunner:
         self.environment = {**environment, "code_sha": runner_code_sha}
         self.config = config
         self.executor = executor
+        self.manifest_path = manifest_path
+        self._samples: tuple[BenchmarkSample, ...] = ()
+        self._identities: dict[str, tuple[ToolIdentity, dict[str, bool]]] = {}
+        self._run_timing: dict[str, str] | None = None
 
     @classmethod
     def for_bundle_only(
@@ -78,7 +97,7 @@ class PhaseARunner:
         runner_code_sha: str,
         environment: dict[str, object],
     ) -> "PhaseARunner":
-        return cls(
+        runner = cls(
             corpus_root=Path("."),
             output_root=Path("."),
             journal=RedactedJournal(Path("journal/unused.jsonl")),
@@ -87,6 +106,11 @@ class PhaseARunner:
             config=RunnerConfig(),
             executor=SubprocessExecutor(60),
         )
+        runner._run_timing = {
+            "started_at": "2000-01-01T00:00:00Z",
+            "completed_at": "2000-01-01T00:00:01Z",
+        }
+        return runner
 
     def run_trial(
         self,
@@ -101,15 +125,16 @@ class PhaseARunner:
         original_sha256 = hash_file(source, max_bytes=self.config.max_input_bytes)
         if original_bytes != sample.byte_count or original_sha256 != sample.sha256:
             raise ValueError("payload does not match its immutable manifest")
-        identity = adapter.identity()
-        if identity.codec_code_sha is None:
-            raise ValueError("measured trials require an explicit codec code SHA")
+        cached = self._identities.get(adapter.name)
+        identity = cached[0] if cached is not None else adapter.identity()
+        if not getattr(identity, "codec_build_provenance_sha256", None):
+            raise ValueError("measured trials require immutable codec build provenance")
         self.output_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="trial-", dir=self.output_root) as directory:
             trial_dir = Path(directory)
             compressed = trial_dir / "compressed.bin"
             decoded = trial_dir / "decoded.bin"
-            compression = self.executor.compress(adapter, source, compressed)
+            compression = self.executor.compress(adapter, identity, source, compressed)
             compressed_bytes = compressed.stat().st_size
             compressed_sha256 = hash_file(compressed)
             if compressed_sha256 != compression.output_sha256:
@@ -121,22 +146,24 @@ class PhaseARunner:
                 max_output_bytes=self.config.max_output_bytes,
                 max_expansion_ratio=self.config.max_expansion_ratio,
             )
-            decompression = self.executor.decompress(adapter, compressed, decoded)
+            decompression = self.executor.decompress(adapter, identity, compressed, decoded)
             decoded_bytes = decoded.stat().st_size
             decoded_sha256 = hash_file(decoded, max_bytes=self.config.max_output_bytes)
             if decoded_sha256 != decompression.output_sha256:
                 raise ValueError("decoded output hash disagrees with the executor")
         if decoded_sha256 != original_sha256 or decoded_bytes != original_bytes:
             raise RoundTripError("decoded output failed exact lossless round trip")
-        tool_fingerprint = stable_fingerprint(identity.__dict__)
+        identity_json = _identity_json(identity, adapter.capabilities)
+        tool_fingerprint = stable_fingerprint(identity_json)
         environment_fingerprint = stable_fingerprint(self.environment)
         return TrialRecord(
             sample_id=sample.sample_id,
             codec_key=adapter.name,
             trial_no=trial_no,
             randomized_order=randomized_order,
+            measured_at=utc_now(),
             runner_code_sha=self.runner_code_sha,
-            codec_code_sha=identity.codec_code_sha,
+            codec_build_provenance_sha256=identity.codec_build_provenance_sha256,
             environment_fingerprint=environment_fingerprint,
             tool_fingerprint=tool_fingerprint,
             tool_version=identity.version,
@@ -151,6 +178,9 @@ class PhaseARunner:
             roundtrip_exact=True,
             metrics={
                 "compressed_bytes": compressed_bytes,
+                "compression_ratio": (
+                    compressed_bytes / original_bytes if original_bytes else 0.0
+                ),
                 "compression_duration": compression.duration_ns / 1_000_000,
                 "decompression_duration": decompression.duration_ns / 1_000_000,
                 "peak_memory": max(compression.peak_rss_bytes, decompression.peak_rss_bytes),
@@ -191,11 +221,64 @@ class PhaseARunner:
         return None
 
     def bundle(self, trials: Iterable[TrialRecord]) -> dict[str, object]:
+        if self._run_timing is None:
+            raise RuntimeError("bundle timing is unavailable before benchmark execution")
+        samples = self._samples
+        manifest_sha256 = (
+            hash_file(self.manifest_path)
+            if self.manifest_path is not None
+            else stable_fingerprint([sample.as_json() for sample in samples])
+        )
         return {
             "schema_version": 1,
             "scope": "resource_codec",
+            "phase": "A",
+            "run_timing": self._run_timing,
+            "corpus": {
+                "manifest_name": (
+                    self.manifest_path.name
+                    if self.manifest_path is not None
+                    else "inline-fixture"
+                ),
+                "manifest_sha256": manifest_sha256,
+                "manifest_schema_version": 1,
+                "sample_count": len(samples),
+                "samples": [sample.as_json() for sample in samples],
+            },
+            "toolchain": [
+                _identity_json(identity, capabilities)
+                for identity, capabilities in (
+                    self._identities[name] for name in sorted(self._identities)
+                )
+            ],
+            "protocol": {
+                "codecs": list(PHASE_A_CODECS),
+                "warmups": self.config.warmups,
+                "trials_per_cell": self.config.trials,
+                "randomized_order_seed": self.config.random_seed,
+                "bootstrap_iterations": 5_000,
+                "bootstrap_confidence": 0.95,
+                "timeout_seconds": self.config.timeout_seconds,
+                "max_input_bytes": self.config.max_input_bytes,
+                "max_output_bytes": self.config.max_output_bytes,
+                "max_expansion_ratio": self.config.max_expansion_ratio,
+                "network_isolation": "systemd_user_unit_plus_seccomp_network_deny",
+                "wall_clock": "time.monotonic_ns",
+                "peak_rss": "gnu_time_verbose",
+            },
             "environment": self.environment,
+            "applicability": {
+                "time_to_first_decoded_byte": {
+                    "available": False,
+                    "reason": "phase_a_codecs_do_not_offer_incremental_decode",
+                },
+                "energy": {
+                    "available": False,
+                    "reason": "readable_calibrated_rapl_unavailable",
+                },
+            },
             "resource_results": [trial.as_json() for trial in trials],
+            "resource_summaries": [],
             "page_results": {
                 "explicit_wasm_application": [],
                 "transparent_http_page": [],
@@ -207,20 +290,39 @@ class PhaseARunner:
         samples: tuple[BenchmarkSample, ...],
         adapters: tuple[CodecAdapter, ...],
     ) -> dict[str, object]:
+        self._run_timing = {"started_at": utc_now(), "completed_at": ""}
         admission = self.environment.get("admission")
         if isinstance(admission, dict) and admission.get("accepted") is not True:
             self.journal.write("failed_admission", {})
             raise RuntimeError("host admission rejected the benchmark run")
         self.output_root.mkdir(parents=True, exist_ok=True)
+        self._samples = samples
+        self._identities = {}
+        for adapter in adapters:
+            try:
+                self._identities[adapter.name] = (
+                    adapter.identity(),
+                    dict(adapter.capabilities),
+                )
+            except (FileNotFoundError, RuntimeError, ValueError):
+                self.journal.write(
+                    "tool_provenance_mismatch",
+                    {"codec_key": adapter.name},
+                )
+                raise
         for sample in samples:
             for adapter in adapters:
                 for warmup_no in range(1, self.config.warmups + 1):
-                    self.try_trial(
+                    warmup = self.try_trial(
                         sample,
                         adapter,
                         trial_no=-warmup_no,
                         randomized_order=warmup_no,
                     )
+                    if warmup is None:
+                        raise RuntimeError(
+                            f"warmup failed: {sample.sample_id}/{adapter.name}"
+                        )
         schedule = [
             (sample, adapter, trial_no)
             for trial_no in range(1, self.config.trials + 1)
@@ -242,13 +344,30 @@ class PhaseARunner:
             is not None
         ]
         _require_complete_cells(results, samples, adapters, self.config.trials)
-        return self.bundle(results)
+        self._run_timing["completed_at"] = utc_now()
+        from summarize import finalize_bundle
+
+        return finalize_bundle(
+            self.bundle(results),
+            seed=self.config.random_seed,
+        )
 
 
 def load_samples(manifest_path: Path) -> tuple[BenchmarkSample, ...]:
+    if manifest_path.stat().st_size > 1024 * 1024:
+        raise ValueError("web corpus manifest exceeds the configured maximum")
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != 1 or not isinstance(data.get("samples"), list):
+    if (
+        not isinstance(data, dict)
+        or set(data) != {"schema_version", "samples"}
+        or data.get("schema_version") != 1
+        or not isinstance(data.get("samples"), list)
+        or not data["samples"]
+    ):
         raise ValueError("unsupported web corpus manifest")
+    for row in data["samples"]:
+        if not isinstance(row, dict) or set(row) != MANIFEST_SAMPLE_FIELDS:
+            raise ValueError("web corpus sample fields are not closed")
     samples = tuple(
         BenchmarkSample(
             sample_id=row["sample_id"],
@@ -257,6 +376,10 @@ def load_samples(manifest_path: Path) -> tuple[BenchmarkSample, ...]:
             byte_count=row["byte_count"],
             media_type=row["media_type"],
             size_class=row["size_class"],
+            media_family=row["media_family"],
+            source_ref=row["source_ref"],
+            license_id=row["license_id"],
+            redistributable=row["redistributable"],
         )
         for row in data["samples"]
     )
@@ -286,7 +409,6 @@ def capture_environment(code_sha: str) -> dict[str, object]:
     }
     return {
         "code_sha": code_sha,
-        "host": platform.node(),
         "cpu": cpu,
         "os": platform.platform(),
         "affinity": affinity,
@@ -305,10 +427,12 @@ def preflight(
             raise ValueError(f"manifest mismatch for {sample.sample_id}")
     if not Path("/usr/bin/time").is_file():
         raise FileNotFoundError("/usr/bin/time is required")
+    SubprocessExecutor.verify_network_sandbox()
     identities = []
     for adapter in phase_a_adapters():
         try:
-            identities.append(adapter.identity().__dict__)
+            identity = adapter.identity()
+            identities.append(_identity_json(identity, adapter.capabilities))
         except (FileNotFoundError, RuntimeError, ValueError):
             journal.write("tool_provenance_mismatch", {"codec_key": adapter.name})
             raise
@@ -323,6 +447,7 @@ def preflight(
         "codecs": list(PHASE_A_CODECS),
         "sample_count": len(samples),
         "gnu_time": "/usr/bin/time",
+        "network_isolation": "systemd_user_unit_plus_seccomp_network_deny",
         "tools": identities,
         "environment": environment,
         "energy": energy if energy is not None else {"available": False},
@@ -353,6 +478,7 @@ def _require_complete_cells(
 def _git_code_sha(*, require_clean: bool = False) -> str:
     completed = subprocess.run(
         ("git", "rev-parse", "HEAD"),
+        cwd=REPO_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=True,
@@ -365,6 +491,7 @@ def _git_code_sha(*, require_clean: bool = False) -> str:
     if require_clean:
         status = subprocess.run(
             ("git", "status", "--porcelain", "--untracked-files=normal"),
+            cwd=REPO_ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=True,
@@ -395,6 +522,55 @@ def _temperatures() -> list[float]:
             continue
         values.append(raw / 1000 if raw > 1000 else raw)
     return values
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace(
+        "+00:00",
+        "Z",
+    )
+
+
+def _identity_json(
+    identity: ToolIdentity | object,
+    capabilities: dict[str, bool],
+) -> dict[str, object]:
+    if hasattr(identity, "as_json"):
+        return identity.as_json(capabilities)
+    return {
+        "name": identity.name,
+        "version": identity.version,
+        "binary_path": identity.binary_path,
+        "binary_sha256": identity.binary_sha256,
+        "flags": list(identity.flags),
+        "capabilities": dict(sorted(capabilities.items())),
+        "binary_package": identity.binary_package,
+        "binary_package_version": identity.binary_package_version,
+        "source_package": identity.source_package,
+        "source_package_version": identity.source_package_version,
+        "upstream_release_sha": identity.upstream_release_sha,
+        "upstream_source_reference": identity.upstream_source_reference,
+        "codec_build_provenance_sha256": identity.codec_build_provenance_sha256,
+    }
+
+
+def atomic_write_json(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -431,11 +607,12 @@ def main() -> int:
         environment=capture_environment(code_sha),
         config=config,
         executor=SubprocessExecutor(config.timeout_seconds, config.max_output_bytes),
+        manifest_path=args.manifest,
     )
     bundle = runner.execute(samples, phase_a_adapters())
     args.out.mkdir(parents=True, exist_ok=True)
-    output_path = args.out / "phase-a-results.json"
-    output_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output_path = args.out / "phase-a.json"
+    atomic_write_json(output_path, bundle)
     print(json.dumps({"bundle": str(output_path), "trials": len(bundle["resource_results"])}))
     return 0
 
