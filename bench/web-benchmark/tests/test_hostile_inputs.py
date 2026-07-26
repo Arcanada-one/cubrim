@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -115,7 +116,7 @@ class HostileInputTests(unittest.TestCase):
         for syscall in MANDATORY_NETWORK_SYSCALLS:
             with self.subTest(syscall=syscall):
                 library = FakeSeccompLibrary(unresolved=syscall)
-                with unittest.mock.patch.object(
+                with mock.patch.object(
                     sandbox_exec.ctypes,
                     "CDLL",
                     return_value=library,
