@@ -151,3 +151,23 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
+
+## Web corpus v2 (`cubr0074-web-real-v2`)
+
+Corpus v2 contains only bytes that are genuinely served on the web and that we
+may redistribute. Provenance, licence, and attribution for every sample live in
+`manifest.v2.json`; the summary is:
+
+| Source | Licence | Samples |
+|---|---|---|
+| Arcanada production pages and API responses (`cubrim.com`, `api.cubrim.com`) | proprietary, redistributable by the copyright holder | HTML ×2, JSON API ×3 |
+| Tailwind CSS output shipped by `cubrim.com` | MIT | CSS ×1 |
+| `@jridgewell/resolve-uri`, `@jridgewell/sourcemap-codec`, `magic-string` dist files and source maps | MIT | JavaScript ×3, source map ×2 |
+| Inter latin subset, carried over from corpus v1 | SIL Open Font License 1.1 | WOFF2 ×1 |
+
+Two content types the founding canon names are **absent and recorded as gaps**
+rather than filled with a generated fixture — see `manifest.v2.json` → `gaps`.
+WebAssembly waits on CUBR-0077; SVG waits on an operator sourcing decision,
+because our own production SVGs are ~300-byte inline icons and the third-party
+SVGs available locally are vendor logos that carry trademark considerations a
+shipped corpus should not take on.
