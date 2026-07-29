@@ -19,7 +19,51 @@ A run that meets this prints `"status": "PASS"` along with
 altered evidence fails. The verifier refuses a journal whose SHA-256 does not
 match its sidecar.
 
-Our own reference run produced `byte_exact_cells: 228`, `rar_byte_deltas: 12`.
+## Result of our reference run
+
+A full containerised rebuild (run `cubr0069-20260728T175301Z`, 240 samples,
+sidecar present) compared against the canonical measurement journal:
+
+| | cells | result |
+|---|---|---|
+| Cubrim | 24 | **bit-identical** |
+| all other non-rar archivers | 192 | **bit-identical** |
+| rar — canterbury + enwik8 | 12 | **bit-identical** |
+| rar — silesia | 12 | uniformly **−16 bytes** |
+| round-trip failures | — | **zero** |
+
+The **1–10 ranking is unchanged**. Even rar's overall aggregate moves only in
+the sixth decimal, 0.257369 → 0.257368; every other archiver's aggregate is
+identical to the last digit.
+
+So the honest claim is: *an independent containerised rebuild reproduces every
+archiver bit-exactly except rar, whose 16-byte-per-file delta is a documented
+mtime artefact, and the ranking is unchanged.* Not "byte-exact across all ten".
+
+### What this does and does not demonstrate
+
+This run was executed **on the same host that produced the original
+measurements**. It therefore demonstrates *build and environment
+reproducibility* — the pinned image, the public inputs, and the recorded
+commands regenerate the published numbers.
+
+It does **not** yet demonstrate independent reproduction on third-party
+hardware, which is what an outside reviewer should actually want. That is the
+gap this package exists to close, and running it is the thing we are asking for.
+
+### Verify the rar delta yourself
+
+You do not have to take the explanation on trust. Compress one silesia file
+with its extracted timestamp, then with a fresh one:
+
+```sh
+cp -p corpus/silesia/dickens ./a && cp corpus/silesia/dickens ./b && touch ./b
+rar a -idq -y -m5 -ep a.rar a && rar a -idq -y -m5 -ep b.rar b
+stat -c '%s %n' a.rar b.rar     # b.rar is 16 bytes larger
+```
+
+The same check on `canterbury/alice29.txt` gives 51,179 bytes with its 1996
+timestamp and 51,195 with a recent one.
 
 ## Why rar is treated differently
 
@@ -132,6 +176,19 @@ sudo docker run --rm --platform linux/amd64 \
 Without that variable the run stops before doing any work and prints the terms.
 Note that Cubrim's licence and release fetches report an install id, IP address,
 OS, architecture, and version to the vendor.
+
+> **If you skip this, the run dies with a bare `exit 3`.** Cubrim prompts for
+> licence acceptance on first use and records the answer under `$HOME`. A
+> container has no TTY and an ephemeral `$HOME`, so the prompt's stdin read
+> fails with `Error: No such device or address (os error 6)` and the tool exits
+> 3 on the very first Cubrim cell — with nothing in the journal pointing at a
+> licence prompt as the cause.
+>
+> Our first attempt at this run (`cubr0069-20260728T173954Z`) died exactly that
+> way. It is easy to miss on a machine where a developer once accepted the terms
+> interactively, because the recorded acceptance then makes everything work
+> locally while breaking in every container and CI job. Hence the explicit
+> opt-in above rather than a silent auto-accept.
 
 The run prints the closed journal and sidecar paths. Verify those exact paths:
 
