@@ -40,6 +40,10 @@ class BenchmarkSample:
     source_ref: str = "inline-fixture"
     license_id: str = "NOASSERTION"
     redistributable: bool = False
+    # Corpus v2 records who a real resource belongs to. v1 fixtures had nobody
+    # to attribute, so the field is absent there rather than filled with a
+    # placeholder, and the bundle's field set stays closed per schema version.
+    attribution: str | None = None
 
     def __post_init__(self) -> None:
         if not IDENTIFIER_RE.fullmatch(self.sample_id):
@@ -64,7 +68,10 @@ class BenchmarkSample:
             raise ValueError("sample redistributable must be boolean")
 
     def as_json(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        if value["attribution"] is None:
+            del value["attribution"]
+        return value
 
 
 @dataclass(frozen=True)
