@@ -7,14 +7,34 @@
 //! -readable lines on stdout and never inspects its input beyond the codec.
 //!
 //! Usage:
-//!   codec_probe encode <input> <output>
+//!   codec_probe encode <input> <output> [scheme] [--no-square-limit]
 //!   codec_probe decode <input> <output>
 //!   codec_probe mode   <blob>            -- report cube vs raw-store
 //!   codec_probe capabilities             -- emit the capability manifest as JSON
 //!
 //! Exit codes: 0 success, 1 decode/encode error (never a panic), 2 usage error.
 
+use cubrim::config::{EncodeConfig, ValueScheme};
 use std::process::ExitCode;
+
+/// Map a scheme name to the value scheme it selects. The name is the wire
+/// vocabulary the measurement harness records, so it must stay stable.
+fn value_scheme(name: &str) -> Option<ValueScheme> {
+    Some(match name {
+        "bitpack-fixed" => ValueScheme::BitpackFixed,
+        "rle-codes" => ValueScheme::RleCodes,
+        "entropy" => ValueScheme::Entropy,
+        "entropy-context" => ValueScheme::EntropyContext,
+        "entropy-context2" => ValueScheme::EntropyContext2,
+        "bwt-entropy" => ValueScheme::BwtEntropy,
+        "bwt-rans" => ValueScheme::BwtRans,
+        "order2-rans" => ValueScheme::Order2Rans,
+        "bwt-adaptive" => ValueScheme::BwtAdaptive,
+        "bwt-context-mix" => ValueScheme::BwtContextMix,
+        "bwt-geo-mix" => ValueScheme::BwtGeoMix,
+        _ => return None,
+    })
+}
 
 /// Cubrim v1 header: [magic 4B][version 1B][mode 1B]..., so the mode
 /// discriminant sits at offset 5. See src/header.rs.
@@ -62,11 +82,22 @@ fn capabilities() -> String {
 fn run(args: &[String]) -> Result<(), String> {
     match args[0].as_str() {
         "encode" => {
-            if args.len() != 3 {
-                return Err("encode needs <input> <output>".into());
+            if args.len() < 3 {
+                return Err("encode needs <input> <output> [scheme] [--no-square-limit]".into());
             }
             let input = read(&args[1])?;
-            let blob = cubrim::encode(&input);
+            let mut config = EncodeConfig::v1_default();
+            for extra in &args[3..] {
+                if extra == "--no-square-limit" {
+                    // Lifts the b*b cube-eligibility ceiling so inputs above
+                    // 64 KiB can be measured in cube mode instead of raw store.
+                    config.use_square_limit = false;
+                } else {
+                    config.value_scheme = value_scheme(extra)
+                        .ok_or_else(|| format!("unknown value scheme {extra}"))?;
+                }
+            }
+            let blob = cubrim::encode_with_config(&input, &config);
             write(&args[2], &blob)?;
             println!("input_bytes={} output_bytes={}", input.len(), blob.len());
             Ok(())
