@@ -1,0 +1,28 @@
+schema_version=1
+
+[canterbury]
+url=https://corpus.canterbury.ac.nz/resources/cantrbry.zip
+archive_sha256=c44b686dfc137e74aba4db0540e5d6568cb09e270ba8f8411d2f9df24f39a1a6
+
+[enwik8]
+url=https://www.mattmahoney.net/dc/enwik8.zip
+archive_sha256=547994d9980ebed1288380d652999f38a14fe291a6247c157c3d33d4932534bc
+
+[silesia]
+url=https://sun.aei.polsl.pl/~sdeor/corpus/silesia.zip
+archive_sha256=0626e25f45c0ffb5dc801f13b7c82a3b75743ba07e3a71835a41e3d9f63c77af
+
+[cubrim]
+release=https://github.com/Arcanada-one/cubrim/releases/tag/v0.3.2
+commit=dfb195ef089db738e51153ad4532fdd583f247bf
+url=https://github.com/Arcanada-one/cubrim/releases/download/v0.3.2/cubrim-v0.3.2-linux-x86_64.tar.gz
+archive_sha256=cbf672e15e425032b6b9bcf28c1308650edb9b4de47d6e04a26414a038ed36fe
+binary_sha256=b6c3cd251f7148c1895f5b85d30d06df8252a70afbd649e269f673a19e2a5768
+version_output=cubrim 0.3.2
+
+[rar]
+url=https://www.rarlab.com/rar/rarlinux-x64-700.tar.gz
+archive_sha256=1dbbfaf1a9697826ee1c52cfdfa10667ff6713500d96926383a8771b3eeee222
+rar_binary_sha256=338274d321513def3891594195ba18aad0c00ef75dc05a94be74e556d8f6c3c0
+unrar_binary_sha256=5be5875a026a2e5fc41a885ae2ef2484e0e6d5e1c119992e784f993df1c2339d
+license_notice=Read rar/license.txt from the downloaded vendor archive before use.
