@@ -399,6 +399,7 @@ def load_samples(manifest_path: Path) -> tuple[BenchmarkSample, ...]:
             source_ref=row["source_ref"],
             license_id=row["license_id"],
             redistributable=row["redistributable"],
+            attribution=row.get("attribution"),
         )
         for row in data["samples"]
     )
