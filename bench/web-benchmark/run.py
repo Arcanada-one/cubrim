@@ -45,6 +45,18 @@ MANIFEST_SAMPLE_FIELDS = {
     "license_id",
     "redistributable",
 }
+# Corpus v2 carries the real-world provenance the generated v1 fixtures could
+# not: an attribution per sample, and a record of the content types that are
+# absent rather than faked. Field sets stay closed per schema version.
+MANIFEST_V2_SAMPLE_FIELDS = MANIFEST_SAMPLE_FIELDS | {"attribution"}
+MANIFEST_TOP_LEVEL = {
+    1: {"schema_version", "samples"},
+    2: {"schema_version", "corpus_key", "provenance", "gaps", "samples"},
+}
+MANIFEST_SAMPLE_FIELDS_BY_VERSION = {
+    1: MANIFEST_SAMPLE_FIELDS,
+    2: MANIFEST_V2_SAMPLE_FIELDS,
+}
 
 
 class RedactedJournal:
@@ -229,6 +241,11 @@ class PhaseARunner:
             if self.manifest_path is not None
             else stable_fingerprint([sample.as_json() for sample in samples])
         )
+        manifest_schema_version = (
+            json.loads(self.manifest_path.read_text(encoding="utf-8"))["schema_version"]
+            if self.manifest_path is not None
+            else 1
+        )
         return {
             "schema_version": 1,
             "scope": "resource_codec",
@@ -241,7 +258,7 @@ class PhaseARunner:
                     else "inline-fixture"
                 ),
                 "manifest_sha256": manifest_sha256,
-                "manifest_schema_version": 1,
+                "manifest_schema_version": manifest_schema_version,
                 "sample_count": len(samples),
                 "samples": [sample.as_json() for sample in samples],
             },
@@ -357,16 +374,18 @@ def load_samples(manifest_path: Path) -> tuple[BenchmarkSample, ...]:
     if manifest_path.stat().st_size > 1024 * 1024:
         raise ValueError("web corpus manifest exceeds the configured maximum")
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    version = data.get("schema_version") if isinstance(data, dict) else None
     if (
         not isinstance(data, dict)
-        or set(data) != {"schema_version", "samples"}
-        or data.get("schema_version") != 1
+        or version not in MANIFEST_TOP_LEVEL
+        or set(data) != MANIFEST_TOP_LEVEL[version]
         or not isinstance(data.get("samples"), list)
         or not data["samples"]
     ):
         raise ValueError("unsupported web corpus manifest")
+    sample_fields = MANIFEST_SAMPLE_FIELDS_BY_VERSION[version]
     for row in data["samples"]:
-        if not isinstance(row, dict) or set(row) != MANIFEST_SAMPLE_FIELDS:
+        if not isinstance(row, dict) or set(row) != sample_fields:
             raise ValueError("web corpus sample fields are not closed")
     samples = tuple(
         BenchmarkSample(
@@ -581,7 +600,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v1.json",
+        default=Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v2.json",
     )
     parser.add_argument("--out", type=Path, default=Path(__file__).parent / "out")
     parser.add_argument("--journal", type=Path, default=Path(__file__).parent / "journal")

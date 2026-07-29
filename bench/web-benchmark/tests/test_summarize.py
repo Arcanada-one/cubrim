@@ -4,19 +4,22 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+from adapters import adapter_for
+from capabilities import PHASE_A_CODECS
 from copy import deepcopy
 from pathlib import Path
 
 
 BENCH_DIR = Path(__file__).resolve().parents[1]
-CANONICAL_MANIFEST = BENCH_DIR.parent / "web-corpus" / "manifest.v1.json"
-CANONICAL_MANIFEST_SHA256 = (
-    "9a0fcb56b9af5c98cd987d1ad289f5adde4b073480646fb472d784b0bbf58599"
-)
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "valid-trials.json"
 sys.path.insert(0, str(BENCH_DIR))
 
 import summarize
+
+# Follow the verifier's own pin rather than keeping a second copy of it here.
+CANONICAL_MANIFEST = summarize.CANONICAL_MANIFEST_PATH
+CANONICAL_MANIFEST_SHA256 = summarize.CANONICAL_MANIFEST_SHA256
 from summarize import summarize_bundle, verify_bundle
 from model import stable_fingerprint
 
@@ -48,13 +51,11 @@ def canonical_bundle():
         "license_id": "MIT",
         "redistributable": True,
     }
-    flags = {
-        "gzip": ["-9", "-c"],
-        "brotli": ["--quality=11", "--stdout"],
-        "zstd": ["-19", "--quiet", "--stdout"],
-    }
+    # Take the flags from the adapters themselves: a fixture that invents them
+    # would keep passing after the real preregistered command changed.
+    flags = {name: list(adapter_for(name).flags) for name in PHASE_A_CODECS}
     tools = []
-    for codec in ("gzip", "brotli", "zstd"):
+    for codec in PHASE_A_CODECS:
         provenance = {
             "name": codec,
             "version": f"{codec} fixture",
@@ -133,7 +134,7 @@ def canonical_bundle():
         },
         "toolchain": tools,
         "protocol": {
-            "codecs": ["gzip", "brotli", "zstd"],
+            "codecs": list(PHASE_A_CODECS),
             "warmups": 3,
             "trials_per_cell": 30,
             "randomized_order_seed": 74074,
@@ -179,7 +180,7 @@ def canonical_production_bundle(trials_per_cell=30):
     order = 0
     for sample in manifest["samples"]:
         for trial_no in range(1, trials_per_cell + 1):
-            for codec in ("gzip", "brotli", "zstd"):
+            for codec in PHASE_A_CODECS:
                 order += 1
                 template_trial_no = ((trial_no - 1) % 30) + 1
                 trial = deepcopy(templates[(codec, template_trial_no)])
@@ -316,7 +317,11 @@ class SummarizeTests(unittest.TestCase):
             require_summaries=False,
             require_canonical_corpus=True,
         )
-        self.assertEqual(len(production["resource_results"]), 8 * 3 * 30)
+        manifest = json.loads(CANONICAL_MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(
+            len(production["resource_results"]),
+            len(manifest["samples"]) * len(PHASE_A_CODECS) * 30,
+        )
 
         mutations = (
             ("digest", lambda value: value["corpus"].__setitem__("manifest_sha256", "f" * 64)),
@@ -356,7 +361,11 @@ class SummarizeTests(unittest.TestCase):
             require_summaries=False,
             require_canonical_corpus=True,
         )
-        self.assertEqual(len(production["resource_results"]), 8 * 3 * 31)
+        manifest = json.loads(CANONICAL_MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(
+            len(production["resource_results"]),
+            len(manifest["samples"]) * len(PHASE_A_CODECS) * 31,
+        )
 
     def test_verify_rejects_stale_or_selective_summary(self):
         self.assertTrue(hasattr(summarize, "finalize_bundle"))
@@ -405,7 +414,11 @@ class SummarizeTests(unittest.TestCase):
                 require_summaries=True,
                 require_canonical_corpus=True,
             )
-            self.assertEqual(len(finalized["resource_results"]), 8 * 3 * 30)
+            manifest = json.loads(CANONICAL_MANIFEST.read_text(encoding="utf-8"))
+            self.assertEqual(
+                len(finalized["resource_results"]),
+                len(manifest["samples"]) * len(PHASE_A_CODECS) * 30,
+            )
             self.assertFalse(list(path.parent.glob(".phase-a.json.*.tmp")))
 
     def test_bundle_cli_rejects_synthetic_corpus_without_overwriting_input(self):

@@ -34,20 +34,24 @@ PHASE_A_METRICS = (
     "peak_memory",
 )
 CANONICAL_MANIFEST_PATH = (
-    Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v1.json"
+    Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v2.json"
 )
 CANONICAL_MANIFEST_SHA256 = (
-    "9a0fcb56b9af5c98cd987d1ad289f5adde4b073480646fb472d784b0bbf58599"
+    "fecc83c1e6559d361d0029024393a3cc98909f0c45dea3a2f0c4f11b75a3a2bf"
 )
 CANONICAL_SAMPLE_IDENTITIES = (
-    ("html-small-v1", "payloads/document.small.html"),
-    ("css-medium-v1", "payloads/styles.medium.css"),
-    ("javascript-small-v1", "payloads/app.small.js"),
-    ("source-map-small-v1", "payloads/app.small.js.map"),
-    ("json-api-large-v1", "payloads/api-response.large.json"),
-    ("svg-medium-v1", "payloads/vector.medium.svg"),
-    ("wasm-small-v1", "payloads/module.small.wasm"),
-    ("woff2-medium-inter-latin-v20", "payloads/inter-latin.medium.woff2"),
+    ("css-medium-tailwind-v2", "payloads-v2/tailwind.css"),
+    ("html-large-web-codec-v2", "payloads-v2/html-large-web-codec-v2.html"),
+    ("html-medium-home-v2", "payloads-v2/html-medium-home-v2.html"),
+    ("javascript-medium-magic-string-v2", "payloads-v2/magic-string.umd.js"),
+    ("javascript-medium-sourcemap-codec-v2", "payloads-v2/sourcemap-codec.umd.js"),
+    ("javascript-small-resolve-uri-v2", "payloads-v2/resolve-uri.umd.js"),
+    ("json-api-large-world-benchmark-v2", "payloads-v2/json-api-large-world-benchmark-v2.json"),
+    ("json-api-medium-web-benchmark-v2", "payloads-v2/json-api-medium-web-benchmark-v2.json"),
+    ("json-api-small-hypotheses-v2", "payloads-v2/json-api-small-hypotheses-v2.json"),
+    ("source-map-large-magic-string-v2", "payloads-v2/magic-string.umd.js.map"),
+    ("source-map-small-sourcemap-codec-v2", "payloads-v2/sourcemap-codec.umd.js.map"),
+    ("woff2-medium-inter-latin-v20", "payloads-v2/inter-latin.medium.woff2"),
 )
 RESOURCE_METRIC_UNITS = {
     "compressed_bytes": "bytes",
@@ -98,6 +102,12 @@ SAMPLE_FIELDS = {
     "source_ref",
     "license_id",
     "redistributable",
+}
+# Corpus v2 records who a real resource belongs to. Field sets stay closed per
+# schema version so a stray key still fails rather than passing unnoticed.
+SAMPLE_FIELDS_BY_SCHEMA = {
+    1: SAMPLE_FIELDS,
+    2: SAMPLE_FIELDS | {"attribution"},
 }
 TOOL_FIELDS = {
     "name",
@@ -267,8 +277,12 @@ def _verify_corpus(value: object) -> dict[str, dict[str, object]]:
         raise ValueError("corpus manifest name must be a basename")
     if not SHA256_RE.fullmatch(str(value["manifest_sha256"])):
         raise ValueError("corpus manifest checksum must be SHA-256")
-    if value["manifest_schema_version"] != 1:
+    # v1 is the retired generated corpus; v2 is the real-world one. Both are
+    # readable so historical bundles stay verifiable, but only the pinned
+    # canonical manifest may back a production bundle.
+    if value["manifest_schema_version"] not in SAMPLE_FIELDS_BY_SCHEMA:
         raise ValueError("unsupported corpus manifest schema")
+    schema_version = value["manifest_schema_version"]
     rows = value["samples"]
     if not isinstance(rows, list) or not rows or value["sample_count"] != len(rows):
         raise ValueError("corpus sample count is invalid")
@@ -277,7 +291,7 @@ def _verify_corpus(value: object) -> dict[str, dict[str, object]]:
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("corpus sample must be an object")
-        _require_exact_fields(row, SAMPLE_FIELDS, "sample")
+        _require_exact_fields(row, SAMPLE_FIELDS_BY_SCHEMA[schema_version], "sample")
         sample_id = row["sample_id"]
         path = row["path"]
         if not isinstance(sample_id, str) or not sample_id or sample_id in samples:

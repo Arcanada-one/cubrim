@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 
-PHASE_A_CODECS = ("gzip", "brotli", "zstd")
+# Phase A compares the presets real web transport actually uses, not only the
+# archival ones. A CDN serving dynamic responses runs brotli-5 or zstd-3; the
+# maximum settings appear on precompressed static assets. Measuring only
+# brotli-11/gzip-9/zstd-19 flatters any candidate on speed and understates the
+# ratio it has to beat, which is the bias CUBR-0068 warned about.
+PHASE_A_CODECS = ("gzip-9", "brotli-11", "brotli-5", "zstd-19", "zstd-3")
 
 
 def validate_codec_attribution(codec_name: str, capabilities: Mapping[str, object]) -> None:

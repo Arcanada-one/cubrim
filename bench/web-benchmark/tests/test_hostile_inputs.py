@@ -169,7 +169,7 @@ class HostileInputTests(unittest.TestCase):
                 "crash",
                 {
                     "sample_id": "safe-id",
-                    "codec_key": "gzip",
+                    "codec_key": "gzip-9",
                     "trial_no": 4,
                     "path": "/private/corpus/input",
                     "stderr": "token=secret",
@@ -179,7 +179,7 @@ class HostileInputTests(unittest.TestCase):
             self.assertEqual(
                 record,
                 {
-                    "codec_key": "gzip",
+                    "codec_key": "gzip-9",
                     "reason": "crash",
                     "sample_id": "safe-id",
                     "trial_no": 4,
