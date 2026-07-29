@@ -22,20 +22,20 @@ REPO_ROOT = getattr(run, "REPO_ROOT", None)
 
 
 class FakeAdapter:
-    name = "gzip"
+    name = "gzip-9"
     flags = ("-9",)
     capabilities = {"whole_buffer_decode": True}
 
     def identity(self):
         return SimpleNamespace(
-            name="gzip",
+            name="gzip-9",
             version="gzip test",
             binary_path="/usr/bin/gzip",
             binary_sha256="b" * 64,
             flags=self.flags,
-            binary_package="gzip",
+            binary_package="gzip-9",
             binary_package_version="1.2.3-1",
-            source_package="gzip",
+            source_package="gzip-9",
             source_package_version="1.2.3-1",
             upstream_release_sha="c" * 40,
             upstream_source_reference="https://example.com/gzip/commit/" + "c" * 40,

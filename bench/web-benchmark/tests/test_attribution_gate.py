@@ -21,7 +21,12 @@ from capabilities import (
 
 class AttributionGateTests(unittest.TestCase):
     def test_phase_a_allowlist_is_exact(self):
-        self.assertEqual(PHASE_A_CODECS, ("gzip", "brotli", "zstd"))
+        # Real web transport runs the fast presets on dynamic responses and the
+        # maximum ones on precompressed assets. Measuring only the archival end
+        # flatters a candidate's speed and understates the ratio it must beat.
+        self.assertEqual(
+            PHASE_A_CODECS, ("gzip-9", "brotli-11", "brotli-5", "zstd-19", "zstd-3")
+        )
 
     def test_cubrim_web_requires_a_real_profile_capability(self):
         with self.assertRaisesRegex(ValueError, "real Web Profile"):
@@ -44,30 +49,45 @@ class AttributionGateTests(unittest.TestCase):
 
     def test_codec_argv_matches_the_preregistered_commands(self):
         path = Path("/tmp/input.bin")
-        self.assertEqual(adapter_for("gzip").compress_argv(path), ("gzip", "-9", "-c", str(path)))
-        self.assertEqual(adapter_for("gzip").decompress_argv(path), ("gzip", "-d", "-c", str(path)))
-        self.assertEqual(
-            adapter_for("brotli").compress_argv(path),
-            ("brotli", "--quality=11", "--stdout", str(path)),
-        )
-        self.assertEqual(
-            adapter_for("brotli").decompress_argv(path),
-            ("brotli", "--decompress", "--stdout", str(path)),
-        )
-        self.assertEqual(
-            adapter_for("zstd").compress_argv(path),
-            ("zstd", "-19", "--quiet", "--stdout", str(path)),
-        )
-        self.assertEqual(
-            adapter_for("zstd").decompress_argv(path),
-            ("zstd", "--decompress", "--quiet", "--stdout", str(path)),
-        )
+        expected = {
+            "gzip-9": (
+                ("gzip", "-9", "-c", str(path)),
+                ("gzip", "-d", "-c", str(path)),
+            ),
+            "brotli-11": (
+                ("brotli", "--quality=11", "--stdout", str(path)),
+                ("brotli", "--decompress", "--stdout", str(path)),
+            ),
+            "brotli-5": (
+                ("brotli", "--quality=5", "--stdout", str(path)),
+                ("brotli", "--decompress", "--stdout", str(path)),
+            ),
+            "zstd-19": (
+                ("zstd", "-19", "--quiet", "--stdout", str(path)),
+                ("zstd", "--decompress", "--quiet", "--stdout", str(path)),
+            ),
+            "zstd-3": (
+                ("zstd", "-3", "--quiet", "--stdout", str(path)),
+                ("zstd", "--decompress", "--quiet", "--stdout", str(path)),
+            ),
+        }
+        # Every allowlisted codec must have a preregistered command pair; a new
+        # preset cannot slip in without its argv being written down here first.
+        self.assertEqual(tuple(expected), PHASE_A_CODECS)
+        for codec, (compress, decompress) in expected.items():
+            with self.subTest(codec=codec):
+                self.assertEqual(adapter_for(codec).compress_argv(path), compress)
+                self.assertEqual(adapter_for(codec).decompress_argv(path), decompress)
 
     def test_installed_releases_keep_upstream_and_build_provenance_distinct(self):
+        # Two presets of one codec share a binary, so they share its upstream
+        # release: the preset lives in the flags, not in a different build.
         expected = {
-            "gzip": "80006351d3bb5d9099b74c41fefd6649424a9a28",
-            "brotli": "ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
-            "zstd": "63779c798237346c2b245c546c40b72a5a5913fe",
+            "gzip-9": "80006351d3bb5d9099b74c41fefd6649424a9a28",
+            "brotli-11": "ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
+            "brotli-5": "ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
+            "zstd-19": "63779c798237346c2b245c546c40b72a5a5913fe",
+            "zstd-3": "63779c798237346c2b245c546c40b72a5a5913fe",
         }
         for codec, source_commit in expected.items():
             with self.subTest(codec=codec):
@@ -84,7 +104,7 @@ class AttributionGateTests(unittest.TestCase):
                 self.assertRegex(identity.codec_build_provenance_sha256, r"^[0-9a-f]{64}$")
 
     def test_executor_replaces_path_lookup_with_the_resolved_hashed_binary(self):
-        adapter = adapter_for("gzip")
+        adapter = adapter_for("gzip-9")
         identity = adapter.identity()
         source = Path("/tmp/input.bin")
         self.assertTrue(hasattr(SubprocessExecutor, "exact_argv"))
@@ -120,13 +140,13 @@ class AttributionGateTests(unittest.TestCase):
     def test_cli_or_package_version_mismatch_fails_closed(self):
         with patch("adapters._tool_version", return_value="gzip 9.99"):
             with self.assertRaisesRegex(ValueError, "version mismatch"):
-                adapter_for("gzip").identity()
+                adapter_for("gzip-9").identity()
         with patch(
             "adapters._package_provenance",
             return_value=("gzip", "1.12-unknown"),
         ):
             with self.assertRaisesRegex(ValueError, "package mismatch"):
-                adapter_for("gzip").identity()
+                adapter_for("gzip-9").identity()
 
     def test_first_decoded_byte_requires_incremental_nonempty_output(self):
         with self.assertRaisesRegex(ValueError, "incremental"):

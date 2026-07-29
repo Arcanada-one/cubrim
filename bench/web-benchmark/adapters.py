@@ -128,6 +128,7 @@ class ProcessMeasurement:
 @dataclass(frozen=True)
 class CodecAdapter:
     name: str
+    binary_name: str
     flags: tuple[str, ...]
     capabilities: dict[str, bool]
     _compress: Callable[[Path], tuple[str, ...]]
@@ -140,18 +141,20 @@ class CodecAdapter:
         return self._decompress(path)
 
     def identity(self) -> ToolIdentity:
-        binary = shutil.which(self.name)
+        binary = shutil.which(self.binary_name)
         if binary is None:
-            raise FileNotFoundError(f"required Phase A tool is unavailable: {self.name}")
+            raise FileNotFoundError(
+                f"required Phase A tool is unavailable: {self.binary_name}"
+            )
         resolved = Path(binary).resolve(strict=True)
         binary_sha256 = hash_file(resolved)
-        version = _tool_version(self.name, resolved)
-        pin = RELEASE_PINS[self.name]
+        version = _tool_version(self.binary_name, resolved)
+        pin = RELEASE_PINS[self.binary_name]
         if version != pin.cli_version:
             raise ValueError(
                 f"{self.name} version mismatch: expected {pin.cli_version!r}, got {version!r}"
             )
-        package = _package_provenance(self.name)
+        package = _package_provenance(self.binary_name)
         expected_package = (
             pin.binary_package,
             pin.binary_package_version,
@@ -212,39 +215,75 @@ def compute_build_provenance_sha256(identity: ToolIdentity) -> str:
     )
 
 
-def _gzip() -> CodecAdapter:
+_WHOLE_BUFFER = {"whole_buffer_decode": True, "incremental_decode": False}
+
+
+def _gzip_9() -> CodecAdapter:
     return CodecAdapter(
+        "gzip-9",
         "gzip",
         ("-9", "-c"),
-        {"whole_buffer_decode": True, "incremental_decode": False},
+        dict(_WHOLE_BUFFER),
         lambda path: ("gzip", "-9", "-c", str(path)),
         lambda path: ("gzip", "-d", "-c", str(path)),
     )
 
 
-def _brotli() -> CodecAdapter:
+def _brotli_11() -> CodecAdapter:
     return CodecAdapter(
+        "brotli-11",
         "brotli",
         ("--quality=11", "--stdout"),
-        {"whole_buffer_decode": True, "incremental_decode": False},
+        dict(_WHOLE_BUFFER),
         lambda path: ("brotli", "--quality=11", "--stdout", str(path)),
         lambda path: ("brotli", "--decompress", "--stdout", str(path)),
     )
 
 
-def _zstd() -> CodecAdapter:
+def _brotli_5() -> CodecAdapter:
+    # The dynamic-response preset: what a server can afford per request.
     return CodecAdapter(
+        "brotli-5",
+        "brotli",
+        ("--quality=5", "--stdout"),
+        dict(_WHOLE_BUFFER),
+        lambda path: ("brotli", "--quality=5", "--stdout", str(path)),
+        lambda path: ("brotli", "--decompress", "--stdout", str(path)),
+    )
+
+
+def _zstd_19() -> CodecAdapter:
+    return CodecAdapter(
+        "zstd-19",
         "zstd",
         ("-19", "--quiet", "--stdout"),
-        {"whole_buffer_decode": True, "incremental_decode": False},
+        dict(_WHOLE_BUFFER),
         lambda path: ("zstd", "-19", "--quiet", "--stdout", str(path)),
+        lambda path: ("zstd", "--decompress", "--quiet", "--stdout", str(path)),
+    )
+
+
+def _zstd_3() -> CodecAdapter:
+    # zstd's own default, and the level most CDNs run on the fly.
+    return CodecAdapter(
+        "zstd-3",
+        "zstd",
+        ("-3", "--quiet", "--stdout"),
+        dict(_WHOLE_BUFFER),
+        lambda path: ("zstd", "-3", "--quiet", "--stdout", str(path)),
         lambda path: ("zstd", "--decompress", "--quiet", "--stdout", str(path)),
     )
 
 
 def adapter_for(name: str) -> CodecAdapter:
     require_phase_a_codec(name)
-    return {"gzip": _gzip, "brotli": _brotli, "zstd": _zstd}[name]()
+    return {
+        "gzip-9": _gzip_9,
+        "brotli-11": _brotli_11,
+        "brotli-5": _brotli_5,
+        "zstd-19": _zstd_19,
+        "zstd-3": _zstd_3,
+    }[name]()
 
 
 def phase_a_adapters() -> tuple[CodecAdapter, ...]:
@@ -276,9 +315,12 @@ class SubprocessExecutor:
 
     @staticmethod
     def exact_argv(argv: tuple[str, ...], identity: ToolIdentity) -> tuple[str, ...]:
-        if not argv or argv[0] != identity.name:
-            raise ValueError("codec argv does not match the measured tool identity")
+        # The measurement identity is the preset (brotli-5); the program it
+        # invokes is the binary (brotli). Compare argv against the executable
+        # that provenance was actually captured from.
         binary = Path(identity.binary_path).resolve(strict=True)
+        if not argv or argv[0] != binary.name:
+            raise ValueError("codec argv does not match the measured tool identity")
         if hash_file(binary) != identity.binary_sha256:
             raise ValueError("resolved codec binary changed after provenance capture")
         return (str(binary), *argv[1:])
