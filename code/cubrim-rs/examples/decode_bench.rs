@@ -47,7 +47,13 @@ fn bench_decode(label: &str, payload: &[u8], scheme: ValueScheme, trials: usize)
             return;
         }
     };
-    assert_eq!(decoded, payload, "{label}: round trip must be exact");
+    if decoded != payload {
+        // Several schemes lose data on real files (see tests/scheme_roundtrip.rs).
+        // Timing a decoder that returns wrong bytes would be meaningless, so the
+        // case is reported and skipped rather than silently benchmarked.
+        println!("{label:34} {:<14} SKIPPED — round trip is not exact", format!("{scheme:?}"));
+        return;
+    }
 
     // Warm caches; the first decode also faults in the output allocation.
     for _ in 0..3 {
@@ -102,7 +108,7 @@ fn main() {
     println!("=== whole-stream decode(), median of {trials} in-process trials ===");
     for (name, payload) in &inputs {
         let short: String = name.rsplit('/').next().unwrap_or(name).chars().take(32).collect();
-        for scheme in [ValueScheme::Entropy, ValueScheme::BwtEntropy] {
+        for scheme in [ValueScheme::Entropy, ValueScheme::EntropyContext2, ValueScheme::BwtEntropy] {
             bench_decode(&short, payload, scheme, trials);
         }
         println!();
