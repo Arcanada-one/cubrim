@@ -361,9 +361,19 @@ const TBITS_MAX: usize = 27; // hash-table cap (~12 GB/model at the max)
 /// init-time waste). The decoder derives the identical value from `orig_len` in
 /// the wire header, so the round trip stays byte-exact.
 fn tbits_for(len: usize) -> usize {
+    tbits_cap().map_or_else(
+        || tbits_for_uncapped(len),
+        |cap| tbits_for_uncapped(len).min(cap),
+    )
+}
+
+/// The exponent a length derives on its own, before any cap. The encoder
+/// compares against this to decide whether the blob needs to carry an explicit
+/// exponent at all: when nothing was capped the field stays 0 and the blob is
+/// byte-identical to one written before the field existed.
+fn tbits_for_uncapped(len: usize) -> usize {
     let ceil_log2 = (usize::BITS - (len.max(2) - 1).leading_zeros()) as usize;
-    let derived = (ceil_log2 + 3).clamp(18, TBITS_MAX);
-    tbits_cap().map_or(derived, |cap| derived.min(cap))
+    (ceil_log2 + 3).clamp(18, TBITS_MAX)
 }
 
 /// Development knob for the memory/ratio/throughput sweep: caps the per-model
@@ -917,7 +927,7 @@ fn skip_col_variants() -> bool {
 
 /// Encode `data`. Wire: `[orig_len u64 BE][bit-range-coded]`.
 pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
-    cm2_encode_with(data, true)
+    cm2_encode_with(data, true, None)
 }
 
 /// `cm2_encode`, with the FH4-03 column-variant sweep under caller control.
@@ -926,9 +936,13 @@ pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
 /// directions — the column flag and delimiter live in the blob's length header —
 /// so this changes cost and ratio, never decodability. See
 /// `EncodeConfig::cm2_column_variants` for the measured price.
-pub(crate) fn cm2_encode_with(data: &[u8], column_variants: bool) -> Vec<u8> {
+pub(crate) fn cm2_encode_with(
+    data: &[u8],
+    column_variants: bool,
+    max_tbits: Option<usize>,
+) -> Vec<u8> {
     let base = crate::prof::track("cm2_variant_base", |v: &Vec<u8>| v.len(), || {
-        cm2_encode_variant(data, None)
+        cm2_encode_variant(data, None, max_tbits)
     });
     // FH4-03: competitive-min. The column variant ships only when it is strictly
     // smaller, so adding it cannot regress any input — the gate above merely
@@ -942,7 +956,7 @@ pub(crate) fn cm2_encode_with(data: &[u8], column_variants: bool) -> Vec<u8> {
     }
     for d in detect_col_delims(data) {
         let alt = crate::prof::track("cm2_variant_col", |v: &Vec<u8>| v.len(), || {
-            cm2_encode_variant(data, Some(d))
+            cm2_encode_variant(data, Some(d), max_tbits)
         });
         if alt.len() < best.len() {
             best = alt;
@@ -961,6 +975,44 @@ pub(crate) fn cm2_encode_with(data: &[u8], column_variants: bool) -> Vec<u8> {
 const CM2_COL_FLAG: u64 = 1 << 63;
 const CM2_COL_DELIM_SHIFT: u32 = 48;
 const CM2_LEN_MASK: u64 = (1u64 << 48) - 1;
+
+// CUBR-0087 (NEW-27) wire packing: the model table exponent, in bits 56..60.
+//
+// Why this has to be in the blob. `cm2_decode` sized its tables by calling
+// `tbits_for(orig_len)` — the *same* derivation the encoder used — so the
+// exponent was implied, not transmitted, and a decoder had no way to be told to
+// use less. Measured consequence (DB `meta_id=35`): decoding a file of ≥16 MB
+// takes ~12.3 GiB of model tables, allocated before any decoding happens.
+// `wasm32` has a 4 GiB address space, so the web-codec decoder could not exist
+// at any size that matters. Making the exponent explicit is what unblocks it.
+//
+// Backward compatible in the only direction that can be: **0 means "derive as
+// before"**. Every archive written before this existed leaves these bits zero
+// and decodes byte-identically, and nothing about the default path changes.
+//
+// **The explicit value may only SHRINK the derived one, never grow it** — see
+// `effective_tbits`. Dropping that clamp would hand back the QA-F-007
+// model-amplification vector: a 214-byte crafted blob could ask for 2^27 tables
+// and drive RSS to gigabytes before any content was validated. The clamp is the
+// reason this is a safe field to add rather than a new attack surface.
+const CM2_TBITS_SHIFT: u32 = 56;
+const CM2_TBITS_MASK: u64 = 0x1F; // 5 bits: 0 = derive, else 12..=27
+
+/// Resolve the table exponent for a blob: the derived size, lowered by the
+/// blob's declared exponent when it carries one.
+///
+/// Never raises. An out-of-range or larger-than-derived declaration is ignored
+/// rather than rejected, because a decoder that merely uses *more accurate*
+/// tables than requested still decodes correctly — the exponent only has to
+/// match between encoder and decoder, and both call this function.
+fn effective_tbits(orig_len: usize, declared: u64) -> usize {
+    let derived = tbits_for(orig_len);
+    let d = (declared >> CM2_TBITS_SHIFT) & CM2_TBITS_MASK;
+    if d == 0 {
+        return derived;
+    }
+    (d as usize).clamp(12, TBITS_MAX).min(derived)
+}
 
 /// FH4-03 gate: propose record-delimiter candidates whose spacing is regular
 /// enough that a within-record position is a meaningful context.
@@ -1020,17 +1072,37 @@ pub(crate) fn cm2_encode_audit(data: &[u8]) -> (Vec<u8>, f64, f64) {
     cm2_encode_audit_variant(data, None)
 }
 
-fn cm2_encode_variant(data: &[u8], col_delim: Option<u8>) -> Vec<u8> {
-    cm2_encode_audit_variant(data, col_delim).0
+fn cm2_encode_variant(data: &[u8], col_delim: Option<u8>, max_tbits: Option<usize>) -> Vec<u8> {
+    cm2_encode_audit_variant_with(data, col_delim, max_tbits).0
 }
 
 fn cm2_encode_audit_variant(data: &[u8], col_delim: Option<u8>) -> (Vec<u8>, f64, f64) {
+    cm2_encode_audit_variant_with(data, col_delim, None)
+}
+
+fn cm2_encode_audit_variant_with(
+    data: &[u8],
+    col_delim: Option<u8>,
+    max_tbits: Option<usize>,
+) -> (Vec<u8>, f64, f64) {
     let mut hdr = data.len() as u64;
     if let Some(d) = col_delim {
         hdr |= CM2_COL_FLAG | ((d as u64) << CM2_COL_DELIM_SHIFT);
     }
+    // NEW-27: declare the table exponent when it is smaller than the derived
+    // one, so the decoder can allocate the same reduced model instead of
+    // re-deriving the full-size one. `tbits_for` already applies the sweep cap,
+    // so writing what it returns keeps encoder and decoder in step by
+    // construction — there is no second source of the number to drift from.
+    let tb = max_tbits.map_or_else(
+        || tbits_for(data.len()),
+        |cap| tbits_for(data.len()).min(cap.clamp(12, TBITS_MAX)),
+    );
+    if tb < tbits_for_uncapped(data.len()) {
+        hdr |= (tb as u64 & CM2_TBITS_MASK) << CM2_TBITS_SHIFT;
+    }
     let mut out = hdr.to_be_bytes().to_vec();
-    let mut model = CmModel::new_with_col(tbits_for(data.len()), col_delim);
+    let mut model = CmModel::new_with_col(tb, col_delim);
     let mut enc = RangeEncoder::new();
     let mut buf: Vec<u8> = Vec::with_capacity(data.len());
     // M1 (pre-registered by the CUBR-0087 consilium): split the per-bit budget
@@ -1148,7 +1220,7 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     }
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
-    let mut model = CmModel::new_with_col(tbits_for(orig_len as usize), col_delim);
+    let mut model = CmModel::new_with_col(effective_tbits(orig_len as usize, raw), col_delim);
     let mut dec = RangeDecoder::new(&blob[8..]);
     // QA-F-001 fail-closed guard (part 2 — stall detector): once the coded stream is
     // exhausted the range decoder only reads zero-padding and stops consuming input, yet

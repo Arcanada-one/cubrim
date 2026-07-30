@@ -175,10 +175,14 @@ pub struct TestArgs {
 pub enum PresetArg {
     /// Maximum ratio. Byte-identical to the shipped v0.3.2 encoder.
     Max,
-    /// Drops the CM2 column-variant passes: measured 2.27-3.30x less CM2 encode
-    /// time for 0.71-4.83% larger output on the classes CM2 wins. Archives stay
-    /// decodable by every other preset.
+    /// Drops the CM2 column-variant passes: measured 3.00x faster encode for
+    /// +2.35% output on dickens. Archives stay decodable by every other preset.
     Balanced,
+    /// Bounded decoder memory for wasm32 and other hard-ceiling environments:
+    /// decode peak 1.47 GiB -> 0.109 GiB for +3.32% output. Needs a decoder that
+    /// reads the table-exponent field; older decoders fail closed on these
+    /// archives rather than returning wrong bytes.
+    Web,
 }
 
 impl From<PresetArg> for Preset {
@@ -186,6 +190,7 @@ impl From<PresetArg> for Preset {
         match value {
             PresetArg::Max => Preset::Max,
             PresetArg::Balanced => Preset::Balanced,
+            PresetArg::Web => Preset::Web,
         }
     }
 }

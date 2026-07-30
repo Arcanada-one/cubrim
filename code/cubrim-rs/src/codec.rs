@@ -4261,7 +4261,7 @@ fn encode_cm2(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     if !cm2_gate(data) {
         return None;
     }
-    let cm = cm2_encode_with(data, config.cm2_column_variants);
+    let cm = cm2_encode_with(data, config.cm2_column_variants, config.cm2_max_tbits);
     let mut out = Vec::with_capacity(6 + cm.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);

@@ -376,6 +376,42 @@ pub struct EncodeConfig {
     /// ratio, so it is never disabled implicitly; only a preset that states the
     /// trade may turn it off.
     pub cm2_column_variants: bool,
+
+    /// Cap on the CM2 model-table exponent, i.e. a memory budget.
+    ///
+    /// `None` keeps the size CM2 derives from the input length,
+    /// `clamp(ceil_log2(len) + 3, 18, 27)`, which gives **13.50 GiB of model
+    /// tables** to any input of 16 MB or more (24 counter tables at 4 B x 2^27
+    /// plus three match tables at 4 B x 2^27).
+    ///
+    /// The cap is recorded in the blob (CM2 length header, bits 56..60), so a
+    /// capped archive decodes on a decoder that was given no configuration at
+    /// all — which is what makes this a usable option rather than a private
+    /// build flag. It can only lower the derived exponent, never raise it.
+    ///
+    /// **Compatibility is one-directional, and the direction matters.** A blob
+    /// that leaves the field zero (any uncapped encode) is byte-identical to one
+    /// written before the field existed, so **old archives and uncapped new
+    /// archives decode everywhere**. A blob that *uses* the field needs a decoder
+    /// that reads it. An older decoder does not silently produce wrong bytes —
+    /// verified: it fails closed with
+    /// `DecodeError: MODE_CM2: coded stream exhausted before orig_len bytes
+    /// decoded`, exit 2, no output file — but it does fail. Setting a cap is
+    /// therefore a decision about who can read the result.
+    ///
+    /// Measured on a quiet 64-core host, `dickens` 2 MB slice, byte-exact
+    /// round-trip on every row (decode peak RSS is the figure that matters, and
+    /// it is class-independent because decode is CM2 alone):
+    ///
+    /// | cap | output | decode peak RSS |
+    /// |---|---|---|
+    /// | none (=24 here) | 461,437 B | 1.47 GiB |
+    /// | 22 | +1.03% | 0.40 GiB |
+    /// | 20 | +3.32% | **0.109 GiB** |
+    /// | 18 | +8.32% | 0.033 GiB |
+    ///
+    /// v1-default: `None` — byte-identical to the shipped encoder.
+    pub cm2_max_tbits: Option<usize>,
 }
 
 /// Speed/ratio operating point.
@@ -401,6 +437,22 @@ pub enum Preset {
     /// type transform wins (exe, image), because CM2 is not the winner there.
     /// Archives stay mutually decodable with `Max`.
     Balanced,
+    /// Bounded decoder memory, for environments that have a hard ceiling —
+    /// chiefly `wasm32`, whose 4 GiB address space cannot hold the 12.3 GiB of
+    /// model tables a >=16 MB file otherwise demands of the **decoder**.
+    ///
+    /// Caps the CM2 table exponent at 20: measured **decode peak 1.47 GiB ->
+    /// 0.109 GiB on a 2 MB slice, +3.32% output**. Also drops the column
+    /// variants, since an environment that cares about decoder memory is not
+    /// paying 3x encode time for 2% ratio.
+    ///
+    /// Readable by any decoder that understands the table-exponent field.
+    /// **Not** readable by a decoder older than that field — such a decoder
+    /// fails closed with a decode error rather than returning wrong bytes
+    /// (verified), but it cannot open the archive. `Max` and `Balanced` archives
+    /// have no such restriction: they leave the field zero and decode
+    /// everywhere, including on builds that predate it.
+    Web,
 }
 
 impl Preset {
@@ -409,6 +461,10 @@ impl Preset {
         match self {
             Preset::Max => {}
             Preset::Balanced => config.cm2_column_variants = false,
+            Preset::Web => {
+                config.cm2_column_variants = false;
+                config.cm2_max_tbits = Some(20);
+            }
         }
         config
     }
@@ -427,6 +483,7 @@ impl EncodeConfig {
             value_scheme: ValueScheme::BitpackFixed,
             min_ctx_count: None,
             cm2_column_variants: true,
+            cm2_max_tbits: None,
         }
     }
 

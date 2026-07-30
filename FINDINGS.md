@@ -577,6 +577,101 @@ no test workflow (now `CUBR-0090`) and the untracked secret-scan hook (now
 `SEC-0019`): a guard that is configured but not reachable. Needs its own ID and
 either committed fixtures, a generator, or an honest `#[ignore]` with the reason.
 
+## F12 — M1 closed with a direct number: the coder is **2.0%** of the per-bit budget
+
+The consilium pre-registered this as the first measurement and attached a kill
+rule: *stub the entropy coder, measure end-to-end; coder share < 25% ⇒ NEW-22 is
+cancelled on the CM path, not descoped.*
+
+I did not stub it. A null coder emits no bytes, which changes every downstream
+competitive comparison and therefore measures a different encoder. Instead the
+per-bit loop is timed in place — `predict_bit` + `update_bit` against
+`RangeEncoder::encode` — which costs two `Instant::now()` per bit while enabled
+and **emits byte-identical output**, so the split is measured on the real path.
+
+`dickens.2m`, dev-ai, three CM2 passes in one encode (base + two column
+variants):
+
+<!-- gate:literal -->
+```
+CM2-BIT-SPLIT bytes=2097152 model_s=24.182 coder_s=0.514 coder_share=2.08%
+CM2-BIT-SPLIT bytes=2097152 model_s=25.132 coder_s=0.516 coder_share=2.01%
+CM2-BIT-SPLIT bytes=2097152 model_s=25.204 coder_s=0.517 coder_share=2.01%
+```
+<!-- /gate:literal -->
+
+**Coder share 2.0%**, an order of magnitude below the kill threshold. By Amdahl an
+infinitely fast entropy coder yields **1.02×** end-to-end. NEW-22's recorded
+target — decode ≥500 MB/s — was unreachable by a factor of thousands on this path,
+and the consilium was right to insist the target be restated end-to-end before any
+work started.
+
+Model 24.2 s against coder 0.51 s also states the positive finding precisely: the
+cost is the **model** — 24 hash-indexed table lookups, two mixer layers and an APM
+chain, per bit. That is where any future throughput work has to go.
+
+## F13 — the wire-format exponent (NEW-27) is implemented, and its compatibility is one-directional
+
+Implemented in the CM2 length header, bits 56..60, `0` = derive as before.
+Verified by running, not by argument:
+
+| property | result |
+|---|---|
+| capped archive (`tbits=18`) decodes on a decoder given **no configuration** | **PASS** |
+| uncapped output byte-identical to the pre-change build | **PASS** — sha `2840d51a…` both |
+| pre-change decoder reads new **uncapped** output | **PASS** |
+| pre-change decoder reads a **capped** archive | **fails closed**, see below |
+| `--preset web` on `dickens.2m` | 487,506 B, encode peak **0.26 GiB**, round-trip PASS |
+
+**I documented this wrong first and am correcting it.** I wrote that `web`
+archives "remain mutually decodable with every other preset". They do not: a
+decoder that predates the field cannot read a capped archive. What it does
+instead is the part that matters, and it was verified rather than assumed —
+
+<!-- gate:literal -->
+```
+Error: DecodeError: MODE_CM2: coded stream exhausted before orig_len bytes decoded
+exit=2, no output file written
+```
+<!-- /gate:literal -->
+
+— it **fails closed**. No silent corruption, no partial file. The QA-F guards on
+the release branch catch it, which is a good argument for CUBR-0089 landing them
+on `main`.
+
+So the honest statement, now in the code docs and the CLI help: `max` and
+`balanced` archives decode **everywhere including older builds**, because they
+leave the field zero; `web` archives need a decoder that reads the field.
+Choosing `web` is a decision about who can open the result.
+
+## F14 — the preset trade is class-dependent, and `balanced` is a no-op on executables
+
+`ooffice.2m` (exe), same host and pin:
+
+| config | output | vs native | enc s | dec peak RSS |
+|---|---|---|---|---|
+| native | 677,605 | — | 93.9 | 1.56 GiB |
+| tbits22 | 685,459 | +1.16% | 89.7 | 0.40 GiB |
+| tbits20 | 704,087 | +3.91% | 87.8 | **0.107 GiB** |
+| tbits18 | 738,469 | +8.98% | 78.6 | 0.033 GiB |
+| **nocol** | **677,605** | **byte-identical** | 94.0 | 1.56 GiB |
+| nocol+tbits20 | 704,087 | +3.91% | 87.4 | 0.107 GiB |
+
+`nocol` produces the **byte-identical blob** and no speedup — exactly as predicted
+for a class where a type transform wins and the CM2 column sweep never fires.
+Predicted before the run and confirmed by it, which is the only reason the
+prediction is worth anything.
+
+Two consequences for how presets get published:
+
+- **`balanced`'s 3.00× is a text/xml/database number, not a corpus number.** Any
+  public claim must say which classes it applies to, or it is misleading on
+  exactly the half of the corpus where Cubrim's competitors are strongest.
+- **The memory lever is class-independent.** Decode peak lands at 0.107–0.109 GiB
+  at `tbits=20` on both `dickens` and `ooffice`, because decode is CM2 alone
+  whatever won at encode time. That is the number the web-codec epic needs, and it
+  does not vary by input type.
+
 ## Measurement conditions — what these numbers are and are not
 
 I told the sibling sessions that a timing taken on a contended host is not a
