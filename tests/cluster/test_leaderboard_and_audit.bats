@@ -9,7 +9,7 @@
 #   - cubrim-assert_run_log_ref catches missing ref
 
 REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
-LEADERBOARD_DIR="$REPO_ROOT/docs/leaderboard"
+LEADERBOARD_DIR="$REPO_ROOT/documentation/leaderboard"
 LEADERBOARD_JSON="$LEADERBOARD_DIR/cubrim-leaderboard.json"
 RUNLOG="$REPO_ROOT/datarim/cubrim-run-log.jsonl"
 VENDOR_DIR="$REPO_ROOT/code/cluster/vendor"

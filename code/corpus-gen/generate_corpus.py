@@ -2,7 +2,7 @@
 Deterministic corpus generator for the benchmark harness.
 
 Each generator produces a fixed-size binary blob from a seeded PRNG.
-Outputs go to docs/ephemeral/research/corpus/ (gitignored).
+Outputs go to documentation/ephemeral/research/corpus/ (gitignored).
 A manifest is written to corpus/manifest.json with:
   - class name, seed, params, output path, size_bytes, sha256, rho
 
@@ -48,7 +48,7 @@ from cubrim_proto.cube import build_cube
 
 # Output directory (relative to Projects/Cubrim root)
 _PROJECT_ROOT = _CODE.parent  # Projects/Cubrim/
-_CORPUS_DIR = _PROJECT_ROOT / "docs" / "ephemeral" / "research" / "corpus"
+_CORPUS_DIR = _PROJECT_ROOT / "documentation" / "ephemeral" / "research" / "corpus"
 
 B_DEFAULT = 256
 HEADER_OVERHEAD_BOUND = 320

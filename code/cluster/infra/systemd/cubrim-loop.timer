@@ -13,7 +13,7 @@
 #
 # Stop the cluster:
 #   sudo systemctl stop cubrim-loop.timer cubrim-loop.service
-# (See docs/how-to/stop-the-cubrim-cluster.md for full kill-switch procedure)
+# (See documentation/how-to/stop-the-cubrim-cluster.md for full kill-switch procedure)
 
 [Unit]
 Description=Cubrim Autonomous Research Loop Timer

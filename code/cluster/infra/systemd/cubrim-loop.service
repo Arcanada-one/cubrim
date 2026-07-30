@@ -9,7 +9,7 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable cubrim-loop.timer  # enable the timer, not the service directly
 #
-# Kill switch (two commands — see docs/how-to/stop-the-cubrim-cluster.md):
+# Kill switch (two commands — see documentation/how-to/stop-the-cubrim-cluster.md):
 #   sudo systemctl stop cubrim-loop.timer cubrim-loop.service
 #   docker stop cubrim-orchestrator cubrim-worker-a cubrim-worker-b cubrim-worker-c
 

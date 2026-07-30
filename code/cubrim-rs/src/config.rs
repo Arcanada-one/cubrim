@@ -233,6 +233,30 @@ pub enum ValueScheme {
     ///
     /// Header byte = 11.
     BwtGeoMix,
+    /// LZ77 match modeling + rANS — a NON-BWT value-stream class (H-25).
+    ///
+    /// The value-code stream is tokenized into (literal, match) tokens by greedy
+    /// LZ77 (3-code hash chains, full prior window). Every sub-stream is then
+    /// entropy-coded: literals through the BWT + order-1 rANS backend (scheme 7),
+    /// the token flags through order-1 rANS over {0,1}, and the match length and
+    /// distance values through a bit-length BUCKET (order-1 rANS) + raw extra bits.
+    /// The distance stream is the dominant cost; bucket+extra reaches ~log2(d)
+    /// (the information floor) while rANS models the bucket distribution.
+    ///
+    /// Captures long-range repeats that the BWT-family schemes leave on the table
+    /// (the holdout gap to gzip/zstd). Competitive (Gotcha #4): produced only as a
+    /// winner of the scheme-7 selection rail, so it can never regress a file.
+    ///
+    /// Wire (after header + gap streams):
+    ///   [n_tokens u32][n_lits u32][n_matches u32]
+    ///   [flags  : order-1 rANS over {0,1}]
+    ///   [lits   : BWT + order-1 rANS (scheme-7 body), count = n_lits]
+    ///   [lenbkt : order-1 rANS over bit-length buckets, count = n_matches]
+    ///   [distbkt: order-1 rANS over bit-length buckets, count = n_matches]
+    ///   [extra_len u32][extra bits: per match (token order), len-extra then dist-extra]
+    ///
+    /// Header byte = 12.
+    LzRans,
 }
 
 impl GapScheme {
@@ -269,6 +293,7 @@ impl ValueScheme {
             ValueScheme::BwtAdaptive => 9,
             ValueScheme::BwtContextMix => 10,
             ValueScheme::BwtGeoMix => 11,
+            ValueScheme::LzRans => 12,
         }
     }
 
@@ -286,6 +311,7 @@ impl ValueScheme {
             9 => Some(ValueScheme::BwtAdaptive),
             10 => Some(ValueScheme::BwtContextMix),
             11 => Some(ValueScheme::BwtGeoMix),
+            12 => Some(ValueScheme::LzRans),
             _ => None,
         }
     }
@@ -434,9 +460,13 @@ mod tests {
             Some(ValueScheme::BwtGeoMix)
         );
         assert_eq!(
-            ValueScheme::from_byte(12),
+            ValueScheme::from_byte(ValueScheme::LzRans.scheme_byte()),
+            Some(ValueScheme::LzRans)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(13),
             None,
-            "12 is not a valid value_scheme byte"
+            "13 is not a valid value_scheme byte"
         );
         assert_eq!(
             ValueScheme::from_byte(99),

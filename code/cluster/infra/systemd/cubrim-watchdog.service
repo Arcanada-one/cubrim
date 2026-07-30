@@ -14,7 +14,7 @@
 #
 # Kill switch: systemctl stop cubrim-watchdog.timer stops the watchdog;
 # systemctl stop cubrim-loop.timer stops iterations.
-# See docs/how-to/stop-the-cubrim-cluster.md for the full two-command procedure.
+# See documentation/how-to/stop-the-cubrim-cluster.md for the full two-command procedure.
 
 [Unit]
 Description=Cubrim Cluster Container Watchdog

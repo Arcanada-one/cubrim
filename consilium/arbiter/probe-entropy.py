@@ -126,7 +126,7 @@ def probe_corpus(
         path = entry.get("path", "")
         if not os.path.exists(path):
             repo_root = Path(manifest_path).parent.parent.parent.parent
-            path = str(repo_root / "docs" / "ephemeral" / "research" / "corpus" / Path(path).name)
+            path = str(repo_root / "documentation" / "ephemeral" / "research" / "corpus" / Path(path).name)
         if not os.path.exists(path):
             results.append({"file": name, "status": "SKIP", "reason": "file not found"})
             continue

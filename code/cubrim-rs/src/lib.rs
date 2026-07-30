@@ -6,15 +6,18 @@
 //   decode(blob: &[u8]) -> Result<...>   — decompress; fail-closed on corrupt input
 
 pub mod bitpack;
+pub(crate) mod cm2;
 pub mod codec;
 pub mod config;
 pub mod cube;
 pub mod distance_map;
 pub mod domainize;
+pub(crate) mod geocm;
 pub mod error;
 pub mod header;
 pub(crate) mod huffman;
 pub mod phi;
+pub(crate) mod ppmd;
 pub mod rle;
 
 pub use codec::{decode, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};

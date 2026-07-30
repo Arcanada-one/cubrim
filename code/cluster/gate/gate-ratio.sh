@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gate-ratio.sh — Gate 4: aggregate ratio strictly improves vs main leaderboard baseline.
 #
-# Reads current_best.aggregate from docs/leaderboard/cubrim-leaderboard.json
+# Reads current_best.aggregate from documentation/leaderboard/cubrim-leaderboard.json
 # (always from main branch state, never from the candidate branch).
 # Runs run_bench.py on the candidate and compares aggregate ratios.
 #
@@ -86,7 +86,7 @@ command -v git >/dev/null 2>&1 || die "git required"
 
 # ── read baseline from main branch via git-object store (tamper-resistant) ───
 # Baseline source priority (highest to lowest):
-#   1. git show main:docs/leaderboard/cubrim-leaderboard.json  — resolves from
+#   1. git show main:documentation/leaderboard/cubrim-leaderboard.json  — resolves from
 #      the main branch ref in the git object store; the candidate branch's
 #      working-tree copy is never consulted, so a worker cannot lower its own bar
 #      by editing the leaderboard in its branch.
@@ -94,7 +94,7 @@ command -v git >/dev/null 2>&1 || die "git required"
 #      during bootstrap (before the leaderboard file is committed to main).
 #      This file lives in the pinned gate dir alongside the gate scripts and
 #      cannot be edited by a candidate branch.
-LEADERBOARD_GIT_PATH="docs/leaderboard/cubrim-leaderboard.json"
+LEADERBOARD_GIT_PATH="documentation/leaderboard/cubrim-leaderboard.json"
 PINNED_BASELINE="$GATE_DIR/pinned-leaderboard-baseline.json"
 MAIN_LEADERBOARD_JSON="$(git -C "$REPO_ROOT" show "main:${LEADERBOARD_GIT_PATH}" 2>/dev/null || true)"
 
@@ -177,8 +177,8 @@ else
         die "bench harness failed (exit $BENCH_RC)"
     fi
 
-    # Locate the output (bench writes to docs/ephemeral/research/)
-    BENCH_OUT="$REPO_ROOT/docs/ephemeral/research/gate-ratio-candidate-bench.json"
+    # Locate the output (bench writes to documentation/ephemeral/research/)
+    BENCH_OUT="$REPO_ROOT/documentation/ephemeral/research/gate-ratio-candidate-bench.json"
     [ -f "$BENCH_OUT" ] || die "bench output not found: $BENCH_OUT"
     CANDIDATE_AGG="$(parse_candidate_aggregate "$BENCH_OUT")"
 fi

@@ -72,17 +72,12 @@ pub fn ensure_license_accepted() -> Result<(), AppError> {
 
     let license = fetch_license(&state, "license_fetch").unwrap_or_else(fallback_license);
     print_license(&license);
-    eprintln!();
-    eprint!("Do you accept the Cubrim license terms? [Y/n] ");
+    eprint!("Do you accept the Cubrim license terms? [y/N] ");
     io::stderr().flush().map_err(AppError::from)?;
 
     let mut answer = String::new();
     read_tty_line(&mut answer)?;
-    let answer = answer.trim();
-    if answer.is_empty()
-        || answer.eq_ignore_ascii_case("y")
-        || answer.eq_ignore_ascii_case("yes")
-    {
+    if answer.trim().eq_ignore_ascii_case("y") || answer.trim().eq_ignore_ascii_case("yes") {
         let accept_license =
             fetch_license(&state, "first_run_accept").unwrap_or_else(|| license.clone());
         mark_accepted(&mut state, &accept_license.version);
@@ -238,10 +233,11 @@ fn set_private_file_permissions(_path: &std::path::Path) -> Result<(), AppError>
 
 #[cfg(unix)]
 fn read_tty_line(out: &mut String) -> Result<(), AppError> {
-    use std::io::BufRead;
-    let tty = fs::File::open("/dev/tty").map_err(AppError::from)?;
-    let mut reader = io::BufReader::new(tty);
-    reader.read_line(out).map_err(AppError::from)?;
+    use std::io::Read;
+    let mut tty = fs::File::open("/dev/tty").map_err(AppError::from)?;
+    let mut buf = [0_u8; 256];
+    let n = tty.read(&mut buf).map_err(AppError::from)?;
+    *out = String::from_utf8_lossy(&buf[..n]).to_string();
     Ok(())
 }
 
