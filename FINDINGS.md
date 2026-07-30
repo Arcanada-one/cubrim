@@ -428,7 +428,7 @@ re-run from scratch on whole Silesia files with the corrected build:
 |---|---|---|---|---|---|
 | ooffice (exe) | 6,152,192 | 1,763,460 | 1,763,460 | **IDENTICAL** ×2 hosts | PASS |
 | x-ray (image) | 8,474,240 | 3,637,036 | 3,637,036 | **IDENTICAL** ×2 hosts | PASS |
-| samba (code) | 21,606,400 | — | — | running on both | — |
+| samba (code) | 21,606,400 | 3,138,929 | 3,138,929 | **IDENTICAL** | PASS |
 
 Run independently on `arcana-devs` and on `dev-ai`, and both hosts produced the
 same byte counts and the same identity verdict. That is worth more than a repeat
@@ -444,12 +444,19 @@ are abandoned mid-flight. At 6 MB and 8 MB these are ~94 and ~130 blocks against
 the slices' ~32, which is where the abandonment race between worker threads has
 room to misbehave.
 
-**Still not proven:**
+**Gate complete: 3/3 IDENTICAL with round-trip PASS at full corpus scale**, across
+all three classes that matter — the two where the bound fires (`ooffice`, `x-ray`)
+and one 21.6 MB / ~330-block file to exercise the abandonment race at depth.
 
-- `samba` (21.6 MB, ~330 blocks) has not completed.
-- Nothing has been run at the scale of `enwik8` (100 MB, ~1,500 blocks).
+**Still not proven, and it should be before this is treated as settled:**
+
+- Nothing has been run at `enwik8` scale (100 MB, ~1,500 blocks), where the model
+  is also 8× larger than anything tested here.
 - The gate compares against a reference binary built from the same tree with the
-  knobs unset. It proves the *change* is inert, not that the codec is correct.
+  knobs unset. It proves the *change* is inert; it says nothing about whether the
+  codec was correct to begin with.
+- The suite's six pre-existing failures mean a fresh clone still cannot go green,
+  so "tests pass" is not yet a statement anyone else can reproduce.
 
 Until those three close, L1 is *measured correct on three files*, which is not the
 same as correct.
