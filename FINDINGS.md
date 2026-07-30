@@ -386,7 +386,7 @@ listed below as a candidate, not as a result.
 | **L1** branch-and-bound: defer `base`, bound it by the incumbent, abandon when partial > bound | exe, image | **none — byte-identical by construction** | yes (output unchanged) | implemented; identity gate **3/3 PASS** (below) |
 | **L2** skip the FH4-03 column variants | text, xml, database | −0.7% to −4.8% output size | yes (column flag lives in the blob header) | knob implemented; sweep pending |
 
-| **L3** global thread budget shared across nesting levels instead of per-level `available_parallelism()` | all classes, and shared-host behaviour | expected none | yes | **candidate, unmeasured** |
+| **L3** global thread budget shared across nesting levels instead of per-level `available_parallelism()` | all classes, and shared-host behaviour | expected none | yes | **UNMEASURED — attempted and abandoned, see below** |
 | **L4** CM2 table-size budget (`tbits`) as a preset-bound memory knob | memory on every CM2-won file | unknown until swept | **no** — the exponent is not in the wire format; needs a header field or preset byte first | knob implemented for sweeping only |
 
 L1 is unconditional: it costs nothing and can ship as the default. L2 costs ratio
@@ -733,6 +733,36 @@ Two consequences for how presets get published:
   at `tbits=20` on both `dickens` and `ooffice`, because decode is CM2 alone
   whatever won at encode time. That is the number the web-codec epic needs, and it
   does not vary by input type.
+
+## F15 — L3 was attempted and abandoned rather than reported
+
+The harness exists (`l3.sh`: `ooffice.2m` at `CUBR_THREADS` ∈ {default, 64, 16,
+8, 4}, deliberately unpinned because the question is whole-machine behaviour and
+pinning to 8 cores while varying thread count conflates the two). It waited for a
+quiet host, started at load 1.42, and I killed it before it produced a single
+complete row.
+
+**Why.** The benchmark track had begun its competitor baseline on the same
+machine. Load was only 6.80 on 64 cores, so on a naive reading there was ample
+headroom — but the contention was **unequal across the rows**: a single-threaded
+`brotli -q 11` steals ~1/64 of capacity from the 64-thread row and essentially
+nothing from the 4-thread row. That biases the comparison **in favour of capping
+threads**, which is my own hypothesis.
+
+This is the same error I refused earlier when I declined to run the sweep under
+falling background load with the full-footprint row first, and the same standard I
+imposed on three sibling sessions. Applying it to someone else's numbers and not
+to my own would make it a rhetorical device rather than a standard.
+
+The other host was not an alternative: `arcana-devs` was at load 8.09 on 16 cores
+with a cubrim process from another session still running.
+
+**So L3 has no number, and the honest report is that it has no number.** The
+script is in place and takes one command on a genuinely quiet host. What is
+recorded stays what was observed in F6 — two concurrent encodes drove a 16-core
+box to load 82, and the mechanism (per-level `available_parallelism()` multiplying
+through nested candidates rather than sharing a budget) is read from source. That
+is a *defect description*, not a measured lever, and it is not to be quoted as one.
 
 ## Measurement conditions — what these numbers are and are not
 
