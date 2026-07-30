@@ -90,8 +90,25 @@ container still reports the host's CPUs, which means this package's own
 path entirely. `-mt` demonstrably controls the output — sweeping `-mt1` … `-mt64`
 on `silesia/mr` produces distinct, repeatable sizes spanning 11,393 bytes — and
 16 is the value the frozen expectations in `expected_cells.json` were produced
-at. rar is therefore pinned rather than inherited, and the remaining tolerance
-covers only the timestamp effect below.
+at.
+
+**Confirmed on two hosts of different size**, which is the only test that
+actually settles it. Compressing `silesia/mr` with a normalised source
+timestamp:
+
+| host | online CPUs | `-mt16` pinned | no `-mt` |
+|---|---|---|---|
+| A | 16 | 2,781,302 | 2,781,302 |
+| B | 64 | **2,781,302** | 2,779,962 |
+
+Pinned, the two hosts agree to the byte. Unpinned, they disagree by 1,340 bytes
+— and that is the smaller end of the effect; the same knob moves `silesia/mr` by
+5,716 bytes between 12 and 16 threads.
+
+A full 24-file, nine-archiver run on host B with `-mt16` pinned reproduced host
+A's frozen expectations on **204 of 216 cells byte-for-byte**, all 216 round
+trips exact. The twelve that differed were the twelve silesia rar cells,
+uniformly −16 bytes — the timestamp effect below, not a compression difference.
 
 **Timestamps — 16 bytes.** rar stores each source file's modification time and
 widens that encoding for recent timestamps, so its archive size also depends on
