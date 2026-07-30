@@ -928,9 +928,41 @@ scheme would have won now gets the sticky choice. Anyone implementing it must
 measure that cost rather than assume it is zero — the same trap as the column sweep,
 which was also "obviously" free until it was priced.
 
-Per-class results for `ooffice`, `osdb` and `dickens` are running; a scheme that is
-stable on image and unstable on text would make this a per-class preset rather than
-a global one, and that is exactly the shape of every other lever in this task.
+### Per-class results, and the absence that turned out to be a result
+
+| file | class | final winner | blocks |
+|---|---|---|---|
+| x-ray | image | `geomix` | **384 / 384** |
+| ooffice | exe | `geomix` | **384 / 384** |
+| dickens | text | — no rows — | see below |
+| osdb | database | — no rows — | see below |
+
+Two classes, one answer, every block. The competition is a constant wherever it
+runs to completion.
+
+**The two blanks are not a failed measurement — they are L1 firing, which I had
+not previously observed.** On text and database `cm2` establishes the incumbent
+first, so the deferred `base` is bounded and abandoned before a single block
+completes, and there is no per-block winner to record:
+
+| file | build | `base` time | `base` output |
+|---|---|---|---|
+| dickens | unbounded | 0.218 s | 1,756,742 B (completed) |
+| dickens | **L1** | **0.097 s** | **0 B (abandoned)** |
+
+So L1 does fire on text — worth **0.12 s of a ~119 s encode**, i.e. nothing for
+speed, because `base` was never the cost there (0.16% in F2). It is confirmation
+that the mechanism works, not a speed result, and it should not be quoted as one.
+
+On image and exe the `FINAL:` rows come from the **nested, unbounded** `base` calls
+inside the winning transform container — exactly the calls F17 showed L1 does not
+and should not bound. Which is why those classes still pay the ~700 CPU-seconds,
+and why the sticky lever is aimed at the *nested* competition specifically.
+
+A scheme stable on image and unstable on text would have made this a per-class
+preset; instead the honest position is that **text and database cannot answer the
+question at all under L1**, so the lever's scope is currently established for
+image and exe only.
 
 ## Status of the pre-registered measurements
 
