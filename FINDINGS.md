@@ -428,10 +428,11 @@ re-run from scratch on whole Silesia files with the corrected build:
 |---|---|---|---|---|---|
 | ooffice (exe) | 6,152,192 | 1,763,460 | 1,763,460 | **IDENTICAL** ×2 hosts | PASS |
 | x-ray (image) | 8,474,240 | 3,637,036 | 3,637,036 | **IDENTICAL** ×2 hosts | PASS |
-| samba (code) | 21,606,400 | 3,138,929 | 3,138,929 | **IDENTICAL** | PASS |
+| samba (code) | 21,606,400 | 3,138,929 | 3,138,929 | **IDENTICAL** ×2 hosts | PASS |
 
-Run independently on `arcana-devs` and on `dev-ai`, and both hosts produced the
-same byte counts and the same identity verdict. That is worth more than a repeat
+**All three files were run to completion independently on `arcana-devs` (16
+cores) and on `dev-ai` (64 cores)**, and both hosts produced the same byte counts
+and the same identity verdict on every one. That is worth more than a repeat
 on one machine: it rules out a host-specific accident, and it matters here
 because the encoder's abandonment path is racy by design — a different core count
 schedules the worker threads differently, so the two runs did not abandon the same
