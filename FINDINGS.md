@@ -387,15 +387,30 @@ mid-flight. Its blob is byte-for-byte what the unbounded encoder produced.
 and 0.32% of encode, so nothing should be abandoned, and the gate confirms the
 change is inert where it should be inert.
 
-**Not yet proven, and it must be before this ships:**
+### Re-run at full corpus scale after the F8 fix
 
-- Only three of the five slices had reference blobs, so `xml` and `x-ray` are
-  ungated. `x-ray` is the second file where `base` loses at the top level, so it
-  is the second load-bearing case and it is untested.
-- These are 2 MB slices — about 32 blocks. A bound that has never met a
-  3,000-block file has not been tested at the scale where the abandonment race
-  between 16 worker threads is interesting.
-- `cargo test --release` on the changed tree is running and has not reported.
+The slice gate above was run against the *broken* implementation, so it was
+re-run from scratch on whole Silesia files with the corrected build:
+
+| file | bytes in | reference | new | identity | round-trip |
+|---|---|---|---|---|---|
+| ooffice (exe) | 6,152,192 | 1,763,460 | 1,763,460 | **IDENTICAL** | PASS |
+| x-ray (image) | 8,474,240 | 3,637,036 | 3,637,036 | **IDENTICAL** | PASS |
+| samba (code) | 21,606,400 | — | — | running | — |
+
+Both **load-bearing** cases now pass at real scale: `ooffice` and `x-ray` are the
+two classes where a type transform wins and `base` therefore loses the top-level
+competition, so they are the only files where the bound actually fires and blocks
+are abandoned mid-flight. At 6 MB and 8 MB these are ~94 and ~130 blocks against
+the slices' ~32, which is where the abandonment race between worker threads has
+room to misbehave.
+
+**Still not proven:**
+
+- `samba` (21.6 MB, ~330 blocks) has not completed.
+- Nothing has been run at the scale of `enwik8` (100 MB, ~1,500 blocks).
+- The gate compares against a reference binary built from the same tree with the
+  knobs unset. It proves the *change* is inert, not that the codec is correct.
 
 Until those three close, L1 is *measured correct on three files*, which is not the
 same as correct.
