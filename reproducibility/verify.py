@@ -23,9 +23,11 @@ from typing import Any
 # argv template previously gave none, so every host produced a different archive
 # from identical input -- and this verifier would have hard-failed an outside
 # reviewer's *correct* run on any box that did not resolve to 16 threads,
-# blaming a timestamp for it. archiver_templates.json now pins -mt16, which
-# yields byte-identical output under taskset -c 0-15, 0-7, 0-3 and 0, so the
-# only residual variation is the timestamp effect this constant is named for.
+# blaming a timestamp for it. rar reads /sys/devices/system/cpu/online rather
+# than the affinity mask, so neither taskset nor a container CPU limit contains
+# it. archiver_templates.json now pins -mt16, removing the auto-detection path,
+# so the only residual variation is the timestamp effect this constant is named
+# for.
 MTIME_HEADER_SLACK = 32
 META_ID = 35
 RELEASE_COMMIT = "dfb195ef089db738e51153ad4532fdd583f247bf"

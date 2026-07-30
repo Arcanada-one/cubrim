@@ -79,10 +79,19 @@ behind the long-unexplained 5,732-byte disagreement on that one cell, and it
 meant this verifier would have rejected an honest third-party run on most
 machines while blaming a timestamp for it.
 
-`archiver_templates.json` now pins `-mt16`. Verified host-independent: with the
-flag pinned, output is byte-identical under `taskset -c 0-15`, `0-7`, `0-3` and
-`0`. rar is therefore deterministic across hosts like the other nine, and the
-remaining tolerance covers only the timestamp effect below.
+Worse, that auto-detection cannot be contained from outside the process.
+`strace` shows rar reading **`/sys/devices/system/cpu/online`** — the machine's
+online CPU list — and never calling `sched_getaffinity`. So `taskset` does not
+change its choice, and neither does a container CPU limit: `/sys` inside a
+container still reports the host's CPUs, which means this package's own
+`docker run --cpus=4` gave no protection at all.
+
+`archiver_templates.json` now pins `-mt16`, which removes the auto-detection
+path entirely. `-mt` demonstrably controls the output — sweeping `-mt1` … `-mt64`
+on `silesia/mr` produces distinct, repeatable sizes spanning 11,393 bytes — and
+16 is the value the frozen expectations in `expected_cells.json` were produced
+at. rar is therefore pinned rather than inherited, and the remaining tolerance
+covers only the timestamp effect below.
 
 **Timestamps — 16 bytes.** rar stores each source file's modification time and
 widens that encoding for recent timestamps, so its archive size also depends on
