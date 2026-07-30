@@ -14,12 +14,14 @@ pub mod domainize;
 pub mod error;
 pub mod header;
 pub(crate) mod huffman;
+pub mod limits;
 pub mod phi;
 pub mod rle;
 
-pub use codec::{decode, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
+pub use codec::{decode, decode_with_limits, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
 pub use config::{EncodeConfig, GapScheme, ValueScheme};
 pub use error::CubrimError;
+pub use limits::DecodeLimits;
 
 // V-AC-8: traceability check module
 #[cfg(test)]

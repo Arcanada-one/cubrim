@@ -129,7 +129,7 @@ pub fn bitpack_decode(
         )));
     }
 
-    let mut values = Vec::with_capacity(count);
+    let mut values = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut bit_pos = 0usize; // current bit position from MSB of first byte
 
     for _ in 0..count {

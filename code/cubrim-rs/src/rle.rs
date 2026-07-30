@@ -165,7 +165,7 @@ pub fn packed_nibble_decode(
     offset: usize,
     n_gaps: usize,
 ) -> Result<(Vec<usize>, usize), CubrimError> {
-    let mut gaps = Vec::with_capacity(n_gaps);
+    let mut gaps = Vec::with_capacity(crate::limits::bounded_capacity(n_gaps));
     let mut pos = offset;
     for _ in 0..n_gaps {
         let (val, consumed) = decode_varint(data, pos)?;

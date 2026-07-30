@@ -168,7 +168,7 @@ fn rle_codes_decode(
     offset: usize,
     count: usize,
 ) -> Result<(Vec<usize>, usize), CubrimError> {
-    let mut codes = Vec::with_capacity(count);
+    let mut codes = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut pos = offset;
     while codes.len() < count {
         if pos + 3 > blob.len() {
@@ -513,6 +513,18 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 /// Deterministic decode from header alone — no out-of-band state.
 /// Corrupt input raises CubrimError (never silent garbage).
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    decode_with_limits(blob, &crate::limits::DecodeLimits::default())
+}
+
+/// R6: Decode a Cubrim v1 blob under explicit resource limits.
+///
+/// `decode()` is this function with [`DecodeLimits::default`]. Callers that
+/// serve untrusted traffic and want a tighter ceiling than the archiver default
+/// — a browser or proxy decoding a response body, for instance — set their own.
+pub fn decode_with_limits(
+    blob: &[u8],
+    limits: &crate::limits::DecodeLimits,
+) -> Result<Vec<u8>, CubrimError> {
     // Parse header (R6)
     let (hdr, mut offset) = parse_header(blob)?;
     let l = hdr.l;
@@ -537,6 +549,11 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             hdr.mode
         )));
     }
+
+    // Every field below this point is attacker-controlled. Refuse the stream
+    // before anything is allocated from it — a declared count or length is not
+    // trustworthy until it has been cross-checked against the bytes supplied.
+    crate::limits::validate_cube_header(&hdr, blob.len(), limits)?;
 
     // Empty input special case
     if l == 0 {
@@ -1177,8 +1194,16 @@ pub(crate) fn context_huffman_decode(
             ));
         }
         let n_ctx = u16::from_be_bytes([blob[offset], blob[offset + 1]]) as usize;
-        // Skip context table entries.
-        let header_bytes = 2 + n_ctx * (2 + n_distinct);
+        // Skip context table entries. Checked: both factors come from the
+        // stream, so the product must not be allowed to wrap.
+        let header_bytes = n_ctx
+            .checked_mul(2 + n_distinct)
+            .and_then(|span| span.checked_add(2))
+            .ok_or_else(|| {
+                CubrimError::Decode(
+                    "EntropyContext: context table size overflows in the empty-stream path".into(),
+                )
+            })?;
         return Ok((vec![], header_bytes));
     }
 
@@ -1191,26 +1216,61 @@ pub(crate) fn context_huffman_decode(
     let n_ctx = u16::from_be_bytes([blob[offset], blob[offset + 1]]) as usize;
     let mut pos = offset + 2;
 
+    // A stream that declares no context tables cannot decode a single symbol,
+    // and the fallback index below would address an empty vector. Refuse it
+    // here rather than panicking at the first lookup.
+    if n_ctx == 0 {
+        return Err(CubrimError::Decode(format!(
+            "EntropyContext: stream declares 0 context tables but {count} symbols to decode"
+        )));
+    }
+
     // 2. Read context tables.
     let header_entry_size = 2 + n_distinct; // ctx_id(u16) + code_len[n_distinct]
-    if pos + n_ctx * header_entry_size > blob.len() {
-        return Err(CubrimError::Decode(format!(
-            "EntropyContext: context table header truncated: need {} bytes, have {}",
-            n_ctx * header_entry_size,
-            blob.len().saturating_sub(pos)
-        )));
+    // Computed with checked arithmetic: an unchecked product of two
+    // header-supplied counts can wrap, and a bounds check whose own arithmetic
+    // wraps admits exactly the input it exists to reject.
+    let header_span = n_ctx
+        .checked_mul(header_entry_size)
+        .ok_or_else(|| {
+            CubrimError::Decode(format!(
+                "EntropyContext: context table size {n_ctx} x {header_entry_size} overflows"
+            ))
+        })?;
+    match pos.checked_add(header_span) {
+        Some(end) if end <= blob.len() => {}
+        _ => {
+            return Err(CubrimError::Decode(format!(
+                "EntropyContext: context table header truncated: need {header_span} bytes, have {}",
+                blob.len().saturating_sub(pos)
+            )));
+        }
     }
 
     // ctx_tables: Vec<(ctx_id, decode_table)>
     // decode_table: HashMap<(codeword, length), symbol> for that context.
     use std::collections::HashMap;
-    let mut ctx_tables: Vec<(u16, HashMap<(u32, u8), usize>)> = Vec::with_capacity(n_ctx);
+    let mut ctx_tables: Vec<(u16, HashMap<(u32, u8), usize>)> =
+        Vec::with_capacity(crate::limits::bounded_capacity(n_ctx));
 
     for _ in 0..n_ctx {
         let ctx_id = u16::from_be_bytes([blob[pos], blob[pos + 1]]);
         pos += 2;
         let code_len: Vec<u8> = blob[pos..pos + n_distinct].to_vec();
         pos += n_distinct;
+
+        // Code lengths come straight off the wire. `assign_canonical_codes`
+        // shifts by the difference between consecutive lengths, so a table
+        // declaring a length of 200 would shift a u32 by more than 31 — a
+        // panic in debug and a silently masked shift in release. `kraft_ok`
+        // already caps depth at 30 and is what guards the `huffman_decode`
+        // path; this call site was missing it.
+        if !crate::huffman::kraft_ok(&code_len) {
+            return Err(CubrimError::Decode(format!(
+                "EntropyContext: context {ctx_id} has code lengths that are not a valid \
+                 prefix-free code"
+            )));
+        }
 
         // Build decode table: (codeword, length) -> symbol.
         // Reuse assign_canonical_codes from huffman.rs.
@@ -1234,7 +1294,7 @@ pub(crate) fn context_huffman_decode(
     // 3. Decode bitstream.
     let bitstream_offset = pos;
     let mut bit_pos: usize = 0; // position in bits from bitstream_offset
-    let mut decoded: Vec<usize> = Vec::with_capacity(count);
+    let mut decoded: Vec<usize> = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut prev_ctx: u16 = 0;
 
     for _ in 0..count {
@@ -1640,6 +1700,16 @@ pub(crate) fn order2_context_huffman_decode(
         return Ok((vec![], header_end - offset));
     }
 
+    // With no context tables there is nothing to decode against, and the
+    // order-0 fallback index below would address an empty vector. Same defect
+    // class as `context_huffman_decode`, reached through the order-2 wire
+    // format instead of the order-1 one.
+    if n_ctx == 0 {
+        return Err(CubrimError::Decode(format!(
+            "EntropyContext2: stream declares 0 context tables but {count} symbols to decode"
+        )));
+    }
+
     // ── Parse context entries ─────────────────────────────────────────────────
     use std::collections::HashMap;
 
@@ -1665,8 +1735,8 @@ pub(crate) fn order2_context_huffman_decode(
         },
     }
 
-    let mut decode_tables: Vec<DecodeTable> = Vec::with_capacity(n_ctx);
-    let mut parsed_entries: Vec<ParsedEntry> = Vec::with_capacity(n_ctx);
+    let mut decode_tables: Vec<DecodeTable> = Vec::with_capacity(crate::limits::bounded_capacity(n_ctx));
+    let mut parsed_entries: Vec<ParsedEntry> = Vec::with_capacity(crate::limits::bounded_capacity(n_ctx));
 
     for _ in 0..n_ctx {
         if pos >= blob.len() {
@@ -1722,6 +1792,17 @@ pub(crate) fn order2_context_huffman_decode(
         }
         let code_len: Vec<u8> = blob[code_len_start..code_len_start + n_distinct].to_vec();
         pos = code_len_start + n_distinct;
+
+        // Same untrusted code-length table as the order-1 path: reject a
+        // non-prefix-free or pathologically deep code before it reaches the
+        // canonical-code shift.
+        if !crate::huffman::kraft_ok(&code_len) {
+            return Err(CubrimError::Decode(
+                "EntropyContext2: context entry has code lengths that are not a valid \
+                 prefix-free code"
+                    .to_string(),
+            ));
+        }
 
         // Build decode table.
         let canonical = crate::huffman::assign_canonical_codes(&code_len);
@@ -1779,7 +1860,7 @@ pub(crate) fn order2_context_huffman_decode(
     // ── Decode bitstream ──────────────────────────────────────────────────────
     let bitstream_offset = pos;
     let mut bit_pos: usize = 0;
-    let mut decoded: Vec<usize> = Vec::with_capacity(count);
+    let mut decoded: Vec<usize> = Vec::with_capacity(crate::limits::bounded_capacity(count));
 
     // Maintain rolling context (two previously decoded values).
     // SYNC NOTE: sentinel values and update order here MUST match `order2_ctx_at` (encoder side).
@@ -2438,7 +2519,7 @@ pub(crate) fn rans_order1_decode(
     // Read own context tables (wire order = encoder emit order).
     use std::collections::HashMap;
     let mut ctx_idx: HashMap<u16, usize> = HashMap::new();
-    let mut tables: Vec<RansCtxTable> = Vec::with_capacity(n_ctx);
+    let mut tables: Vec<RansCtxTable> = Vec::with_capacity(crate::limits::bounded_capacity(n_ctx));
 
     for _ in 0..n_ctx {
         if pos + 2 > blob.len() {
@@ -2485,7 +2566,7 @@ pub(crate) fn rans_order1_decode(
         | (payload[3] as u32) << 24;
     cursor += 4;
 
-    let mut result = Vec::with_capacity(count);
+    let mut result = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut prev_ctx: u16 = 0;
     for _ in 0..count {
         let table = match ctx_idx.get(&prev_ctx) {
@@ -2817,7 +2898,7 @@ fn order2_rans_decode(
     let n_ctx1 = u16::from_be_bytes([blob[pos], blob[pos + 1]]) as usize;
     pos += 2;
     let mut o1_idx: HashMap<u16, usize> = HashMap::new();
-    let mut o1_tables: Vec<RansCtxTable> = Vec::with_capacity(n_ctx1);
+    let mut o1_tables: Vec<RansCtxTable> = Vec::with_capacity(crate::limits::bounded_capacity(n_ctx1));
     for _ in 0..n_ctx1 {
         if pos + 2 > blob.len() {
             return Err(CubrimError::Decode("rANS2: ctx1 id truncated".into()));
@@ -2837,7 +2918,7 @@ fn order2_rans_decode(
     let n_ctx2 = u16::from_be_bytes([blob[pos], blob[pos + 1]]) as usize;
     pos += 2;
     let mut o2_idx: HashMap<(u16, u16), usize> = HashMap::new();
-    let mut o2_tables: Vec<RansCtxTable> = Vec::with_capacity(n_ctx2);
+    let mut o2_tables: Vec<RansCtxTable> = Vec::with_capacity(crate::limits::bounded_capacity(n_ctx2));
     for _ in 0..n_ctx2 {
         if pos + 4 > blob.len() {
             return Err(CubrimError::Decode("rANS2: ctx2 key truncated".into()));
@@ -2881,7 +2962,7 @@ fn order2_rans_decode(
         | (payload[3] as u32) << 24;
     cursor += 4;
 
-    let mut result = Vec::with_capacity(count);
+    let mut result = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut p2: u16 = 0;
     let mut p1: u16 = 0;
     for _ in 0..count {
@@ -3171,7 +3252,7 @@ fn adaptive_range_o1_decode(
     let a = n_distinct;
     let mut models: Vec<AdaptModel> = (0..a).map(|_| AdaptModel::new(a)).collect();
     let mut dec = RangeDecoder::new(payload);
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut prev = 0usize;
     for _ in 0..count {
         let total = models[prev].total;
@@ -3419,7 +3500,7 @@ fn cm_pure_o1_encode(seq_codes: &[usize], a: usize, inc: u32) -> Vec<u8> {
 fn cm_pure_o1_decode(payload: &[u8], count: usize, a: usize, inc: u32) -> Vec<usize> {
     let mut ctx: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
     let mut dec = CmRangeDecoder::new(payload);
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut prev = 0usize;
     for _ in 0..count {
         let total = ctx[prev].total;
@@ -3548,7 +3629,7 @@ fn cm_mix_decode(payload: &[u8], count: usize, a: usize, inc: u32, lr: f64) -> V
     let mut w: f64 = 0.5;
     let mut qfreq = vec![0u32; a];
     let mut dec = CmRangeDecoder::new(payload);
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut prev = 0usize;
     for _ in 0..count {
         cm_mix_table(&freq1[prev], tot1[prev], &freq0, tot0, w, a, &mut qfreq);
@@ -3915,7 +3996,7 @@ fn gm_mix_decode(payload: &[u8], count: usize, a: usize, inc: u32, lr: f64, ln: 
     let mut ex = vec![0.0f64; a];
     let mut q = vec![0u32; a];
     let mut dec = CmRangeDecoder::new(payload);
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut prev2 = 0usize;
     let mut prev1 = 0usize;
     for _ in 0..count {

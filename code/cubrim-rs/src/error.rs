@@ -14,6 +14,12 @@ pub enum CubrimError {
     GapInvariant(String),
     /// General decode error (corrupt/truncated stream).
     Decode(String),
+    /// The stream is well-formed enough to parse but declares more resources
+    /// than the decoder will commit — an output length or allocation beyond the
+    /// configured limits. Kept distinct from `Decode` so a caller can tell
+    /// "corrupt" from "refused on policy", which is the distinction the Web
+    /// Profile's resource limits are specified in terms of.
+    ResourceLimit(String),
     /// IO error (file operations).
     Io(String),
 }
@@ -27,6 +33,7 @@ impl fmt::Display for CubrimError {
             }
             CubrimError::GapInvariant(msg) => write!(f, "GapInvariant: {msg}"),
             CubrimError::Decode(msg) => write!(f, "DecodeError: {msg}"),
+            CubrimError::ResourceLimit(msg) => write!(f, "ResourceLimit: {msg}"),
             CubrimError::Io(msg) => write!(f, "IoError: {msg}"),
         }
     }

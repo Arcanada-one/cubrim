@@ -172,8 +172,17 @@ pub(crate) fn assign_canonical_codes(code_len: &[u8]) -> Vec<(u32, u8)> {
     for &sym in &symbols {
         let len = code_len[sym];
         if prev_len > 0 {
-            // Shift left by (len - prev_len) for length increase
-            code <<= (len - prev_len) as u32;
+            // Shift left by (len - prev_len) for length increase.
+            //
+            // `symbols` is sorted ascending by length, so the subtraction
+            // cannot underflow. The shift *amount* can still exceed 31 when
+            // `code_len` came from an untrusted stream, which panics in debug
+            // and is silently masked in release. Callers must reject such
+            // tables via `kraft_ok` (it caps depth at 30) before getting here;
+            // saturating to 0 keeps this function total either way, so a
+            // missing guard can never become a panic in a decoder.
+            let shift = (len - prev_len) as u32;
+            code = code.checked_shl(shift).unwrap_or(0);
         }
         result[sym] = (code, len);
         code += 1;
@@ -256,7 +265,7 @@ pub(crate) fn huffman_decode(
     }
 
     let data = &blob[offset..];
-    let mut result = Vec::with_capacity(count);
+    let mut result = Vec::with_capacity(crate::limits::bounded_capacity(count));
     let mut bit_pos = 0usize; // current bit position in the bitstream (MSB-first)
 
     while result.len() < count {
