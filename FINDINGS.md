@@ -258,6 +258,8 @@ So "the `code` type is fast" is really "`samba` is fast". Its 13,902 MiB peak
 proves CM2 *did* run with full-size tables (`tbits = 27`), so the speed is not
 explained by skipping the strong backend.
 
+**CONFIRMED DIRECTLY — see the measurement at the end of this section.**
+
 **Prediction (falsifiable, and the sweep tests it without new work):** the
 difference is F2c's column-variant sweep failing to trigger. `detect_col_delims`
 accepts a byte only if its inter-occurrence gaps have coefficient of variation
@@ -267,11 +269,41 @@ costs 3.30× the CM2 encode time. If it simply does not fire on `samba`, `samba`
 should be ~3× faster than its peers *for that reason alone* and for no reason
 that generalises.
 
-The test is already in the sweep: if `CUBRIM_CM2_NO_COL=1` moves `dickens` and
-`osdb` to roughly `samba`'s per-byte speed, the outlier is explained and the same
-knob is the corpus-wide lever. If it does not, this explanation is wrong and the
-outlier needs its own attribution run — which is cheap now that the instrument
-exists.
+### The direct measurement, and it lands on the prediction
+
+Attribution on a 2 MB `samba` slice, dev-ai, same binary as every other row:
+
+| candidate | calls | seconds | share | wins | out bytes |
+|---|---|---|---|---|---|
+| `cm2` | 1 | 23.434 | 97.44% | 1 | 377,987 |
+| `cm2_variant_base` | 1 | 23.419 | 97.37% | 1 | 377,981 |
+| `lz_prepass` | 1 | 7.128 | 29.64% | 0 | 509,645 |
+| `geocm` | 1 | 0.507 | 2.11% | 0 | — |
+| `base` | 1 | 0.069 | 0.29% | 0 | — |
+
+**There is no `cm2_variant_col` row.** Not a small one — absent. The instrument
+emits a row for every candidate that runs, so its absence is the measurement:
+`detect_col_delims` proposes nothing on a tar of C sources, and the sweep never
+fires. `cm2` total (23.434 s) and `cm2_variant_base` (23.419 s) agree to 15 ms,
+which is the same statement from the other side: the base pass *is* the whole of
+CM2 here.
+
+The arithmetic closes it:
+
+| file | sweep fires? | encode wall, 2 MB | MiB/s |
+|---|---|---|---|
+| dickens (text) | yes, 2 extra passes | 80.8 s | 0.0248 |
+| dickens, `--preset balanced` | suppressed | 26.9 s | 0.0744 |
+| **samba (code)** | **never proposed** | **24.1 s** | **0.0832** |
+
+`samba` at 24.1 s sits alongside `dickens` with the sweep suppressed at 26.9 s,
+and the measured 0.0832 MiB/s reproduces the DB's `code`-scope 0.0851 MiB/s. So
+the outlier was never a property of source code as data — **`samba` was simply
+not paying for a sweep everything else was paying for**, and `--preset balanced`
+is exactly the knob that brings the other classes to it.
+
+M4 is closed by measurement rather than by inference, and it turned out to be the
+same finding as F2c seen from the other end.
 
 ## F5 — all five classes attributed: two cost centres, and the entropy coder is neither
 
