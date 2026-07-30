@@ -426,9 +426,16 @@ re-run from scratch on whole Silesia files with the corrected build:
 
 | file | bytes in | reference | new | identity | round-trip |
 |---|---|---|---|---|---|
-| ooffice (exe) | 6,152,192 | 1,763,460 | 1,763,460 | **IDENTICAL** | PASS |
-| x-ray (image) | 8,474,240 | 3,637,036 | 3,637,036 | **IDENTICAL** | PASS |
-| samba (code) | 21,606,400 | — | — | running | — |
+| ooffice (exe) | 6,152,192 | 1,763,460 | 1,763,460 | **IDENTICAL** ×2 hosts | PASS |
+| x-ray (image) | 8,474,240 | 3,637,036 | 3,637,036 | **IDENTICAL** ×2 hosts | PASS |
+| samba (code) | 21,606,400 | — | — | running on both | — |
+
+Run independently on `arcana-devs` and on `dev-ai`, and both hosts produced the
+same byte counts and the same identity verdict. That is worth more than a repeat
+on one machine: it rules out a host-specific accident, and it matters here
+because the encoder's abandonment path is racy by design — a different core count
+schedules the worker threads differently, so the two runs did not abandon the same
+blocks at the same moments and still emitted identical bytes.
 
 Both **load-bearing** cases now pass at real scale: `ooffice` and `x-ray` are the
 two classes where a type transform wins and `base` therefore loses the top-level
