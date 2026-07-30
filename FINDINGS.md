@@ -321,7 +321,7 @@ same finding as F2c seen from the other end.
 | xml | xml | 0.0760 | 176.1 | 69.2 | `cm2` | `cm2` 98.8%, col sweep 68.5% | negligible (`base` 0.12%) |
 | osdb | database | 0.2255 | 228.9 | 46.8 | `cm2` (col variant) | `cm2` 82.4%, col sweep 57.4% | negligible (`base` 0.32%) |
 | ooffice | exe | 0.3231 | 207.1 | 55.8 | `bcj_cm2` | `base` 43.5% + winner 24.4% | **large** |
-| x-ray | image | 0.4188 | 111.1 | **2.6** | `med16` | `base` 73.5% + `med16` 73.5% | **large** |
+| x-ray | image | 0.4188 | 111.1 | **2.6** | `med16` | `base` 73.5% + `med16` 73.5% | **none — see F17** |
 
 Two cost centres, cleanly split by which backend wins:
 
@@ -806,12 +806,10 @@ treating it as if it did is the same aggregation error the brief's flat-profile
 diagnostic made — which I criticised, and then reproduced.
 
 **What is actually unexplained is much bigger than what I explained.** Image sits
-at 64–80×, an order of magnitude above the text band. My own attribution already
-carries the lead: on `x-ray`, `base` is **73.5% of encode wall and never wins**
-while `med16` wins and decodes in 2.6 s. So encode pays for the whole cube/BWT
-path plus the winner; decode replays only the trivially-cheap winner. That is F2b,
-and **L1 is exactly the lever that removes it** — which makes the next measurement
-obvious and cheap.
+at 64–80×, an order of magnitude above the text band. I predicted here that L1 was "exactly the lever that removes it". **I measured it,
+and that was wrong — see F17.** `base` on `x-ray` does not lose; it wins 13 of its
+14 calls, because those calls *are* the winning `med16` container's nested
+encoder. L1 leaves it untouched.
 
 I told the sibling sessions that a timing taken on a contended host is not a
 measurement. The same standard applies to mine, so here is the exact status of
@@ -845,6 +843,52 @@ quiet-sweep script's `busy()` check tests `pgrep -x cubrim`, which does not matc
 the renamed binary copies the identity gates run (`cubrim-sweep`, `cubrim-l1v2`).
 Its load-average check catches those anyway, so the gate has not admitted a bad
 row — but the process check alone would not have stopped one.
+
+## F17 — L1 does **not** fix the image asymmetry, and two of my claims were wrong
+
+Predicted in F16: L1 should collapse `x-ray`'s encode, because `base` is 73.5% of
+it and "never wins". Measured with the L1 build, same file, same instrument:
+
+| build | `base` seconds | `base` share | `base` wins |
+|---|---|---|---|
+| unbounded | 81.656 | 73.52% | **13 of 14** |
+| L1 (bounded) | 80.296 | 71.84% | 13 of 14 |
+
+**Unchanged. L1 does not fire on `x-ray` at all** — refuted by the first
+measurement that tested it.
+
+**Two errors of mine, stated plainly:**
+
+1. **`base` does not "never win" on `x-ray` — it wins 13 of 14 calls.** The F5
+   table said "never wins" for both `ooffice` and `x-ray`. True of `ooffice`
+   (wins **0**), false of `x-ray` (wins **13**). I carried a property of one file
+   across to another because they shared a shape.
+2. **L1 only bounds the top-level `base` call.** The other 13 are *nested* calls
+   made by transforms, which use the unbounded `encode_base`. The giveaway was in
+   the table all along: `base` 81.656 s against `med16` 81.586 s — within 70 ms,
+   because **they are the same work**. `med16`'s encode *is* a nested `base` call.
+   Bounding the winner would be wrong, and L1 correctly does not.
+
+### What actually causes the 64–80× image asymmetry
+
+The winning path itself is lopsided. `med16` → nested chunked `base` → **per
+block, the eight-way value-stream competition**: `vs_ctxmix` 490 s, `vs_geomix`
+423 s, `vs_order2_rans` 79 s of CPU on a 2 MB file. Decode replays **one** scheme
+per block and lands at 2.6 s.
+
+It is the *same structural pattern* as the CM2 column sweep — encoder races N
+candidates, decoder replays 1 — one level further down. That is now the identified
+cause of the largest asymmetry on the board, where CUBR-0092's backlog line still
+records it as "UNIDENTIFIED".
+
+**Addressable, and not by L1.** The lever is to bound or gate the *inner* per-block
+competition, as `--preset balanced` gates the column sweep. Unimplemented and
+unmeasured — and a better next lever than anything on the original list.
+
+**Why this matters beyond the finding:** F2b, F5 and F16 all leaned on "`base` is
+huge and never wins" as one story spanning `ooffice` and `x-ray`. It was two
+stories. `ooffice` is genuinely outer-rail waste (wins 0) and L1 does address it —
+that remains measured and true. `x-ray` never was.
 
 ## Status of the pre-registered measurements
 
