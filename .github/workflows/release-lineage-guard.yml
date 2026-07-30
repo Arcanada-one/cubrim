@@ -1,0 +1,88 @@
+name: release-lineage-guard
+
+# Detection leg. Invariant: the default branch contains every release this
+# repository has published, and its crate version is never behind the latest
+# release. The prevention leg lives in release.yml, which refuses to build a tag
+# that is not already on the default branch — so a failure here is always a real
+# defect, never a legitimate in-between state.
+#
+# This exists because on 2026-07-30 the default branch did not contain its own
+# latest release (v0.3.2): the release lineage had become the real trunk while
+# `main` stayed a stale fork missing the champion codec and the fail-closed
+# decode hardening. Nothing failed, nothing was visible.
+
+on:
+  push:
+    branches: ['**']            # filtered to the real default branch inside the job
+  release:
+    types: [published, edited, released]
+  schedule:
+    - cron: '17 6 * * *'        # daily net for out-of-band tags, UI-created releases, renames
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write                 # only used to escalate a scheduled failure
+
+concurrency:
+  group: release-lineage-guard
+  cancel-in-progress: false
+
+jobs:
+  lineage:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Resolve the default branch
+        id: dflt
+        run: |
+          set -euo pipefail
+          # Never hardcode 'main': a default-branch rename must not silently
+          # disable this guard.
+          name="$(gh repo view "$REPO" --json defaultBranchRef -q .defaultBranchRef.name)"
+          [ -n "$name" ] || { echo "cannot resolve default branch"; exit 2; }
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "default branch: $name"
+
+      - name: Decide whether this event is in scope
+        id: gate
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = push ] \
+             && [ "${{ github.ref }}" != "refs/heads/${{ steps.dflt.outputs.name }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "push to a non-default branch — out of scope"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # fetch-depth: 0 is mandatory. A depth-1 clone carries no merge-base
+      # information, so the ancestry test would be unanswerable; the script
+      # exits 2 rather than reporting a false pass if that ever regresses.
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ steps.dflt.outputs.name }}
+
+      - name: Check release lineage and version drift
+        if: steps.gate.outputs.skip != 'true'
+        run: bash .github/scripts/check-release-lineage.sh
+
+      - name: Escalate a scheduled failure to an issue
+        if: failure() && github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          # A red cron run with no PR attached gets ignored; an issue does not.
+          title='release-lineage-guard: default branch does not contain its latest release'
+          existing="$(gh issue list --repo "$REPO" --state open \
+                        --search "\"$title\" in:title" --json number -q '.[0].number' || true)"
+          body="Automated detection by release-lineage-guard. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body "$body"
+          fi
