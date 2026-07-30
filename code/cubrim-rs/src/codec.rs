@@ -560,6 +560,23 @@ fn encode_rans_family_value_stream(
         encoded_values = lz_bytes;
         crate::prof::win("vs_lz_rans");
     }
+    // CUBR-0087: record the FINAL winner per block, not the running improvements.
+    // `win()` above fires every time a candidate becomes the running minimum, so
+    // several candidates "win" per block and the counts cannot answer the question
+    // that matters for a sticky-selection lever: does one scheme win *the block*,
+    // and does it keep winning across the file? If it does, the other seven passes
+    // are computing a known answer ~1,100 CPU-seconds at a time.
+    crate::prof::win(match winner_scheme {
+        ValueScheme::BwtRans => "FINAL:bwt_rans",
+        ValueScheme::BwtEntropy => "FINAL:bwt_huff",
+        ValueScheme::EntropyContext => "FINAL:t4_huff",
+        ValueScheme::Order2Rans => "FINAL:order2_rans",
+        ValueScheme::BwtAdaptive => "FINAL:adaptive",
+        ValueScheme::BwtContextMix => "FINAL:ctxmix",
+        ValueScheme::BwtGeoMix => "FINAL:geomix",
+        ValueScheme::LzRans => "FINAL:lz_rans",
+        _ => "FINAL:other",
+    });
     (winner_scheme, encoded_values)
 }
 

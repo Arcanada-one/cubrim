@@ -890,6 +890,48 @@ huge and never wins" as one story spanning `ooffice` and `x-ray`. It was two
 stories. `ooffice` is genuinely outer-rail waste (wins 0) and L1 does address it —
 that remains measured and true. `x-ray` never was.
 
+## F18 — the eight-way per-block competition computes a constant on image data
+
+F17 named the inner competition as the cause of the 64–80× image asymmetry. The
+question that decides whether it is *fixable* is not how much it costs but whether
+its answer varies. The `wins` counter could not answer that — it fires every time a
+candidate becomes the running minimum, so several candidates "win" per block — so I
+added a `FINAL:` counter that records the winner **of the block**.
+
+`x-ray.2m`, 384 blocks:
+
+<!-- gate:literal -->
+```
+FINAL:geomix    blocks_won=384
+```
+<!-- /gate:literal -->
+
+**One line. 384 of 384 blocks, and no other scheme appears at all.** The encoder
+runs eight candidates per block to discover an answer that is identical every time,
+at roughly **700 CPU-seconds per 2 MB** for the seven that never win
+(`vs_ctxmix` 490 s, `vs_order2_rans` 79 s, `vs_lz_rans` 43 s, `vs_adaptive` 30 s,
+`vs_bwt_huff` 29 s, `vs_bwt_rans` 30 s).
+
+### What this does and does not license
+
+**It licenses a sticky-selection lever**: compete for the first N blocks, then reuse
+the winner and re-check periodically. On this file that removes ~64% of the
+value-stream budget.
+
+**It does not license a byte-exact one, and that distinction matters.** L1's
+branch-and-bound was free precisely because abandoning a candidate that has already
+exceeded the incumbent cannot change the minimum. Here the expensive candidates are
+the ones that *win*, so a bound never fires on them — bounding only the losers saves
+roughly 190 s of the ~1,100 s, not the 700 s that matters. **Stickiness is a
+ratio-costing preset lever, not a free one**, because a later block where another
+scheme would have won now gets the sticky choice. Anyone implementing it must
+measure that cost rather than assume it is zero — the same trap as the column sweep,
+which was also "obviously" free until it was priced.
+
+Per-class results for `ooffice`, `osdb` and `dickens` are running; a scheme that is
+stable on image and unstable on text would make this a per-class preset rather than
+a global one, and that is exactly the shape of every other lever in this task.
+
 ## Status of the pre-registered measurements
 
 | ID | question | state |
