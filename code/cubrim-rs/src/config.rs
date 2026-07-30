@@ -356,6 +356,62 @@ pub struct EncodeConfig {
     /// never from EncodeConfig).
     /// None → use the scheme default (128). Range: 1..=65535.
     pub min_ctx_count: Option<u16>,
+
+    /// Run the CM2 column-position model variants (FH4-03).
+    ///
+    /// `cm2_encode` encodes the input once for the base model and once more for
+    /// each candidate column delimiter, keeping the smallest — while the decoder
+    /// replays exactly the one variant recorded in the blob header. Measured
+    /// price of the extra passes (CUBR-0087, 2 MB Silesia slices, byte-exact
+    /// round-trip): `xml` 160,517 → 159,384 bytes, **−0.71% for 2.27×** the CM2
+    /// encode time; `osdb` 496,824 → 472,809 bytes, **−4.83% for 3.30×**.
+    ///
+    /// Turning it off is **wire-compatible in both directions**: the column model
+    /// and its delimiter live in the blob's length header, so a base-only blob
+    /// decodes under any build and an archive written with the variants enabled
+    /// still opens when they are disabled. That is what makes this a legitimate
+    /// speed preset rather than a format change.
+    ///
+    /// v1-default: `true` — byte-identical to the shipped encoder. It costs
+    /// ratio, so it is never disabled implicitly; only a preset that states the
+    /// trade may turn it off.
+    pub cm2_column_variants: bool,
+}
+
+/// Speed/ratio operating point.
+///
+/// Cubrim leads on ratio (0.1890 against ppmd 0.2286 on the reference corpus)
+/// and is ~410× slower than ppmd to encode. Publishing only the maximum-ratio
+/// point forces every user to pay 3.7 hours for 300 MB; publishing only a fast
+/// point would give away the thing Cubrim is best at. Both are true and both are
+/// products, so the operating point is explicit.
+///
+/// Every preset must state its trade in **measured** numbers. A preset whose cost
+/// has not been measured on the real corpus does not exist yet — it is not
+/// guessed into being here.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Preset {
+    /// Maximum ratio, whatever it costs. Byte-identical to the shipped v0.3.2
+    /// encoder: every competitive candidate runs, including the CM2 column
+    /// variants.
+    Max,
+    /// Drops the CM2 column-variant passes. Measured on 2 MB Silesia slices:
+    /// **2.27–3.30× less CM2 encode time for 0.71–4.83% larger output** on the
+    /// classes CM2 wins (text, xml, database). No effect on the classes where a
+    /// type transform wins (exe, image), because CM2 is not the winner there.
+    /// Archives stay mutually decodable with `Max`.
+    Balanced,
+}
+
+impl Preset {
+    /// Apply the preset to a config, returning it.
+    pub fn apply(self, mut config: EncodeConfig) -> EncodeConfig {
+        match self {
+            Preset::Max => {}
+            Preset::Balanced => config.cm2_column_variants = false,
+        }
+        config
+    }
 }
 
 impl EncodeConfig {
@@ -370,6 +426,7 @@ impl EncodeConfig {
             gap_scheme: GapScheme::RleU16,
             value_scheme: ValueScheme::BitpackFixed,
             min_ctx_count: None,
+            cm2_column_variants: true,
         }
     }
 
@@ -558,6 +615,7 @@ mod tests {
             gap_scheme: GapScheme::RleU16,
             value_scheme: ValueScheme::BitpackFixed,
             min_ctx_count: None,
+            cm2_column_variants: true,
         };
 
         let inputs: Vec<Vec<u8>> = vec![

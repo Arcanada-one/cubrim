@@ -19,7 +19,7 @@
 // For inputs <= 320 bytes, raw-store always fires.
 
 use crate::bitpack::{bitpack_decode, bitpack_encode, build_value_dict, compute_width};
-use crate::cm2::{cm2_decode, cm2_encode};
+use crate::cm2::{cm2_decode, cm2_encode_with};
 use crate::config::{EncodeConfig, GapScheme, ValueScheme};
 use crate::cube::build_cube_with_params;
 use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
@@ -281,14 +281,44 @@ fn encode_with_config_inner(
     try_binfloat: bool,
     try_lz: bool,
 ) -> Vec<u8> {
-    let mut best = encode_base(data, config);
+    // CUBR-0087: `base` is deferred on the multi-block path so the cheap strong
+    // backends can establish an incumbent first and bound it (see `EncBound`).
+    // On a single-block input `base` is cheap — there is no chunked accumulation
+    // to abandon — so it stays eager there and the ordering is untouched.
+    let large = data.len() > config.cube_size_limit();
+    let mut best = if large {
+        Vec::new()
+    } else {
+        crate::prof::track("base", |v: &Vec<u8>| v.len(), || encode_base(data, config))
+    };
+    // `best` is empty *only* as the "not computed yet" marker on the large path;
+    // a real candidate is never empty (every mode emits at least a header).
+    let have_best = |b: &Vec<u8>| !b.is_empty();
     // H-52: a detected VCF is handled by the specialized PBWT genotype-matrix container,
     // which always beats the whole-file LZ / columnar-CSV competitors on this data — so
     // short-circuit them (they are as slow as base and never win here). Still competitive
     // against base (min), so a degenerate VCF cannot regress.
-    if let Some(vcf) = encode_vcf(data, config) {
+    if let Some(vcf) = crate::prof::track("vcf", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_vcf(data, config)) {
+        if !have_best(&best) {
+            // Large path: base was deferred. Run it now, bounded by the VCF
+            // candidate. Base wins ties, exactly as when it was the initial
+            // incumbent, so the comparison below is `<=` on base.
+            let base = crate::prof::track(
+                "base",
+                |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                || encode_base_bounded(data, config, vcf.len()),
+            );
+            return match base {
+                Some(base) if base.len() <= vcf.len() => base,
+                _ => {
+                    crate::prof::win("vcf");
+                    vcf
+                }
+            };
+        }
         if vcf.len() < best.len() {
             best = vcf;
+            crate::prof::win("vcf");
         }
         return best;
     }
@@ -314,8 +344,14 @@ fn encode_with_config_inner(
         std::thread::scope(|scope| {
             let lz_handle = if try_lz {
                 Some(scope.spawn(|| {
-                    let lz = encode_lz_prepass(data, config);
-                    let col = encode_columnar(data, config);
+                    let lz = crate::prof::track("lz_prepass", |v: &Vec<u8>| v.len(), || {
+                        encode_lz_prepass(data, config)
+                    });
+                    let col = crate::prof::track(
+                        "columnar",
+                        |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                        || encode_columnar(data, config),
+                    );
                     (lz, col)
                 }))
             } else {
@@ -328,85 +364,120 @@ fn encode_with_config_inner(
             // `try_binfloat` doubles as the heavy-transform recursion guard (nested calls pass
             // false). The detectors return None cheaply when their structure is absent.
             if try_binfloat {
-                if let Some(bf) = encode_binfloat(data, config) {
-                    if bf.len() < best.len() {
+                if let Some(bf) = crate::prof::track("binfloat", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_binfloat(data, config)) {
+                    if !have_best(&best) || bf.len() < best.len() {
                         best = bf;
+                        crate::prof::win("binfloat");
                     }
                 }
-                if let Some(m) = encode_med16(data, config) {
-                    if m.len() < best.len() {
+                if let Some(m) = crate::prof::track("med16", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_med16(data, config)) {
+                    if !have_best(&best) || m.len() < best.len() {
                         best = m;
+                        crate::prof::win("med16");
                     }
                 }
                 // MODE_GEOCM (D→A port): geo-context image codec, gated to periodic
                 // image-like inputs. Competitive min() — kept only when strictly
                 // smaller, so no non-image file can regress.
-                if let Some(g) = encode_geocm(data, config) {
-                    if g.len() < best.len() {
+                if let Some(g) = crate::prof::track("geocm", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_geocm(data, config)) {
+                    if !have_best(&best) || g.len() < best.len() {
                         best = g;
+                        crate::prof::win("geocm");
                     }
                 }
-                if let Some(b) = encode_bcj(data, config) {
-                    if b.len() < best.len() {
+                if let Some(b) = crate::prof::track("bcj", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_bcj(data, config)) {
+                    if !have_best(&best) || b.len() < best.len() {
                         best = b;
+                        crate::prof::win("bcj");
                     }
                 }
-                if let Some(s) = encode_soa(data, config) {
-                    if s.len() < best.len() {
+                if let Some(s) = crate::prof::track("soa", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_soa(data, config)) {
+                    if !have_best(&best) || s.len() < best.len() {
                         best = s;
+                        crate::prof::win("soa");
                     }
                 }
                 // CUBR-0061 (FH-10): record-aware CM (MODE_RECORDCM), the live
                 // per-type binary #1. Detector-gated via soa_detect_width;
                 // competitive min() — kept only when strictly smaller, so
                 // non-record files stay byte-identical and no file regresses.
-                if let Some(rc) = encode_record_cm(data, config) {
-                    if rc.len() < best.len() {
+                if let Some(rc) = crate::prof::track("record_cm", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_record_cm(data, config)) {
+                    if !have_best(&best) || rc.len() < best.len() {
                         best = rc;
+                        crate::prof::win("record_cm");
                     }
                 }
-                if let Some(cm) = encode_cm(data, config) {
-                    if cm.len() < best.len() {
+                if let Some(cm) = crate::prof::track("cm", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_cm(data, config)) {
+                    if !have_best(&best) || cm.len() < best.len() {
                         best = cm;
+                        crate::prof::win("cm");
                     }
                 }
                 // MODE_CM2 strong context-mixing backend (gated to large
                 // text/xml/exe). Slow but a competitive min() — zero regression.
-                if let Some(cm2) = encode_cm2(data) {
-                    if cm2.len() < best.len() {
+                if let Some(cm2) = crate::prof::track("cm2", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_cm2(data, config)) {
+                    if !have_best(&best) || cm2.len() < best.len() {
                         best = cm2;
+                        crate::prof::win("cm2");
                     }
                 }
                 // BCJ transform composed with the CM2 backend. `encode_bcj`'s nested
                 // encode runs with the recursion guard set, which excludes CM2, so this
                 // pairing is otherwise unreachable. Arch-gated + strict min() ⇒ every
                 // non-executable and every non-winning input stays byte-identical.
-                if let Some(bc) = encode_bcj_cm2(data) {
-                    if bc.len() < best.len() {
+                if let Some(bc) = crate::prof::track("bcj_cm2", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_bcj_cm2(data, config)) {
+                    if !have_best(&best) || bc.len() < best.len() {
                         best = bc;
+                        crate::prof::win("bcj_cm2");
                     }
                 }
             }
 
             if let Some(h) = lz_handle {
                 let (lz, col) = h.join().expect("lz/columnar pre-pass thread panicked");
-                if lz.len() < best.len() {
+                if !have_best(&best) || lz.len() < best.len() {
                     best = lz;
+                    crate::prof::win("lz_prepass");
                 }
                 if let Some(col) = col {
-                    if col.len() < best.len() {
+                    if !have_best(&best) || col.len() < best.len() {
                         best = col;
+                        crate::prof::win("columnar");
                     }
                 }
             }
         });
+        // CUBR-0087: the deferred `base` candidate, bounded by the incumbent the
+        // cheap backends established. `base` was the original initial incumbent,
+        // so it still wins ties — hence `<=` here and `>` (never `>=`) inside the
+        // abandonment check. When nothing else produced a candidate there is no
+        // bound to apply and `base` runs to completion exactly as before.
+        // No incumbent => no bound. `base` must then run to completion, because
+        // it is the only candidate and there is nothing to fall back on. This is
+        // the case the global-bound version got wrong.
+        let bound = if have_best(&best) { best.len() } else { usize::MAX };
+        let base = crate::prof::track("base", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || {
+            encode_base_bounded(data, config, bound)
+        });
+        match base {
+            Some(base) if !have_best(&best) || base.len() <= best.len() => {
+                crate::prof::win("base");
+                best = base;
+            }
+            _ => {}
+        }
+        debug_assert!(
+            have_best(&best),
+            "large-file path must always produce a candidate: base was abandoned with no incumbent"
+        );
     } else if try_binfloat {
         // IW-05: Canterbury `sum` is a 38 KiB SPARC ELF. Architecture detection is
         // sufficiently strict to let BCJ compete below the general multi-block gate;
         // the strict size minimum preserves the existing byte stream when it does not win.
-        if let Some(b) = encode_bcj(data, config) {
+        if let Some(b) = crate::prof::track("bcj_small", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_bcj(data, config)) {
             if b.len() < best.len() {
                 best = b;
+                crate::prof::win("bcj_small");
             }
         }
         // Open the ≤64 KB path to the strong context-mixing backend (MODE_CM2) — the
@@ -420,9 +491,10 @@ fn encode_with_config_inner(
         // the single global VERSION const would instead change byte[4] of EVERY blob and
         // break both large-file byte-identity and old-archive decode parity (see the decode
         // gate, `blob[4] == VERSION`). The multi-block transforms keep their own gates.
-        if let Some(cm2) = encode_cm2(data) {
+        if let Some(cm2) = crate::prof::track("cm2_small", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_cm2(data, config)) {
             if cm2.len() < best.len() {
                 best = cm2;
+                crate::prof::win("cm2_small");
             }
         }
     }
@@ -442,50 +514,75 @@ fn encode_rans_family_value_stream(
     seq_codes: &[usize],
     n_distinct: usize,
 ) -> (ValueScheme, Vec<u8>) {
-    let rans_bytes = bwt_rans_encode(seq_codes, n_distinct);
-    let bwt_huff_bytes = bwt_entropy_encode(seq_codes, n_distinct);
-    let t4_bytes_val = context_huffman_encode(seq_codes, n_distinct);
-    let order2_bytes = bwt_order2_rans_encode(seq_codes, n_distinct);
-    let adaptive_bytes = bwt_adaptive_encode(seq_codes, n_distinct);
-    let ctxmix_bytes = bwt_ctxmix_encode(seq_codes, n_distinct);
-    let geomix_bytes = bwt_geomix_encode(seq_codes, n_distinct);
-    let lz_bytes = lz_rans_encode(seq_codes, n_distinct);
+    let rans_bytes = crate::prof::track("vs_bwt_rans", |v: &Vec<u8>| v.len(), || bwt_rans_encode(seq_codes, n_distinct));
+    let bwt_huff_bytes = crate::prof::track("vs_bwt_huff", |v: &Vec<u8>| v.len(), || bwt_entropy_encode(seq_codes, n_distinct));
+    let t4_bytes_val = crate::prof::track("vs_t4_huff", |v: &Vec<u8>| v.len(), || context_huffman_encode(seq_codes, n_distinct));
+    let order2_bytes = crate::prof::track("vs_order2_rans", |v: &Vec<u8>| v.len(), || bwt_order2_rans_encode(seq_codes, n_distinct));
+    let adaptive_bytes = crate::prof::track("vs_adaptive", |v: &Vec<u8>| v.len(), || bwt_adaptive_encode(seq_codes, n_distinct));
+    let ctxmix_bytes = crate::prof::track("vs_ctxmix", |v: &Vec<u8>| v.len(), || bwt_ctxmix_encode(seq_codes, n_distinct));
+    let geomix_bytes = crate::prof::track("vs_geomix", |v: &Vec<u8>| v.len(), || bwt_geomix_encode(seq_codes, n_distinct));
+    let lz_bytes = crate::prof::track("vs_lz_rans", |v: &Vec<u8>| v.len(), || lz_rans_encode(seq_codes, n_distinct));
 
     let mut winner_scheme = ValueScheme::BwtRans;
     let mut encoded_values = rans_bytes;
     if bwt_huff_bytes.len() < encoded_values.len() {
         winner_scheme = ValueScheme::BwtEntropy;
         encoded_values = bwt_huff_bytes;
+        crate::prof::win("vs_bwt_huff");
     }
     if t4_bytes_val.len() < encoded_values.len() {
         winner_scheme = ValueScheme::EntropyContext;
         encoded_values = t4_bytes_val;
+        crate::prof::win("vs_t4_huff");
     }
     if order2_bytes.len() < encoded_values.len() {
         winner_scheme = ValueScheme::Order2Rans;
         encoded_values = order2_bytes;
+        crate::prof::win("vs_order2_rans");
     }
     if adaptive_bytes.len() < encoded_values.len() {
         winner_scheme = ValueScheme::BwtAdaptive;
         encoded_values = adaptive_bytes;
+        crate::prof::win("vs_adaptive");
     }
     if ctxmix_bytes.len() < encoded_values.len() {
         winner_scheme = ValueScheme::BwtContextMix;
         encoded_values = ctxmix_bytes;
+        crate::prof::win("vs_ctxmix");
     }
     if geomix_bytes.len() < encoded_values.len() {
         winner_scheme = ValueScheme::BwtGeoMix;
         encoded_values = geomix_bytes;
+        crate::prof::win("vs_geomix");
     }
     if lz_bytes.len() < encoded_values.len() {
         winner_scheme = ValueScheme::LzRans;
         encoded_values = lz_bytes;
+        crate::prof::win("vs_lz_rans");
     }
     (winner_scheme, encoded_values)
 }
 
 /// Base encoder (single-block cube/raw, or MODE_CHUNKED for large inputs). This is
 /// the non-LZ path; `encode_with_config` wraps it with the optional MODE_LZ pre-pass.
+/// `encode_base`, abandonable against the competitive bound.
+///
+/// Returns `None` when the chunked accumulation passed the incumbent, i.e. the
+/// candidate provably cannot win. Only the competitive rail may call this — a
+/// caller that embeds the result must use `encode_base`, which always completes.
+fn encode_base_bounded(
+    data: &[u8],
+    config: &EncodeConfig,
+    bound: EncBound,
+) -> Option<Vec<u8>> {
+    if data.len() > config.cube_size_limit() {
+        // Only the chunked path has an accumulation to abandon.
+        encode_chunked_bounded(data, config, bound)
+    } else {
+        Some(encode_base(data, config))
+    }
+}
+
 fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let l = data.len();
     let b = config.b;
@@ -795,6 +892,66 @@ fn chunk_block_size(config: &EncodeConfig) -> usize {
     config.cube_size_limit().min(65536)
 }
 
+// ---- Competitive-min branch-and-bound (CUBR-0087) ----
+//
+// The encoder builds many candidate encodings of the same input and emits the
+// smallest; the decoder replays only the winner. Measured on a 2 MB slice of
+// Silesia `ooffice`, the cube/BWT `base` path costs 43% of encode wall and its
+// per-block eight-way value-stream competition burns ~1,258 CPU-seconds — and it
+// loses by a factor of ~43 to `bcj_cm2`, which wins in 50 s. The competition is
+// doing correct work on a container that is then discarded whole.
+//
+// A candidate that has already emitted more bytes than the incumbent cannot win,
+// so it can be abandoned. The incumbent's size is passed to the
+// accumulation loops, which give up as soon as they pass it.
+//
+// **This does not change a single emitted byte, and the argument is worth
+// stating precisely because "nearly identical" would be a defect:**
+//
+//   * The bound only ever decreases (it is only lowered when a strictly smaller
+//     incumbent is found), so a candidate abandoned against an older, larger
+//     bound is also above every later bound. No abandonment can be regretted.
+//   * The rail keeps the *strictly smaller* candidate, so ties go to whichever
+//     candidate the documented order visits first. Abandonment therefore uses
+//     `partial > bound`, never `>=`: a candidate that would exactly tie runs to
+//     completion and still wins the tie exactly as before. Using `>=` here would
+//     change output on ties only, on some files only — the kind of defect that
+//     survives a test suite.
+//   * Abandoning the value-stream competition does not touch the R7 raw-store
+//     fallback, which is what actually bounds expansion.
+//
+// The bound is passed explicitly, not held in a global.
+//
+// The first implementation used a process-global `AtomicUsize`, on the reasoning
+// that a bound which only decreases can never cause a regrettable abandonment.
+// That reasoning is sound for one encode and **wrong for a library**: `encode` is
+// a public entry point, callers run it concurrently, and the crate's own test
+// suite does exactly that. A small bound set by one encode then abandoned another
+// thread's `base` — and with no incumbent of its own to fall back on, that encode
+// returned an EMPTY blob. 26 tests failed on the chunked/large-file paths.
+//
+// The byte-identity gate had passed at the same time, because the CLI runs one
+// encode per process, so it could not see this. Recorded because the lesson is
+// the general one: a gate that exercises one concurrency level cannot clear a
+// change whose failure mode is concurrency.
+//
+// Threading the value costs a parameter on three functions and removes the
+// failure mode entirely — no shared mutable state, so no cross-encode leakage,
+// and the bound a candidate is measured against is the one its own caller set.
+/// Incumbent size a candidate is measured against. `usize::MAX` = unbounded.
+type EncBound = usize;
+
+/// True when `emitted` has passed `bound`, so the candidate under construction
+/// cannot be the strict minimum and may be abandoned.
+///
+/// Strictly `>`, never `>=`: the rail keeps the *strictly smaller* candidate, so
+/// a candidate that would exactly tie must run to completion and win the tie as
+/// before.
+#[inline]
+fn bound_exceeded(emitted: usize, bound: EncBound) -> bool {
+    emitted > bound
+}
+
 /// Encode an input larger than the single-block ceiling as a MODE_CHUNKED container.
 ///
 /// The input is sliced into `chunk_block_size(config)`-byte blocks; each block is
@@ -806,6 +963,25 @@ fn chunk_block_size(config: &EncodeConfig) -> usize {
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_CHUNKED 1B][n_blocks u32 BE]
 ///       then n_blocks × ( [sub_len u32 BE][sub_blob] ).
 fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    encode_chunked_bounded(data, config, usize::MAX)
+        .expect("unbounded chunked encode cannot be abandoned")
+}
+
+/// `encode_chunked`, optionally abandonable against the competitive bound.
+///
+/// With `allow_abort`, returns `None` as soon as the accumulated container has
+/// passed the incumbent (`bound`) — the candidate provably cannot win, so
+/// the remaining blocks are not encoded. **`allow_abort` must be false for every
+/// caller that embeds the result in a larger container**: a partial container is
+/// not a valid encoding, and handing one to a consumer that does not check for
+/// `None` would corrupt output. Only the competitive rail, which discards
+/// losers, may pass true.
+fn encode_chunked_bounded(
+    data: &[u8],
+    config: &EncodeConfig,
+    bound: EncBound,
+) -> Option<Vec<u8>> {
+    let allow_abort = bound != usize::MAX;
     let block_size = chunk_block_size(config);
     debug_assert!(block_size >= 1, "chunk block size must be positive");
 
@@ -823,13 +999,16 @@ fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     // atomic work-stealing cursor for load balance (block cost varies with the winning
     // value-scheme). The output is reassembled in strict block order, so the wire format
     // — and therefore the round-trip — is byte-identical to a serial encode.
-    let sub_blobs: Vec<Vec<u8>> = encode_blocks_parallel(&blocks, config);
+    let sub_blobs: Vec<Vec<u8>> = match encode_blocks_parallel(&blocks, config, bound) {
+        Some(blobs) => blobs,
+        None => return None,
+    };
 
     for sub_blob in &sub_blobs {
         out.extend_from_slice(&(sub_blob.len() as u32).to_be_bytes());
         out.extend_from_slice(sub_blob);
     }
-    out
+    Some(out)
 }
 
 /// Encode independent blocks in parallel, returning the sub-blobs in block order.
@@ -838,10 +1017,15 @@ fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 /// work-stealing cursor so faster threads pick up more blocks when block costs are
 /// uneven. Determinism is preserved: each block's sub-blob depends only on that block's
 /// bytes + `config`, and results are re-sorted into block order before return.
-fn encode_blocks_parallel(blocks: &[&[u8]], config: &EncodeConfig) -> Vec<Vec<u8>> {
+fn encode_blocks_parallel(
+    blocks: &[&[u8]],
+    config: &EncodeConfig,
+    bound: EncBound,
+) -> Option<Vec<Vec<u8>>> {
+    let allow_abort = bound != usize::MAX;
     let n_blocks = blocks.len();
     if n_blocks == 0 {
-        return Vec::new();
+        return Some(Vec::new());
     }
     // Single block, or parallelism disabled: encode serially (avoids thread setup cost
     // and keeps nested candidate encodes — which already saturate the pool — cheap).
@@ -859,13 +1043,32 @@ fn encode_blocks_parallel(blocks: &[&[u8]], config: &EncodeConfig) -> Vec<Vec<u8
         // Serial fallback: encode on the calling thread with the fast sweep enabled, then
         // restore the prior flag so unrelated later work on this thread is unaffected.
         let prev = GEOMIX_FAST_SWEEP.with(|f| f.replace(true));
-        let out: Vec<Vec<u8>> = blocks.iter().map(|b| encode_base(b, config)).collect();
+        let mut out: Vec<Vec<u8>> = Vec::with_capacity(n_blocks);
+        let mut emitted = 0usize;
+        let mut abandoned = false;
+        for b in blocks {
+            let blob = encode_base(b, config);
+            emitted += blob.len() + 4; // + the u32 length frame
+            out.push(blob);
+            if allow_abort && bound_exceeded(emitted, bound) {
+                abandoned = true;
+                break;
+            }
+        }
         GEOMIX_FAST_SWEEP.with(|f| f.set(prev));
-        return out;
+        return if abandoned { None } else { Some(out) };
     }
 
     let cursor = std::sync::atomic::AtomicUsize::new(0);
     let cursor_ref = &cursor;
+    // Bytes emitted so far across all workers. Blocks complete out of order, so
+    // this is an order-independent sum — which is exactly what the bound needs:
+    // the finished container is at least this large, so passing the bound here
+    // proves the candidate cannot win, whichever blocks happen to be done.
+    let emitted = std::sync::atomic::AtomicUsize::new(0);
+    let emitted_ref = &emitted;
+    let abandoned = std::sync::atomic::AtomicBool::new(false);
+    let abandoned_ref = &abandoned;
     let mut collected: Vec<(usize, Vec<u8>)> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..n_threads)
             .map(|_| {
@@ -874,11 +1077,26 @@ fn encode_blocks_parallel(blocks: &[&[u8]], config: &EncodeConfig) -> Vec<Vec<u8
                     GEOMIX_FAST_SWEEP.with(|f| f.set(true));
                     let mut local: Vec<(usize, Vec<u8>)> = Vec::new();
                     loop {
+                        if allow_abort && abandoned_ref.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
                         let i = cursor_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         if i >= n_blocks {
                             break;
                         }
-                        local.push((i, encode_base(blocks[i], config)));
+                        let blob = encode_base(blocks[i], config);
+                        if allow_abort {
+                            let total = emitted_ref.fetch_add(
+                                blob.len() + 4,
+                                std::sync::atomic::Ordering::Relaxed,
+                            ) + blob.len()
+                                + 4;
+                            if bound_exceeded(total, bound) {
+                                abandoned_ref.store(true, std::sync::atomic::Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                        local.push((i, blob));
                     }
                     local
                 })
@@ -889,9 +1107,12 @@ fn encode_blocks_parallel(blocks: &[&[u8]], config: &EncodeConfig) -> Vec<Vec<u8
             .flat_map(|h| h.join().expect("block-encode thread panicked"))
             .collect()
     });
+    if allow_abort && abandoned.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
     // Reassemble strict block order (threads complete out of order).
     collected.sort_by_key(|(i, _)| *i);
-    collected.into_iter().map(|(_, blob)| blob).collect()
+    Some(collected.into_iter().map(|(_, blob)| blob).collect())
 }
 
 /// Candidate field delimiters tried for the columnar transform, in no particular order
@@ -2668,7 +2889,7 @@ fn encode_bcj(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
 /// Regression-proof by construction: returns `None` unless architecture detection fires
 /// (so non-executables are never touched) and the CM2 gate accepts the filtered stream;
 /// the caller keeps it only when strictly smaller. All transforms are integer-only.
-fn encode_bcj_cm2(data: &[u8]) -> Option<Vec<u8>> {
+fn encode_bcj_cm2(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     if data.len() > u32::MAX as usize {
         return None; // orig_len is a u32 field in the MODE_BCJ container
     }
@@ -2680,7 +2901,7 @@ fn encode_bcj_cm2(data: &[u8]) -> Option<Vec<u8>> {
         3 => bcj_sparc(&mut filtered, true),
         _ => return None,
     }
-    let nested = encode_cm2(&filtered)?;
+    let nested = encode_cm2(&filtered, config)?;
     let mut out = Vec::with_capacity(11 + nested.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
@@ -4036,11 +4257,11 @@ fn cm2_sample_entropy(data: &[u8]) -> f64 {
 /// Competitive-min candidate: the MODE_CM2 strong context-mixing backend, gated
 /// to large text/xml/exe. Returns None when the gate rejects the input.
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_CM2 1B] then the cm2 blob.
-fn encode_cm2(data: &[u8]) -> Option<Vec<u8>> {
+fn encode_cm2(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     if !cm2_gate(data) {
         return None;
     }
-    let cm = cm2_encode(data);
+    let cm = cm2_encode_with(data, config.cm2_column_variants);
     let mut out = Vec::with_capacity(6 + cm.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
@@ -10265,7 +10486,7 @@ mod tests {
         assert!(data.len() > cfg.cube_size_limit(), "must reach the heavy-candidate block");
         assert!(data.len() >= CM2_MIN_LEN && data.len() < (1 << 18), "inside the reclaimed window");
 
-        let cm2 = encode_cm2(&data).expect("CM2 must be offered below the old 256 KiB floor");
+        let cm2 = encode_cm2(&data, &EncodeConfig::v1_default()).expect("CM2 must be offered below the old 256 KiB floor");
         assert_eq!(cm2[5], MODE_CM2);
         assert_eq!(decode(&cm2).expect("CM2 blob decodes"), data);
 
@@ -10282,7 +10503,7 @@ mod tests {
     #[test]
     fn cm2_gate_declines_below_the_floor_but_still_round_trips() {
         let data: Vec<u8> = b"abcdefgh".iter().cycle().take(CM2_MIN_LEN - 1).copied().collect();
-        assert!(encode_cm2(&data).is_none(), "CM2 must not be offered below the floor");
+        assert!(encode_cm2(&data, &EncodeConfig::v1_default()).is_none(), "CM2 must not be offered below the floor");
         let blob = encode(&data);
         assert_eq!(decode(&blob).expect("fast-path blob decodes"), data);
     }
@@ -10310,7 +10531,7 @@ mod tests {
             "input must be inside the ≤64 KB freeze window"
         );
 
-        let cm2 = encode_cm2(&text).expect("CM2 must be offered on a compressible ≤64 KB input");
+        let cm2 = encode_cm2(&text, &EncodeConfig::v1_default()).expect("CM2 must be offered on a compressible ≤64 KB input");
         let base = encode_base(&text, &cfg);
         let blob = encode(&text);
 
@@ -10777,7 +10998,7 @@ mod tests {
         // > 256 KiB so the CM2 gate accepts the input.
         let elf = bcj_favourable_x86_elf(300_000);
 
-        let blob = encode_bcj_cm2(&elf).expect("x86 ELF must reach the BCJ+CM2 candidate");
+        let blob = encode_bcj_cm2(&elf, &EncodeConfig::v1_default()).expect("x86 ELF must reach the BCJ+CM2 candidate");
         assert_eq!(blob[5], MODE_BCJ, "outer container is MODE_BCJ");
         assert_eq!(blob[10], 1, "x86 arch tag");
         assert_eq!(blob[16], MODE_CM2, "nested container is MODE_CM2");
@@ -10792,7 +11013,7 @@ mod tests {
 
         // The composition must actually beat the CM2 backend alone on BCJ-favourable code,
         // otherwise the candidate is dead weight.
-        let cm2_only = encode_cm2(&elf).expect("CM2 gate must accept the fixture");
+        let cm2_only = encode_cm2(&elf, &EncodeConfig::v1_default()).expect("CM2 gate must accept the fixture");
         assert!(
             blob.len() < cm2_only.len(),
             "BCJ+CM2 ({}) must beat CM2 alone ({})",
@@ -10815,7 +11036,7 @@ mod tests {
         }
         assert!(bcj_detect_arch(&data).is_none(), "fixture is not an executable");
         assert!(
-            encode_bcj_cm2(&data).is_none(),
+            encode_bcj_cm2(&data, &EncodeConfig::v1_default()).is_none(),
             "BCJ+CM2 must not fire on non-executables"
         );
     }

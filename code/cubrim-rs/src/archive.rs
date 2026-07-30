@@ -6,7 +6,7 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use blake3::Hash;
-use cubrim::{decode, encode};
+use cubrim::{decode, encode_with_config, EncodeConfig};
 use walkdir::WalkDir;
 
 use crate::cli::{AddArgs, ExtractArgs, ListArgs, TestArgs};
@@ -48,7 +48,8 @@ pub fn add_archive(args: AddArgs) -> Result<(), AppError> {
     }
 
     let password = resolve_password(&args.password, "Archive")?;
-    let entries = collect_entries(&args.paths, args.preserve)?;
+    let encode_config = args.encode_config();
+    let entries = collect_entries(&args.paths, args.preserve, &encode_config)?;
     let payload = serialize_entries(&entries)?;
     let mut archive = Vec::new();
     archive.extend_from_slice(MAGIC);
@@ -193,7 +194,11 @@ pub fn test_archive(args: TestArgs) -> Result<(), AppError> {
     Ok(())
 }
 
-fn collect_entries(paths: &[PathBuf], preserve: bool) -> Result<Vec<ArchiveEntry>, AppError> {
+fn collect_entries(
+    paths: &[PathBuf],
+    preserve: bool,
+    config: &EncodeConfig,
+) -> Result<Vec<ArchiveEntry>, AppError> {
     let mut entries = Vec::new();
     for input in paths {
         if !input.exists() {
@@ -208,6 +213,7 @@ fn collect_entries(paths: &[PathBuf], preserve: bool) -> Result<Vec<ArchiveEntry
                 input,
                 input.strip_prefix(base).unwrap_or(input),
                 preserve,
+                config,
             )?);
             continue;
         }
@@ -224,7 +230,7 @@ fn collect_entries(paths: &[PathBuf], preserve: bool) -> Result<Vec<ArchiveEntry
                 }
                 entries.push(dir_entry(path, rel, preserve)?);
             } else if item.file_type().is_file() {
-                entries.push(file_entry(path, rel, preserve)?);
+                entries.push(file_entry(path, rel, preserve, config)?);
             }
         }
     }
@@ -236,10 +242,15 @@ fn collect_entries(paths: &[PathBuf], preserve: bool) -> Result<Vec<ArchiveEntry
     Ok(entries)
 }
 
-fn file_entry(path: &Path, rel: &Path, preserve: bool) -> Result<ArchiveEntry, AppError> {
+fn file_entry(
+    path: &Path,
+    rel: &Path,
+    preserve: bool,
+    config: &EncodeConfig,
+) -> Result<ArchiveEntry, AppError> {
     validate_archive_path(rel)?;
     let data = fs::read(path)?;
-    let compressed = encode(&data);
+    let compressed = encode_with_config(&data, config);
     let metadata = fs::metadata(path)?;
     let (mode, mtime) = metadata_values(&metadata, preserve);
     Ok(ArchiveEntry {

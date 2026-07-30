@@ -362,7 +362,32 @@ const TBITS_MAX: usize = 27; // hash-table cap (~12 GB/model at the max)
 /// the wire header, so the round trip stays byte-exact.
 fn tbits_for(len: usize) -> usize {
     let ceil_log2 = (usize::BITS - (len.max(2) - 1).leading_zeros()) as usize;
-    (ceil_log2 + 3).clamp(18, TBITS_MAX)
+    let derived = (ceil_log2 + 3).clamp(18, TBITS_MAX);
+    tbits_cap().map_or(derived, |cap| derived.min(cap))
+}
+
+/// Development knob for the memory/ratio/throughput sweep: caps the per-model
+/// hash-table exponent, so `CUBRIM_CM2_TBITS=23` makes every model at most
+/// 2^23 entries (~0.85 GiB total instead of 13.5 GiB at the 27 cap).
+///
+/// A cap, never a raise: it can only shrink the tables a file would otherwise
+/// get, so it cannot push a small input past its own derived size.
+///
+/// **This is a measurement instrument, not a shipping feature.** Because the
+/// decoder derives its table size from the same function, an archive written
+/// under one cap is only decodable under the same cap — the size is not in the
+/// wire format. Any production memory knob must therefore record the exponent
+/// in the header (or bind it to a preset byte) rather than read the
+/// environment; until then this stays a sweep-only override.
+fn tbits_cap() -> Option<usize> {
+    use std::sync::OnceLock;
+    static CAP: OnceLock<Option<usize>> = OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("CUBRIM_CM2_TBITS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .map(|v| v.clamp(12, TBITS_MAX))
+    })
 }
 const IBITS: usize = 20; // indirect map bits
 const M1_MIN: usize = 6;
@@ -866,17 +891,62 @@ impl CmModel {
     }
 }
 
+/// Skip the FH4-03 column-model variants and emit the base CM2 encode only.
+///
+/// `cm2_encode` runs one full CM2 pass per candidate column delimiter on top of
+/// the base pass (up to `MAX = 2` extra passes), while the decoder replays
+/// exactly one — measured as the bulk of the encode/decode asymmetry. This knob
+/// exists to price that sweep: how much ratio do the extra passes actually buy?
+///
+/// Unlike the table-size cap, this one is **wire-compatible in both
+/// directions**: the column model and its delimiter are recorded in the blob's
+/// length header, so a base-only blob decodes under any build, and an archive
+/// written with the sweep enabled still decodes when it is disabled. That makes
+/// it a legitimate candidate for a speed preset rather than a sweep-only
+/// override — but it costs ratio wherever a column variant would have won, so
+/// it must never be the default without that trade measured and recorded.
+fn skip_col_variants() -> bool {
+    use std::sync::OnceLock;
+    static SKIP: OnceLock<bool> = OnceLock::new();
+    *SKIP.get_or_init(|| {
+        std::env::var("CUBRIM_CM2_NO_COL")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
 /// Encode `data`. Wire: `[orig_len u64 BE][bit-range-coded]`.
 pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
-    let base = cm2_encode_variant(data, None);
+    cm2_encode_with(data, true)
+}
+
+/// `cm2_encode`, with the FH4-03 column-variant sweep under caller control.
+///
+/// `column_variants = false` emits the base variant only. Wire-compatible in both
+/// directions — the column flag and delimiter live in the blob's length header —
+/// so this changes cost and ratio, never decodability. See
+/// `EncodeConfig::cm2_column_variants` for the measured price.
+pub(crate) fn cm2_encode_with(data: &[u8], column_variants: bool) -> Vec<u8> {
+    let base = crate::prof::track("cm2_variant_base", |v: &Vec<u8>| v.len(), || {
+        cm2_encode_variant(data, None)
+    });
     // FH4-03: competitive-min. The column variant ships only when it is strictly
     // smaller, so adding it cannot regress any input — the gate above merely
     // avoids paying for a candidate that has no chance.
     let mut best = base;
+    crate::prof::win("cm2_variant_base");
+    // The environment override stays as a sweep instrument and can only ever
+    // *disable* the sweep, so it cannot re-enable what a preset turned off.
+    if !column_variants || skip_col_variants() {
+        return best;
+    }
     for d in detect_col_delims(data) {
-        let alt = cm2_encode_variant(data, Some(d));
+        let alt = crate::prof::track("cm2_variant_col", |v: &Vec<u8>| v.len(), || {
+            cm2_encode_variant(data, Some(d))
+        });
         if alt.len() < best.len() {
             best = alt;
+            crate::prof::win("cm2_variant_col");
         }
     }
     best
@@ -963,25 +1033,80 @@ fn cm2_encode_audit_variant(data: &[u8], col_delim: Option<u8>) -> (Vec<u8>, f64
     let mut model = CmModel::new_with_col(tbits_for(data.len()), col_delim);
     let mut enc = RangeEncoder::new();
     let mut buf: Vec<u8> = Vec::with_capacity(data.len());
+    // M1 (pre-registered by the CUBR-0087 consilium): split the per-bit budget
+    // between the model — predict + update over 24 hash-indexed tables — and the
+    // range coder that consumes the model's probability. The consilium's kill rule
+    // for NEW-22 (SIMD rANS) is "coder share < 25% => cancelled on the CM path",
+    // so the share has to be a measurement, not an estimate.
+    //
+    // Timed in place rather than by stubbing the coder: a null coder emits no
+    // bytes, which changes every downstream competitive comparison and therefore
+    // measures a different encoder. This costs two `Instant::now()` per bit while
+    // enabled (~20 ns each, ~0.7 s per 2 MB against a ~140 s encode) and **emits
+    // byte-identical output**, so the split is measured on the real path.
+    let time_coder = coder_timing_enabled();
+    let mut coder_nanos: u128 = 0;
+    let mut model_nanos: u128 = 0;
     for &byte in data {
         model.start_byte(&buf);
         let mut c0 = 1usize;
         for bit in 0..8u32 {
             let y = ((byte >> (7 - bit)) & 1) as i32;
-            let pf = model.predict_bit(c0, bit);
-            if y == 1 {
-                enc.encode(0, pf as u32, PSCALE as u32);
+            if time_coder {
+                let t0 = std::time::Instant::now();
+                let pf = model.predict_bit(c0, bit);
+                let t1 = std::time::Instant::now();
+                if y == 1 {
+                    enc.encode(0, pf as u32, PSCALE as u32);
+                } else {
+                    enc.encode(pf as u32, (PSCALE - pf) as u32, PSCALE as u32);
+                }
+                let t2 = std::time::Instant::now();
+                model.update_bit(y);
+                let t3 = std::time::Instant::now();
+                coder_nanos += (t2 - t1).as_nanos();
+                model_nanos += (t1 - t0).as_nanos() + (t3 - t2).as_nanos();
             } else {
-                enc.encode(pf as u32, (PSCALE - pf) as u32, PSCALE as u32);
+                let pf = model.predict_bit(c0, bit);
+                if y == 1 {
+                    enc.encode(0, pf as u32, PSCALE as u32);
+                } else {
+                    enc.encode(pf as u32, (PSCALE - pf) as u32, PSCALE as u32);
+                }
+                model.update_bit(y);
             }
-            model.update_bit(y);
             c0 = (c0 << 1) | (y as usize);
         }
         buf.push(byte);
         model.end_byte(&buf);
     }
+    if time_coder {
+        let total = (coder_nanos + model_nanos) as f64;
+        eprintln!(
+            "CM2-BIT-SPLIT bytes={} model_s={:.3} coder_s={:.3} coder_share={:.2}%",
+            data.len(),
+            model_nanos as f64 / 1e9,
+            coder_nanos as f64 / 1e9,
+            if total > 0.0 {
+                100.0 * coder_nanos as f64 / total
+            } else {
+                0.0
+            }
+        );
+    }
     out.extend_from_slice(&enc.finish());
     (out, model.q_bits, model.i_bits)
+}
+
+/// Enable the M1 per-bit model/coder split (`CUBRIM_PROFILE_CODER=1`).
+fn coder_timing_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("CUBRIM_PROFILE_CODER")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
 }
 
 /// Decode a blob produced by [`cm2_encode`]. Fail-closed on a truncated header.

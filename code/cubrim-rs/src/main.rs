@@ -54,7 +54,9 @@ fn run(cli: Cli) -> Result<(), AppError> {
             match data {
                 Ok(data) => {
                     let config = args.encode_config();
+                    let encode_started = Instant::now();
                     let blob = encode_with_config(&data, &config);
+                    cubrim::report_encode_profile(encode_started.elapsed().as_nanos());
                     std::fs::write(&args.output, &blob)
                         .map(|_| {
                             if !args.quiet {
