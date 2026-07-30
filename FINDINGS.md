@@ -104,7 +104,13 @@ encode **once for the base model plus once per candidate column delimiter**
 (`detect_col_delims`, `MAX = 2`), keeping the smallest — while `cm2_decode`
 replays exactly the one variant recorded in the blob header. Up to **3 full
 passes at encode against 1 at decode** explains the measured 140.0 s / 51.4 s
-= 2.7× on this file, and the corpus-level 4.11×.
+= 2.7× on this file.
+
+> **CORRECTION (see F16).** The sentence above originally also claimed this
+> explained "the corpus-level 4.11×". **It does not.** 4.11× is a weighted
+> aggregate over a per-file range of 1.04× to 80.2×, and the column sweep accounts
+> only for the text band. The correction was prompted by the CUBR-0092 lane and
+> verified against the DB before accepting it.
 
 This relocates the lever and kills a plausible-but-wrong plan:
 
@@ -764,7 +770,48 @@ box to load 82, and the mechanism (per-level `available_parallelism()` multiplyi
 through nested candidates rather than sharing a budget) is read from source. That
 is a *defect description*, not a measured lever, and it is not to be quoted as one.
 
-## Measurement conditions — what these numbers are and are not
+## F16 — the 4.11× asymmetry is an aggregate over a 1.04–80× range, and my F2 claim over-reached
+
+Raised by the CUBR-0092 lane and **verified against the DB before accepting it**,
+because a claim that contradicts my own finding deserves the same scepticism I
+applied to the brief. Per-file encode/decode on `meta_id=35`, files > 1 MB:
+
+| file | type | encode s | decode s | enc/dec |
+|---|---|---|---|---|
+| mr | image | 477.3 | 5.9 | **80.22** |
+| x-ray | image | 358.4 | 5.6 | **63.91** |
+| sao | binary | 602.4 | 22.5 | **26.77** |
+| nci | database | 1944.3 | 284.5 | 6.83 |
+| kennedy.xls | binary | 63.4 | 9.4 | 6.72 |
+| ooffice | exe | 381.6 | 70.4 | 5.42 |
+| mozilla | exe | 2417.4 | 538.4 | 4.49 |
+| enwik8 | text | 3897.9 | 1158.3 | 3.37 |
+| osdb | database | 469.7 | 139.7 | 3.36 |
+| dickens | text | 422.3 | 131.0 | 3.22 |
+| webster | text | 1534.1 | 483.8 | 3.17 |
+| xml | text | 163.9 | 55.0 | 2.98 |
+| reymont | text | 226.8 | 76.4 | 2.97 |
+| **samba** | code | 242.1 | 233.2 | **1.04** |
+
+**What this does to F2.** The column-sweep mechanism is confirmed and its scope is
+narrower than I wrote. It explains the **text band, 2.97–3.37×** — precisely where
+1 base pass + 2 column passes should land — and `samba` at **1.04×** is the
+control that proves it: I measured directly that no `cm2_variant_col` row is
+emitted there, and its asymmetry duly collapses to ~1. Mechanism confirmed twice,
+once by presence and once by absence.
+
+But "and the corpus-level 4.11×" was wrong, and I have corrected it in F2 and in
+the DB. A single aggregate over a 1.04–80× spread does not have one cause, and
+treating it as if it did is the same aggregation error the brief's flat-profile
+diagnostic made — which I criticised, and then reproduced.
+
+**What is actually unexplained is much bigger than what I explained.** Image sits
+at 64–80×, an order of magnitude above the text band. My own attribution already
+carries the lead: on `x-ray`, `base` is **73.5% of encode wall and never wins**
+while `med16` wins and decodes in 2.6 s. So encode pays for the whole cube/BWT
+path plus the winner; decode replays only the trivially-cheap winner. That is F2b,
+and **L1 is exactly the lever that removes it** — which makes the next measurement
+obvious and cheap.
 
 I told the sibling sessions that a timing taken on a contended host is not a
 measurement. The same standard applies to mine, so here is the exact status of
