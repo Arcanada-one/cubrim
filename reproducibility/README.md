@@ -11,7 +11,7 @@ external byte comparison against the original. On top of that:
 
 - **Nine of the ten archivers are held to exact archive sizes** — 216 cells,
   including **every Cubrim cell**.
-- **rar is held to its round trip plus a 256-byte bound**, and any difference is
+- **rar is held to its round trip plus a 32-byte bound**, and any difference is
   printed and counted rather than absorbed. See below for why.
 
 A run that meets this prints `"status": "PASS"` along with
@@ -67,10 +67,28 @@ timestamp and 51,195 with a recent one.
 
 ## Why rar is treated differently
 
-rar stores each source file's modification time and widens that encoding for
-recent timestamps, so its archive size depends on how the corpus was copied
-rather than on content alone. It is the only one of the ten archivers with that
-property — the other nine are byte-identical given the same input.
+Two reasons, and until 2026-07-30 we had only found one of them.
+
+**Thread count — the larger effect, now pinned.** rar's compressed output is a
+function of how many compression threads it uses, and rar 7.00 selects that from
+the CPU count visible to it when no `-mt` flag is passed. This package used to
+pass none, so **the same input produced a different archive on every
+differently-sized host**. On `silesia/mr` the spread across `-mt1` … `-mt16` is
+11,393 bytes; between 12 and 16 threads alone it is 5,716. That is what was
+behind the long-unexplained 5,732-byte disagreement on that one cell, and it
+meant this verifier would have rejected an honest third-party run on most
+machines while blaming a timestamp for it.
+
+`archiver_templates.json` now pins `-mt16`. Verified host-independent: with the
+flag pinned, output is byte-identical under `taskset -c 0-15`, `0-7`, `0-3` and
+`0`. rar is therefore deterministic across hosts like the other nine, and the
+remaining tolerance covers only the timestamp effect below.
+
+**Timestamps — 16 bytes.** rar stores each source file's modification time and
+widens that encoding for recent timestamps, so its archive size also depends on
+how the corpus was copied rather than on content alone. It is the only one of
+the ten archivers with that property — the other nine are byte-identical given
+the same input.
 
 Concretely, `canterbury/alice29.txt` compresses to 51,179 bytes with its
 original 1996 timestamp and 51,195 with a recent one.
