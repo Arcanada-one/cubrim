@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cubrim — Universal Compression</title>
+    <meta name="description" content="Cubrim compresses anything you throw at it — any format, any size, lossless. Part of the Arcanada ecosystem.">
+    <meta property="og:title" content="Cubrim — Universal Compression">
+    <meta property="og:description" content="Cubrim compresses anything you throw at it — any format, any size, lossless. Part of the Arcanada ecosystem.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://cubrim.com">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="canonical" href="https://cubrim.com/en/">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/tailwind.css?v=1785263107">
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+      ::selection { background: rgba(59,130,246,0.25); color: inherit; }
+
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      .dark ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+      /* Card — light default, .dark override */
+      .cb-card {
+        position: relative;
+        border-radius: 12px;
+        transition: all 0.3s ease;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+      }
+      .dark .cb-card { border-color: #1e293b; background: #0d1220; }
+      .cb-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(59,130,246,0.3);
+        box-shadow: 0 4px 24px rgba(59,130,246,0.06);
+      }
+      .dark .cb-card:hover { border-color: rgba(96,165,250,0.3); box-shadow: 0 4px 24px rgba(96,165,250,0.06); }
+
+      /* Hero gradient text — light default, .dark override */
+      .cb-hero-gradient {
+        background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 50%, #7c3aed 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .dark .cb-hero-gradient {
+        background: linear-gradient(135deg, #93c5fd 0%, #60a5fa 50%, #a78bfa 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      /* Glow */
+      .cb-glow {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(100px);
+        pointer-events: none;
+      }
+
+      .will-animate { opacity: 0; }
+      [x-cloak] { display: none !important; }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+        }
+        .will-animate { opacity: 1; }
+      }
+    </style>
+
+        <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XYV4JC836T"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-XYV4JC836T');
+    </script>
+    </head>
+
+<body
+  x-data="{
+    dark: localStorage.getItem('theme') === 'dark'
+      || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches),
+    mobileMenu: false
+  }"
+  x-init="
+    $watch('dark', v => {
+      localStorage.setItem('theme', v ? 'dark' : 'light');
+      document.documentElement.classList.toggle('dark', v);
+    });
+    document.documentElement.classList.toggle('dark', dark);
+  "
+  class="font-body antialiased transition-colors duration-300"
+  :class="dark ? 'bg-cb-bg text-slate-200' : 'bg-white text-slate-800'"
+>
+
+  <!-- HEADER -->
+  <header
+    class="fixed top-0 left-0 right-0 z-50 transition-colors duration-300 border-b"
+    :class="dark ? 'bg-[#0a0e1a]/85 border-white/5' : 'bg-white/85 border-slate-200'"
+    style="backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);"
+  >
+    <div class="max-w-5xl mx-auto px-4 sm:px-6">
+      <div class="flex items-center justify-between h-16">
+
+        <!-- Logo -->
+        <a href="/en/" class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center font-mono font-bold text-sm bg-cb-500 text-white">C</div>
+          <span class="font-heading font-bold text-lg tracking-tight">Cubrim</span>
+        </a>
+
+        <!-- Primary nav -->
+        <nav class="hidden sm:flex items-center gap-1 text-sm font-medium">
+          <a href="/en/web-codec"
+             data-nav-top-level="web-codec"
+             class="inline-flex min-h-11 items-center rounded-lg px-3 py-2 transition-colors "
+             :class="dark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'">
+            Web Codec          </a>
+          <div data-nav-section="archiver"
+               x-data="{ open: false }"
+               @click.away="open = false"
+               @keydown.escape.window="open = false"
+               class="relative">
+            <button @click="open = !open"
+                    type="button"
+                    class="flex min-h-11 items-center gap-1 rounded-lg px-3 py-2 transition-colors "
+                    :class="dark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'"
+                    :aria-expanded="open"
+                    aria-controls="archiver-menu-desktop">
+              Archiver              <svg class="w-3 h-3 transition-transform duration-150" :class="open ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </button>
+            <div id="archiver-menu-desktop" x-show="open" x-cloak x-transition
+                 class="absolute left-0 top-full mt-2 min-w-44 rounded-xl border py-1.5 shadow-lg"
+                 :class="dark ? 'bg-cb-bg-surface border-white/10' : 'bg-white border-slate-200'">
+                            <a href="/en/evolution"
+                 data-nav-item
+                                  class="flex min-h-11 items-center whitespace-nowrap px-4 py-2 transition-colors "
+                 :class="dark ? 'text-slate-300 hover:text-white hover:bg-white/5' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'">
+                Evolution              </a>
+                            <a href="/en/evolution/hypotheses"
+                 data-nav-item
+                                  class="flex min-h-11 items-center whitespace-nowrap px-4 py-2 transition-colors "
+                 :class="dark ? 'text-slate-300 hover:text-white hover:bg-white/5' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'">
+                Hypotheses              </a>
+                            <a href="/en/evolution/benchmark"
+                 data-nav-item
+                                  class="flex min-h-11 items-center whitespace-nowrap px-4 py-2 transition-colors "
+                 :class="dark ? 'text-slate-300 hover:text-white hover:bg-white/5' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'">
+                Benchmark              </a>
+                            <a href="/en/methodology"
+                 data-nav-item
+                                  class="flex min-h-11 items-center whitespace-nowrap px-4 py-2 transition-colors "
+                 :class="dark ? 'text-slate-300 hover:text-white hover:bg-white/5' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'">
+                Methodology              </a>
+                            <a href="/en/addressor"
+                 data-nav-item
+                                  class="flex min-h-11 items-center whitespace-nowrap px-4 py-2 transition-colors "
+                 :class="dark ? 'text-slate-300 hover:text-white hover:bg-white/5' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'">
+                Addresser              </a>
+                            <a href="/en/addressor/regeneration"
+                 data-nav-item
+                                  class="flex min-h-11 items-center whitespace-nowrap px-4 py-2 transition-colors "
+                 :class="dark ? 'text-slate-300 hover:text-white hover:bg-white/5' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'">
+                Regeneration              </a>
+                            <a href="/en/download"
+                 data-nav-item
+                 data-download-menu-item="desktop"                 class="flex min-h-11 items-center whitespace-nowrap px-4 py-2 transition-colors "
+                 :class="dark ? 'text-slate-300 hover:text-white hover:bg-white/5' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'">
+                Download              </a>
+                          </div>
+          </div>
+          <a href="/en/download"
+             data-download-cta="desktop"
+             aria-label="Download"
+             class="inline-flex min-h-11 items-center gap-2 rounded-lg bg-cb-500 px-3 py-2 text-sm font-semibold text-white shadow-md shadow-cb-500/20 transition-colors hover:bg-cb-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cb-400 focus-visible:ring-offset-2"
+             :class="dark ? 'focus-visible:ring-offset-cb-bg' : 'focus-visible:ring-offset-white'">
+            <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/>
+            </svg>
+            <span>Download</span>
+          </a>
+          <a href="/en/about"
+             class="px-3 py-1.5 rounded-lg transition-colors "
+             :class="dark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'">
+            About          </a>
+          <a href="/en/contacts"
+             class="px-3 py-1.5 rounded-lg transition-colors "
+             :class="dark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'">
+            Contacts          </a>
+        </nav>
+
+        <!-- Controls -->
+        <div class="flex items-center gap-2">
+          <!-- Lang Toggle -->
+                    <div class="flex items-center rounded-full px-1 py-1 text-xs font-medium"
+               :class="dark ? 'bg-white/5' : 'bg-slate-900/5'">
+            <a href="/en/"
+               class="px-2.5 py-1 rounded-full transition-all duration-200 bg-cb-500 text-white"
+               aria-label="Switch to English">EN</a>
+            <a href="/ru/"
+               class="px-2.5 py-1 rounded-full transition-all duration-200 opacity-50 hover:opacity-80"
+               aria-label="Переключить на русский">RU</a>
+          </div>
+
+          <!-- Theme Toggle -->
+          <button @click="dark = !dark"
+                  class="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
+                  :class="dark ? 'hover:bg-white/5' : 'hover:bg-slate-100'"
+                  :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'">
+            <svg x-show="dark" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+            </svg>
+            <svg x-show="!dark" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+          </button>
+
+          <!-- Mobile menu toggle -->
+          <button @click="mobileMenu = !mobileMenu"
+                  type="button"
+                  class="sm:hidden w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
+                  :class="dark ? 'hover:bg-white/5' : 'hover:bg-slate-100'"
+                  :aria-expanded="mobileMenu"
+                  aria-haspopup="true"
+                  aria-label="Menu">
+            <svg x-show="!mobileMenu" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+            <svg x-show="mobileMenu" x-cloak class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18"/>
+            </svg>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Mobile nav panel (toggled by the burger; overlays content below the fixed header) -->
+      <nav x-show="mobileMenu" x-cloak x-transition
+           @keydown.escape.window="mobileMenu = false"
+           class="sm:hidden pb-3 pt-1 text-sm font-medium border-t max-h-[calc(100vh-4rem)] overflow-y-auto"
+           :class="dark ? 'border-white/5' : 'border-slate-100'">
+        <a href="/en/web-codec"
+           data-nav-top-level="web-codec"
+           class="mt-2 flex min-h-11 items-center rounded-lg px-3 py-2 transition-colors "
+           :class="dark ? 'text-slate-300' : 'text-slate-600'">
+          Web Codec        </a>
+        <div data-nav-section="archiver">
+        <div class="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider opacity-60">
+          Archiver        </div>
+                <a href="/en/evolution"
+           data-nav-item
+                      class="flex min-h-11 items-center rounded-lg px-5 py-2 transition-colors "
+           :class="dark ? 'text-slate-300' : 'text-slate-600'">
+          Evolution        </a>
+                <a href="/en/evolution/hypotheses"
+           data-nav-item
+                      class="flex min-h-11 items-center rounded-lg px-5 py-2 transition-colors "
+           :class="dark ? 'text-slate-300' : 'text-slate-600'">
+          Hypotheses        </a>
+                <a href="/en/evolution/benchmark"
+           data-nav-item
+                      class="flex min-h-11 items-center rounded-lg px-5 py-2 transition-colors "
+           :class="dark ? 'text-slate-300' : 'text-slate-600'">
+          Benchmark        </a>
+                <a href="/en/methodology"
+           data-nav-item
+                      class="flex min-h-11 items-center rounded-lg px-5 py-2 transition-colors "
+           :class="dark ? 'text-slate-300' : 'text-slate-600'">
+          Methodology        </a>
+                <a href="/en/addressor"
+           data-nav-item
+                      class="flex min-h-11 items-center rounded-lg px-5 py-2 transition-colors "
+           :class="dark ? 'text-slate-300' : 'text-slate-600'">
+          Addresser        </a>
+                <a href="/en/addressor/regeneration"
+           data-nav-item
+                      class="flex min-h-11 items-center rounded-lg px-5 py-2 transition-colors "
+           :class="dark ? 'text-slate-300' : 'text-slate-600'">
+          Regeneration        </a>
+                <a href="/en/download"
+           data-nav-item
+           data-download-menu-item="mobile"           class="flex min-h-11 items-center rounded-lg px-5 py-2 transition-colors "
+           :class="dark ? 'text-slate-300' : 'text-slate-600'">
+          Download        </a>
+                </div>
+        <a href="/en/download"
+           data-download-cta="mobile"
+           aria-label="Download"
+           class="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-cb-500 px-4 py-2.5 font-semibold text-white shadow-md shadow-cb-500/20 transition-colors hover:bg-cb-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cb-400 focus-visible:ring-offset-2"
+           :class="dark ? 'focus-visible:ring-offset-cb-bg' : 'focus-visible:ring-offset-white'">
+          <svg class="h-5 w-5 shrink-0" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/>
+          </svg>
+          <span>Download</span>
+        </a>
+        <div class="mt-3 pt-2 border-t" :class="dark ? 'border-white/5' : 'border-slate-100'">
+          <a href="/en/about"
+             class="block px-3 py-2 rounded-lg transition-colors "
+             :class="dark ? 'text-slate-300' : 'text-slate-600'">
+            About          </a>
+          <a href="/en/contacts"
+             class="block px-3 py-2 rounded-lg transition-colors "
+             :class="dark ? 'text-slate-300' : 'text-slate-600'">
+            Contacts          </a>
+        </div>
+      </nav>
+
+    </div>
+  </header>
+
+  <main class="pt-16">
+
+<!-- Hero -->
+<section class="relative overflow-hidden">
+  <!-- Glow -->
+  <div class="cb-glow w-96 h-96 -top-48 left-1/4 animate-pulse-subtle"
+       :class="dark ? 'bg-cb-500/10' : 'bg-cb-500/5'"></div>
+  <div class="cb-glow w-72 h-72 top-20 right-1/4 animate-pulse-subtle"
+       style="animation-delay: 1.5s;"
+       :class="dark ? 'bg-accent-400/5' : 'bg-accent-500/3'"></div>
+
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 pt-20 pb-16 lg:pt-32 lg:pb-24 text-center">
+
+    <!-- Eyebrow badge -->
+    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium font-mono mb-6 will-animate animate-fade-up"
+         :class="dark ? 'bg-cb-500/10 text-cb-300 border border-cb-500/20' : 'bg-blue-50 text-blue-700 border border-blue-200'">
+      <span class="w-1.5 h-1.5 rounded-full bg-cb-400 animate-pulse"></span>
+      Coming soon    </div>
+
+    <!-- Hero accent — the product teaser -->
+    <h1 class="text-4xl sm:text-5xl lg:text-6xl font-heading font-extrabold tracking-tight leading-tight will-animate animate-fade-up-1">
+      <span class="cb-hero-gradient">Compress anything you throw at it.</span>
+    </h1>
+
+    <!-- Description -->
+    <p class="mt-6 text-lg sm:text-xl max-w-2xl mx-auto leading-relaxed will-animate animate-fade-up-2"
+       :class="dark ? 'text-slate-400' : 'text-slate-500'">
+      Any format. Any size. Lossless output — exactly what went in comes back out. Cubrim is designed for the inputs that other tools struggle with.    </p>
+
+    <!-- CTA -->
+    <div class="mt-8 will-animate animate-fade-up-3">
+      <a href="https://arcanada.ai/en/ecosystem"
+         target="_blank"
+         rel="noopener"
+         class="inline-flex items-center gap-2 px-7 py-3 rounded-lg font-medium transition-colors bg-cb-500 hover:bg-cb-600 text-white">
+        Stay in the loop        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+        </svg>
+      </a>
+    </div>
+
+  </div>
+</section>
+
+<!-- Value Sections -->
+<section class="py-16 lg:py-24">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6">
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+      <!-- Universal Input -->
+      <article class="cb-card p-6" aria-label="Universal Input">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
+             :class="dark ? 'bg-cb-500/10 text-cb-400' : 'bg-blue-50 text-blue-600'">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+        </div>
+        <h2 class="font-heading font-semibold text-lg mb-2">Universal Input</h2>
+        <p class="text-sm leading-relaxed" :class="dark ? 'text-slate-400' : 'text-slate-500'">
+          Documents, logs, binaries, datasets — Cubrim handles them all with a single interface. No format-specific plugins, no configuration overhead.        </p>
+      </article>
+
+      <!-- Lossless by Default -->
+      <article class="cb-card p-6" aria-label="Lossless by Default">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
+             :class="dark ? 'bg-cb-500/10 text-cb-400' : 'bg-blue-50 text-blue-600'">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+          </svg>
+        </div>
+        <h2 class="font-heading font-semibold text-lg mb-2">Lossless by Default</h2>
+        <p class="text-sm leading-relaxed" :class="dark ? 'text-slate-400' : 'text-slate-500'">
+          Every byte restored. Cubrim is built with round-trip fidelity as a non-negotiable — not a mode you turn on, but the only mode that ships.        </p>
+      </article>
+
+      <!-- Fewer Bytes, Full Fidelity -->
+      <article class="cb-card p-6" aria-label="Fewer Bytes, Full Fidelity">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
+             :class="dark ? 'bg-accent-500/10 text-accent-400' : 'bg-violet-50 text-violet-600'">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+          </svg>
+        </div>
+        <h2 class="font-heading font-semibold text-lg mb-2">Fewer Bytes, Full Fidelity</h2>
+        <p class="text-sm leading-relaxed" :class="dark ? 'text-slate-400' : 'text-slate-500'">
+          Smaller archives without sacrificing a single bit of the original. The promise is simple: less space, nothing lost.        </p>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- Ecosystem section -->
+<section class="py-12 lg:py-16 border-t" :class="dark ? 'border-white/5' : 'border-slate-100'">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 text-center">
+    <p class="text-sm opacity-50 mb-3">Part of</p>
+    <a href="https://arcanada.ai/en/ecosystem"
+       target="_blank"
+       rel="noopener"
+       class="inline-flex items-center gap-2 text-base font-medium transition-opacity hover:opacity-80"
+       :class="dark ? 'text-purple-400' : 'text-purple-600'"
+       aria-label="Arcanada Ecosystem">
+      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      Arcanada Ecosystem    </a>
+  </div>
+</section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="border-t mt-24" :class="dark ? 'border-white/5' : 'border-slate-200'">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-12">
+
+      <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+
+        <!-- Left: Logo + tagline -->
+        <div class="flex flex-col items-center md:items-start gap-2">
+          <div class="flex flex-wrap items-center justify-center md:justify-start gap-x-2.5 gap-y-1.5">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center font-mono font-bold text-xs bg-cb-500 text-white shrink-0">C</div>
+            <span class="font-semibold tracking-tight">Cubrim</span>
+            <!-- Built by AI badge (longer copy → may wrap under the logo on narrow
+                 screens, but never breaks mid-phrase: whitespace-nowrap holds it
+                 on one line) -->
+            <span class="text-xs font-mono px-2 py-0.5 rounded-full border whitespace-nowrap"
+                  :class="dark ? 'border-white/10 text-slate-400' : 'border-slate-300 text-slate-500'">
+              invented by humans, built by AI            </span>
+          </div>
+          <p class="text-sm opacity-50">Universal compression. Lossless.</p>
+        </div>
+
+        <!-- Right: Arcanada Ecosystem link -->
+        <div class="text-sm opacity-40 hover:opacity-70 transition-opacity">
+          <a href="https://arcanada.ai/en/ecosystem"
+             target="_blank"
+             rel="noopener"
+             class="flex items-center gap-1.5"
+             :class="dark ? 'text-purple-400' : 'text-purple-600'">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            Arcanada Ecosystem          </a>
+        </div>
+
+      </div>
+
+      <!-- Slogan + copyright -->
+      <div class="mt-8 pt-6 border-t text-center text-xs"
+           :class="dark ? 'border-white/5' : 'border-slate-200'">
+        <p class="italic opacity-40 mb-1">One human life matters</p>
+        <p class="opacity-30">&copy; 2026 Arcanada. All rights reserved.</p>
+      </div>
+
+    </div>
+  </footer>
+
+</body>
+</html>

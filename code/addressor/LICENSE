@@ -1,0 +1,15 @@
+Cubrim License Summary
+
+Cubrim is free for non-commercial use under the Cubrim non-commercial license.
+Commercial use requires a paid Arcanada commercial license.
+Standard commercial target: USD 50/year per named user seat or per installed device.
+
+License and release fetches send only a random install_id UUID, operating
+system, CPU architecture, Cubrim CLI version, and event type. The server also
+sees and logs the request IP address. These records are used only for license
+management, release delivery, abuse prevention, and installation counting.
+Cubrim never sends hostnames, OS usernames, file paths, compressed content, or
+project data.
+
+Temporary canonical license URL: https://cubrim.com/legal/cubrim-license
+Future canonical license URL: https://legal.arcanada.ai/policies/cubrim/license/v1.0

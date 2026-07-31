@@ -9,7 +9,28 @@ permissions:
   contents: write
 
 jobs:
+  # Prevention leg. Refuses to build or publish a tag that is not already
+  # reachable from the default branch, and refuses a tag whose version does not
+  # match the crate manifest. release-lineage-guard.yml detects the bad state
+  # after the fact; this is what stops it from being created — so no legitimate
+  # red state ever exists for the detection leg, and a red run there is always
+  # a real defect rather than a normal in-between window that gets normalised.
+  lineage-gate:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # depth-1 has no merge-base; ancestry would be unanswerable
+          fetch-tags: true
+
+      - name: Tag must already be on the default branch
+        run: bash .github/scripts/check-release-lineage.sh --tag "${GITHUB_REF#refs/tags/}"
+
   build:
+    needs: lineage-gate
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

@@ -143,19 +143,27 @@ runs), but encodes the permutation implicitly via LF-mapping + one
 primary_index integer. No transmitted coordinate map — escapes the
 Gotcha #7 information-conservation trap.
 
-**Current best (SHIPPED):** aggregate **0.168227** — **Consolidated 8+9+10**
-(one codec carrying ValueScheme bytes 8 Order2Rans, 9 BwtAdaptive, 10
-BwtContextMix, all behind the competitive min(scheme) per-file rail), code_sha
-f0ff451, 10-file frozen corpus, merged 2026-06-23, independently re-verified.
-Per-file the rail picks the best scheme: sparse_clustered 179 (sch9), text 1757
-(sch10), log_like 570 (sch9), binary_mixed 5679 (sch10), block_bound_runs 2950
-(sch10) — 4 bytes better than the strongest standalone (H-22 0.168262).
+**Current best (SHIPPED):** aggregate **0.158273** — **BwtGeoMix** (ValueScheme
+byte 11, logistic geometric mixing, behind the competitive rail over schemes
+7..11), code_sha 48e28b7, 10-file frozen corpus, merged 2026-06-23,
+independently re-verified (200 tests green, RT 10/10, aggregate reproduced
+byte-exact).
+
+**gzip milestone — with an honest caveat.** 0.158273 edges gzip-9 (0.158290 on
+the same corpus) by **2 bytes (0.01%)** — the project's stated goal is nominally
+reached. BUT the win is fragile and corpus-specific: independent per-file
+measurement shows Cubrim is SMALLER on only 3 files (block_bound_runs
+2389 vs 3051, both_sparse_16/24) and LARGER on most (text 1525 vs 1286,
+log_like 557 vs 417, sparse_small 269 vs 48). The aggregate edge rests almost
+entirely on block_bound_runs. Do NOT publicly claim "Cubrim beats gzip" in
+general — on a different corpus gzip would very likely lead again. This is "the
+aggregate on this frozen corpus dipped 0.01% under gzip," not "a better general
+compressor." (The agent itself flagged a corpus-sensitivity check before
+promote — heed it before any public claim.)
 
 Champion lineage on the 10-file corpus:
-BwtEntropy 0.299337 → BwtRans 0.221726 (H-19, order-1 rANS) → Order2Rans
-0.207618 (H-20, order-2 rANS) → {H-21 BwtAdaptive 0.177122, H-22 BwtContextMix
-0.168262 forked separately} → **Consolidated 0.168227** (all schemes in one
-competitive codec). Goal: beat gzip 0.159674 — now ~5% away.
+BwtEntropy 0.299337 → BwtRans 0.221726 (H-19) → Order2Rans 0.207618 (H-20) →
+Consolidated 8+9+10 0.168227 → **BwtGeoMix 0.158273 (H-24)**. gzip-9 ≈ 0.158290.
 
 Measurement note: aggregate is via the competitive rail (compress with
 `--value-scheme bwt-rans`, which selects min of schemes 7/8/9/10 per file). The

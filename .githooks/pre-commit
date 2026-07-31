@@ -1,0 +1,8 @@
+#!/bin/sh
+# CUBR guard: Cubrim-1 must never be touched by addressor work
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if ! git diff --cached --quiet -- code/cubrim-rs/; then
+  echo "BLOCKED: staged changes under code/cubrim-rs/ (Cubrim-1 boundary)" >&2
+  exit 1
+fi
+exit 0

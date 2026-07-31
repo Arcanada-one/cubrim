@@ -5,7 +5,8 @@ datarim/
 /target/
 code/target/
 **/target/
-code/cubrim-rs/dist/
+dist/
+**/dist/
 **/*.rs.bk
 Cargo.lock
 
@@ -26,6 +27,10 @@ documentation/ephemeral/research/gate-ratio-candidate-bench.json
 documentation/ephemeral/research/gate-ratio-candidate-report.md
 documentation/ephemeral/research/probe-*-bench.json
 documentation/ephemeral/research/probe-*-report.md
+
+# Cubrim Web Benchmark generated evidence and void journal
+bench/web-benchmark/out/
+bench/web-benchmark/journal/
 
 # Cluster secrets (never commit)
 code/cluster/*.env
