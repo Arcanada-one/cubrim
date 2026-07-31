@@ -425,15 +425,34 @@ pub struct EncodeConfig {
 /// Every preset must state its trade in **measured** numbers. A preset whose cost
 /// has not been measured on the real corpus does not exist yet — it is not
 /// guessed into being here.
+///
+/// **Corpus ratios (24-file world corpus, 314,749,364 B; these supersede every
+/// slice figure quoted per-variant below):**
+///
+/// | preset | corpus ratio | vs `Max` | still ahead of ppmd (0.228592) |
+/// |---|---|---|---|
+/// | `Max` | 0.189007 | — | yes, by 17.3% relative |
+/// | `Balanced` | 0.189891 | +0.47% | yes, by 16.9% |
+/// | `Web` | 0.206627 | +9.32% | yes, by 9.6% |
+///
+/// A slice can mislead in *either* direction and did in both: `Balanced` costs
+/// five times less than its slice suggested (the column sweep is a no-op wherever
+/// CM2 does not win, which is most of the corpus), and `Web` costs three times
+/// more (a 2 MB slice derives a 24-bit table exponent, so a cap at 20 costs four
+/// steps, while a corpus file of >=16 MB derives 27 and pays seven). Encode
+/// throughput and decode peak RSS per preset are **not yet measured at corpus
+/// scale** — those cells are deliberately absent rather than carried across.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Preset {
     /// Maximum ratio, whatever it costs. Byte-identical to the shipped v0.3.2
     /// encoder: every competitive candidate runs, including the CM2 column
     /// variants.
     Max,
-    /// Drops the CM2 column-variant passes. Measured on 2 MB Silesia slices:
+    /// Drops the CM2 column-variant passes. Corpus cost is **+0.47% output**
+    /// (0.189891 against 0.189007). Measured on 2 MB Silesia slices:
     /// **2.27–3.30× less CM2 encode time for 0.71–4.83% larger output** on the
-    /// classes CM2 wins (text, xml, database). No effect on the classes where a
+    /// classes CM2 wins (text, xml, database) — the per-class slice spread is
+    /// why the corpus average is so much smaller. No effect on the classes where a
     /// type transform wins (exe, image), because CM2 is not the winner there.
     /// Archives stay mutually decodable with `Max`.
     Balanced,
@@ -442,7 +461,9 @@ pub enum Preset {
     /// model tables a >=16 MB file otherwise demands of the **decoder**.
     ///
     /// Caps the CM2 table exponent at 20: measured **decode peak 1.47 GiB ->
-    /// 0.109 GiB on a 2 MB slice, +3.32% output**. Also drops the column
+    /// 0.109 GiB** (class-independent). Output cost is **+3.32% on a 2 MB slice
+    /// but +9.32% on the corpus** — the slice structurally understates it, see
+    /// the corpus table above. Also drops the column
     /// variants, since an environment that cares about decoder memory is not
     /// paying 3x encode time for 2% ratio.
     ///
