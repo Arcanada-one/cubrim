@@ -14359,8 +14359,17 @@ mod tests {
                     ok_count += 1;
                 }
                 Err(e) => {
-                    // Skip if file not present in CI environment.
-                    eprintln!("SKIP corpus file '{name}' ({path}): {e}");
+                    // The fixtures are committed, so a missing file is a broken
+                    // checkout (or a bad CUBRIM_CORPUS_DIR override), and the
+                    // count assertion below WILL fail. Say so — a message that
+                    // reads "SKIP" while the test proceeds to fail cannot be
+                    // told apart from a real regression by anyone reading logs.
+                    eprintln!(
+                        "MISSING corpus fixture '{name}' ({path}): {e} — this test will FAIL; \
+                         the fixtures are committed under documentation/ephemeral/research/corpus/, \
+                         regenerable via code/corpus-gen/generate_corpus.py + \
+                         documentation/ephemeral/research/gen_cubr0030_corpus.py + gen_cubr0031_corpus.py"
+                    );
                 }
             }
         }
@@ -14463,7 +14472,10 @@ mod tests {
                     );
                     ok_count += 1;
                 }
-                Err(e) => eprintln!("SKIP corpus file '{name}' ({path}): {e}"),
+                Err(e) => eprintln!(
+                    "MISSING corpus fixture '{name}' ({path}): {e} — this test will FAIL; \
+                     fixtures are committed, see documentation/ephemeral/research/corpus/"
+                ),
             }
         }
         assert_eq!(
