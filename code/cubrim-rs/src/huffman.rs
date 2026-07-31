@@ -376,14 +376,41 @@ pub(crate) struct HuffTable {
 }
 
 impl HuffTable {
+    /// Index width, i.e. how many bits to peel per symbol.
+    pub(crate) fn bits(&self) -> u8 {
+        self.bits
+    }
+
+    /// Entry count, used by callers budgeting table memory across contexts.
+    pub(crate) fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// `(symbol, code_length)` for a `bits`-wide pattern; length 0 = no code.
+    ///
+    /// `index` must be less than [`entry_count`]; callers peel exactly `bits`.
+    #[inline]
+    pub(crate) fn lookup(&self, index: usize) -> (u16, u8) {
+        self.entries[index]
+    }
+
     /// Build from canonical code lengths, or `None` when the code is deeper
     /// than [`MAX_TABLE_BITS`] or has no symbols.
     ///
     /// The caller must have validated `code_len` with [`kraft_ok`] first; this
     /// function assumes a complete prefix-free code.
     pub(crate) fn build(code_len: &[u8]) -> Option<Self> {
+        Self::build_bounded(code_len, MAX_TABLE_BITS)
+    }
+
+    /// As [`build`], but refusing codes deeper than `max_bits`.
+    ///
+    /// The per-context decoders build one table per context, so their ceiling
+    /// has to be lower than the single-table case: at 14 bits a table is 16 Ki
+    /// entries, which is fine once and far too much a few hundred times over.
+    pub(crate) fn build_bounded(code_len: &[u8], max_bits: u8) -> Option<Self> {
         let max_len = code_len.iter().copied().max().unwrap_or(0);
-        if max_len == 0 || max_len > MAX_TABLE_BITS {
+        if max_len == 0 || max_len > max_bits.min(MAX_TABLE_BITS) {
             return None;
         }
         let codes = assign_canonical_codes(code_len);
