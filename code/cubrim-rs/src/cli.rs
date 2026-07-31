@@ -175,13 +175,19 @@ pub struct TestArgs {
 pub enum PresetArg {
     /// Maximum ratio. Byte-identical to the shipped v0.3.2 encoder.
     Max,
-    /// Drops the CM2 column-variant passes: measured 3.00x faster encode for
-    /// +2.35% output on dickens. Archives stay decodable by every other preset.
+    /// Drops the CM2 column-variant passes. Corpus cost is +0.47% output
+    /// (24-file world corpus, ratio 0.189891 against max 0.189007); the speedup
+    /// is class-dependent and largest where CM2 wins, e.g. 3.00x faster encode
+    /// on dickens. Archives stay decodable by every other preset.
     Balanced,
     /// Bounded decoder memory for wasm32 and other hard-ceiling environments:
-    /// decode peak 1.47 GiB -> 0.109 GiB for +3.32% output. Needs a decoder that
-    /// reads the table-exponent field; older decoders fail closed on these
-    /// archives rather than returning wrong bytes.
+    /// decode peak 1.47 GiB -> 0.109 GiB. Corpus cost is +9.32% output (ratio
+    /// 0.206627), which is higher than a small-file measurement suggests: a
+    /// 2 MB sample derives a 24-bit table exponent, so capping at 20 costs four
+    /// steps, while a corpus file of 16 MB or more derives 27 and pays seven.
+    /// Still ahead of ppmd (0.228592). Needs a decoder that reads the
+    /// table-exponent field; older decoders fail closed on these archives
+    /// rather than returning wrong bytes.
     Web,
 }
 
