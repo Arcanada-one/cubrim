@@ -6219,7 +6219,21 @@ pub(crate) fn order2_context_huffman_decode(
     // We'll build decode tables keyed by tag+key for O(1) lookup.
     struct DecodeTable {
         decode_map: HashMap<(u32, u8), usize>,
+        /// Flat lookup table when the context's code is shallow enough to
+        /// afford one. `None` falls back to `decode_map` and the bit scan,
+        /// which is correct but costs a hash probe per candidate length.
+        fast: Option<crate::huffman::HuffTable>,
     }
+
+    // One table per context, so the per-context ceiling must be lower than the
+    // single-table case: 11 bits is 2 Ki entries, affordable a few hundred
+    // times over, where 14 bits (16 Ki) would not be. The total is capped as
+    // well, because n_ctx is attacker-influenced and a stream declaring many
+    // deep contexts must not be able to make the decoder allocate without
+    // bound — the same discipline src/limits.rs applies elsewhere.
+    const CTX_TABLE_BITS: u8 = 11;
+    const CTX_TABLE_ENTRY_BUDGET: usize = 1 << 20; // ~4 MiB of entries
+    let mut table_entries_used: usize = 0;
 
     // Parsed entries: (tag, optional prev2, prev1, decode_table)
     #[derive(Debug)]
@@ -6305,8 +6319,14 @@ pub(crate) fn order2_context_huffman_decode(
             }
         }
 
+        let fast = crate::huffman::HuffTable::build_bounded(&code_len, CTX_TABLE_BITS)
+            .filter(|t| {
+                table_entries_used.saturating_add(t.entry_count()) <= CTX_TABLE_ENTRY_BUDGET
+            })
+            .inspect(|t| table_entries_used += t.entry_count());
+
         let table_idx = decode_tables.len();
-        decode_tables.push(DecodeTable { decode_map });
+        decode_tables.push(DecodeTable { decode_map, fast });
 
         let parsed = match tag {
             0 => ParsedEntry::Order0 { table_idx },
@@ -6381,15 +6401,60 @@ pub(crate) fn order2_context_huffman_decode(
         // QA-F-006 fail-closed: table_idx comes from header-derived maps (and the order-0
         // fallback index); a corrupt blob can point it past the decoded table set (e.g. an
         // empty decode_tables with a nonzero count). Bounds-check instead of panicking.
-        let decode_table = &decode_tables
+        let entry = decode_tables
             .get(table_idx)
             .ok_or_else(|| {
                 CubrimError::Decode(format!(
                     "EntropyContext2: table index {table_idx} out of range (have {})",
                     decode_tables.len()
                 ))
-            })?
-            .decode_map;
+            })?;
+
+        // Fast path: peel the index width once and look the symbol up, instead
+        // of accumulating a bit at a time and probing a hash map per candidate
+        // length. Identical results — same canonical codes, same bitstream.
+        if let Some(table) = &entry.fast {
+            let want = table.bits() as usize;
+            let total_bits = blob.len().saturating_sub(bitstream_offset) * 8;
+            let available = total_bits.saturating_sub(bit_pos);
+            if available == 0 {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: bitstream exhausted at bit {bit_pos} decoding symbol {sym_idx}/{count}"
+                )));
+            }
+            // Near the end fewer than `want` bits remain; the codeword itself
+            // may still fit, so pad with zeros and check the decoded length
+            // against what was actually there.
+            let take = want.min(available);
+            let mut index: usize = 0;
+            for k in 0..take {
+                let at = bit_pos + k;
+                let byte_off = bitstream_offset + at / 8;
+                let bit = (blob[byte_off] >> (7 - (at % 8))) & 1;
+                index = (index << 1) | bit as usize;
+            }
+            index <<= want - take;
+
+            let (sym, len) = table.lookup(index);
+            if len == 0 {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: no codeword match at symbol {sym_idx}/{count}"
+                )));
+            }
+            if (len as usize) > available {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: bitstream truncated at bit {bit_pos} decoding symbol {sym_idx}/{count}"
+                )));
+            }
+            bit_pos += len as usize;
+            let sym = sym as usize;
+            decoded.push(sym);
+            prev2 = prev1;
+            prev1 = sym as u16;
+            continue;
+        }
+
+        let decode_table = &entry.decode_map;
 
         // Huffman decode: try increasing lengths.
         let mut codeword: u32 = 0;
