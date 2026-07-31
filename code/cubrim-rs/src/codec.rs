@@ -29,7 +29,7 @@ use crate::header::{
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
 };
-use crate::phi::{compute_n_and_b, phi as phi_fn, phi_inv as phi_inv_fn};
+use crate::phi::{compute_n_and_b, phi_inv as phi_inv_fn};
 use crate::rle::{
     packed_nibble_decode, packed_nibble_encode, packed_nibble_size, rle_decode, rle_encode,
     rle_size,
@@ -673,12 +673,52 @@ pub fn decode_with_limits(
             //
             // This is deterministic from (L, N, B) alone — no out-of-band state (R6).
 
-            let mut lex_sorted_coords: Vec<Vec<usize>> = (0..l).map(|i| phi_fn(i, n, b)).collect();
-            lex_sorted_coords.sort();
+            // Lex order over phi(i) is the digit-reversed numeric order of i.
+            // Comparing coords[0] first means comparing the LEAST significant
+            // base-B digit first, so packing coords[0] as the MOST significant
+            // digit of a scalar key reproduces that ordering exactly, and the
+            // key is a bijection so the sort stays deterministic.
+            //
+            // The previous form materialised one heap-allocated Vec<usize> per
+            // position and then sorted those vectors, chasing a pointer per
+            // comparison: L allocations plus O(L log L) indirect compares, on
+            // the hot path of every cube decode. It is also the allocation
+            // whose unbounded form produced the ~111 GB OOM, so this is the
+            // throughput ceiling and the memory hazard in one place.
+            //
+            // Digits beyond `digits` are zero for every i < L (L <= B^digits),
+            // so they are equal across all elements and cannot affect ordering.
+            let digits = {
+                let mut count = 1usize;
+                let mut capacity = b;
+                while capacity < l {
+                    capacity = capacity.saturating_mul(b);
+                    count += 1;
+                }
+                count.min(n)
+            };
+
+            // key < B^digits <= B * L, which is well inside u64 for any L the
+            // u32 length field can express.
+            let radix = b as u64;
+            let mut ranked: Vec<(u64, u32)> = (0..l)
+                .map(|i| {
+                    let mut remainder = i;
+                    let mut key: u64 = 0;
+                    for _ in 0..digits {
+                        key = key * radix + (remainder % b) as u64;
+                        remainder /= b;
+                    }
+                    (key, i as u32)
+                })
+                .collect();
+            ranked.sort_unstable();
 
             let mut result = vec![0u8; l];
-            for (j, coords) in lex_sorted_coords.iter().enumerate() {
-                let orig_idx = phi_inv_fn(coords, b);
+            for (j, &(_, index)) in ranked.iter().enumerate() {
+                // phi_inv(phi(i)) == i by construction, so the original index
+                // is carried alongside the key rather than recomputed.
+                let orig_idx = index as usize;
                 if orig_idx < l && j < values.len() {
                     result[orig_idx] = values[j] as u8;
                 }
