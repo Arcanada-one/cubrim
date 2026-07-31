@@ -170,7 +170,36 @@ two independent ways, so the ladder is now explicit:
 
 So: implemented, measured, and CLI-verified — **not** available to users.
 
-`balanced`'s numbers come from 2 MB slices. Before it appears on a public
-benchmark it needs a full-corpus run on a quiet host, because a ratio measured on
-a slice is not a ratio on the corpus — the project's own rule is that a ratio is
-only valid against the corpus it was measured on.
+## Corpus numbers (2026-07-31) — these supersede every slice figure above
+
+Full 24-file world corpus, 314,749,364 bytes, **round-trip OK on all 24 files in
+every run**:
+
+| preset | archive bytes | corpus ratio | vs `max` | rank vs field |
+|---|---|---|---|---|
+| `max` | 59,489,703 | **0.189007** | — | **#1**, 17.3% clear of ppmd |
+| `balanced` | 59,768,178 | **0.189891** | **+0.47%** | **#1**, 16.9% clear |
+| `web` | 65,035,750 | **0.206627** | **+9.32%** | **#1**, 9.6% clear |
+
+(ppmd 0.228592, xz 0.234411 on the same corpus.)
+
+`max` reproduces `meta_id=35`'s `0.18900658684095069371` to six decimals on a
+different host — the strongest available evidence the harness is sound.
+
+**Both slice estimates above were wrong, in opposite directions.** `balanced` was
+overstated ~5× (+2.35% slice vs **+0.47%** corpus) because the column sweep is a
+no-op wherever CM2 does not win, and most of the corpus is in that position.
+`web` was understated ~3× (+3.32% vs **+9.32%**) because a 2 MB slice derives
+`tbits = 24` — capping to 20 costs four steps — while a real corpus file ≥ 16 MB
+derives 27 and the same cap costs **seven**. The slice structurally could not show
+the real price.
+
+**The headline this licenses:** the 13.5× decoder-memory cut does not cost the
+ratio lead, it narrows it from 17.3% to 9.6%. Publish it that way — as a corpus
+number, per operating point, never as a single "Cubrim is X" figure.
+
+**One caution:** `web` at 0.206627 sits close to the consilium's ~0.21 refusal
+threshold. That threshold was set for `--max` and `web` is a different operating
+point, so it is not breached — but the margin is thin enough that any further
+ratio-costing lever stacked onto `web` must be re-checked against it rather than
+assumed to have headroom.

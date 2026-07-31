@@ -983,6 +983,60 @@ preset; instead the honest position is that **text and database cannot answer th
 question at all under L1**, so the lever's scope is currently established for
 image and exe only.
 
+## F19 — the corpus numbers landed, and they correct my slice figures in BOTH directions
+
+The benchmark lane completed a full 24-file world-corpus pass per preset
+(314,749,364 bytes, round-trip **OK on all 24 files** in every run). This is the
+measurement I said had not been taken, and it changes what may be published.
+
+| preset | archive bytes | corpus ratio | vs `max` | my 2 MB slice estimate |
+|---|---|---|---|---|
+| `max` | 59,489,703 | **0.189007** | — | — |
+| `balanced` | 59,768,178 | **0.189891** | **+0.47%** | +2.35% — **overstated ~5×** |
+| `web` | 65,035,750 | **0.206627** | **+9.32%** | +3.32% — **understated ~3×** |
+
+**`max` reproduces the DB exactly.** `meta_id=35` records
+`0.18900658684095069371`, which rounds to `0.189007`; the fresh run on a
+different host gives `0.189007`. A preset campaign that reproduces the standing
+champion figure to six decimals is the strongest available evidence that the
+harness is sound.
+
+**Both of my slice numbers were wrong, in opposite directions, for the same
+reason** — a slice is not the corpus:
+
+- `balanced` is **five times cheaper** than I said. The column sweep is a no-op
+  wherever CM2 does not win, and across 24 files most of the corpus is in that
+  position. My figure came from `dickens`, one of the files where it bites hardest.
+- `web` is **three times more expensive** than I said, and this one matters more.
+  The 2 MB slice derives `tbits = 24`, so capping at 20 costs four steps. A real
+  corpus file ≥ 16 MB derives `tbits = 27`, so the same cap costs **seven**. The
+  slice structurally could not show the real price.
+
+This is the project's own rule — *a ratio is only valid against the corpus it was
+measured on* — demonstrating itself against me. I flagged the slice caveat
+repeatedly and was still wrong by 3–5× once the corpus spoke.
+
+### The product statement this licenses
+
+**All three presets keep the ratio lead.** Against the same corpus, ppmd is
+0.228592 and xz 0.234411:
+
+| entrant | corpus ratio | still #1? |
+|---|---|---|
+| cubrim `max` | 0.189007 | yes, by 17.3% relative |
+| cubrim `balanced` | 0.189891 | yes, by 16.9% |
+| cubrim `web` | 0.206627 | **yes, by 9.6%** |
+
+So the 13.5× decoder-memory cut does **not** cost the lead — it narrows it from
+17.3% to 9.6%. That is the honest headline for the web profile, and it is a
+corpus number, not a slice.
+
+One caution for whoever publishes it: `web` at 0.206627 sits close to the
+consilium's refusal threshold of ~0.21. That threshold was set for `--max` and
+`web` is a different operating point, so it is not breached — but the margin is
+thin enough that any further ratio-costing lever stacked onto `web` needs
+re-checking against it rather than assuming headroom.
+
 ## Status of the pre-registered measurements
 
 | ID | question | state |
