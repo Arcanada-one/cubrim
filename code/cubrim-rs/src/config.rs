@@ -433,11 +433,11 @@ pub struct EncodeConfig {
 /// |---|---|---|---|
 /// | `Max` | 0.189007 | — | yes, by 17.3% relative |
 /// | `Balanced` | 0.189891 | +0.47% | yes, by 16.9% |
-/// | `Web` | 0.206627 | +9.32% | yes, by 9.6% |
+/// | `LowmemDecode` | 0.206627 | +9.32% | yes, by 9.6% |
 ///
 /// A slice can mislead in *either* direction and did in both: `Balanced` costs
 /// five times less than its slice suggested (the column sweep is a no-op wherever
-/// CM2 does not win, which is most of the corpus), and `Web` costs three times
+/// CM2 does not win, which is most of the corpus), and `LowmemDecode` costs three times
 /// more (a 2 MB slice derives a 24-bit table exponent, so a cap at 20 costs four
 /// steps, while a corpus file of >=16 MB derives 27 and pays seven). Encode
 /// throughput and decode peak RSS per preset are **not yet measured at corpus
@@ -460,12 +460,13 @@ pub enum Preset {
     /// chiefly `wasm32`, whose 4 GiB address space cannot hold the 12.3 GiB of
     /// model tables a >=16 MB file otherwise demands of the **decoder**.
     ///
-    /// Caps the CM2 table exponent at 20: measured **decode peak 1.47 GiB ->
-    /// 0.109 GiB** (class-independent). Output cost is **+3.32% on a 2 MB slice
-    /// but +9.32% on the corpus** — the slice structurally understates it, see
-    /// the corpus table above. Also drops the column
+    /// Caps the CM2 table exponent at 20: measured **decode peak 12.27 GiB ->
+    /// 0.216 GiB on the 24-file world corpus, a 56.8x cut** (class-independent —
+    /// decode is CM2 alone whatever won at encode time). Output cost is
+    /// **+9.32% on the corpus** (+3.32% on a 2 MB slice — the slice structurally
+    /// understates it, see the corpus table above). Also drops the column
     /// variants, since an environment that cares about decoder memory is not
-    /// paying 3x encode time for 2% ratio.
+    /// paying 3x encode time for a fraction of a percent of ratio.
     ///
     /// Readable by any decoder that understands the table-exponent field.
     /// **Not** readable by a decoder older than that field — such a decoder
@@ -473,7 +474,13 @@ pub enum Preset {
     /// (verified), but it cannot open the archive. `Max` and `Balanced` archives
     /// have no such restriction: they leave the field zero and decode
     /// everywhere, including on builds that predate it.
-    Web,
+    ///
+    /// Was `Web` until 2026-07-31; renamed before any release shipped the flag.
+    /// The preset names its mechanism — bounded decode-side memory — while
+    /// "web" named the separate Web Codec product area, and the encode side
+    /// still peaks at ~9.4 GiB on the corpus, so a bare "lowmem" would
+    /// over-promise exactly the way an unmeasured name does.
+    LowmemDecode,
 }
 
 impl Preset {
@@ -482,7 +489,7 @@ impl Preset {
         match self {
             Preset::Max => {}
             Preset::Balanced => config.cm2_column_variants = false,
-            Preset::Web => {
+            Preset::LowmemDecode => {
                 config.cm2_column_variants = false;
                 config.cm2_max_tbits = Some(20);
             }

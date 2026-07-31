@@ -10,10 +10,10 @@ are products, so the operating point is explicit and both are published.
 
 **A preset that has not been measured on the real corpus does not exist.** No
 preset is added here on the strength of an argument about what it should cost.
-That is why this file defines `max`, `balanced` and `web` but **not** `--fast`,
+That is why this file defines `max`, `balanced` and `lowmem-decode` but **not** `--fast`,
 which the mandate sketched: `--fast` requires a measurement that has not been
 taken, and inventing its numbers would be exactly the fabrication the programme
-forbids. `web` is here instead, and was not in the original sketch, because the
+forbids. `lowmem-decode` is here instead, and was not in the original sketch, because the
 measurement produced a need the sketch did not anticipate — a decoder memory
 ceiling that blocks another epic.
 
@@ -60,7 +60,16 @@ strongest.
 recorded in the blob's length header, so a `balanced` archive opens under `max`
 and a `max` archive opens under `balanced`. Choosing a preset never strands data.
 
-### `--preset web` — bounded decoder memory
+### `--preset lowmem-decode` — bounded decoder memory
+
+> **Renamed from `web` on 2026-07-31**, before any release shipped the flag, so no
+> user has typed the old token. Two reasons, both recorded by the consilium that
+> reviewed the campaign: (1) "web" collided with the separate **Web Codec**
+> product area — two unrelated things called "web" in one product; (2) a preset
+> should name its mechanism, and the mechanism is a bounded **decode-side**
+> memory ceiling. A bare `lowmem` was rejected because encode still peaks at
+> ~9.4 GiB on the corpus — a name promising low memory unqualified would be
+> unsupported by the measurements in exactly the way this file forbids.
 
 Caps the CM2 table exponent at 20 and drops the column variants.
 
@@ -78,7 +87,7 @@ Measured, `dickens` 2 MB slice, byte-exact round-trip:
 |---|---|---|---|
 | none (=24 here) | 461,437 B | — | 1.47 GiB |
 | 22 | 466,176 B | +1.03% | 0.40 GiB |
-| **20 (`web`)** | 476,746 B | **+3.32%** | **0.109 GiB** |
+| **20 (`lowmem-decode`)** | 476,746 B | **+3.32%** | **0.109 GiB** |
 | 18 | 499,852 B | +8.32% | 0.033 GiB |
 
 **The memory figure is class-independent** — decode peak lands at 0.107–0.109 GiB
@@ -93,12 +102,12 @@ travels in the CM2 length header (bits 56..60, `0` = derive as before), so:
   what earlier builds produced, and decode **everywhere including older
   decoders** (verified: sha `2840d51a…` on both builds, and the pre-change binary
   reads new uncapped output).
-- A `web` archive **needs a decoder that reads the field**. An older decoder does
+- A `lowmem-decode` archive **needs a decoder that reads the field**. An older decoder does
   not silently produce wrong bytes — verified, it fails closed with
   `DecodeError: MODE_CM2: coded stream exhausted before orig_len bytes decoded`,
   exit 2, no output file — but it cannot open the archive.
 
-So choosing `web` is a decision about who can read the result. It is the right
+So choosing `lowmem-decode` is a decision about who can read the result. It is the right
 default for a browser and the wrong one for an archive you hand to someone with an
 older binary.
 
@@ -124,10 +133,10 @@ lever accepted into `max`, that crosses it.
 
 Every preset states its trade in measured numbers or it does not ship.
 
-## ⚠ Compatibility warning — read before choosing `web`
+## ⚠ Compatibility warning — read before choosing `lowmem-decode`
 
-**A decoder that predates the table-exponent field CANNOT read a `--preset web`
-archive.** It does not misread it and it does not return wrong bytes; it stops:
+**A decoder that predates the table-exponent field CANNOT read a `--preset
+lowmem-decode` archive.** It does not misread it and it does not return wrong bytes; it stops:
 
 <!-- gate:literal -->
 ```
@@ -140,8 +149,9 @@ Verified by running an older binary against a capped archive, not inferred.
 
 `max` and `balanced` archives are unaffected — they leave the field zero, are
 **byte-identical** to what pre-field builds produced, and open on any decoder old
-or new. Only `web` narrows the audience, and it narrows it to builds carrying the
-field. Choosing `web` is a decision about **who can open the result**, and it
+or new. Only `lowmem-decode` narrows the audience, and it narrows it to builds
+carrying the field. Choosing `lowmem-decode` is a decision about **who can open
+the result**, and it
 should be made once per distribution channel rather than per file.
 
 ## Status — and what "status" means here
@@ -149,12 +159,13 @@ should be made once per distribution channel rather than per file.
 The word *shipped* was used in an earlier revision of this file and was wrong in
 two independent ways, so the ladder is now explicit:
 
-| stage | `max` | `balanced` | `web` | `fast` |
+| stage | `max` | `balanced` | `lowmem-decode` | `fast` |
 |---|---|---|---|---|
 | implemented | ✅ | ✅ | ✅ | ❌ |
-| measured | it *is* the current benchmark row | ✅ 2 MB slices, 2 classes | ✅ 2 MB slices, 2 classes | ❌ |
+| measured (ratio + RSS, full corpus) | ✅ meta 36 — reproduces the meta-35 headline bit-exactly | ✅ meta 37 | ✅ meta 38 | ❌ |
+| measured (speed, full corpus) | in progress (timing pass on dev-ai) | in progress | in progress | ❌ |
 | **reachable from the CLI** (`compress` **and** `a`) | ✅ | ✅ | ✅ | — |
-| merged to `main` | ❌ | ❌ | ❌ | — |
+| merged to `main` | ✅ PR #13, 2026-07-31 | ✅ | ✅ | — |
 | in a released binary | ❌ | ❌ | ❌ | — |
 
 **Why the two corrections matter:**
@@ -164,11 +175,13 @@ two independent ways, so the ladder is now explicit:
    would run. The measurements were legitimate — they went through the library
    API — but a library-reachable option is not a user-reachable one. The CLI row
    above exists because that distinction is exactly what got blurred.
-2. Even with the flag in the binary, all of this lives on branch
-   `CUBR-0087-speed-memory`. It is **not on `main` and not in any release**; the
-   latest release is `v0.3.2` (2026-07-25), which predates every preset.
+2. (Historical) the flags first lived only on branch `CUBR-0087-speed-memory`;
+   PR #13 merged them to `main` on 2026-07-31. They are still **in no release**:
+   the latest release is `v0.3.2` (2026-07-25), which predates every preset — so
+   no downloadable binary accepts these flags, and no released decoder can open
+   a `lowmem-decode` archive.
 
-So: implemented, measured, and CLI-verified — **not** available to users.
+So: implemented, measured, merged — **not yet available to users**.
 
 ## Corpus numbers (2026-07-31) — these supersede every slice figure above
 
@@ -179,7 +192,7 @@ every run**:
 |---|---|---|---|---|
 | `max` | 59,489,703 | **0.189007** | — | **#1**, 17.3% clear of ppmd |
 | `balanced` | 59,768,178 | **0.189891** | **+0.47%** | **#1**, 16.9% clear |
-| `web` | 65,035,750 | **0.206627** | **+9.32%** | **#1**, 9.6% clear |
+| `lowmem-decode` | 65,035,750 | **0.206627** | **+9.32%** | **#1**, 9.6% clear |
 
 (ppmd 0.228592, xz 0.234411 on the same corpus.)
 
@@ -189,17 +202,18 @@ different host — the strongest available evidence the harness is sound.
 **Both slice estimates above were wrong, in opposite directions.** `balanced` was
 overstated ~5× (+2.35% slice vs **+0.47%** corpus) because the column sweep is a
 no-op wherever CM2 does not win, and most of the corpus is in that position.
-`web` was understated ~3× (+3.32% vs **+9.32%**) because a 2 MB slice derives
+`lowmem-decode` was understated ~3× (+3.32% vs **+9.32%**) because a 2 MB slice derives
 `tbits = 24` — capping to 20 costs four steps — while a real corpus file ≥ 16 MB
 derives 27 and the same cap costs **seven**. The slice structurally could not show
 the real price.
 
-**The headline this licenses:** the 13.5× decoder-memory cut does not cost the
+**The headline this licenses:** the corpus-measured **56.8×** decoder-memory cut
+(12.27 GiB → 0.216 GiB, `world_benchmark_cell` metas 36/38) does not cost the
 ratio lead, it narrows it from 17.3% to 9.6%. Publish it that way — as a corpus
 number, per operating point, never as a single "Cubrim is X" figure.
 
-**One caution:** `web` at 0.206627 sits close to the consilium's ~0.21 refusal
-threshold. That threshold was set for `--max` and `web` is a different operating
+**One caution:** `lowmem-decode` at 0.206627 sits close to the consilium's ~0.21 refusal
+threshold. That threshold was set for `--max` and `lowmem-decode` is a different operating
 point, so it is not breached — but the margin is thin enough that any further
-ratio-costing lever stacked onto `web` must be re-checked against it rather than
+ratio-costing lever stacked onto `lowmem-decode` must be re-checked against it rather than
 assumed to have headroom.

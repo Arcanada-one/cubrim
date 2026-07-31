@@ -181,14 +181,17 @@ pub enum PresetArg {
     /// on dickens. Archives stay decodable by every other preset.
     Balanced,
     /// Bounded decoder memory for wasm32 and other hard-ceiling environments:
-    /// decode peak 1.47 GiB -> 0.109 GiB. Corpus cost is +9.32% output (ratio
-    /// 0.206627), which is higher than a small-file measurement suggests: a
-    /// 2 MB sample derives a 24-bit table exponent, so capping at 20 costs four
-    /// steps, while a corpus file of 16 MB or more derives 27 and pays seven.
-    /// Still ahead of ppmd (0.228592). Needs a decoder that reads the
-    /// table-exponent field; older decoders fail closed on these archives
-    /// rather than returning wrong bytes.
-    Web,
+    /// decode peak 12.27 GiB -> 0.216 GiB on the 24-file world corpus, a 56.8x
+    /// cut. Corpus cost is +9.32% output (ratio 0.206627), which is higher than
+    /// a small-file measurement suggests: a 2 MB sample derives a 24-bit table
+    /// exponent, so capping at 20 costs four steps, while a corpus file of
+    /// 16 MB or more derives 27 and pays seven. Still ahead of ppmd (0.228592).
+    /// Needs a decoder that reads the table-exponent field; older decoders fail
+    /// closed on these archives rather than returning wrong bytes.
+    /// (Named `web` before any release shipped the flag; renamed because the
+    /// preset states a mechanism — bounded decode memory — while "web" named a
+    /// separate product area.)
+    LowmemDecode,
 }
 
 impl From<PresetArg> for Preset {
@@ -196,7 +199,7 @@ impl From<PresetArg> for Preset {
         match value {
             PresetArg::Max => Preset::Max,
             PresetArg::Balanced => Preset::Balanced,
-            PresetArg::Web => Preset::Web,
+            PresetArg::LowmemDecode => Preset::LowmemDecode,
         }
     }
 }
