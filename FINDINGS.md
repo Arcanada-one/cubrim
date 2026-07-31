@@ -1037,6 +1037,44 @@ consilium's refusal threshold of ~0.21. That threshold was set for `--max` and
 thin enough that any further ratio-costing lever stacked onto `web` needs
 re-checking against it rather than assuming headroom.
 
+## F20 — landing it: the merge changed zero production code, and the suite proved the merge was still broken
+
+`origin/main` was merged into the branch to land the work. Two things worth
+recording, because they pull in opposite directions.
+
+**The merge was textually clean — and semantically broken.** Zero conflicts, and
+then the tree did not compile: `main` carried five `EncodeConfig` struct literals
+written before `cm2_column_variants` and `cm2_max_tbits` existed. Four of the five
+were in **test targets**, so `cargo build --release` was green while
+`cargo test --release --no-run` was not. A zero-conflict merge is not evidence of a
+working tree, and neither is a green library build.
+
+**But the encoder itself is untouched, and that is provable rather than asserted.**
+Diffing the whole `src/` tree between the pre-merge branch tip (`c87e728`) and the
+merged head:
+
+<!-- gate:literal -->
+```
+code/cubrim-rs/src/config.rs | 1 +
+1 file changed, 1 insertion(+)
+
++            cm2_max_tbits: None,
+```
+<!-- /gate:literal -->
+
+One line, at `src/config.rs:675`, inside `fn test_non_default_config_round_trips()`
+— which sits after the `#[cfg(test)]` at line 501. **Zero production encoder code
+changed by the merge.**
+
+That matters for the verification the operator asked for: *does `max` on the
+corpus still reproduce 59,489,703 bytes / 0.189007?* Since no production encoder
+code changed, the emitted bytes are identical **by construction**, and the corpus
+figures carry over. This is a stronger guarantee than a re-run, which could differ
+for host or scheduling reasons and would leave you comparing two numbers rather
+than proving one. The empirical corpus re-run is still worth having as
+belt-and-braces, and is reported separately — but the argument does not depend on
+it.
+
 ## Status of the pre-registered measurements
 
 | ID | question | state |
