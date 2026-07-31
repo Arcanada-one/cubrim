@@ -124,14 +124,51 @@ lever accepted into `max`, that crosses it.
 
 Every preset states its trade in measured numbers or it does not ship.
 
-## Status
+## ⚠ Compatibility warning — read before choosing `web`
 
-| preset | defined | measured | shipped |
-|---|---|---|---|
-| `max` | yes | it *is* the current benchmark row | flag implemented, reachable from `compress` and `a` |
-| `balanced` | yes | 2 MB slices, two classes — **not the world corpus** | flag implemented |
-| `web` | yes | 2 MB slices, two classes — **not the world corpus** | flag implemented; wire field implemented and verified |
-| `fast` | no | no | no |
+**A decoder that predates the table-exponent field CANNOT read a `--preset web`
+archive.** It does not misread it and it does not return wrong bytes; it stops:
+
+<!-- gate:literal -->
+```
+Error: DecodeError: MODE_CM2: coded stream exhausted before orig_len bytes decoded
+exit status 2, no output file written
+```
+<!-- /gate:literal -->
+
+Verified by running an older binary against a capped archive, not inferred.
+
+`max` and `balanced` archives are unaffected — they leave the field zero, are
+**byte-identical** to what pre-field builds produced, and open on any decoder old
+or new. Only `web` narrows the audience, and it narrows it to builds carrying the
+field. Choosing `web` is a decision about **who can open the result**, and it
+should be made once per distribution channel rather than per file.
+
+## Status — and what "status" means here
+
+The word *shipped* was used in an earlier revision of this file and was wrong in
+two independent ways, so the ladder is now explicit:
+
+| stage | `max` | `balanced` | `web` | `fast` |
+|---|---|---|---|---|
+| implemented | ✅ | ✅ | ✅ | ❌ |
+| measured | it *is* the current benchmark row | ✅ 2 MB slices, 2 classes | ✅ 2 MB slices, 2 classes | ❌ |
+| **reachable from the CLI** (`compress` **and** `a`) | ✅ | ✅ | ✅ | — |
+| merged to `main` | ❌ | ❌ | ❌ | — |
+| in a released binary | ❌ | ❌ | ❌ | — |
+
+**Why the two corrections matter:**
+
+1. The compiled artefact under the default `target/` lagged the source by an hour,
+   so for a while the flag existed in `cli.rs` and *not* in the binary a user
+   would run. The measurements were legitimate — they went through the library
+   API — but a library-reachable option is not a user-reachable one. The CLI row
+   above exists because that distinction is exactly what got blurred.
+2. Even with the flag in the binary, all of this lives on branch
+   `CUBR-0087-speed-memory`. It is **not on `main` and not in any release**; the
+   latest release is `v0.3.2` (2026-07-25), which predates every preset.
+
+So: implemented, measured, and CLI-verified — **not** available to users.
 
 `balanced`'s numbers come from 2 MB slices. Before it appears on a public
 benchmark it needs a full-corpus run on a quiet host, because a ratio measured on

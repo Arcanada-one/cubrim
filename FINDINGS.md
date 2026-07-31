@@ -836,7 +836,26 @@ been written to the DB.
 **Not taken at all** — the table-size sweep. It is armed behind a quiet-host gate
 and will report nothing rather than something wrong. Consequence: the derived
 claim that the 2.27–3.30× translates into an end-to-end corpus speedup is
-**unmeasured**, and `--preset balanced` therefore ships with slice numbers only.
+**unmeasured**, and `--preset balanced` therefore carries slice numbers only.
+
+**Status wording corrected (2026-07-31).** An earlier revision called the presets
+"shipped". That was wrong twice over, and both ways are worth recording because
+they are different failure modes:
+
+1. **The artefact lagged the source.** `src/cli.rs` was committed at 13:50; the
+   binary under the default `target/` was from 12:39. For roughly an hour the flag
+   existed in the source and *not* in the binary a user would run. My measurements
+   were still valid — they went through the library API — but **library-reachable
+   is not user-reachable**, and calling it shipped erased that distinction. Fixed
+   by rebuilding and re-verifying every preset end-to-end **through the CLI**,
+   encode *and* decode, rather than through the API.
+2. **It is on a branch.** Even with the flag in the binary, all of this lives on
+   `CUBR-0087-speed-memory` — **not on `main`, not in any release**. The latest
+   release is `v0.3.2` (2026-07-25), which predates every preset.
+
+The honest status is *implemented, measured, CLI-verified, not available to
+users*, and `PRESETS.md` now carries that as an explicit five-row ladder instead
+of one overloaded word.
 
 One gap in the gate itself, found and recorded rather than quietly patched: the
 quiet-sweep script's `busy()` check tests `pgrep -x cubrim`, which does not match
