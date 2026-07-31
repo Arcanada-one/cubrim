@@ -673,6 +673,7 @@ mod tests {
             value_scheme: ValueScheme::BitpackFixed,
             min_ctx_count: None,
             cm2_column_variants: true,
+            cm2_max_tbits: None,
         };
 
         let inputs: Vec<Vec<u8>> = vec![
