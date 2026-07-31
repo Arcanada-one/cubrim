@@ -431,20 +431,34 @@ pub enum Preset {
     /// encoder: every competitive candidate runs, including the CM2 column
     /// variants.
     Max,
-    /// Drops the CM2 column-variant passes. Measured on 2 MB Silesia slices:
-    /// **2.27–3.30× less CM2 encode time for 0.71–4.83% larger output** on the
-    /// classes CM2 wins (text, xml, database). No effect on the classes where a
-    /// type transform wins (exe, image), because CM2 is not the winner there.
+    /// Drops the CM2 column-variant passes.
+    ///
+    /// **Corpus figures (these supersede the earlier slice estimates):** on the
+    /// full 24-file world corpus the cost is **+0.47% output** — five times
+    /// cheaper than the +2.35% a 2 MB `dickens` slice suggested, because the
+    /// sweep is a no-op wherever CM2 does not win and most of the corpus is in
+    /// that position.
+    ///
+    /// The *speedup* is genuinely class-specific and must be quoted that way:
+    /// **3.00× on text/xml/database**, and a **byte-identical no-op on
+    /// executables**. Never state it as a corpus-wide speedup.
+    ///
     /// Archives stay mutually decodable with `Max`.
     Balanced,
     /// Bounded decoder memory, for environments that have a hard ceiling —
     /// chiefly `wasm32`, whose 4 GiB address space cannot hold the 12.3 GiB of
     /// model tables a >=16 MB file otherwise demands of the **decoder**.
     ///
-    /// Caps the CM2 table exponent at 20: measured **decode peak 1.47 GiB ->
-    /// 0.109 GiB on a 2 MB slice, +3.32% output**. Also drops the column
-    /// variants, since an environment that cares about decoder memory is not
-    /// paying 3x encode time for 2% ratio.
+    /// Caps the CM2 table exponent at 20: **decode peak 1.47 GiB -> 0.109 GiB**,
+    /// a 13.5x cut, independent of input type because decode is CM2 alone
+    /// whatever won at encode. **Corpus cost +9.32% output** on the full 24-file
+    /// world corpus — three times dearer than the +3.32% a 2 MB slice suggested,
+    /// because a 2 MB slice derives `tbits = 24` so capping at 20 costs four
+    /// steps, while a real file >= 16 MB derives 27 and the same cap costs seven.
+    /// Still ahead of the field: 0.206627 against ppmd 0.228592.
+    ///
+    /// Also drops the column variants, since an environment that cares about
+    /// decoder memory is not paying 3x encode time for a fraction of a percent.
     ///
     /// Readable by any decoder that understands the table-exponent field.
     /// **Not** readable by a decoder older than that field — such a decoder

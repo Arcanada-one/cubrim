@@ -173,15 +173,21 @@ pub struct TestArgs {
 /// Speed/ratio operating point. See `cubrim::Preset` for the measured trade.
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum PresetArg {
-    /// Maximum ratio. Byte-identical to the shipped v0.3.2 encoder.
+    /// Maximum ratio, whatever it costs. Byte-identical to the v0.3.2 encoder;
+    /// 0.189007 on the full 24-file world corpus.
     Max,
-    /// Drops the CM2 column-variant passes: measured 3.00x faster encode for
-    /// +2.35% output on dickens. Archives stay decodable by every other preset.
+    /// Faster encode for a small ratio cost. Measured on the full 24-file world
+    /// corpus: +0.47% output. The speedup is text-class specific — 3.00x on
+    /// text/xml/database, and a byte-identical no-op on executables, where the
+    /// dropped CM2 column-variant passes never run. Archives stay readable by
+    /// every decoder.
     Balanced,
-    /// Bounded decoder memory for wasm32 and other hard-ceiling environments:
-    /// decode peak 1.47 GiB -> 0.109 GiB for +3.32% output. Needs a decoder that
-    /// reads the table-exponent field; older decoders fail closed on these
-    /// archives rather than returning wrong bytes.
+    /// Bounded decoder memory, for wasm32 and other hard-ceiling environments:
+    /// decode peak 1.47 GiB -> 0.109 GiB, a 13.5x cut, independent of input type.
+    /// Costs +9.32% output on the full 24-file world corpus. NOTE: a decoder that
+    /// predates the table-exponent field CANNOT read these archives — it fails
+    /// closed with a decode error rather than returning wrong bytes, but it
+    /// cannot open them. `max` and `balanced` archives have no such restriction.
     Web,
 }
 
