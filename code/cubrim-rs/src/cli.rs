@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use cubrim::{EncodeConfig, GapScheme, ValueScheme};
+use cubrim::{EncodeConfig, GapScheme, Preset, ValueScheme};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -59,6 +59,8 @@ pub struct CompressArgs {
     pub value_scheme: Option<ValueSchemeArg>,
     #[arg(long)]
     pub min_ctx_count: Option<u16>,
+    #[arg(long, value_enum, help = "Speed/ratio operating point (default: max)")]
+    pub preset: Option<PresetArg>,
     #[arg(short, long)]
     pub quiet: bool,
 }
@@ -66,6 +68,10 @@ pub struct CompressArgs {
 impl CompressArgs {
     pub fn encode_config(&self) -> EncodeConfig {
         let mut config = EncodeConfig::v1_default();
+        // Preset first, so the explicit low-level overrides below still win.
+        if let Some(preset) = self.preset {
+            config = Preset::from(preset).apply(config);
+        }
         if let Some(value) = self.raw_store_bound {
             config.raw_store_bound = value;
         }
@@ -109,6 +115,25 @@ pub struct AddArgs {
     pub preserve: bool,
     #[arg(short, long, num_args = 0..=1, default_missing_value = "")]
     pub password: Option<String>,
+    #[arg(long, value_enum, help = "Speed/ratio operating point (default: max)")]
+    pub preset: Option<PresetArg>,
+}
+
+impl AddArgs {
+    /// Encode configuration for the user-facing archive path.
+    ///
+    /// Before CUBR-0087 the archive path had no configuration at all —
+    /// `archive.rs` called `encode(&data)`, the crate default — so the operating
+    /// point was not reachable from `cubrim a`, only from the hidden internal
+    /// `compress` subcommand the benchmark uses. A preset the benchmark can
+    /// select and the product cannot is not a product feature.
+    pub fn encode_config(&self) -> EncodeConfig {
+        let mut config = EncodeConfig::v1_default();
+        if let Some(preset) = self.preset {
+            config = Preset::from(preset).apply(config);
+        }
+        config
+    }
 }
 
 #[derive(Debug, Args)]
@@ -143,6 +168,31 @@ pub struct TestArgs {
     pub quiet: bool,
     #[arg(short, long, num_args = 0..=1, default_missing_value = "")]
     pub password: Option<String>,
+}
+
+/// Speed/ratio operating point. See `cubrim::Preset` for the measured trade.
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum PresetArg {
+    /// Maximum ratio. Byte-identical to the shipped v0.3.2 encoder.
+    Max,
+    /// Drops the CM2 column-variant passes: measured 3.00x faster encode for
+    /// +2.35% output on dickens. Archives stay decodable by every other preset.
+    Balanced,
+    /// Bounded decoder memory for wasm32 and other hard-ceiling environments:
+    /// decode peak 1.47 GiB -> 0.109 GiB for +3.32% output. Needs a decoder that
+    /// reads the table-exponent field; older decoders fail closed on these
+    /// archives rather than returning wrong bytes.
+    Web,
+}
+
+impl From<PresetArg> for Preset {
+    fn from(value: PresetArg) -> Self {
+        match value {
+            PresetArg::Max => Preset::Max,
+            PresetArg::Balanced => Preset::Balanced,
+            PresetArg::Web => Preset::Web,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]

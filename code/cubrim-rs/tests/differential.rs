@@ -98,6 +98,8 @@ fn text_entropy() {
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::Entropy,
         min_ctx_count: None,
+        cm2_column_variants: true,
+        cm2_max_tbits: None,
     };
 
     // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the
@@ -148,6 +150,8 @@ fn text_entropy_context() {
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::EntropyContext,
         min_ctx_count: None,
+        cm2_column_variants: true,
+        cm2_max_tbits: None,
     };
 
     // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the
@@ -201,6 +205,8 @@ fn sparse_clustered_rlecodes() {
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::RleCodes,
         min_ctx_count: None,
+        cm2_column_variants: true,
+        cm2_max_tbits: None,
     };
 
     // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the
