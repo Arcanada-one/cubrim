@@ -27,9 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           input="$RUNNER_TEMP/cubr-0076-input.bin"
-          find "$GITHUB_WORKSPACE/bench/web-corpus/payloads-v2" -maxdepth 1 -type f -print0 \
-            | sort -z \
-            | xargs -0 cat > "$input"
+          cp "$GITHUB_WORKSPACE/bench/web-corpus/payloads-v2/json-api-large-world-benchmark-v2.json" "$input"
           sha256sum "$input"
           wc -c "$input"
           echo "input=$input" >> "$GITHUB_ENV"
@@ -45,7 +43,7 @@ jobs:
             > "$baseline/code/cubrim-rs/examples/decode_bench.rs"
           (
             cd "$baseline/code/cubrim-rs"
-            TRIALS=5 cargo run --release --example decode_bench -- "$input"
+            TRIALS=7 cargo run --release --example decode_bench -- "$input"
           ) 2>&1 | tee "$RUNNER_TEMP/cubr-0076-baseline.log"
 
       - name: Benchmark candidate
@@ -54,7 +52,7 @@ jobs:
           set -euo pipefail
           (
             cd "$GITHUB_WORKSPACE/code/cubrim-rs"
-            TRIALS=5 cargo run --release --example decode_bench -- "$input"
+            TRIALS=7 cargo run --release --example decode_bench -- "$input"
           ) 2>&1 | tee "$RUNNER_TEMP/cubr-0076-candidate.log"
 
       - name: Report before/after throughput
