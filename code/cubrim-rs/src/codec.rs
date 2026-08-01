@@ -14112,6 +14112,22 @@ mod tests {
     }
 
     #[test]
+    fn test_order2_header_invalid_code_lengths_do_not_panic() {
+        // Overfull lengths used to make the fast flat-table builder write past
+        // its allocation. The existing map decoder remains the safe fallback.
+        let mut fake = Vec::new();
+        fake.extend_from_slice(&128u16.to_be_bytes()); // min_ctx
+        fake.extend_from_slice(&1u16.to_be_bytes()); // one Order0 context
+        fake.push(0u8); // tag = Order0
+        fake.extend_from_slice(&[1u8, 1, 1, 0]); // overfull code lengths
+        fake.push(0u8); // one valid zero bit for symbol 0
+
+        let (decoded, _) = order2_context_huffman_decode(&fake, 0, 1, 4)
+            .expect("invalid lengths must use the safe fallback, not panic");
+        assert_eq!(decoded, vec![0]);
+    }
+
+    #[test]
     fn test_order2_header_rejects_short_blob() {
         // A blob that is only 3 bytes — too short for even the min_ctx+n_ctx fields.
         let fake = vec![0u8, 128u8, 0u8]; // only 3 bytes, need at least 4

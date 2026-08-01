@@ -387,8 +387,9 @@ impl HuffTable {
     /// Build from canonical code lengths, or `None` when the code is deeper
     /// than [`MAX_TABLE_BITS`] or has no symbols.
     ///
-    /// The caller must have validated `code_len` with [`kraft_ok`] first; this
-    /// function assumes a complete prefix-free code.
+    /// Invalid or incomplete code lengths return `None` so callers can fall
+    /// back to their existing validation path without risking an out-of-bounds
+    /// table fill.
     pub(crate) fn build(code_len: &[u8]) -> Option<Self> {
         Self::build_bounded(code_len, MAX_TABLE_BITS)
     }
@@ -399,6 +400,9 @@ impl HuffTable {
     /// has to be lower than the single-table case: at 14 bits a table is 16 Ki
     /// entries, which is fine once and far too much a few hundred times over.
     pub(crate) fn build_bounded(code_len: &[u8], max_bits: u8) -> Option<Self> {
+        if !kraft_ok(code_len) {
+            return None;
+        }
         let max_len = code_len.iter().copied().max().unwrap_or(0);
         if max_len == 0 || max_len > max_bits.min(MAX_TABLE_BITS) {
             return None;
@@ -829,6 +833,14 @@ mod tests {
             result.is_err(),
             "all-zero lengths with count>0 must return Err, not panic"
         );
+    }
+
+    #[test]
+    fn huff_table_rejects_invalid_lengths_without_panicking() {
+        // An overfull canonical assignment would otherwise write past the flat
+        // table while expanding the third one-bit code.
+        assert!(HuffTable::build_bounded(&[1, 1, 1], 11).is_none());
+        assert!(HuffTable::build_bounded(&[2, 2], 11).is_none());
     }
 
     // ── assign_canonical_codes direct tests ─────────────────────────────
