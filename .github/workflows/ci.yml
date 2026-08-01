@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'code/cubrim-rs/**'
+      - 'bench/web-corpus/payloads-v2/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'code/cubrim-rs/**'
+      - 'bench/web-corpus/payloads-v2/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scheme-roundtrip:
+    name: Lossless scheme round-trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: code/cubrim-rs
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run the silent-data-loss suite
+        run: cargo test --release --test scheme_roundtrip
