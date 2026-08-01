@@ -161,6 +161,48 @@ def test_verify_rejects_tampered_or_partial_run(
         verify_fixture(paths)
 
 
+def shift_rar_bytes(delta: int) -> callable:
+    def mutate(records: list[dict]) -> None:
+        for record in records:
+            if record.get("kind") == "sample" and record.get("archiver") == "rar":
+                record["archive_bytes"] = record["archive_bytes"] + delta
+                return
+        raise AssertionError("no rar sample in fixture")
+
+    return mutate
+
+
+def test_verify_tolerates_rar_timestamp_delta(tmp_path: Path) -> None:
+    """16 bytes is the timestamp-encoding effect and must still pass."""
+    paths = fixture(tmp_path)
+    rewrite_journal(paths[2], paths[3], shift_rar_bytes(16))
+    summary = verify_fixture(paths)
+    assert summary["status"] == "PASS"
+    assert summary["rar_byte_deltas"] == 1
+
+
+def test_verify_rejects_rar_thread_count_regression(tmp_path: Path) -> None:
+    """A thread-count change moves rar by thousands of bytes, not sixteen.
+
+    Guards the tolerance itself: before -mt was pinned in archiver_templates.json
+    a host that resolved to a different rar thread count produced exactly this
+    class of delta (5,732 bytes on silesia/mr), and it must be rejected rather
+    than absorbed as a timestamp difference.
+    """
+    paths = fixture(tmp_path)
+    rewrite_journal(paths[2], paths[3], shift_rar_bytes(5732))
+    with pytest.raises(VerificationError, match="beyond mtime slack"):
+        verify_fixture(paths)
+
+
+def test_verify_rejects_rar_delta_just_over_the_bound(tmp_path: Path) -> None:
+    """The bound is observed failing one byte past it, not only far past it."""
+    paths = fixture(tmp_path)
+    rewrite_journal(paths[2], paths[3], shift_rar_bytes(33))
+    with pytest.raises(VerificationError, match="beyond mtime slack"):
+        verify_fixture(paths)
+
+
 def test_verify_rejects_sidecar_hash_mismatch(tmp_path: Path) -> None:
     paths = fixture(tmp_path)
     paths[2].write_text(paths[2].read_text() + "\n")
