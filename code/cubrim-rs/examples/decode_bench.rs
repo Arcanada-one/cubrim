@@ -10,9 +10,8 @@
 //!
 //! 1. **Whole-stream `decode()` throughput**, the number a Web Profile decode
 //!    hypothesis actually needs.
-//! 2. **A/B of the Huffman inner loop**, table-driven against the original
-//!    per-length scan, on one build and one input, so the speedup is not
-//!    inferred across a git boundary.
+//! 2. **A repeatable whole-stream comparison** on one fixed input and runner;
+//!    the before/after source revisions are measured with the same harness.
 //!
 //! ```text
 //! cargo run --release --example decode_bench -- [path ...]

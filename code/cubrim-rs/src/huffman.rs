@@ -251,10 +251,8 @@ pub(crate) fn huffman_decode(
 
 /// The original per-length scanning decoder.
 ///
-/// Retained as the correct fallback for codes deeper than [`MAX_TABLE_BITS`],
-/// and used by the decode benchmark as the baseline the table is measured
-/// against, so the comparison runs on one build and one input rather than
-/// across a git boundary.
+/// Retained as the correct fallback for codes deeper than [`MAX_TABLE_BITS`].
+/// Tests and diagnostics can also use it as a reference implementation.
 pub(crate) fn huffman_decode_scan(
     blob: &[u8],
     offset: usize,
