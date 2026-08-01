@@ -33,7 +33,7 @@ use crate::header::{
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
 };
-use crate::phi::{compute_n_and_b, phi as phi_fn, phi_inv as phi_inv_fn};
+use crate::phi::{compute_n_and_b, phi_inv as phi_inv_fn};
 use crate::rle::{
     packed_nibble_decode, packed_nibble_encode, packed_nibble_size, rle_decode, rle_encode,
     rle_size,
@@ -5153,12 +5153,52 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             //
             // This is deterministic from (L, N, B) alone — no out-of-band state (R6).
 
-            let mut lex_sorted_coords: Vec<Vec<usize>> = (0..l).map(|i| phi_fn(i, n, b)).collect();
-            lex_sorted_coords.sort();
+            // Lex order over phi(i) is the digit-reversed numeric order of i.
+            // Comparing coords[0] first means comparing the LEAST significant
+            // base-B digit first, so packing coords[0] as the MOST significant
+            // digit of a scalar key reproduces that ordering exactly, and the
+            // key is a bijection so the sort stays deterministic.
+            //
+            // The previous form materialised one heap-allocated Vec<usize> per
+            // position and then sorted those vectors, chasing a pointer per
+            // comparison: L allocations plus O(L log L) indirect compares, on
+            // the hot path of every cube decode. It is also the allocation
+            // whose unbounded form produced the ~111 GB OOM, so this is the
+            // throughput ceiling and the memory hazard in one place.
+            //
+            // Digits beyond `digits` are zero for every i < L (L <= B^digits),
+            // so they are equal across all elements and cannot affect ordering.
+            let digits = {
+                let mut count = 1usize;
+                let mut capacity = b;
+                while capacity < l {
+                    capacity = capacity.saturating_mul(b);
+                    count += 1;
+                }
+                count.min(n)
+            };
+
+            // key < B^digits <= B * L, which is well inside u64 for any L the
+            // u32 length field can express.
+            let radix = b as u64;
+            let mut ranked: Vec<(u64, u32)> = (0..l)
+                .map(|i| {
+                    let mut remainder = i;
+                    let mut key: u64 = 0;
+                    for _ in 0..digits {
+                        key = key * radix + (remainder % b) as u64;
+                        remainder /= b;
+                    }
+                    (key, i as u32)
+                })
+                .collect();
+            ranked.sort_unstable();
 
             let mut result = vec![0u8; l];
-            for (j, coords) in lex_sorted_coords.iter().enumerate() {
-                let orig_idx = phi_inv_fn(coords, b);
+            for (j, &(_, index)) in ranked.iter().enumerate() {
+                // phi_inv(phi(i)) == i by construction, so the original index
+                // is carried alongside the key rather than recomputed.
+                let orig_idx = index as usize;
                 if orig_idx < l && j < values.len() {
                     result[orig_idx] = values[j] as u8;
                 }
@@ -6179,7 +6219,21 @@ pub(crate) fn order2_context_huffman_decode(
     // We'll build decode tables keyed by tag+key for O(1) lookup.
     struct DecodeTable {
         decode_map: HashMap<(u32, u8), usize>,
+        /// Flat lookup table when the context's code is shallow enough to
+        /// afford one. `None` falls back to `decode_map` and the bit scan,
+        /// which is correct but costs a hash probe per candidate length.
+        fast: Option<crate::huffman::HuffTable>,
     }
+
+    // One table per context, so the per-context ceiling must be lower than the
+    // single-table case: 11 bits is 2 Ki entries, affordable a few hundred
+    // times over, where 14 bits (16 Ki) would not be. The total is capped as
+    // well, because n_ctx is attacker-influenced and a stream declaring many
+    // deep contexts must not be able to make the decoder allocate without
+    // bound — the same discipline src/limits.rs applies elsewhere.
+    const CTX_TABLE_BITS: u8 = 11;
+    const CTX_TABLE_ENTRY_BUDGET: usize = 1 << 20; // ~4 MiB of entries
+    let mut table_entries_used: usize = 0;
 
     // Parsed entries: (tag, optional prev2, prev1, decode_table)
     #[derive(Debug)]
@@ -6265,8 +6319,14 @@ pub(crate) fn order2_context_huffman_decode(
             }
         }
 
+        let fast = crate::huffman::HuffTable::build_bounded(&code_len, CTX_TABLE_BITS)
+            .filter(|t| {
+                table_entries_used.saturating_add(t.entry_count()) <= CTX_TABLE_ENTRY_BUDGET
+            })
+            .inspect(|t| table_entries_used += t.entry_count());
+
         let table_idx = decode_tables.len();
-        decode_tables.push(DecodeTable { decode_map });
+        decode_tables.push(DecodeTable { decode_map, fast });
 
         let parsed = match tag {
             0 => ParsedEntry::Order0 { table_idx },
@@ -6341,15 +6401,60 @@ pub(crate) fn order2_context_huffman_decode(
         // QA-F-006 fail-closed: table_idx comes from header-derived maps (and the order-0
         // fallback index); a corrupt blob can point it past the decoded table set (e.g. an
         // empty decode_tables with a nonzero count). Bounds-check instead of panicking.
-        let decode_table = &decode_tables
+        let entry = decode_tables
             .get(table_idx)
             .ok_or_else(|| {
                 CubrimError::Decode(format!(
                     "EntropyContext2: table index {table_idx} out of range (have {})",
                     decode_tables.len()
                 ))
-            })?
-            .decode_map;
+            })?;
+
+        // Fast path: peel the index width once and look the symbol up, instead
+        // of accumulating a bit at a time and probing a hash map per candidate
+        // length. Identical results — same canonical codes, same bitstream.
+        if let Some(table) = &entry.fast {
+            let want = table.bits() as usize;
+            let total_bits = blob.len().saturating_sub(bitstream_offset) * 8;
+            let available = total_bits.saturating_sub(bit_pos);
+            if available == 0 {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: bitstream exhausted at bit {bit_pos} decoding symbol {sym_idx}/{count}"
+                )));
+            }
+            // Near the end fewer than `want` bits remain; the codeword itself
+            // may still fit, so pad with zeros and check the decoded length
+            // against what was actually there.
+            let take = want.min(available);
+            let mut index: usize = 0;
+            for k in 0..take {
+                let at = bit_pos + k;
+                let byte_off = bitstream_offset + at / 8;
+                let bit = (blob[byte_off] >> (7 - (at % 8))) & 1;
+                index = (index << 1) | bit as usize;
+            }
+            index <<= want - take;
+
+            let (sym, len) = table.lookup(index);
+            if len == 0 {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: no codeword match at symbol {sym_idx}/{count}"
+                )));
+            }
+            if (len as usize) > available {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: bitstream truncated at bit {bit_pos} decoding symbol {sym_idx}/{count}"
+                )));
+            }
+            bit_pos += len as usize;
+            let sym = sym as usize;
+            decoded.push(sym);
+            prev2 = prev1;
+            prev1 = sym as u16;
+            continue;
+        }
+
+        let decode_table = &entry.decode_map;
 
         // Huffman decode: try increasing lengths.
         let mut codeword: u32 = 0;
@@ -14004,6 +14109,22 @@ mod tests {
             result.is_err(),
             "Unknown tag byte must return Err, not panic"
         );
+    }
+
+    #[test]
+    fn test_order2_header_invalid_code_lengths_do_not_panic() {
+        // Overfull lengths used to make the fast flat-table builder write past
+        // its allocation. The existing map decoder remains the safe fallback.
+        let mut fake = Vec::new();
+        fake.extend_from_slice(&128u16.to_be_bytes()); // min_ctx
+        fake.extend_from_slice(&1u16.to_be_bytes()); // one Order0 context
+        fake.push(0u8); // tag = Order0
+        fake.extend_from_slice(&[1u8, 1, 1, 0]); // overfull code lengths
+        fake.push(0u8); // one valid zero bit for symbol 0
+
+        let (decoded, _) = order2_context_huffman_decode(&fake, 0, 1, 4)
+            .expect("invalid lengths must use the safe fallback, not panic");
+        assert_eq!(decoded, vec![0]);
     }
 
     #[test]

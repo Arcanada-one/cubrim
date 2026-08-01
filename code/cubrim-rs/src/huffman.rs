@@ -238,6 +238,36 @@ pub(crate) fn huffman_decode(
         ));
     }
 
+    // Fast path: one array index per symbol instead of a per-length scan.
+    // Byte-for-byte equivalent to the scan below — same canonical codes, same
+    // stream, same symbols — so this is purely a decode-cost change.
+    if let Some(table) = HuffTable::build(code_len) {
+        let (symbols, bits) = huffman_decode_tabled(&blob[offset..], &table, count)?;
+        return Ok((symbols, bits.div_ceil(8)));
+    }
+
+    huffman_decode_scan(blob, offset, count, code_len)
+}
+
+/// The original per-length scanning decoder.
+///
+/// Retained as the correct fallback for codes deeper than [`MAX_TABLE_BITS`].
+/// Tests and diagnostics can also use it as a reference implementation.
+pub(crate) fn huffman_decode_scan(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    code_len: &[u8],
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    if count == 0 {
+        return Ok((vec![], 0));
+    }
+    if !kraft_ok(code_len) {
+        return Err(CubrimError::Decode(
+            "Huffman decode: Kraft inequality violated (tree not valid)".to_string(),
+        ));
+    }
+
     let codes = assign_canonical_codes(code_len);
 
     // Build reverse lookup: (codeword, length) -> symbol
@@ -301,6 +331,150 @@ pub(crate) fn huffman_decode(
     // Round up to the next byte boundary
     let bytes_consumed = bit_pos.div_ceil(8);
     Ok((result, bytes_consumed))
+}
+
+// ─── Table-driven decoding ─────────────────────────────────────────────────
+//
+// The bit-at-a-time decoder this replaces cost, *per symbol*, a scan over every
+// candidate length in which each step re-read the codeword one bit at a time
+// and then probed a tuple-keyed HashMap: O(max_len^2) bit extractions and
+// O(max_len) hash lookups to emit a single symbol. On a 15-bit-deep code that
+// is ~120 bit reads and ~15 hash probes per symbol, which is the dominant term
+// in Cubrim's measured 0.093 MiB/s decode throughput.
+//
+// A canonical Huffman code can instead be decoded by peeling `max_len` bits
+// once and indexing a flat table: every codeword shorter than `max_len` simply
+// occupies the 2^(max_len - len) slots that share its prefix. That is one array
+// index per symbol.
+//
+// This changes decode cost only. The wire format, the canonical code
+// assignment, and the emitted bytes are all untouched, so a stream produced by
+// any earlier build decodes identically.
+
+/// Widest table this will build directly. A complete canonical code over the
+/// <=256-symbol alphabet the format allows is essentially always within this
+/// depth; beyond it the flat table would cost more to fill than the scan costs
+/// to run, so the original decoder is kept as a correct fallback rather than
+/// growing a multi-level table for a case real data does not produce.
+const MAX_TABLE_BITS: u8 = 14;
+
+/// Flat lookup table over the next `bits` bits of the stream.
+pub(crate) struct HuffTable {
+    bits: u8,
+    /// One entry per bit pattern: `(symbol, code_length)`, length 0 = no code.
+    entries: Vec<(u16, u8)>,
+}
+
+impl HuffTable {
+    /// Index width, i.e. how many bits to peel per symbol.
+    pub(crate) fn bits(&self) -> u8 {
+        self.bits
+    }
+
+    /// Entry count, used by callers budgeting table memory across contexts.
+    pub(crate) fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// `(symbol, code_length)` for a `bits`-wide pattern; length 0 = no code.
+    ///
+    /// `index` must be less than [`entry_count`]; callers peel exactly `bits`.
+    #[inline]
+    pub(crate) fn lookup(&self, index: usize) -> (u16, u8) {
+        self.entries[index]
+    }
+
+    /// Build from canonical code lengths, or `None` when the code is deeper
+    /// than [`MAX_TABLE_BITS`] or has no symbols.
+    ///
+    /// Invalid or incomplete code lengths return `None` so callers can fall
+    /// back to their existing validation path without risking an out-of-bounds
+    /// table fill.
+    pub(crate) fn build(code_len: &[u8]) -> Option<Self> {
+        Self::build_bounded(code_len, MAX_TABLE_BITS)
+    }
+
+    /// As [`build`], but refusing codes deeper than `max_bits`.
+    ///
+    /// The per-context decoders build one table per context, so their ceiling
+    /// has to be lower than the single-table case: at 14 bits a table is 16 Ki
+    /// entries, which is fine once and far too much a few hundred times over.
+    pub(crate) fn build_bounded(code_len: &[u8], max_bits: u8) -> Option<Self> {
+        if !kraft_ok(code_len) {
+            return None;
+        }
+        let max_len = code_len.iter().copied().max().unwrap_or(0);
+        if max_len == 0 || max_len > max_bits.min(MAX_TABLE_BITS) {
+            return None;
+        }
+        let codes = assign_canonical_codes(code_len);
+        let size = 1usize << max_len;
+        let mut entries = vec![(0u16, 0u8); size];
+        for (sym, &(codeword, len)) in codes.iter().enumerate() {
+            if len == 0 {
+                continue;
+            }
+            // Every pattern sharing this codeword's prefix decodes to it, so the
+            // low (max_len - len) bits are don't-cares.
+            let shift = max_len - len;
+            let base = (codeword as usize) << shift;
+            for slot in base..base + (1usize << shift) {
+                entries[slot] = (sym as u16, len);
+            }
+        }
+        Some(Self {
+            bits: max_len,
+            entries,
+        })
+    }
+}
+
+/// Decode `count` symbols using a prebuilt table.
+///
+/// Returns `(symbols, bits_consumed)`. Fail-closed on truncation or on a bit
+/// pattern with no codeword; never panics.
+pub(crate) fn huffman_decode_tabled(
+    data: &[u8],
+    table: &HuffTable,
+    count: usize,
+) -> Result<(Vec<usize>, usize), CubrimError> {
+    let mut result = Vec::with_capacity(count.min(crate::codec::DECODE_PREALLOC_CAP));
+    let mut bit_pos = 0usize;
+    let total_bits = data.len() * 8;
+    let want = table.bits as usize;
+
+    while result.len() < count {
+        // Peel `want` bits. Near the end of the stream fewer remain; the
+        // codeword itself may still fit, so pad with zeros and verify the
+        // decoded length against what was actually available.
+        let available = total_bits.saturating_sub(bit_pos);
+        if available == 0 {
+            return Err(CubrimError::Decode(format!(
+                "Huffman decode: bitstream exhausted after {} of {count} symbols",
+                result.len()
+            )));
+        }
+        let take = want.min(available);
+        let mut index = read_bits(data, bit_pos, take) as usize;
+        index <<= want - take;
+
+        let (sym, len) = table.entries[index];
+        if len == 0 {
+            return Err(CubrimError::Decode(format!(
+                "Huffman decode: no matching codeword at bit position {bit_pos} (corrupt stream)"
+            )));
+        }
+        if (len as usize) > available {
+            return Err(CubrimError::Decode(format!(
+                "Huffman decode: bitstream truncated at bit {bit_pos} (code needs {len} bits, \
+                 {available} remain)"
+            )));
+        }
+        result.push(sym as usize);
+        bit_pos += len as usize;
+    }
+
+    Ok((result, bit_pos))
 }
 
 /// Compute bit-exact size (in bytes, rounded up) for Huffman encoding `seq_codes`.
@@ -659,6 +833,14 @@ mod tests {
             result.is_err(),
             "all-zero lengths with count>0 must return Err, not panic"
         );
+    }
+
+    #[test]
+    fn huff_table_rejects_invalid_lengths_without_panicking() {
+        // An overfull canonical assignment would otherwise write past the flat
+        // table while expanding the third one-bit code.
+        assert!(HuffTable::build_bounded(&[1, 1, 1], 11).is_none());
+        assert!(HuffTable::build_bounded(&[2, 2], 11).is_none());
     }
 
     // ── assign_canonical_codes direct tests ─────────────────────────────
