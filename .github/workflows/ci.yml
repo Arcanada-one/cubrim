@@ -32,5 +32,8 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
       - name: Run the silent-data-loss suite
         run: cargo test --release --test scheme_roundtrip
