@@ -1,0 +1,71 @@
+name: cubr-0076 decode benchmark probe
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  before-after:
+    name: Same-runner decode before/after
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build fixed benchmark input
+        shell: bash
+        run: |
+          set -euo pipefail
+          input="$RUNNER_TEMP/cubr-0076-input.bin"
+          find "$GITHUB_WORKSPACE/bench/web-corpus/payloads-v2" -maxdepth 1 -type f -print0 \
+            | sort -z \
+            | xargs -0 cat > "$input"
+          sha256sum "$input"
+          wc -c "$input"
+          echo "input=$input" >> "$GITHUB_ENV"
+
+      - name: Benchmark origin/main baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline="$RUNNER_TEMP/cubr-0076-baseline"
+          git worktree add --detach "$baseline" origin/main
+          mkdir -p "$baseline/code/cubrim-rs/examples"
+          git show "$GITHUB_SHA:code/cubrim-rs/examples/decode_bench.rs" \
+            > "$baseline/code/cubrim-rs/examples/decode_bench.rs"
+          (
+            cd "$baseline/code/cubrim-rs"
+            TRIALS=5 cargo run --release --example decode_bench -- "$input"
+          ) 2>&1 | tee "$RUNNER_TEMP/cubr-0076-baseline.log"
+
+      - name: Benchmark candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd "$GITHUB_WORKSPACE/code/cubrim-rs"
+            TRIALS=5 cargo run --release --example decode_bench -- "$input"
+          ) 2>&1 | tee "$RUNNER_TEMP/cubr-0076-candidate.log"
+
+      - name: Report before/after throughput
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'scheme baseline_mib_s candidate_mib_s speedup'
+          for scheme in Entropy EntropyContext2 BwtEntropy; do
+            baseline="$(awk -v scheme="$scheme" '$2 == scheme && $NF == "MiB/s" {print $(NF-1)}' "$RUNNER_TEMP/cubr-0076-baseline.log" | tail -1)"
+            candidate="$(awk -v scheme="$scheme" '$2 == scheme && $NF == "MiB/s" {print $(NF-1)}' "$RUNNER_TEMP/cubr-0076-candidate.log" | tail -1)"
+            test -n "$baseline" -a -n "$candidate"
+            awk -v scheme="$scheme" -v baseline="$baseline" -v candidate="$candidate" \
+              'BEGIN { printf "%s %.3f %.3f %.3fx\n", scheme, baseline, candidate, candidate / baseline }'
+          done
