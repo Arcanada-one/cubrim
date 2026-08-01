@@ -436,7 +436,7 @@ pub(crate) fn huffman_decode_tabled(
     table: &HuffTable,
     count: usize,
 ) -> Result<(Vec<usize>, usize), CubrimError> {
-    let mut result = Vec::with_capacity(crate::limits::bounded_capacity(count));
+    let mut result = Vec::with_capacity(count.min(crate::codec::DECODE_PREALLOC_CAP));
     let mut bit_pos = 0usize;
     let total_bits = data.len() * 8;
     let want = table.bits as usize;

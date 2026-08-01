@@ -51,7 +51,10 @@ fn bench_decode(label: &str, payload: &[u8], scheme: ValueScheme, trials: usize)
         // Several schemes lose data on real files (see tests/scheme_roundtrip.rs).
         // Timing a decoder that returns wrong bytes would be meaningless, so the
         // case is reported and skipped rather than silently benchmarked.
-        println!("{label:34} {:<14} SKIPPED — round trip is not exact", format!("{scheme:?}"));
+        println!(
+            "{label:34} {:<14} SKIPPED — round trip is not exact",
+            format!("{scheme:?}")
+        );
         return;
     }
 
@@ -93,8 +96,12 @@ fn main() {
         // Structured text with the redundancy real web assets have.
         let synthetic: Vec<u8> = (0..6000u32)
             .flat_map(|i| {
-                format!("<div class=\"row r{}\"><span>value {}</span></div>\n", i % 17, i % 29)
-                    .into_bytes()
+                format!(
+                    "<div class=\"row r{}\"><span>value {}</span></div>\n",
+                    i % 17,
+                    i % 29
+                )
+                .into_bytes()
             })
             .collect();
         inputs.push(("synthetic-html".to_string(), synthetic));
@@ -107,8 +114,18 @@ fn main() {
 
     println!("=== whole-stream decode(), median of {trials} in-process trials ===");
     for (name, payload) in &inputs {
-        let short: String = name.rsplit('/').next().unwrap_or(name).chars().take(32).collect();
-        for scheme in [ValueScheme::Entropy, ValueScheme::EntropyContext2, ValueScheme::BwtEntropy] {
+        let short: String = name
+            .rsplit('/')
+            .next()
+            .unwrap_or(name)
+            .chars()
+            .take(32)
+            .collect();
+        for scheme in [
+            ValueScheme::Entropy,
+            ValueScheme::EntropyContext2,
+            ValueScheme::BwtEntropy,
+        ] {
             bench_decode(&short, payload, scheme, trials);
         }
         println!();
