@@ -12,13 +12,13 @@ pub mod config;
 pub mod cube;
 pub mod distance_map;
 pub mod domainize;
-pub(crate) mod geocm;
 pub mod error;
+pub(crate) mod geocm;
 pub mod header;
 pub(crate) mod huffman;
 pub mod phi;
-pub(crate) mod prof;
 pub(crate) mod ppmd;
+pub(crate) mod prof;
 pub mod rle;
 
 pub use codec::{decode, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};

@@ -117,7 +117,11 @@ fn build_nex() -> Vec<[u8; 2]> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
     let discount = |loser: i32, winner_new: i32| -> i32 {
-        let mut d = if loser > 2 { 2 + ((loser - 2) >> 1) } else { loser };
+        let mut d = if loser > 2 {
+            2 + ((loser - 2) >> 1)
+        } else {
+            loser
+        };
         match mode {
             1 => d = d.min(winner_new + bnd),
             2 => {
@@ -329,11 +333,11 @@ const SM_ORD_I: usize = WORD_I + 1; // NORD state-map order probs
 const SM_SP_I: usize = SM_ORD_I + NORD; // NSPARSE state-map sparse probs
 const SM_IND_I: usize = SM_SP_I + NSPARSE; // indirect state-map prob
 const SM_WORD_I: usize = SM_IND_I + 1; // word state-map prob
-// 2nd word model (previous-word × current-word bigram context) — appended so all
-// prior indices stay stable.
+                                       // 2nd word model (previous-word × current-word bigram context) — appended so all
+                                       // prior indices stay stable.
 const WORD2_I: usize = SM_WORD_I + 1; // stationary 2nd-word prob
 const SM_WORD2_I: usize = WORD2_I + 1; // state-map 2nd-word prob
-// 3rd word model: case-folded current word (The/the/THE share statistics).
+                                       // 3rd word model: case-folded current word (The/the/THE share statistics).
 const WORD3_I: usize = SM_WORD2_I + 1;
 const SM_WORD3_I: usize = WORD3_I + 1;
 // 3rd (long) match model — catches long exact repeats (wiki markup/templates).
@@ -590,7 +594,9 @@ impl CmModel {
             .unwrap_or(1023);
         Self {
             ord: (0..NORD).map(|_| Ctr::new(tbits, ctrlim, smcap)).collect(),
-            sp: (0..NSPARSE).map(|_| Ctr::new(tbits, ctrlim, smcap)).collect(),
+            sp: (0..NSPARSE)
+                .map(|_| Ctr::new(tbits, ctrlim, smcap))
+                .collect(),
             ind: Ctr::new(tbits, ctrlim, smcap),
             ind_map: vec![0u32; 1usize << IBITS],
             ind_mask: (1usize << IBITS) - 1,
@@ -941,9 +947,11 @@ pub(crate) fn cm2_encode_with(
     column_variants: bool,
     max_tbits: Option<usize>,
 ) -> Vec<u8> {
-    let base = crate::prof::track("cm2_variant_base", |v: &Vec<u8>| v.len(), || {
-        cm2_encode_variant(data, None, max_tbits)
-    });
+    let base = crate::prof::track(
+        "cm2_variant_base",
+        |v: &Vec<u8>| v.len(),
+        || cm2_encode_variant(data, None, max_tbits),
+    );
     // FH4-03: competitive-min. The column variant ships only when it is strictly
     // smaller, so adding it cannot regress any input — the gate above merely
     // avoids paying for a candidate that has no chance.
@@ -955,9 +963,11 @@ pub(crate) fn cm2_encode_with(
         return best;
     }
     for d in detect_col_delims(data) {
-        let alt = crate::prof::track("cm2_variant_col", |v: &Vec<u8>| v.len(), || {
-            cm2_encode_variant(data, Some(d), max_tbits)
-        });
+        let alt = crate::prof::track(
+            "cm2_variant_col",
+            |v: &Vec<u8>| v.len(),
+            || cm2_encode_variant(data, Some(d), max_tbits),
+        );
         if alt.len() < best.len() {
             best = alt;
             crate::prof::win("cm2_variant_col");
@@ -1066,7 +1076,6 @@ fn detect_col_delims(data: &[u8]) -> Vec<u8> {
     scored.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap().then(a.1.cmp(&b.1)));
     scored.into_iter().take(MAX).map(|(_, d)| d).collect()
 }
-
 
 pub(crate) fn cm2_encode_audit(data: &[u8]) -> (Vec<u8>, f64, f64) {
     cm2_encode_audit_variant(data, None)
@@ -1278,7 +1287,6 @@ mod tests {
         blob.len()
     }
 
-
     /// QA-F-007 calibration guard: every blob the ENCODER can produce must satisfy the
     /// decoder's expansion bound. This is what makes CM2_MAX_EXPANSION safe — if a future
     /// model change pushes real ratios past it, this test fails instead of silently
@@ -1290,9 +1298,23 @@ mod tests {
             ("zeros_64k", vec![0u8; 65536]),
             ("zeros_256k", vec![0u8; 256 * 1024]),
             ("const_128k", vec![0x5Au8; 128 * 1024]),
-            ("rep2_128k", (0..(128 * 1024)).map(|i| (i % 2) as u8).collect()),
-            ("rep16_128k", (0..(128 * 1024)).map(|i| (i % 16) as u8).collect()),
-            ("text_128k", b"the quick brown fox. ".iter().cloned().cycle().take(128 * 1024).collect()),
+            (
+                "rep2_128k",
+                (0..(128 * 1024)).map(|i| (i % 2) as u8).collect(),
+            ),
+            (
+                "rep16_128k",
+                (0..(128 * 1024)).map(|i| (i % 16) as u8).collect(),
+            ),
+            (
+                "text_128k",
+                b"the quick brown fox. "
+                    .iter()
+                    .cloned()
+                    .cycle()
+                    .take(128 * 1024)
+                    .collect(),
+            ),
         ];
         let mut worst_ratio = 0f64;
         for (name, data) in cases {
@@ -1344,9 +1366,14 @@ mod tests {
     fn cm2_valid_high_ratio_above_stall_limit_round_trips() {
         for data in [
             vec![0u8; 128 * 1024],
-            (0..(128 * 1024)).map(|i| (i % 2) as u8).collect::<Vec<u8>>(),
+            (0..(128 * 1024))
+                .map(|i| (i % 2) as u8)
+                .collect::<Vec<u8>>(),
         ] {
-            assert!(data.len() as u64 > CM2_STALL_LIMIT, "fixture must exceed the guarded limit");
+            assert!(
+                data.len() as u64 > CM2_STALL_LIMIT,
+                "fixture must exceed the guarded limit"
+            );
             let blob = cm2_encode(&data);
             let out = cm2_decode(&blob).expect("valid high-ratio blob must decode");
             assert_eq!(out, data, "valid RT broken for len {}", data.len());
@@ -1408,7 +1435,7 @@ mod tests {
         for d in [
             vec![],
             vec![0u8; 1],
-            vec![0u8; 4096],           // maximally compressible — shortest coded stream
+            vec![0u8; 4096], // maximally compressible — shortest coded stream
             vec![0x5Au8; 1000],
             b"lorem ipsum dolor sit amet ".repeat(200),
         ] {
