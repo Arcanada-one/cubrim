@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from adapters import adapter_for
-from capabilities import PHASE_A_CODECS
+from capabilities import PHASE_A_CODECS, REFERENCE_PHASE_A_CODECS
 from copy import deepcopy
 from pathlib import Path
 
@@ -169,6 +169,75 @@ def canonical_bundle():
     return summarize.finalize_bundle(bundle, bootstrap_iterations=100)
 
 
+def reference_bundle():
+    source = canonical_bundle()
+    tool_provenance = {
+        "name": "cubrim-lowmem-decode",
+        "version": "cubrim 0.3.2+lowmem-decode",
+        "binary_sha256": "d" * 64,
+        "flags": ["compress", "--preset", "lowmem-decode", "-q"],
+        "binary_package": "cubrim",
+        "binary_package_version": "0.3.2",
+        "source_package": "cubrim",
+        "source_package_version": "0.3.2",
+        "upstream_release_sha": "a" * 40,
+        "upstream_source_reference": "CUBR-0097:" + "a" * 40,
+    }
+    tool = {
+        **tool_provenance,
+        "binary_path": "/opt/cubrim/target/release/cubrim",
+        "capabilities": {
+            "decode": True,
+            "encode": True,
+            "web_profile": False,
+            "web_profile_version": "pending",
+            "whole_buffer_decode": True,
+            "incremental_decode": False,
+            "lowmem_decode": True,
+            "hostile_input_hardened": False,
+            "roundtrip_exact": False,
+        },
+        "codec_build_provenance_sha256": stable_fingerprint(tool_provenance),
+    }
+    trials = []
+    for order, trial in enumerate(
+        (trial for trial in source["resource_results"] if trial["codec_key"] == "gzip-9"),
+        start=1,
+    ):
+        candidate = deepcopy(trial)
+        candidate["codec_key"] = REFERENCE_PHASE_A_CODECS[0]
+        candidate["randomized_order"] = order
+        candidate["codec_build_provenance_sha256"] = tool[
+            "codec_build_provenance_sha256"
+        ]
+        candidate["tool_fingerprint"] = stable_fingerprint(tool)
+        candidate["tool_version"] = tool["version"]
+        candidate["tool_binary_sha256"] = tool["binary_sha256"]
+        candidate["tool_flags"] = tool["flags"]
+        trials.append(candidate)
+    source.update(
+        {
+            "scope": "resource_codec_reference",
+            "phase": "A-reference",
+            "toolchain": [tool],
+            "protocol": {
+                **source["protocol"],
+                "codecs": list(REFERENCE_PHASE_A_CODECS),
+            },
+            "applicability": {
+                **source["applicability"],
+                "time_to_first_decoded_byte": {
+                    "available": False,
+                    "reason": "reference_channel_whole_buffer_decode",
+                },
+            },
+            "resource_results": trials,
+            "resource_summaries": [],
+        }
+    )
+    return source
+
+
 def canonical_production_bundle(trials_per_cell=30):
     bundle = canonical_bundle()
     manifest = json.loads(CANONICAL_MANIFEST.read_text(encoding="utf-8"))
@@ -231,6 +300,36 @@ class SummarizeTests(unittest.TestCase):
         self.assertNotEqual(compressed["median"], 10)
         self.assertLessEqual(compressed["bootstrap_95"]["low"], compressed["median"])
         self.assertGreaterEqual(compressed["bootstrap_95"]["high"], compressed["median"])
+
+    def test_reference_channel_has_closed_protocol_and_same_exact_summary_contract(self):
+        bundle = reference_bundle()
+        finalized = summarize.finalize_bundle(
+            bundle,
+            seed=74074,
+            bootstrap_iterations=100,
+            codecs=REFERENCE_PHASE_A_CODECS,
+            scope="resource_codec_reference",
+            phase="A-reference",
+            applicability_reason="reference_channel_whole_buffer_decode",
+            reference_channel=True,
+        )
+        summarize.verify_bundle(
+            finalized,
+            require_summaries=True,
+            codecs=REFERENCE_PHASE_A_CODECS,
+            scope="resource_codec_reference",
+            phase="A-reference",
+            applicability_reason="reference_channel_whole_buffer_decode",
+            reference_channel=True,
+        )
+        self.assertEqual(finalized["protocol"]["warmups"], 3)
+        self.assertEqual(finalized["protocol"]["trials_per_cell"], 30)
+        self.assertEqual(
+            {row["metric_name"] for row in finalized["resource_summaries"]},
+            set(summarize.PHASE_A_METRICS),
+        )
+        with self.assertRaisesRegex(ValueError, "resource_codec|Phase A"):
+            verify_bundle(finalized)
 
     def test_verify_rejects_duplicate_trials(self):
         invalid = deepcopy(self.bundle)

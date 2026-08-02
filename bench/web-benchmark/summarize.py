@@ -16,7 +16,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-from capabilities import PHASE_A_CODECS
+from capabilities import (
+    PHASE_A_CODECS,
+    REFERENCE_PHASE_A_CODECS,
+    REFERENCE_PHASE_A_APPLICABILITY_REASON,
+    REFERENCE_PHASE_A_PHASE,
+    REFERENCE_PHASE_A_SCOPE,
+)
 from model import (
     CODE_SHA_RE,
     SHA256_RE,
@@ -180,20 +186,36 @@ def verify_bundle(
     *,
     require_summaries: bool = True,
     require_canonical_corpus: bool = False,
+    codecs: tuple[str, ...] = PHASE_A_CODECS,
+    scope: str = "resource_codec",
+    phase: str = "A",
+    applicability_reason: str = "phase_a_codecs_do_not_offer_incremental_decode",
+    reference_channel: bool = False,
 ) -> None:
+    if reference_channel and (
+        codecs != REFERENCE_PHASE_A_CODECS
+        or scope != REFERENCE_PHASE_A_SCOPE
+        or phase != REFERENCE_PHASE_A_PHASE
+        or applicability_reason != REFERENCE_PHASE_A_APPLICABILITY_REASON
+    ):
+        raise ValueError("reference channel identity is invalid")
     _require_exact_fields(bundle, TOP_LEVEL_FIELDS, "bundle")
-    if bundle["schema_version"] != 1 or bundle["scope"] != "resource_codec":
+    if bundle["schema_version"] != 1 or bundle["scope"] != scope:
         raise ValueError("bundle must use resource_codec schema version 1")
-    if bundle["phase"] != "A" or "voids" in bundle:
+    if bundle["phase"] != phase or "voids" in bundle:
         raise ValueError("bundle must contain Phase A results and no void records")
     run_timing = _verify_run_timing(bundle["run_timing"])
     _verify_environment(bundle["environment"])
     samples = _verify_corpus(bundle["corpus"])
     if require_canonical_corpus:
         _verify_canonical_corpus(bundle["corpus"])
-    tools = _verify_toolchain(bundle["toolchain"])
-    protocol = _verify_protocol(bundle["protocol"])
-    _verify_applicability(bundle["applicability"])
+    tools = _verify_toolchain(
+        bundle["toolchain"],
+        codecs=codecs,
+        reference_channel=reference_channel,
+    )
+    protocol = _verify_protocol(bundle["protocol"], codecs=codecs)
+    _verify_applicability(bundle["applicability"], reason=applicability_reason)
     if bundle["page_results"] != {
         "explicit_wasm_application": [],
         "transparent_http_page": [],
@@ -209,6 +231,7 @@ def verify_bundle(
         protocol,
         bundle["environment"],
         run_timing,
+        codecs=codecs,
     )
     summaries = bundle["resource_summaries"]
     if not isinstance(summaries, list):
@@ -343,8 +366,13 @@ def _verify_canonical_corpus(value: object) -> None:
         )
 
 
-def _verify_toolchain(value: object) -> dict[str, dict[str, object]]:
-    if not isinstance(value, list) or len(value) != len(PHASE_A_CODECS):
+def _verify_toolchain(
+    value: object,
+    *,
+    codecs: tuple[str, ...] = PHASE_A_CODECS,
+    reference_channel: bool = False,
+) -> dict[str, dict[str, object]]:
+    if not isinstance(value, list) or len(value) != len(codecs):
         raise ValueError("toolchain must contain exactly the Phase A codecs")
     tools: dict[str, dict[str, object]] = {}
     for tool in value:
@@ -352,7 +380,7 @@ def _verify_toolchain(value: object) -> dict[str, dict[str, object]]:
             raise ValueError("tool provenance must be an object")
         _require_exact_fields(tool, TOOL_FIELDS, "tool provenance")
         name = tool["name"]
-        if name not in PHASE_A_CODECS or name in tools:
+        if name not in codecs or name in tools:
             raise ValueError("toolchain codec is not uniquely allowlisted")
         for key in (
             "version",
@@ -378,9 +406,36 @@ def _verify_toolchain(value: object) -> dict[str, dict[str, object]]:
         ):
             raise ValueError("tool flags are invalid")
         capabilities = tool["capabilities"]
-        if (
-            not isinstance(capabilities, dict)
-            or set(capabilities) != {"whole_buffer_decode", "incremental_decode"}
+        if not isinstance(capabilities, dict):
+            raise ValueError("tool capabilities are invalid for Phase A")
+        if reference_channel:
+            expected_capabilities = {
+                "decode",
+                "encode",
+                "web_profile",
+                "web_profile_version",
+                "whole_buffer_decode",
+                "incremental_decode",
+                "lowmem_decode",
+                "hostile_input_hardened",
+                "roundtrip_exact",
+            }
+            if (
+                set(capabilities) != expected_capabilities
+                or capabilities["decode"] is not True
+                or capabilities["encode"] is not True
+                or capabilities["web_profile"] is not False
+                or capabilities["web_profile_version"]
+                not in {"pending", "planned", "placeholder"}
+                or capabilities["whole_buffer_decode"] is not True
+                or capabilities["incremental_decode"] is not False
+                or capabilities["lowmem_decode"] is not True
+                or not isinstance(capabilities["hostile_input_hardened"], bool)
+                or not isinstance(capabilities["roundtrip_exact"], bool)
+            ):
+                raise ValueError("reference tool capabilities are invalid")
+        elif (
+            set(capabilities) != {"whole_buffer_decode", "incremental_decode"}
             or capabilities["whole_buffer_decode"] is not True
             or capabilities["incremental_decode"] is not False
         ):
@@ -403,16 +458,20 @@ def _verify_toolchain(value: object) -> dict[str, dict[str, object]]:
         if stable_fingerprint(provenance_input) != tool["codec_build_provenance_sha256"]:
             raise ValueError("tool build provenance digest does not match its source fields")
         tools[name] = tool
-    if tuple(sorted(tools)) != tuple(sorted(PHASE_A_CODECS)):
+    if tuple(sorted(tools)) != tuple(sorted(codecs)):
         raise ValueError("toolchain Phase A allowlist is incomplete")
     return tools
 
 
-def _verify_protocol(value: object) -> dict[str, object]:
+def _verify_protocol(
+    value: object,
+    *,
+    codecs: tuple[str, ...] = PHASE_A_CODECS,
+) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("protocol must be an object")
     _require_exact_fields(value, PROTOCOL_FIELDS, "protocol")
-    if value["codecs"] != list(PHASE_A_CODECS):
+    if value["codecs"] != list(codecs):
         raise ValueError("protocol codec allowlist is invalid")
     trials_per_cell = value["trials_per_cell"]
     if (
@@ -448,11 +507,15 @@ def _verify_protocol(value: object) -> dict[str, object]:
     return value
 
 
-def _verify_applicability(value: object) -> None:
+def _verify_applicability(
+    value: object,
+    *,
+    reason: str = "phase_a_codecs_do_not_offer_incremental_decode",
+) -> None:
     expected = {
         "time_to_first_decoded_byte": {
             "available": False,
-            "reason": "phase_a_codecs_do_not_offer_incremental_decode",
+            "reason": reason,
         },
         "energy": {
             "available": False,
@@ -470,6 +533,8 @@ def _verify_trials(
     protocol: dict[str, object],
     environment: dict[str, object],
     run_timing: tuple[datetime, datetime],
+    *,
+    codecs: tuple[str, ...] = PHASE_A_CODECS,
 ) -> None:
     seen: set[tuple[str, str, int]] = set()
     orders: set[int] = set()
@@ -510,7 +575,7 @@ def _verify_trials(
         )
     expected_trials = set(range(1, protocol["trials_per_cell"] + 1))
     for sample_id in samples:
-        for codec_key in PHASE_A_CODECS:
+        for codec_key in codecs:
             if cell_trials[(sample_id, codec_key)] != expected_trials:
                 raise ValueError(
                     "sample/codec cell requires the complete configured trial set: "
@@ -590,13 +655,26 @@ def summarize_bundle(
     *,
     seed: int = 74074,
     bootstrap_iterations: int = 5_000,
+    codecs: tuple[str, ...] = PHASE_A_CODECS,
+    scope: str = "resource_codec",
+    phase: str = "A",
+    applicability_reason: str = "phase_a_codecs_do_not_offer_incremental_decode",
+    reference_channel: bool = False,
 ) -> dict[str, object]:
     candidate = copy.deepcopy(bundle)
     candidate["resource_summaries"] = []
-    verify_bundle(candidate, require_summaries=False)
+    verify_bundle(
+        candidate,
+        require_summaries=False,
+        codecs=codecs,
+        scope=scope,
+        phase=phase,
+        applicability_reason=applicability_reason,
+        reference_channel=reference_channel,
+    )
     return {
         "schema_version": 1,
-        "scope": "resource_codec",
+        "scope": scope,
         "seed": seed,
         "bootstrap_iterations": bootstrap_iterations,
         "summaries": _summary_rows(
@@ -613,16 +691,33 @@ def finalize_bundle(
     seed: int = 74074,
     bootstrap_iterations: int = 5_000,
     require_canonical_corpus: bool = False,
+    codecs: tuple[str, ...] = PHASE_A_CODECS,
+    scope: str = "resource_codec",
+    phase: str = "A",
+    applicability_reason: str = "phase_a_codecs_do_not_offer_incremental_decode",
+    reference_channel: bool = False,
 ) -> dict[str, object]:
     finalized = copy.deepcopy(bundle)
+    finalized["scope"] = scope
+    finalized["phase"] = phase
     finalized["protocol"]["randomized_order_seed"] = seed
     finalized["protocol"]["bootstrap_iterations"] = bootstrap_iterations
     finalized["protocol"]["bootstrap_confidence"] = 0.95
+    finalized["protocol"]["codecs"] = list(codecs)
+    finalized["applicability"]["time_to_first_decoded_byte"] = {
+        "available": False,
+        "reason": applicability_reason,
+    }
     finalized["resource_summaries"] = []
     verify_bundle(
         finalized,
         require_summaries=False,
         require_canonical_corpus=require_canonical_corpus,
+        codecs=codecs,
+        scope=scope,
+        phase=phase,
+        applicability_reason=applicability_reason,
+        reference_channel=reference_channel,
     )
     finalized["resource_summaries"] = _summary_rows(
         finalized["resource_results"],
@@ -633,6 +728,11 @@ def finalize_bundle(
         finalized,
         require_summaries=True,
         require_canonical_corpus=require_canonical_corpus,
+        codecs=codecs,
+        scope=scope,
+        phase=phase,
+        applicability_reason=applicability_reason,
+        reference_channel=reference_channel,
     )
     return finalized
 

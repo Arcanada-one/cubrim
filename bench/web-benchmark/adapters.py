@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from capabilities import PHASE_A_CODECS, require_phase_a_codec
+from capabilities import (
+    PHASE_A_CODECS,
+    REFERENCE_PHASE_A_CODECS,
+    require_phase_a_codec,
+)
 from model import CODE_SHA_RE, SHA256_RE, hash_file, stable_fingerprint
 
 
@@ -49,7 +53,7 @@ class ToolIdentity:
     upstream_source_reference: str
     codec_build_provenance_sha256: str
 
-    def as_json(self, capabilities: dict[str, bool]) -> dict[str, object]:
+    def as_json(self, capabilities: dict[str, object]) -> dict[str, object]:
         return {
             "name": self.name,
             "version": self.version,
@@ -130,17 +134,30 @@ class CodecAdapter:
     name: str
     binary_name: str
     flags: tuple[str, ...]
-    capabilities: dict[str, bool]
+    capabilities: dict[str, object]
     _compress: Callable[[Path], tuple[str, ...]]
     _decompress: Callable[[Path], tuple[str, ...]]
+    _compress_with_target: Callable[[Path, Path], tuple[str, ...]] | None = None
+    _decompress_with_target: Callable[[Path, Path], tuple[str, ...]] | None = None
+    _identity_factory: Callable[[], ToolIdentity] | None = None
 
-    def compress_argv(self, path: Path) -> tuple[str, ...]:
+    def compress_argv(self, path: Path, target: Path | None = None) -> tuple[str, ...]:
+        if target is not None and self._compress_with_target is not None:
+            return self._compress_with_target(path, target)
+        if target is None and self._compress_with_target is not None:
+            raise ValueError(f"{self.name} requires a target output path")
         return self._compress(path)
 
-    def decompress_argv(self, path: Path) -> tuple[str, ...]:
+    def decompress_argv(self, path: Path, target: Path | None = None) -> tuple[str, ...]:
+        if target is not None and self._decompress_with_target is not None:
+            return self._decompress_with_target(path, target)
+        if target is None and self._decompress_with_target is not None:
+            raise ValueError(f"{self.name} requires a target output path")
         return self._decompress(path)
 
     def identity(self) -> ToolIdentity:
+        if self._identity_factory is not None:
+            return self._identity_factory()
         binary = shutil.which(self.binary_name)
         if binary is None:
             raise FileNotFoundError(
@@ -275,6 +292,114 @@ def _zstd_3() -> CodecAdapter:
     )
 
 
+_REFERENCE_FLAGS = ("compress", "--preset", "lowmem-decode", "-q")
+_REFERENCE_CAPABILITIES = {
+    "decode": True,
+    "encode": True,
+    "web_profile": False,
+    "web_profile_version": "pending",
+    "whole_buffer_decode": True,
+    "incremental_decode": False,
+    "lowmem_decode": True,
+    "hostile_input_hardened": False,
+    "roundtrip_exact": False,
+}
+_REFERENCE_CODE_SHA = "a3d399f57aa8ee5b7c172afd5322a7f7a1e14392"
+_REFERENCE_SOURCE_REFERENCE = f"CUBR-0097:{_REFERENCE_CODE_SHA}"
+_REFERENCE_CLI_VERSION = "cubrim 0.3.2"
+_REFERENCE_BUILD_VERSION = "cubrim 0.3.2+lowmem-decode"
+
+
+def _reference_binary() -> Path:
+    configured = os.environ.get("CUBRIM_REFERENCE_BINARY")
+    path = (
+        Path(configured).expanduser()
+        if configured
+        else Path(__file__).resolve().parents[2]
+        / "code"
+        / "cubrim-rs"
+        / "target"
+        / "release"
+        / "cubrim"
+    )
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        raise PermissionError(f"reference Cubrim binary is not executable: {resolved}")
+    return resolved
+
+
+def _reference_identity() -> ToolIdentity:
+    binary = _reference_binary()
+    cli_version = _tool_version("cubrim", binary)
+    if cli_version != _REFERENCE_CLI_VERSION:
+        raise ValueError(
+            f"cubrim-lowmem-decode version mismatch: expected {_REFERENCE_CLI_VERSION!r}, "
+            f"got {cli_version!r}"
+        )
+    binary_sha256 = hash_file(binary)
+    package = ("cubrim", "0.3.2", "cubrim", "0.3.2")
+    if not CODE_SHA_RE.fullmatch(_REFERENCE_CODE_SHA):
+        raise ValueError("Cubrim reference source pin is invalid")
+    identity_without_digest = {
+        "name": "cubrim-lowmem-decode",
+        "version": _REFERENCE_BUILD_VERSION,
+        "binary_sha256": binary_sha256,
+        "flags": list(_REFERENCE_FLAGS),
+        "binary_package": package[0],
+        "binary_package_version": package[1],
+        "source_package": package[2],
+        "source_package_version": package[3],
+        "upstream_release_sha": _REFERENCE_CODE_SHA,
+        "upstream_source_reference": _REFERENCE_SOURCE_REFERENCE,
+    }
+    return ToolIdentity(
+        name="cubrim-lowmem-decode",
+        version=_REFERENCE_BUILD_VERSION,
+        binary_path=str(binary),
+        binary_sha256=binary_sha256,
+        flags=_REFERENCE_FLAGS,
+        binary_package=package[0],
+        binary_package_version=package[1],
+        source_package=package[2],
+        source_package_version=package[3],
+        upstream_release_sha=_REFERENCE_CODE_SHA,
+        upstream_source_reference=_REFERENCE_SOURCE_REFERENCE,
+        codec_build_provenance_sha256=stable_fingerprint(identity_without_digest),
+    )
+
+
+def _reference_requires_target(path: Path) -> tuple[str, ...]:
+    raise ValueError("cubrim-lowmem-decode requires a target output path")
+
+
+def _reference_adapter() -> CodecAdapter:
+    return CodecAdapter(
+        "cubrim-lowmem-decode",
+        "cubrim",
+        _REFERENCE_FLAGS,
+        dict(_REFERENCE_CAPABILITIES),
+        _reference_requires_target,
+        _reference_requires_target,
+        _compress_with_target=lambda source, target: (
+            "cubrim",
+            "compress",
+            str(source),
+            str(target),
+            "--preset",
+            "lowmem-decode",
+            "-q",
+        ),
+        _decompress_with_target=lambda source, target: (
+            "cubrim",
+            "decompress",
+            str(source),
+            str(target),
+            "-q",
+        ),
+        _identity_factory=_reference_identity,
+    )
+
+
 def adapter_for(name: str) -> CodecAdapter:
     require_phase_a_codec(name)
     return {
@@ -290,6 +415,16 @@ def phase_a_adapters() -> tuple[CodecAdapter, ...]:
     return tuple(adapter_for(name) for name in PHASE_A_CODECS)
 
 
+def reference_adapter_for(name: str) -> CodecAdapter:
+    if name not in REFERENCE_PHASE_A_CODECS:
+        raise ValueError(f"reference Phase A codec is not allowlisted: {name}")
+    return _reference_adapter()
+
+
+def reference_phase_a_adapters() -> tuple[CodecAdapter, ...]:
+    return tuple(reference_adapter_for(name) for name in REFERENCE_PHASE_A_CODECS)
+
+
 class SubprocessExecutor:
     def __init__(self, timeout_seconds: float, max_output_bytes: int = 64 * 1024 * 1024):
         self.timeout_seconds = timeout_seconds
@@ -302,7 +437,10 @@ class SubprocessExecutor:
         source: Path,
         target: Path,
     ) -> ProcessMeasurement:
-        return self._run(self.exact_argv(adapter.compress_argv(source), identity), target)
+        return self._run(
+            self.exact_argv(adapter.compress_argv(source, target), identity),
+            target,
+        )
 
     def decompress(
         self,
@@ -311,7 +449,10 @@ class SubprocessExecutor:
         source: Path,
         target: Path,
     ) -> ProcessMeasurement:
-        return self._run(self.exact_argv(adapter.decompress_argv(source), identity), target)
+        return self._run(
+            self.exact_argv(adapter.decompress_argv(source, target), identity),
+            target,
+        )
 
     @staticmethod
     def exact_argv(argv: tuple[str, ...], identity: ToolIdentity) -> tuple[str, ...]:

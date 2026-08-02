@@ -15,8 +15,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from adapters import CodecAdapter, SubprocessExecutor, ToolIdentity, phase_a_adapters
-from capabilities import PHASE_A_CODECS, energy_capability
+from adapters import (
+    CodecAdapter,
+    SubprocessExecutor,
+    ToolIdentity,
+    phase_a_adapters,
+    reference_phase_a_adapters,
+)
+from capabilities import (
+    PHASE_A_CODECS,
+    REFERENCE_PHASE_A_APPLICABILITY_REASON,
+    REFERENCE_PHASE_A_CODECS,
+    REFERENCE_PHASE_A_PHASE,
+    REFERENCE_PHASE_A_SCOPE,
+    energy_capability,
+)
 from model import (
     CODE_SHA_RE,
     BenchmarkSample,
@@ -99,7 +112,7 @@ class PhaseARunner:
         self.executor = executor
         self.manifest_path = manifest_path
         self._samples: tuple[BenchmarkSample, ...] = ()
-        self._identities: dict[str, tuple[ToolIdentity, dict[str, bool]]] = {}
+        self._identities: dict[str, tuple[ToolIdentity, dict[str, object]]] = {}
         self._run_timing: dict[str, str] | None = None
 
     @classmethod
@@ -232,7 +245,15 @@ class PhaseARunner:
             self.journal.write("crash", context)
         return None
 
-    def bundle(self, trials: Iterable[TrialRecord]) -> dict[str, object]:
+    def bundle(
+        self,
+        trials: Iterable[TrialRecord],
+        *,
+        codec_names: tuple[str, ...] = PHASE_A_CODECS,
+        scope: str = "resource_codec",
+        phase: str = "A",
+        applicability_reason: str = "phase_a_codecs_do_not_offer_incremental_decode",
+    ) -> dict[str, object]:
         if self._run_timing is None:
             raise RuntimeError("bundle timing is unavailable before benchmark execution")
         samples = self._samples
@@ -248,8 +269,8 @@ class PhaseARunner:
         )
         return {
             "schema_version": 1,
-            "scope": "resource_codec",
-            "phase": "A",
+            "scope": scope,
+            "phase": phase,
             "run_timing": self._run_timing,
             "corpus": {
                 "manifest_name": (
@@ -269,7 +290,7 @@ class PhaseARunner:
                 )
             ],
             "protocol": {
-                "codecs": list(PHASE_A_CODECS),
+                "codecs": list(codec_names),
                 "warmups": self.config.warmups,
                 "trials_per_cell": self.config.trials,
                 "randomized_order_seed": self.config.random_seed,
@@ -287,7 +308,7 @@ class PhaseARunner:
             "applicability": {
                 "time_to_first_decoded_byte": {
                     "available": False,
-                    "reason": "phase_a_codecs_do_not_offer_incremental_decode",
+                    "reason": applicability_reason,
                 },
                 "energy": {
                     "available": False,
@@ -306,6 +327,12 @@ class PhaseARunner:
         self,
         samples: tuple[BenchmarkSample, ...],
         adapters: tuple[CodecAdapter, ...],
+        *,
+        codec_names: tuple[str, ...] = PHASE_A_CODECS,
+        scope: str = "resource_codec",
+        phase: str = "A",
+        applicability_reason: str = "phase_a_codecs_do_not_offer_incremental_decode",
+        reference_channel: bool = False,
     ) -> dict[str, object]:
         self._run_timing = {"started_at": utc_now(), "completed_at": ""}
         admission = self.environment.get("admission")
@@ -365,8 +392,19 @@ class PhaseARunner:
         from summarize import finalize_bundle
 
         return finalize_bundle(
-            self.bundle(results),
+            self.bundle(
+                results,
+                codec_names=codec_names,
+                scope=scope,
+                phase=phase,
+                applicability_reason=applicability_reason,
+            ),
             seed=self.config.random_seed,
+            codecs=codec_names,
+            scope=scope,
+            phase=phase,
+            applicability_reason=applicability_reason,
+            reference_channel=reference_channel,
         )
 
 
@@ -439,6 +477,10 @@ def capture_environment(code_sha: str) -> dict[str, object]:
 def preflight(
     manifest_path: Path,
     journal: RedactedJournal,
+    *,
+    adapters: tuple[CodecAdapter, ...] | None = None,
+    codec_names: tuple[str, ...] = PHASE_A_CODECS,
+    phase: str = "A",
 ) -> dict[str, object]:
     samples = load_samples(manifest_path)
     for sample in samples:
@@ -449,7 +491,8 @@ def preflight(
         raise FileNotFoundError("/usr/bin/time is required")
     SubprocessExecutor.verify_network_sandbox()
     identities = []
-    for adapter in phase_a_adapters():
+    selected_adapters = phase_a_adapters() if adapters is None else adapters
+    for adapter in selected_adapters:
         try:
             identity = adapter.identity()
             identities.append(_identity_json(identity, adapter.capabilities))
@@ -463,8 +506,8 @@ def preflight(
     if energy is None:
         journal.write("energy_unavailable", {"codec_key": "host"})
     return {
-        "phase": "A",
-        "codecs": list(PHASE_A_CODECS),
+        "phase": phase,
+        "codecs": list(codec_names),
         "sample_count": len(samples),
         "gnu_time": "/usr/bin/time",
         "network_isolation": "systemd_user_unit_plus_seccomp_network_deny",
@@ -553,7 +596,7 @@ def utc_now() -> str:
 
 def _identity_json(
     identity: ToolIdentity | object,
-    capabilities: dict[str, bool],
+    capabilities: dict[str, object],
 ) -> dict[str, object]:
     if hasattr(identity, "as_json"):
         return identity.as_json(capabilities)
@@ -599,6 +642,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--check", action="store_true", required=True)
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument(
+        "--reference-phase-a",
+        action="store_true",
+        help="run the isolated non-Web-Profile Cubrim reference channel",
+    )
+    parser.add_argument(
         "--manifest",
         type=Path,
         default=Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v2.json",
@@ -614,8 +662,32 @@ def main() -> int:
     args = _parse_args()
     journal = RedactedJournal(args.journal / "voids.jsonl")
     config = RunnerConfig(trials=args.trials, warmups=args.warmups)
+    reference_channel = args.reference_phase_a
+    codec_names = REFERENCE_PHASE_A_CODECS if reference_channel else PHASE_A_CODECS
+    phase = REFERENCE_PHASE_A_PHASE if reference_channel else "A"
+    scope = REFERENCE_PHASE_A_SCOPE if reference_channel else "resource_codec"
+    applicability_reason = (
+        REFERENCE_PHASE_A_APPLICABILITY_REASON
+        if reference_channel
+        else "phase_a_codecs_do_not_offer_incremental_decode"
+    )
+    selected_adapters = (
+        reference_phase_a_adapters() if reference_channel else phase_a_adapters()
+    )
     if args.preflight:
-        print(json.dumps(preflight(args.manifest, journal), indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                preflight(
+                    args.manifest,
+                    journal,
+                    adapters=selected_adapters,
+                    codec_names=codec_names,
+                    phase=phase,
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
     samples = load_samples(args.manifest)
     code_sha = _git_code_sha(require_clean=True)
@@ -629,9 +701,17 @@ def main() -> int:
         executor=SubprocessExecutor(config.timeout_seconds, config.max_output_bytes),
         manifest_path=args.manifest,
     )
-    bundle = runner.execute(samples, phase_a_adapters())
+    bundle = runner.execute(
+        samples,
+        selected_adapters,
+        codec_names=codec_names,
+        scope=scope,
+        phase=phase,
+        applicability_reason=applicability_reason,
+        reference_channel=reference_channel,
+    )
     args.out.mkdir(parents=True, exist_ok=True)
-    output_path = args.out / "phase-a.json"
+    output_path = args.out / ("reference-phase-a.json" if reference_channel else "phase-a.json")
     atomic_write_json(output_path, bundle)
     print(json.dumps({"bundle": str(output_path), "trials": len(bundle["resource_results"])}))
     return 0

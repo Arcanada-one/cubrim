@@ -10,9 +10,10 @@ BENCH_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH_DIR))
 
 import adapters
-from adapters import SubprocessExecutor, adapter_for
+from adapters import SubprocessExecutor, adapter_for, reference_adapter_for
 from capabilities import (
     PHASE_A_CODECS,
+    REFERENCE_PHASE_A_CODECS,
     energy_capability,
     first_decoded_byte_ms,
     validate_codec_attribution,
@@ -45,6 +46,43 @@ class AttributionGateTests(unittest.TestCase):
                 "encode": True,
                 "decode": True,
             },
+        )
+
+    def test_reference_channel_is_separate_and_not_a_web_profile(self):
+        self.assertEqual(REFERENCE_PHASE_A_CODECS, ("cubrim-lowmem-decode",))
+        self.assertEqual(
+            PHASE_A_CODECS, ("gzip-9", "brotli-11", "brotli-5", "zstd-19", "zstd-3")
+        )
+        with self.assertRaisesRegex(ValueError, "not allowlisted"):
+            adapter_for("cubrim-lowmem-decode")
+
+        adapter = reference_adapter_for("cubrim-lowmem-decode")
+        self.assertFalse(adapter.capabilities["web_profile"])
+        self.assertTrue(adapter.capabilities["whole_buffer_decode"])
+        self.assertFalse(adapter.capabilities["incremental_decode"])
+        validate_codec_attribution(adapter.name, adapter.capabilities)
+        with self.assertRaisesRegex(ValueError, "real Web Profile"):
+            validate_codec_attribution("Cubrim-Web", adapter.capabilities)
+
+    def test_reference_argv_is_target_aware_and_preregistered(self):
+        source = Path("/tmp/input.bin")
+        target = Path("/tmp/output.cbr")
+        adapter = reference_adapter_for("cubrim-lowmem-decode")
+        self.assertEqual(
+            adapter.compress_argv(source, target),
+            (
+                "cubrim",
+                "compress",
+                str(source),
+                str(target),
+                "--preset",
+                "lowmem-decode",
+                "-q",
+            ),
+        )
+        self.assertEqual(
+            adapter.decompress_argv(source, target),
+            ("cubrim", "decompress", str(source), str(target), "-q"),
         )
 
     def test_codec_argv_matches_the_preregistered_commands(self):

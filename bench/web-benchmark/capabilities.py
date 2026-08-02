@@ -15,6 +15,14 @@ from typing import Iterable, Mapping
 # ratio it has to beat, which is the bias CUBR-0068 warned about.
 PHASE_A_CODECS = ("gzip-9", "brotli-11", "brotli-5", "zstd-19", "zstd-3")
 
+# This is deliberately not part of PHASE_A_CODECS. It measures the existing
+# whole-buffer CLI as a reference channel while the real Web Profile remains a
+# downstream implementation task.
+REFERENCE_PHASE_A_CODECS = ("cubrim-lowmem-decode",)
+REFERENCE_PHASE_A_SCOPE = "resource_codec_reference"
+REFERENCE_PHASE_A_PHASE = "A-reference"
+REFERENCE_PHASE_A_APPLICABILITY_REASON = "reference_channel_whole_buffer_decode"
+
 
 def validate_codec_attribution(codec_name: str, capabilities: Mapping[str, object]) -> None:
     normalized = codec_name.casefold().replace("_", "-")
