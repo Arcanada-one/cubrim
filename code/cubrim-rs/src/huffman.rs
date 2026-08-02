@@ -173,7 +173,11 @@ pub(crate) fn assign_canonical_codes(code_len: &[u8]) -> Vec<(u32, u8)> {
         let len = code_len[sym];
         if prev_len > 0 {
             // Shift left by (len - prev_len) for length increase
-            code <<= (len - prev_len) as u32;
+            // Code lengths may come directly from an untrusted context table.
+            // Keep canonical assignment total even if a caller misses the
+            // Kraft guard: an oversized shift must not panic in debug builds.
+            let shift = (len - prev_len) as u32;
+            code = code.checked_shl(shift).unwrap_or(0);
         }
         result[sym] = (code, len);
         code += 1;
@@ -873,5 +877,16 @@ mod tests {
         let lengths = vec![1u8, 1, 0, 2, 2];
         let codes = assign_canonical_codes(&lengths);
         assert_eq!(codes[2], (0, 0), "absent symbol must have sentinel (0, 0)");
+    }
+
+    #[test]
+    fn canonical_assignment_oversized_shift_is_total() {
+        // A hostile code-length table can request a shift wider than a u32.
+        // Canonical assignment must remain total even before the decoder's
+        // Kraft guard reports the table as invalid.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assign_canonical_codes(&[1, 40]);
+        }));
+        assert!(result.is_ok(), "oversized canonical shift must not panic");
     }
 }

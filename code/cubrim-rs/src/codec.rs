@@ -33,6 +33,7 @@ use crate::header::{
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
 };
+use crate::limits::DecodeLimits;
 use crate::phi::{compute_n_and_b, phi_inv as phi_inv_fn};
 use crate::rle::{
     packed_nibble_decode, packed_nibble_encode, packed_nibble_size, rle_decode, rle_encode,
@@ -5013,7 +5014,32 @@ impl Drop for DecodeDepthGuard {
     }
 }
 
+/// Decode with the default deterministic resource policy.
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    decode_with_limits(blob, &DecodeLimits::default())
+}
+
+/// Decode a classic cube/raw blob under caller-selected output and
+/// reconstruction-memory limits.
+///
+/// Container modes keep their existing mode-specific fail-closed guards; the
+/// explicit policy is applied when the self-describing cube/raw header is
+/// available. This keeps the public contract useful for the Web Profile path
+/// without pretending that a nested container has a single fixed header shape.
+pub fn decode_with_limits(blob: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, CubrimError> {
+    if blob.len() >= 6 && blob[0..4] == MAGIC && blob[4] == VERSION {
+        match blob[5] {
+            MODE_CUBE | MODE_RAW => {
+                let (hdr, _) = parse_header(blob)?;
+                crate::limits::validate_header(&hdr, limits)?;
+            }
+            _ => {}
+        }
+    }
+    decode_unlimited(blob)
+}
+
+fn decode_unlimited(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     // QA-F-009 fail-closed guard: bound container nesting. Placed in `decode` itself so
     // every recursive path is covered by one check, whatever mode does the nesting.
     let depth = DECODE_DEPTH.with(|d| {
@@ -5835,8 +5861,15 @@ pub(crate) fn context_huffman_decode(
             ));
         }
         let n_ctx = u16::from_be_bytes([blob[offset], blob[offset + 1]]) as usize;
-        // Skip context table entries.
-        let header_bytes = 2 + n_ctx * (2 + n_distinct);
+        // Skip context table entries with checked arithmetic. Even though the
+        // wire counters are bounded integers, this must remain safe on 32-bit
+        // targets and must not return a consumed span past the input.
+        let header_bytes = crate::limits::checked_context_header_span(n_ctx, n_distinct)?;
+        if header_bytes > blob.len().saturating_sub(offset) {
+            return Err(CubrimError::Decode(
+                "EntropyContext: context table header truncated".into(),
+            ));
+        }
         return Ok((vec![], header_bytes));
     }
 
@@ -5850,14 +5883,18 @@ pub(crate) fn context_huffman_decode(
     let mut pos = offset + 2;
 
     // 2. Read context tables.
-    let header_entry_size = 2 + n_distinct; // ctx_id(u16) + code_len[n_distinct]
-    if pos + n_ctx * header_entry_size > blob.len() {
+    let header_bytes = crate::limits::checked_context_header_span(n_ctx, n_distinct)?;
+    let header_end = offset.checked_add(header_bytes).ok_or_else(|| {
+        CubrimError::Decode("EntropyContext: context table header offset overflow".into())
+    })?;
+    if header_end > blob.len() {
         return Err(CubrimError::Decode(format!(
             "EntropyContext: context table header truncated: need {} bytes, have {}",
-            n_ctx * header_entry_size,
+            header_bytes - 2,
             blob.len().saturating_sub(pos)
         )));
     }
+    crate::limits::validate_context_table_entries(n_ctx, n_distinct)?;
 
     // ctx_tables: Vec<(ctx_id, decode_table)>
     // decode_table: HashMap<(codeword, length), symbol> for that context.
@@ -5869,6 +5906,12 @@ pub(crate) fn context_huffman_decode(
         pos += 2;
         let code_len: Vec<u8> = blob[pos..pos + n_distinct].to_vec();
         pos += n_distinct;
+
+        if !crate::huffman::kraft_ok(&code_len) {
+            return Err(CubrimError::Decode(format!(
+                "EntropyContext: context {ctx_id} has invalid Huffman code lengths"
+            )));
+        }
 
         // Build decode table: (codeword, length) -> symbol.
         // Reuse assign_canonical_codes from huffman.rs.
@@ -6346,6 +6389,7 @@ pub(crate) fn order2_context_huffman_decode(
         },
     }
 
+    crate::limits::validate_context_table_entries(n_ctx, n_distinct)?;
     let mut decode_tables: Vec<DecodeTable> = Vec::with_capacity(n_ctx);
     let mut parsed_entries: Vec<ParsedEntry> = Vec::with_capacity(n_ctx);
 
@@ -6403,6 +6447,15 @@ pub(crate) fn order2_context_huffman_decode(
         }
         let code_len: Vec<u8> = blob[code_len_start..code_len_start + n_distinct].to_vec();
         pos = code_len_start + n_distinct;
+
+        // Code lengths come from the wire.  Validate Kraft's inequality
+        // before canonical-code arithmetic so a malformed deep table cannot
+        // wrap the codeword or make the decoder panic in debug builds.
+        if !crate::huffman::kraft_ok(&code_len) {
+            return Err(CubrimError::Decode(
+                "EntropyContext2: context entry has invalid Huffman code lengths".into(),
+            ));
+        }
 
         // Build decode table.
         let canonical = crate::huffman::assign_canonical_codes(&code_len);
@@ -14273,9 +14326,10 @@ mod tests {
     }
 
     #[test]
-    fn test_order2_header_invalid_code_lengths_do_not_panic() {
-        // Overfull lengths used to make the fast flat-table builder write past
-        // its allocation. The existing map decoder remains the safe fallback.
+    fn test_order2_header_invalid_code_lengths_fail_closed() {
+        // Overfull lengths used to make canonical-code arithmetic and the fast
+        // flat-table builder unsafe. Malformed wire tables now fail closed with
+        // a typed error before either decoder is constructed.
         let mut fake = Vec::new();
         fake.extend_from_slice(&128u16.to_be_bytes()); // min_ctx
         fake.extend_from_slice(&1u16.to_be_bytes()); // one Order0 context
@@ -14283,9 +14337,14 @@ mod tests {
         fake.extend_from_slice(&[1u8, 1, 1, 0]); // overfull code lengths
         fake.push(0u8); // one valid zero bit for symbol 0
 
-        let (decoded, _) = order2_context_huffman_decode(&fake, 0, 1, 4)
-            .expect("invalid lengths must use the safe fallback, not panic");
-        assert_eq!(decoded, vec![0]);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            order2_context_huffman_decode(&fake, 0, 1, 4)
+        }));
+        assert!(result.is_ok(), "invalid lengths must not panic");
+        assert!(matches!(
+            result.unwrap(),
+            Err(CubrimError::Decode(message)) if message.contains("invalid Huffman code lengths")
+        ));
     }
 
     #[test]

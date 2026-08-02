@@ -16,12 +16,13 @@ pub mod error;
 pub(crate) mod geocm;
 pub mod header;
 pub(crate) mod huffman;
+pub mod limits;
 pub mod phi;
 pub(crate) mod ppmd;
 pub(crate) mod prof;
 pub mod rle;
 
-pub use codec::{decode, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
+pub use codec::{decode, decode_with_limits, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
 
 /// Write the encoder candidate-attribution table to stderr, given the wall time
 /// of the encode it should be attributed against. No-op unless
@@ -31,6 +32,7 @@ pub fn report_encode_profile(total_nanos: u128) {
 }
 pub use config::{EncodeConfig, GapScheme, Preset, ValueScheme};
 pub use error::CubrimError;
+pub use limits::DecodeLimits;
 
 // V-AC-8: traceability check module
 #[cfg(test)]
