@@ -1,8 +1,8 @@
 # CUBR-0074 Gate 2: reference-channel gate
 
 **Status:** MEASURED NEGATIVE — the protocol void is retained for numeric cells,
-but the diagnostic establishes that the current archival candidate fails the
-web-sized encode budget on the largest corpus resource.
+and controlled diagnostics establish a size-threshold/superlinear encode regime
+in the current archival candidate.
 
 ## Gate
 
@@ -83,18 +83,35 @@ diagnostic only, not a web-schema benchmark result.
 | `source-map-small-v1` | 6,144 B | 250 B | 0.06 s | 29,776 kB | yes |
 
 The small-resource discriminator rejects the fixed per-invocation-cost
-hypothesis. The large JSON result supports the payload-class-pathology
-hypothesis: the candidate takes 70.49 seconds to encode the corpus's largest
-web resource, exceeding the unchanged 60-second protocol budget in both
-validated-harness attempts, while the three smallest resources complete in
-milliseconds. The large diagnostic archive also decoded byte-for-byte to the
-300,000-byte source.
+hypothesis, but it did not by itself prove a JSON-specific pathology. A
+size-only ladder was therefore run on prefixes of the JSON payload and on a
+second media type made by repeating/truncating the source-map seed. Every row
+was a single no-timeout encode followed by exact `cmp` verification:
+
+| Size | JSON wall | JSON s/MiB | JSON peak RSS | Source-map wall | Source-map s/MiB | Source-map peak RSS |
+|---:|---:|---:|---:|---:|---:|---:|
+| 12,288 B | 0.13 s | 11.1 | 31,016 kB | 0.11 s | 9.4 | 30,248 kB |
+| 25,600 B | 0.27 s | 11.1 | 31,000 kB | 0.26 s | 10.6 | 30,104 kB |
+| 51,200 B | 0.58 s | 11.9 | 55,484 kB | 0.47 s | 9.6 | 51,644 kB |
+| 102,400 B | 14.61 s | 149.6 | 622,728 kB | 9.44 s | 96.7 | 602,104 kB |
+| 204,800 B | 42.98 s | 220.1 | 638,288 kB | 15.74 s | 80.6 | 619,616 kB |
+| 300,000 B | 77.52 s | 271.0 | 654,568 kB | 30.65 s | 107.1 | 625,508 kB |
+
+The transition is size-driven and appears between 51,200 B and 102,400 B on
+both media types. The current source-level sizing path is consistent with the
+boundary: `code/cubrim-rs/src/cm2.rs:363-376` derives exponent 19 at 51,200 B
+and 20 at 102,400 B, crossing at 65,537 B; `LowmemDecode` caps the exponent at
+20 in `code/cubrim-rs/src/config.rs:489-495`, while `CmModel` and `Match`
+allocate multiple `1 << tbits` tables in `cm2.rs:566-614`. That explains the
+observed jump from roughly 50 MB to roughly 600 MB RSS. It localizes the finding
+to a core-codec size regime; it does not yet identify the exact hot loop, and no
+fix is authorized by this mandate.
 
 This is the decision-relevant 0074 result: the current archival codec cannot
-encode a 300 KB web JSON payload inside the same web-stand time budget used by
-the validated Brotli and Zstd baselines. The timeout remains a journaled void
-for numeric benchmark cells; this measured negative belongs in the 0074 record
-and must not be converted into a DB number.
+encode a 300 KB web payload inside the same web-stand time budget used by the
+validated Brotli and Zstd baselines. The timeout remains a journaled void for
+numeric benchmark cells; this measured negative belongs in the 0074 record and
+must not be converted into a DB number.
 
 The result also establishes the programme order: CUBR-0076 Web Profile work is
 the precondition for a web-capable configuration, not a nice-to-have measurement
