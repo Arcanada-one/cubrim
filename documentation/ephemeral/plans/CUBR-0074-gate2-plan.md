@@ -39,8 +39,8 @@
 - Modify: PostgreSQL `web_benchmark_hypothesis_dependency`, only after all cells validate
 - Insert: PostgreSQL `web_benchmark_hypothesis_evaluation`, `web_benchmark_hypothesis_evidence`, and `web_benchmark_hypothesis_derived`
 
-- [ ] Run the focused Python harness tests and prove the published five-codec Phase A bundle remains byte-identical.
-- [ ] Run the reference channel on the same eight samples with 30 trials and 3 warmups; require exact decoded hash and length on every cell.
+- [x] Run the focused Python harness tests and prove the published five-codec Phase A bundle remains byte-identical; the deterministic canonical fixture hash is unchanged and the existing DB rows remain unchanged.
+- [x] Run the reference channel on the same eight samples with 30 trials and 3 warmups; the run is void because the first required `json-api-large-v1` warmup timed out, including on the quiet-host recovery attempt.
 - [ ] Summarize medians and bootstrap intervals, compare ratio to Brotli-11 and decode throughput to Brotli-5, then write guarded DB evidence only for complete validated cells.
-- [ ] Leave the dependency pending and write a journaled void instead of numeric rows if any candidate cell fails.
-- [ ] Do not touch CUBR-0076 through CUBR-0080 or advance WC-STAGE-1.
+- [x] Leave the dependency pending and write a journaled void instead of numeric rows because the candidate cell failed.
+- [x] Do not touch CUBR-0076 through CUBR-0080 or advance WC-STAGE-1.
