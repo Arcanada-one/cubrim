@@ -567,10 +567,6 @@ struct CmModel {
 }
 
 impl CmModel {
-    fn new(tbits: usize) -> Self {
-        Self::new_with_col(tbits, None)
-    }
-
     /// `col_delim = Some(d)` enables the FH4-03 column-position model keyed on
     /// bytes-since-`d`. `None` reproduces the default model set exactly.
     fn new_with_col(tbits: usize, col_delim: Option<u8>) -> Self {
@@ -932,6 +928,7 @@ fn skip_col_variants() -> bool {
 }
 
 /// Encode `data`. Wire: `[orig_len u64 BE][bit-range-coded]`.
+#[cfg(test)]
 pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
     cm2_encode_with(data, true, None)
 }
@@ -1077,6 +1074,9 @@ fn detect_col_delims(data: &[u8]) -> Vec<u8> {
     scored.into_iter().take(MAX).map(|(_, d)| d).collect()
 }
 
+// Intentionally unused in production: this is the manual audit instrument
+// exercised only by the ignored `self_probe` test.
+#[allow(dead_code)]
 pub(crate) fn cm2_encode_audit(data: &[u8]) -> (Vec<u8>, f64, f64) {
     cm2_encode_audit_variant(data, None)
 }
@@ -1085,6 +1085,9 @@ fn cm2_encode_variant(data: &[u8], col_delim: Option<u8>, max_tbits: Option<usiz
     cm2_encode_audit_variant_with(data, col_delim, max_tbits).0
 }
 
+// Intentionally unused outside the manual audit instrument above; keep it for
+// the ignored `self_probe` test without hiding unrelated dead code.
+#[allow(dead_code)]
 fn cm2_encode_audit_variant(data: &[u8], col_delim: Option<u8>) -> (Vec<u8>, f64, f64) {
     cm2_encode_audit_variant_with(data, col_delim, None)
 }
