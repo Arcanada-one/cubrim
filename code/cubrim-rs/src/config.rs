@@ -442,8 +442,13 @@ pub struct EncodeConfig {
 /// When the skipped variant would have won, the output pays the measured ratio
 /// cost. `LowmemDecode` costs three times more (a 2 MB slice derives a 24-bit
 /// table exponent, so a cap at 20 costs four steps, while a corpus file of >=16 MB
-/// derives 27 and pays seven). No decode-speed claim is made here, and the
-/// `LowmemDecode` run is outside this update.
+/// derives 27 and pays seven). Its measured per-file archive-size cost ranges
+/// from **+0.06% on `xargs.1` to +15.70% on `enwik8`**; the **+9.32%** above
+/// is the corpus delta, not a per-file expectation. `LowmemDecode` inherits
+/// `Balanced`'s dropped column sweep and then adds the table cap: `xml` moves
+/// from 2.99x to 3.90x faster encode and `samba` from 0.99x to 1.27x, so
+/// the cap contributes real encode-time savings on top, but those levers are not an
+/// additive claim. No decode-speed claim is made here.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Preset {
     /// Maximum ratio, whatever it costs. Byte-identical to the shipped v0.3.2
@@ -466,11 +471,19 @@ pub enum Preset {
     ///
     /// Caps the CM2 table exponent at 20: measured **decode peak 12.27 GiB ->
     /// 0.216 GiB on the 24-file world corpus, a 56.8x cut** (class-independent —
-    /// decode is CM2 alone whatever won at encode time). Output cost is
-    /// **+9.32% on the corpus** (+3.32% on a 2 MB slice — the slice structurally
-    /// understates it, see the corpus table above). Also drops the column
+    /// decode is CM2 alone whatever won at encode time). The measured no-change
+    /// exceptions are `sao`, `mr`, and `x-ray` (0.086-0.093 GiB on both presets,
+    /// with byte-identical archives), plus Canterbury's `grammar.lsp`, `ptt5`,
+    /// and `sum`; their table exponent never reached the cap, so the cap is inert.
+    /// Output cost is **+9.32% on the corpus** (+3.32% on a 2 MB slice — the
+    /// slice structurally understates it, see the corpus table above). Per-file
+    /// archive-size cost ranges from **+0.06% on `xargs.1` to +15.70% on `enwik8`**;
+    /// the corpus delta is not a per-file expectation. Also drops the column
     /// variants, since an environment that cares about decoder memory is not
-    /// paying 3x encode time for a fraction of a percent of ratio.
+    /// paying 3x encode time for a fraction of a percent of ratio. This preset
+    /// inherits `Balanced`'s dropped column sweep and then adds the table cap;
+    /// the `xml` and `samba` encode results above show the two levers are not an
+    /// additive claim. No decode-speed claim is made.
     ///
     /// Readable by any decoder that understands the table-exponent field.
     /// **Not** readable by a decoder older than that field — such a decoder
