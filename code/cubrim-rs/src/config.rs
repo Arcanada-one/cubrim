@@ -436,25 +436,29 @@ pub struct EncodeConfig {
 /// | `LowmemDecode` | 0.206627 | +9.32% | yes, by 9.6% |
 ///
 /// A slice can mislead in *either* direction and did in both: `Balanced` costs
-/// five times less than its slice suggested (the column sweep is a no-op wherever
-/// CM2 does not win, which is most of the corpus), and `LowmemDecode` costs three times
-/// more (a 2 MB slice derives a 24-bit table exponent, so a cap at 20 costs four
-/// steps, while a corpus file of >=16 MB derives 27 and pays seven). Encode
-/// throughput and decode peak RSS per preset are **not yet measured at corpus
-/// scale** — those cells are deliberately absent rather than carried across.
+/// five times less than its slice suggested because disabling the sweep can skip
+/// exploratory passes whose candidate would not improve the final output, so the
+/// resulting archive can be byte-identical despite a real encode-time saving.
+/// When the skipped variant would have won, the output pays the measured ratio
+/// cost. `LowmemDecode` costs three times more (a 2 MB slice derives a 24-bit
+/// table exponent, so a cap at 20 costs four steps, while a corpus file of >=16 MB
+/// derives 27 and pays seven). No decode-speed claim is made here, and the
+/// `LowmemDecode` run is outside this update.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Preset {
     /// Maximum ratio, whatever it costs. Byte-identical to the shipped v0.3.2
     /// encoder: every competitive candidate runs, including the CM2 column
     /// variants.
     Max,
-    /// Drops the CM2 column-variant passes. Corpus cost is **+0.47% output**
-    /// (0.189891 against 0.189007). Measured on 2 MB Silesia slices:
-    /// **2.27–3.30× less CM2 encode time for 0.71–4.83% larger output** on the
-    /// classes CM2 wins (text, xml, database) — the per-class slice spread is
-    /// why the corpus average is so much smaller. No effect on the classes where a
-    /// type transform wins (exe, image), because CM2 is not the winner there.
-    /// Archives stay mutually decodable with `Max`.
+    /// Drops the CM2 column-variant passes. The strongest named result is
+    /// **`enwik8`: 2.48x faster encode** (4047.6 s -> 1632.6 s) with a
+    /// **byte-identical 19,552,678-byte archive**. On some inputs it emits
+    /// byte-identical output; on others it costs ratio, with a measured
+    /// **+0.47% corpus delta** (0.189891 against 0.189007). Named results include
+    /// `reymont` at 3.01x faster and `sao` at a relative 1.56x; `sao` saved the
+    /// most absolute encode seconds per MiB in the measured run despite a
+    /// mid-range compression ratio. These are encode measurements; no decode
+    /// speed is claimed. Archives stay mutually decodable with `Max`.
     Balanced,
     /// Bounded decoder memory, for environments that have a hard ceiling —
     /// chiefly `wasm32`, whose 4 GiB address space cannot hold the 12.3 GiB of
