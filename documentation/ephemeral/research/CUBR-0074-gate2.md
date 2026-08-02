@@ -1,8 +1,8 @@
 # CUBR-0074 Gate 2: reference-channel gate
 
-**Status:** BLOCKED / VOID — the isolated reference channel is implemented, but the
-required candidate run cannot produce a complete validated bundle because the
-first required warmup times out on the large JSON sample.
+**Status:** MEASURED NEGATIVE — the protocol void is retained for numeric cells,
+but the diagnostic establishes that the current archival candidate fails the
+web-sized encode budget on the largest corpus resource.
 
 ## Gate
 
@@ -61,6 +61,45 @@ Chromium, or standards work.
 - Candidate build 7 remains immutable and still advertises
   `hostile_input_hardened=false`, `roundtrip_exact=false`, and no Web Profile;
   it was not mutated or used to manufacture a passing evaluation.
+
+## Diagnostic conclusion: protocol failure, not an environmental block
+
+The two competing explanations were stated before the diagnostic run:
+
+1. A fixed per-invocation encode cost makes even small resources
+   disproportionately slow.
+2. The 300 KB JSON resource triggers a payload-class pathology.
+
+The required no-timeout, one-file diagnostic used the same immutable candidate
+binary and the same `compress INPUT OUTPUT --preset lowmem-decode -q` command as
+the reference adapter. It ran outside the benchmark harness and therefore is
+diagnostic only, not a web-schema benchmark result.
+
+| Resource | Input | Archive | Encode wall | Peak RSS | Exact round-trip |
+|---|---:|---:|---:|---:|---|
+| `json-api-large-v1` | 300,000 B | 1,149 B | 70.49 s | 651,908 kB | yes |
+| `wasm-small-v1` | 2,048 B | 57 B | 0.02 s | 22,272 kB | yes |
+| `html-small-v1` | 4,096 B | 226 B | 0.04 s | 29,184 kB | yes |
+| `source-map-small-v1` | 6,144 B | 250 B | 0.06 s | 29,776 kB | yes |
+
+The small-resource discriminator rejects the fixed per-invocation-cost
+hypothesis. The large JSON result supports the payload-class-pathology
+hypothesis: the candidate takes 70.49 seconds to encode the corpus's largest
+web resource, exceeding the unchanged 60-second protocol budget in both
+validated-harness attempts, while the three smallest resources complete in
+milliseconds. The large diagnostic archive also decoded byte-for-byte to the
+300,000-byte source.
+
+This is the decision-relevant 0074 result: the current archival codec cannot
+encode a 300 KB web JSON payload inside the same web-stand time budget used by
+the validated Brotli and Zstd baselines. The timeout remains a journaled void
+for numeric benchmark cells; this measured negative belongs in the 0074 record
+and must not be converted into a DB number.
+
+The result also establishes the programme order: CUBR-0076 Web Profile work is
+the precondition for a web-capable configuration, not a nice-to-have measurement
+after the archival codec. CUBR-0076 through CUBR-0080 remain untouched in this
+task.
 
 ## Stop conditions
 
