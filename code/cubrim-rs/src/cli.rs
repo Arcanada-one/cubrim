@@ -175,10 +175,15 @@ pub struct TestArgs {
 pub enum PresetArg {
     /// Maximum ratio. Byte-identical to the shipped v0.3.2 encoder.
     Max,
-    /// Drops the CM2 column-variant passes. Corpus cost is +0.47% output
-    /// (24-file world corpus, ratio 0.189891 against max 0.189007); the speedup
-    /// is class-dependent and largest where CM2 wins, e.g. 3.00x faster encode
-    /// on dickens. Archives stay decodable by every other preset.
+    /// Drops the CM2 column-variant passes. The strongest named result is
+    /// `enwik8`: 2.48x faster encode (4047.6 s -> 1632.6 s) with a
+    /// byte-identical 19,552,678-byte archive. Some inputs remain byte-identical;
+    /// on others it costs ratio, with a measured +0.47% corpus delta (0.189891
+    /// against max 0.189007). `reymont` reached 3.01x faster encode, while
+    /// `sao` reached a relative 1.56x and saved the most absolute encode seconds
+    /// per MiB in the measured run despite a mid-range compression ratio. These
+    /// are encode results; no decode-speed claim is made. Archives stay decodable
+    /// by every other preset.
     Balanced,
     /// Bounded decoder memory for wasm32 and other hard-ceiling environments:
     /// decode peak 12.27 GiB -> 0.216 GiB on the 24-file world corpus, a 56.8x
