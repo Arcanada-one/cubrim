@@ -148,23 +148,43 @@ passes the exact round-trip check. The ratio result stays in this research
 record only; it does not authorize a numeric, evaluation, evidence, or derived
 row in the database.
 
+The epic already owns the corpus question. The CUBR-0072 canon defines the
+CUBR-0074 corpus as HTML, CSS, JavaScript, source maps, JSON API, SVG, WASM, and
+fonts across small/medium/large size classes, with canonical sources and
+checksums. The backlog has one CUBR-0074 world-web-benchmark row and no separate
+corpus-acquisition task; CUBR-0075 owns decode-side hypotheses, and CUBR-0076
+through CUBR-0080 are downstream tasks.
+
+The repository also contains the already-designed real corpus candidate
+`bench/web-corpus/manifest.v2.json` (`cubr0074-web-real-v2`). It has 12 samples,
+all with non-`project-authored:` provenance and `redistributable=true`:
+HTML x2, CSS x1, JavaScript x3, JSON API x3, source maps x2, and WOFF2 x1;
+the size split is small x2, medium x7, and large x3. Its
+`real_world_sample_share` is `12/12 = 1.000`. The manifest records, rather than
+fakes, two canon gaps: WASM is blocked on CUBR-0077, and SVG is blocked on an
+operator sourcing decision because available third-party assets carry trademark
+concerns. This v2 candidate has not been substituted into the current v1
+Gate2 run or written to the database.
+
 The route diagnostic is decision-relevant for attribution: the current archival
 configuration chooses an inappropriate large-input mode for web resources above
 64 KiB, while the supported small-route configuration handles the 300 KB response
 within the budget. It is not a Gate2 continuation or WIN result. The true current
-blocker is corpus provenance, not the codec, harness, or Web Profile: the manifest
-has `real_world_sample_share=0.125`, so the `>=0.80` criterion is unsatisfied by
-construction.
+blocker for this v1 run is corpus selection/provenance, not the codec, harness, or
+Web Profile: its manifest has `real_world_sample_share=0.125`, so the `>=0.80`
+criterion is unsatisfied by construction. The existing v2 candidate removes the
+provenance defect, but its coverage and measurement status still require an
+explicit CUBR-0074 reconciliation.
 
 CUBR-0076 now has a concrete measured requirement: a Web Profile must select or
 equivalently configure the small-input route by deployment context so a
 300 KB web response does not pay the archival large-file competition. No 0076
 implementation is authorized in this task.
 
-The result also establishes the programme order: corpus acquisition/licensing is
-the immediate prerequisite for a valid corpus-parity Gate2 evaluation. CUBR-0076
-Web Profile work still has the concrete route requirement above, but it cannot
-clear the current corpus blocker. CUBR-0076 through CUBR-0080 remain untouched in
+The result also establishes the programme order: reconcile the existing v2 corpus
+record before proposing any acquisition work. CUBR-0076 Web Profile work still
+has the concrete route requirement above, but it cannot by itself clear the
+current corpus-selection blocker. CUBR-0076 through CUBR-0080 remain untouched in
 this task.
 
 ## Stop conditions
@@ -175,3 +195,38 @@ this task.
   rows; retain only a journaled void.
 - Do not resolve the 0074 dependency or write evaluation/evidence/derived rows until
   every candidate cell is complete and validated.
+
+## State handoff for the next session
+
+- **Cliff:** approximately 10 s/MiB is linear below 64 KiB; the first rung above
+  the threshold has a 25x step. `cube_size_limit` is defined at
+  `code/cubrim-rs/src/config.rs:520` and gates `cm_should_try` (the symbol is at
+  `code/cubrim-rs/src/codec.rs:3317` in this checkout); the cliff reproduced on
+  JSON and source-map inputs, with 12/12 exact round-trips.
+- **Route override:** the 300 KB JSON moved from 77.52 s / 654 MB to 2.15 s /
+  106 MB with `--b 1024 --preset lowmem-decode`, exact round-trip preserved.
+  `ratio_vs_brotli11=0.552138` is fixture-only; Brotli-11 reaches roughly 144x
+  compression on that same synthetic file, so the ratio is not web-representative.
+- **Binding blocker:** the measured v1 manifest is at
+  `real_world_sample_share=0.125` versus the required `0.80`; dependency 5,
+  `instrumentation: real-world-web-corpus`, remains `pending_dependency`. The
+  repository's v2 candidate is 12/12 real and redistributable, but has explicit
+  WASM and SVG gaps and has not yet become a Gate2 DB result.
+- **Ownership:** CUBR-0074 already owns the world-web benchmark and corpus
+  decision. No duplicate corpus task exists in the backlog. CUBR-0075 owns the
+  decode-side hypothesis work; 0076 owns the Web Profile route/format requirement
+  and gates 0077/0078/0079; 0080 is last and operator-gated for public
+  standardisation.
+- **0076 requirement:** select the small-input route by deployment context, not
+  input size; the route requirement is measured, not assumed.
+- **Untouched:** codec defaults, harness timeout, `PHASE_A_CODECS`, the database
+  (120 summaries / 0 evaluations), the shared backlog (` M`, unstaged), and
+  CUBR-0076 through CUBR-0080.
+- **Next session:** reconcile whether v2 is the authorized Gate2 corpus and how
+  its recorded WASM/SVG gaps affect the canon coverage requirement. Do not fetch
+  third-party resources, add manifest entries, create a duplicate task, or write
+  DB rows as a diagnostic side effect. If v2 is accepted, measure it through the
+  existing CUBR-0074 guarded pipeline; only complete validated cells can clear the
+  dependency.
+- **Boundary:** stop at the instructed quota boundary with this handoff committed;
+  no outward-facing publication or irreversible action was taken.
