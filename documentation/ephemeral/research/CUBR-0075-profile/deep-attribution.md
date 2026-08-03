@@ -185,6 +185,8 @@ Branch `codex/cubr-0075-profile`, HEAD `d3c345c`; source SHA
 `7b1d1f786885c3f2866d84c7e3895d5d85aff966578be9bbbf08c0fd0fd46d04`; encoder
 binary SHA `144684151ba90deb8bcad0c659f78a9dc40941eb7d8cbb4b18534cf931c2ec03`;
 manifest SHA `fecc83c1e6559d361d0029024393a3cc98909f0c45dea3a2f0c4f11b75a3a2bf`.
+Pushed evidence commit: local `89658fdde8c3d9d6d1cf90137749b1d736129d8c`;
+remote `refs/heads/codex/cubr-0075-profile` confirmed at the same SHA.
 The split run measured counter/state lookup, mixer dot products, and adaptation
 boundaries inside the CM2 model across the full web corpus. Next question: is
 adaptation's 56.1 cycles per learned input a cache problem or an algorithmic one?
