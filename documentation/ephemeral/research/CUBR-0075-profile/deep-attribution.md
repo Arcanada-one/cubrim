@@ -71,6 +71,29 @@ arithmetic. The profile shows a deliberately broad model design repeated through
 context views; a follow-on implementation study would still need isolated counters or
 hardware measurements to split that work into lookup, dot-product, and adaptation cost.
 
+## Split correction
+
+The direct split measurement supersedes the earlier **10.0 cycles per dot-product term**
+reading. The isolated dot-product boundary is **1,033.4 / 256 = 4.04 cycles per term**;
+the earlier figure conflated dot products with lookup and adaptation work. The measured
+normalized costs are **30.5 cycles per learned input** for lookup and **56.1 cycles per
+learned input** for adaptation. The split therefore puts the dominant cost in adaptation
+(52.09%), followed by counter/state lookup (28.34%); dot products are 19.57%.
+
+The split Amdahl ceiling is:
+
+| eliminated work | maximum speedup |
+|---|---:|
+| all dot products | **1.24×** |
+| all counter/state lookup | **1.40×** |
+| all adaptation | **2.09×** |
+| all model work | **22.52×** |
+| required decode-gate speedup | **227×** |
+
+No single split exceeds 2.09×, and the full model ceiling remains far below 227×.
+The archival opportunity remains worth pursuing; the web claim requires a different
+decode path, so CUBR-0076 `web-profile-prototype` remains mandatory.
+
 ## Amdahl ceiling and the web-path decision
 
 The all-mode deep evidence totals **2,456,882,895,434 detailed substage cycles**. The
@@ -157,9 +180,15 @@ remain unchanged.
 
 ## Split-profile pickup
 
-Branch `codex/cubr-0075-profile`, HEAD `d3c345c`: the split run measured
-counter/state lookup, mixer dot products, and adaptation boundaries inside the
-CM2 model across the full web corpus. Exact relaunch command:
+Branch `codex/cubr-0075-profile`, HEAD `d3c345c`; source SHA
+`d3c345cb8be7baf4abb77a471e402d4bad0893e3`; profile binary SHA
+`7b1d1f786885c3f2866d84c7e3895d5d85aff966578be9bbbf08c0fd0fd46d04`; encoder
+binary SHA `144684151ba90deb8bcad0c659f78a9dc40941eb7d8cbb4b18534cf931c2ec03`;
+manifest SHA `fecc83c1e6559d361d0029024393a3cc98909f0c45dea3a2f0c4f11b75a3a2bf`.
+The split run measured counter/state lookup, mixer dot products, and adaptation
+boundaries inside the CM2 model across the full web corpus. Next question: is
+adaptation's 56.1 cycles per learned input a cache problem or an algorithmic one?
+Exact relaunch command:
 
 ```text
 python3 bench/web-benchmark/profile_decode.py --profile-binary code/cubrim-rs/target/release/cubrim-decode-profile --encoder-binary code/cubrim-rs/target/release/cubrim --output documentation/ephemeral/research/CUBR-0075-profile/split-attribution.json
