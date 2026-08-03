@@ -1,6 +1,7 @@
 #![cfg(feature = "decode-profile")]
 
 use cubrim::{decode, encode};
+use serde_json::Value;
 
 #[test]
 fn profile_report_has_the_six_stage_contract() {
@@ -31,6 +32,22 @@ fn profile_report_has_the_six_stage_contract() {
             "entropy.range_decode",
             "transforms.update_bit",
             "transforms.end_byte",
+        ]
+    );
+
+    let json = serde_json::to_value(&report).expect("profile report serializes");
+    assert_eq!(json["model_split_schema_version"], Value::from(1));
+    assert_eq!(
+        json["model_splits"]
+            .as_array()
+            .expect("model split rows")
+            .iter()
+            .map(|row| row["name"].as_str().expect("split name"))
+            .collect::<Vec<_>>(),
+        vec![
+            "model.counter_state_lookup",
+            "model.dot_products",
+            "model.adaptation",
         ]
     );
 }

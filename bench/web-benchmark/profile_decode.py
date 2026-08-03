@@ -29,6 +29,7 @@ STAGE_NAMES = (
     "output_materialization",
 )
 SUBSTAGE_SCHEMA_VERSION = 1
+MODEL_SPLIT_SCHEMA_VERSION = 1
 SUBSTAGE_NAMES = (
     "transforms.start_byte",
     "entropy.predict_bit",
@@ -36,6 +37,11 @@ SUBSTAGE_NAMES = (
     "entropy.range_decode",
     "transforms.update_bit",
     "transforms.end_byte",
+)
+MODEL_SPLIT_NAMES = (
+    "model.counter_state_lookup",
+    "model.dot_products",
+    "model.adaptation",
 )
 AFFINITY_MODES = ("one-core", "fixed-core")
 DEFAULT_TRIALS = 30
@@ -151,6 +157,16 @@ def validate_profile_record(
     )
     if substage_names != SUBSTAGE_NAMES:
         raise ProfileBlocked(f"profile substage contract mismatch: {sample_id}")
+    if profile.get("model_split_schema_version") != MODEL_SPLIT_SCHEMA_VERSION:
+        raise ProfileBlocked(f"profile model split schema mismatch: {sample_id}")
+    model_split_rows = profile.get("model_splits")
+    model_split_names = (
+        tuple(row.get("name") for row in model_split_rows)
+        if isinstance(model_split_rows, list)
+        else ()
+    )
+    if model_split_names != MODEL_SPLIT_NAMES:
+        raise ProfileBlocked(f"profile model split contract mismatch: {sample_id}")
     if profile.get("output_bytes") != original_bytes:
         raise ProfileBlocked(f"profile output size drifted: {sample_id}")
 
@@ -191,6 +207,19 @@ def summarize_observations(observations: list[dict[str, Any]]) -> dict[str, Any]
                 row["cycles_per_output_byte"] for row in rows
             ),
         }
+    model_splits: dict[str, dict[str, Any]] = {}
+    for index, name in enumerate(MODEL_SPLIT_NAMES):
+        rows = [profile["model_splits"][index] for profile in profile_rows]
+        model_splits[name] = {
+            "applicable": all(row["applicable"] for row in rows),
+            "calls_median": _median(row["calls"] for row in rows),
+            "nanos_per_output_byte_median": _median(
+                row["nanos_per_output_byte"] for row in rows
+            ),
+            "cycles_per_output_byte_median": _median(
+                row["cycles_per_output_byte"] for row in rows
+            ),
+        }
     return {
         "trials": len(observations),
         "exact_roundtrip_all": all(
@@ -204,6 +233,7 @@ def summarize_observations(observations: list[dict[str, Any]]) -> dict[str, Any]
         ),
         "stages": stages,
         "substages": substages,
+        "model_splits": model_splits,
     }
 
 
@@ -293,6 +323,7 @@ def run_profile(
         "kind": "cubr0075-decode-attribution-deep",
         "schema_version": 1,
         "substage_schema_version": SUBSTAGE_SCHEMA_VERSION,
+        "model_split_schema_version": MODEL_SPLIT_SCHEMA_VERSION,
         "attribution_detail": "per-operation",
         "status": "complete",
         "task_id": "CUBR-0075",

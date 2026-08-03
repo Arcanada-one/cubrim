@@ -72,6 +72,11 @@ class ProfileDecodeTests(unittest.TestCase):
                     }
                     for name in profile_decode.SUBSTAGE_NAMES
                 ],
+                "model_split_schema_version": profile_decode.MODEL_SPLIT_SCHEMA_VERSION,
+                "model_splits": [
+                    {"name": name, "applicable": False}
+                    for name in profile_decode.MODEL_SPLIT_NAMES
+                ],
             },
         }
         profile_decode.validate_profile_record(
@@ -92,6 +97,33 @@ class ProfileDecodeTests(unittest.TestCase):
         valid["exact_roundtrip"] = True
         valid["decode_profile"]["substages"] = valid["decode_profile"]["substages"][:-1]
         with self.assertRaisesRegex(profile_decode.ProfileBlocked, "substage contract"):
+            profile_decode.validate_profile_record(
+                valid,
+                sample_id="sample-a",
+                original_sha256="a" * 64,
+                original_bytes=10,
+            )
+
+    def test_profile_record_requires_model_split_contract(self):
+        valid = {
+            "exact_roundtrip": True,
+            "original_sha256": "a" * 64,
+            "original_bytes": 10,
+            "decode_profile": {
+                "output_bytes": 10,
+                "stages": [{"name": name, "applicable": False} for name in profile_decode.STAGE_NAMES],
+                "substage_schema_version": profile_decode.SUBSTAGE_SCHEMA_VERSION,
+                "substages": [
+                    {
+                        "name": name,
+                        "parent_stage": name.split(".", 1)[0],
+                        "applicable": False,
+                    }
+                    for name in profile_decode.SUBSTAGE_NAMES
+                ],
+            },
+        }
+        with self.assertRaisesRegex(profile_decode.ProfileBlocked, "model split schema"):
             profile_decode.validate_profile_record(
                 valid,
                 sample_id="sample-a",

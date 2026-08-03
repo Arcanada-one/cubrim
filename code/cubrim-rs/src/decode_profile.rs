@@ -11,6 +11,7 @@ use std::time::Instant;
 
 pub const SCHEMA_VERSION: u32 = 1;
 pub const SUBSTAGE_SCHEMA_VERSION: u32 = 1;
+pub const MODEL_SPLIT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Stage {
@@ -109,6 +110,37 @@ impl Substage {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModelSplit {
+    CounterStateLookup,
+    DotProducts,
+    Adaptation,
+}
+
+impl ModelSplit {
+    pub const ALL: [ModelSplit; 3] = [
+        Self::CounterStateLookup,
+        Self::DotProducts,
+        Self::Adaptation,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::CounterStateLookup => "model.counter_state_lookup",
+            Self::DotProducts => "model.dot_products",
+            Self::Adaptation => "model.adaptation",
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::CounterStateLookup => 0,
+            Self::DotProducts => 1,
+            Self::Adaptation => 2,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct StageTotals {
     calls: u64,
@@ -149,6 +181,17 @@ pub struct SubstageReport {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct ModelSplitReport {
+    pub name: &'static str,
+    pub calls: u64,
+    pub nanos: u64,
+    pub cycles: Option<u64>,
+    pub applicable: bool,
+    pub nanos_per_output_byte: Option<f64>,
+    pub cycles_per_output_byte: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct Report {
     pub schema_version: u32,
     pub input_bytes: usize,
@@ -160,6 +203,8 @@ pub struct Report {
     pub stages: Vec<StageReport>,
     pub substage_schema_version: u32,
     pub substages: Vec<SubstageReport>,
+    pub model_split_schema_version: u32,
+    pub model_splits: Vec<ModelSplitReport>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -173,6 +218,7 @@ struct Accumulator {
     input_bytes: usize,
     stages: [StageTotals; 6],
     substages: [SubstageTotals; 6],
+    model_splits: [SubstageTotals; 3],
 }
 
 impl Accumulator {
@@ -181,6 +227,7 @@ impl Accumulator {
             input_bytes,
             stages: [StageTotals::default(); 6],
             substages: [SubstageTotals::default(); 6],
+            model_splits: [SubstageTotals::default(); 3],
         }
     }
 
@@ -196,6 +243,8 @@ impl Accumulator {
             stages: Vec::with_capacity(Stage::ALL.len()),
             substage_schema_version: SUBSTAGE_SCHEMA_VERSION,
             substages: Vec::with_capacity(Substage::ALL.len()),
+            model_split_schema_version: MODEL_SPLIT_SCHEMA_VERSION,
+            model_splits: Vec::with_capacity(ModelSplit::ALL.len()),
         };
         for stage in Stage::ALL {
             let totals = self.stages[stage.index()];
@@ -214,6 +263,18 @@ impl Accumulator {
             report.substages.push(SubstageReport {
                 name: substage.name(),
                 parent_stage: substage.parent_stage(),
+                calls: totals.calls,
+                nanos: totals.nanos,
+                cycles: totals.cycles,
+                applicable: totals.applicable,
+                nanos_per_output_byte: None,
+                cycles_per_output_byte: None,
+            });
+        }
+        for split in ModelSplit::ALL {
+            let totals = self.model_splits[split.index()];
+            report.model_splits.push(ModelSplitReport {
+                name: split.name(),
                 calls: totals.calls,
                 nanos: totals.nanos,
                 cycles: totals.cycles,
@@ -312,6 +373,15 @@ impl Report {
                 row.cycles_per_output_byte = None;
             }
         }
+        for row in &mut self.model_splits {
+            if row.applicable && self.output_bytes > 0 {
+                row.nanos_per_output_byte = Some(row.nanos as f64 / denominator);
+                row.cycles_per_output_byte = row.cycles.map(|cycles| cycles as f64 / denominator);
+            } else {
+                row.nanos_per_output_byte = None;
+                row.cycles_per_output_byte = None;
+            }
+        }
     }
 }
 
@@ -362,6 +432,50 @@ impl Drop for StageGuard {
 pub(crate) struct SubstageGuard {
     substage: Substage,
     start: Option<Clock>,
+}
+
+pub(crate) struct ModelSplitGuard {
+    split: ModelSplit,
+    start: Option<Clock>,
+}
+
+impl ModelSplitGuard {
+    pub(crate) fn enter(split: ModelSplit) -> Self {
+        let active = ACTIVE.with(|current| current.borrow().is_some());
+        if active {
+            ACTIVE.with(|current| {
+                if let Some(accumulator) = current.borrow_mut().as_mut() {
+                    accumulator.model_splits[split.index()].applicable = true;
+                }
+            });
+            Self {
+                split,
+                start: Some(Clock::now()),
+            }
+        } else {
+            Self { split, start: None }
+        }
+    }
+}
+
+impl Drop for ModelSplitGuard {
+    fn drop(&mut self) {
+        let Some(start) = self.start.take() else {
+            return;
+        };
+        let timing = start.elapsed();
+        ACTIVE.with(|current| {
+            if let Some(accumulator) = current.borrow_mut().as_mut() {
+                let totals = &mut accumulator.model_splits[self.split.index()];
+                totals.calls = totals.calls.saturating_add(1);
+                totals.nanos = totals.nanos.saturating_add(timing.nanos);
+                if let Some(cycles) = timing.cycles {
+                    let total = totals.cycles.unwrap_or(0).saturating_add(cycles);
+                    totals.cycles = Some(total);
+                }
+            }
+        });
+    }
 }
 
 impl SubstageGuard {
@@ -464,7 +578,7 @@ fn cycle_source() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{begin, finish, Substage, SubstageGuard};
+    use super::{begin, finish, ModelSplit, ModelSplitGuard, Substage, SubstageGuard};
 
     #[test]
     fn substage_guard_accumulates_only_inside_an_active_profile() {
@@ -478,6 +592,23 @@ mod tests {
             .iter()
             .find(|row| row.name == "transforms.start_byte")
             .expect("start-byte substage row");
+        assert!(row.applicable);
+        assert_eq!(row.calls, 1);
+        assert!(row.nanos_per_output_byte.is_some());
+    }
+
+    #[test]
+    fn model_split_guard_accumulates_only_inside_an_active_profile() {
+        begin(8);
+        {
+            let _split = ModelSplitGuard::enter(ModelSplit::DotProducts);
+        }
+        let report = finish(4).expect("active profile");
+        let row = report
+            .model_splits
+            .iter()
+            .find(|row| row.name == "model.dot_products")
+            .expect("dot-product split row");
         assert!(row.applicable);
         assert_eq!(row.calls, 1);
         assert!(row.nanos_per_output_byte.is_some());

@@ -719,6 +719,10 @@ impl CmModel {
     }
 
     fn predict_bit(&mut self, c0: usize, bit: u32) -> i32 {
+        #[cfg(feature = "decode-profile")]
+        let _profile_model_lookup = crate::decode_profile::ModelSplitGuard::enter(
+            crate::decode_profile::ModelSplit::CounterStateLookup,
+        );
         for k in 0..NORD {
             let cx = self.hk[k].wrapping_mul(0x2545_F491).wrapping_add(c0);
             self.cxs[k] = cx;
@@ -797,8 +801,15 @@ impl CmModel {
         }
         self.st[self.nin - 1] = 256; // bias
 
+        #[cfg(feature = "decode-profile")]
+        drop(_profile_model_lookup);
+
         // 2-layer mixer: NL1 context-specialised layer-1 mixers over all inputs,
         // combined by a layer-2 mixer over their stretched outputs.
+        #[cfg(feature = "decode-profile")]
+        let _profile_model_dot = crate::decode_profile::ModelSplitGuard::enter(
+            crate::decode_profile::ModelSplit::DotProducts,
+        );
         self.mctx[0] = self.prev;
         self.mctx[1] = self.ind_key & 1023;
         self.mctx[2] = ((self.m1.len.min(15) << 1) | (self.m1.active as usize)) & 63;
@@ -812,6 +823,9 @@ impl CmModel {
         let pmix = self.l2.px;
         self.pmix = pmix;
 
+        #[cfg(feature = "decode-profile")]
+        drop(_profile_model_dot);
+
         // SSE chain: apm1 (prev byte) then apm2 (order-2 hash), gently blended.
         let (a1, i1) = self.apm1.refine(&self.lg, self.prev, pmix);
         self.apm1_idx = i1;
@@ -822,6 +836,10 @@ impl CmModel {
     }
 
     fn update_bit(&mut self, y: i32) {
+        #[cfg(feature = "decode-profile")]
+        let _profile_model_adaptation = crate::decode_profile::ModelSplitGuard::enter(
+            crate::decode_profile::ModelSplit::Adaptation,
+        );
         if self.audit {
             // FH2-06: layer-2 mixer output — quantized (12-bit squash + ST_MAX
             // clamp) vs the f64-ideal (unclamped logistic of the raw dot). The
