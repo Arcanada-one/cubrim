@@ -1,6 +1,6 @@
 # CUBR-0074 Decode Consilium
 
-**Date:** 2026-08-03  
+**Date:** 2026-08-03
 **Status:** design-only handoff; no decoder, format, default, or database-evaluation change authorized
 
 ## Question and scope
