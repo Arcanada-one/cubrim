@@ -213,10 +213,12 @@ this task.
   repository's v2 candidate is 12/12 real and redistributable, but has explicit
   WASM and SVG gaps and has not yet become a Gate2 DB result.
 - **Ownership:** CUBR-0074 already owns the world-web benchmark and corpus
-  decision. No duplicate corpus task exists in the backlog. CUBR-0075 owns the
-  decode-side hypothesis work; 0076 owns the Web Profile route/format requirement
-  and gates 0077/0078/0079; 0080 is last and operator-gated for public
-  standardisation.
+  decision. No duplicate corpus task exists in the backlog. The canonical
+  backlog pointer to `tasks/CUBR-0074-task-description.md` is dangling in the
+  inspected checkout; that record-location gap is not authorization to create a
+  competing corpus task. CUBR-0075 owns the decode-side hypothesis work; 0076
+  owns the Web Profile route/format requirement and gates 0077/0078/0079; 0080
+  is last and operator-gated for public standardisation.
 - **0076 requirement:** select the small-input route by deployment context, not
   input size; the route requirement is measured, not assumed.
 - **Untouched:** codec defaults, harness timeout, `PHASE_A_CODECS`, the database
