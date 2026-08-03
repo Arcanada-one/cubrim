@@ -69,6 +69,10 @@ pub fn encode_axis_gaps(coords: &[usize], b_k: usize) -> Result<Vec<usize>, Cubr
 /// Start: x_k = -1 (sentinel).
 /// For each gap: x_k += gap_k.
 pub fn decode_axis_gaps(gaps: &[usize]) -> Vec<usize> {
+    #[cfg(feature = "decode-profile")]
+    let _profile_transforms = crate::decode_profile::StageGuard::enter(
+        crate::decode_profile::Stage::Transforms,
+    );
     let mut coords = Vec::with_capacity(gaps.len());
     let mut x: isize = -1; // sentinel start
     for &g in gaps {

@@ -10,6 +10,8 @@ pub(crate) mod cm2;
 pub mod codec;
 pub mod config;
 pub mod cube;
+#[cfg(feature = "decode-profile")]
+pub mod decode_profile;
 pub mod distance_map;
 pub mod domainize;
 pub(crate) mod geocm;

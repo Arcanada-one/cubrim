@@ -13,9 +13,17 @@ categories = ["compression", "command-line-utilities"]
 name = "cubrim"
 path = "src/main.rs"
 
+[[bin]]
+name = "cubrim-decode-profile"
+path = "src/bin/cubrim_decode_profile.rs"
+required-features = ["decode-profile"]
+
 [lib]
 name = "cubrim"
 path = "src/lib.rs"
+
+[features]
+decode-profile = []
 
 [profile.release]
 opt-level = 3

@@ -18,6 +18,10 @@ pub const N_DEFAULT: usize = 2;
 ///
 /// Bijective on [0, B^N - 1].
 pub fn phi(index: usize, n: usize, b: usize) -> Vec<usize> {
+    #[cfg(feature = "decode-profile")]
+    let _profile_transforms = crate::decode_profile::StageGuard::enter(
+        crate::decode_profile::Stage::Transforms,
+    );
     let mut coords = Vec::with_capacity(n);
     let mut remainder = index;
     for _ in 0..n {
@@ -31,6 +35,10 @@ pub fn phi(index: usize, n: usize, b: usize) -> Vec<usize> {
 ///
 /// phi_inv((x_0, x_1, ..., x_{N-1})) = sum(x_k * B^k)
 pub fn phi_inv(coords: &[usize], b: usize) -> usize {
+    #[cfg(feature = "decode-profile")]
+    let _profile_transforms = crate::decode_profile::StageGuard::enter(
+        crate::decode_profile::Stage::Transforms,
+    );
     let mut index = 0usize;
     let mut base = 1usize;
     for &x in coords {

@@ -107,6 +107,10 @@ pub fn bitpack_decode(
     count: usize,
     inverse_dict: &[usize],
 ) -> Result<Vec<usize>, CubrimError> {
+    #[cfg(feature = "decode-profile")]
+    let _profile_entropy = crate::decode_profile::StageGuard::enter(
+        crate::decode_profile::Stage::Entropy,
+    );
     if count == 0 {
         return Ok(vec![]);
     }

@@ -1186,6 +1186,10 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     if blob.len() < 8 {
         return Err(CubrimError::Decode("MODE_CM2: header truncated".into()));
     }
+    #[cfg(feature = "decode-profile")]
+    let _profile_framing = crate::decode_profile::StageGuard::enter(
+        crate::decode_profile::Stage::Framing,
+    );
     // FH4-03: unpack the column-model flag/delimiter first, so every guard below
     // sees the true declared length and not the packed word.
     let raw = u64::from_be_bytes(blob[..8].try_into().unwrap());
@@ -1218,9 +1222,18 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
              (max {max_plausible} at {CM2_MAX_EXPANSION}x expansion)"
         )));
     }
+    #[cfg(feature = "decode-profile")]
+    drop(_profile_framing);
+
     let cap = orig_len.min(1 << 20) as usize;
+    #[cfg(feature = "decode-profile")]
+    let _profile_allocation = crate::decode_profile::StageGuard::enter(
+        crate::decode_profile::Stage::Allocation,
+    );
     let mut out = Vec::with_capacity(cap);
     let mut model = CmModel::new_with_col(effective_tbits(orig_len as usize, raw), col_delim);
+    #[cfg(feature = "decode-profile")]
+    drop(_profile_allocation);
     let mut dec = RangeDecoder::new(&blob[8..]);
     // QA-F-001 fail-closed guard (part 2 — stall detector): once the coded stream is
     // exhausted the range decoder only reads zero-padding and stops consuming input, yet
@@ -1231,10 +1244,20 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     let mut last_progress = dec.progress();
     let mut stall: u64 = 0;
     for _ in 0..orig_len {
+        #[cfg(feature = "decode-profile")]
+        let _profile_transforms = crate::decode_profile::StageGuard::enter(
+            crate::decode_profile::Stage::Transforms,
+        );
         model.start_byte(&out);
+        #[cfg(feature = "decode-profile")]
+        drop(_profile_transforms);
         let mut c0 = 1usize;
         let mut byte = 0u8;
         for bit in 0..8u32 {
+            #[cfg(feature = "decode-profile")]
+            let _profile_entropy = crate::decode_profile::StageGuard::enter(
+                crate::decode_profile::Stage::Entropy,
+            );
             let pf = model.predict_bit(c0, bit);
             let f = dec.get_freq(PSCALE as u32);
             let y = if f < pf as u32 {
@@ -1244,12 +1267,34 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 dec.decode(pf as u32, (PSCALE - pf) as u32, PSCALE as u32);
                 0
             };
+            #[cfg(feature = "decode-profile")]
+            drop(_profile_entropy);
+
+            #[cfg(feature = "decode-profile")]
+            let _profile_transforms = crate::decode_profile::StageGuard::enter(
+                crate::decode_profile::Stage::Transforms,
+            );
             model.update_bit(y);
+            #[cfg(feature = "decode-profile")]
+            drop(_profile_transforms);
             byte = (byte << 1) | (y as u8);
             c0 = (c0 << 1) | (y as usize);
         }
+        #[cfg(feature = "decode-profile")]
+        let _profile_output = crate::decode_profile::StageGuard::enter(
+            crate::decode_profile::Stage::OutputMaterialization,
+        );
         out.push(byte);
+        #[cfg(feature = "decode-profile")]
+        drop(_profile_output);
+
+        #[cfg(feature = "decode-profile")]
+        let _profile_transforms = crate::decode_profile::StageGuard::enter(
+            crate::decode_profile::Stage::Transforms,
+        );
         model.end_byte(&out);
+        #[cfg(feature = "decode-profile")]
+        drop(_profile_transforms);
         // Stall accounting (QA-F-001 part 2).
         let p = dec.progress();
         if p != last_progress {

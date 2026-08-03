@@ -56,6 +56,10 @@ pub fn rle_encode(gaps: &[usize]) -> Vec<u8> {
 /// R4 inverse: Decode RLE-encoded bytes back to gap list.
 /// Raises error if data length is not a multiple of PAIR_SIZE.
 pub fn rle_decode(data: &[u8]) -> Result<Vec<usize>, CubrimError> {
+    #[cfg(feature = "decode-profile")]
+    let _profile_transforms = crate::decode_profile::StageGuard::enter(
+        crate::decode_profile::Stage::Transforms,
+    );
     if data.is_empty() {
         return Ok(vec![]);
     }

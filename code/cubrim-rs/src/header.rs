@@ -275,6 +275,10 @@ pub(crate) fn serialize_cube_header(s: &CubeHeaderState<'_>) -> Vec<u8> {
 /// Parse header from bytes. Returns (Header, offset_after_header).
 /// Raises CubrimError for invalid magic or unsupported version.
 pub fn parse_header(data: &[u8]) -> Result<(Header, usize), CubrimError> {
+    #[cfg(feature = "decode-profile")]
+    let _profile_framing = crate::decode_profile::StageGuard::enter(
+        crate::decode_profile::Stage::Framing,
+    );
     if data.len() < FIXED_HEADER_SIZE {
         return Err(CubrimError::Decode(format!(
             "Data too short to contain header: {} < {} bytes",
