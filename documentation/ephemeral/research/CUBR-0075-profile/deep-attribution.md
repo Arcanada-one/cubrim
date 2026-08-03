@@ -154,3 +154,13 @@ remain unchanged.
   `57ec2944aa363ad6b15a0619829b04d061ca5efc655a9e60bbe9ea65c509bc37`.
 - Raw evidence: [`deep-attribution.json`](deep-attribution.json).
 - Database evaluation/evidence rows written: `0`; pending hypotheses advanced: `0`.
+
+## Split-profile pickup
+
+Branch `codex/cubr-0075-profile`, HEAD `d3c345c`: the split run measured
+counter/state lookup, mixer dot products, and adaptation boundaries inside the
+CM2 model across the full web corpus. Exact relaunch command:
+
+```text
+python3 bench/web-benchmark/profile_decode.py --profile-binary code/cubrim-rs/target/release/cubrim-decode-profile --encoder-binary code/cubrim-rs/target/release/cubrim --output documentation/ephemeral/research/CUBR-0075-profile/split-attribution.json
+```
