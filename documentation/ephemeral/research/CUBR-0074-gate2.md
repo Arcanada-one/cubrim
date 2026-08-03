@@ -1,8 +1,8 @@
 # CUBR-0074 Gate 2: reference-channel gate
 
 **Status:** MEASURED NEGATIVE — the protocol void is retained for numeric cells,
-and controlled diagnostics establish a size-threshold/superlinear encode regime
-in the current archival candidate.
+and diagnostics establish a deliberate `cube_size_limit` route switch in the
+current archival configuration.
 
 ## Gate
 
@@ -62,7 +62,7 @@ Chromium, or standards work.
   `hostile_input_hardened=false`, `roundtrip_exact=false`, and no Web Profile;
   it was not mutated or used to manufacture a passing evaluation.
 
-## Diagnostic conclusion: protocol failure, not an environmental block
+## Diagnostic conclusion: designed large-route switch, not a codec defect
 
 The two competing explanations were stated before the diagnostic run:
 
@@ -82,11 +82,11 @@ diagnostic only, not a web-schema benchmark result.
 | `html-small-v1` | 4,096 B | 226 B | 0.04 s | 29,184 kB | yes |
 | `source-map-small-v1` | 6,144 B | 250 B | 0.06 s | 29,776 kB | yes |
 
-The small-resource discriminator rejects the fixed per-invocation-cost
-hypothesis, but it did not by itself prove a JSON-specific pathology. A
-size-only ladder was therefore run on prefixes of the JSON payload and on a
-second media type made by repeating/truncating the source-map seed. Every row
-was a single no-timeout encode followed by exact `cmp` verification:
+The small-resource discriminator rejected both fixed invocation overhead and a
+JSON-only explanation. A size-only ladder was therefore run on prefixes of the
+JSON payload and on a second media type made by repeating/truncating the
+source-map seed. Every row was a single no-timeout encode followed by exact
+`cmp` verification:
 
 | Size | JSON wall | JSON s/MiB | JSON peak RSS | Source-map wall | Source-map s/MiB | Source-map peak RSS |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -97,21 +97,41 @@ was a single no-timeout encode followed by exact `cmp` verification:
 | 204,800 B | 42.98 s | 220.1 | 638,288 kB | 15.74 s | 80.6 | 619,616 kB |
 | 300,000 B | 77.52 s | 271.0 | 654,568 kB | 30.65 s | 107.1 | 625,508 kB |
 
-The transition is size-driven and appears between 51,200 B and 102,400 B on
-both media types. The current source-level sizing path is consistent with the
-boundary: `code/cubrim-rs/src/cm2.rs:363-376` derives exponent 19 at 51,200 B
-and 20 at 102,400 B, crossing at 65,537 B; `LowmemDecode` caps the exponent at
-20 in `code/cubrim-rs/src/config.rs:489-495`, while `CmModel` and `Match`
-allocate multiple `1 << tbits` tables in `cm2.rs:566-614`. That explains the
-observed jump from roughly 50 MB to roughly 600 MB RSS. It localizes the finding
-to a core-codec size regime; it does not yet identify the exact hot loop, and no
-fix is authorized by this mandate.
+The transition is a designed route switch. `code/cubrim-rs/src/config.rs:520-524`
+defines `cube_size_limit()` as `b*b`; the default `b=256` is 65,536 B, and
+`code/cubrim-rs/src/codec.rs:288-334` selects the large-input competition only
+when the input exceeds that limit. The ladder's 51,200 → 102,400 B step is the
+first rung crossing this gate, so the 25x jump is the cost of entering the
+large-file strategy, not an unlocalized superlinear core-codec defect.
 
-This is the decision-relevant 0074 result: the current archival codec cannot
-encode a 300 KB web payload inside the same web-stand time budget used by the
-validated Brotli and Zstd baselines. The timeout remains a journaled void for
-numeric benchmark cells; this measured negative belongs in the 0074 record and
-must not be converted into a DB number.
+### Forced-small-route diagnostic
+
+The supported CLI override `--b 1024` raises the route ceiling to 1,048,576 B,
+keeping the 300,000-byte JSON resource on the small route without changing
+source. With the same `--preset lowmem-decode` and exact round-trip check:
+
+| Route | Encode wall | Peak RSS | Archive | Candidate ratio | Ratio vs Brotli-11 | Exact round-trip |
+|---|---:|---:|---:|---:|---:|---|
+| Default `b=256` ladder point | 77.52 s | 654,568 kB | 1,149 B | 0.003830 | 0.552138 | yes |
+| Forced small `--b 1024` | 2.15 s | 106,008 kB | 1,149 B | 0.003830 | 0.552138 | yes |
+
+The Brotli-11 comparison uses the validated run-2 summary for this sample:
+2,081 compressed bytes over 30 trials. The forced-small diagnostic is about
+36x faster than the default route, uses roughly 84% less RSS, and emits the
+same archive bytes, so it demonstrates the desired web-sized operating point
+without a ratio penalty. It is diagnostic only and creates no web-schema
+benchmark result.
+
+This is the decision-relevant 0074 result: the current archival configuration
+chooses an inappropriate large-input mode for web resources above 64 KiB, while
+the supported small-route configuration handles the 300 KB response within the
+budget and at `ratio_vs_brotli11=0.552138`. Seven of the eight corpus samples
+are below the default gate; the 300 KB JSON is the sole crossing case.
+
+CUBR-0076 now has a concrete measured requirement: a Web Profile must select or
+equivalently configure the small-input route by deployment context so a
+300 KB web response does not pay the archival large-file competition. No 0076
+implementation is authorized in this task.
 
 The result also establishes the programme order: CUBR-0076 Web Profile work is
 the precondition for a web-capable configuration, not a nice-to-have measurement
