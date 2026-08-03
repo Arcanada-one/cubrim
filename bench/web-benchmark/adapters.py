@@ -292,7 +292,7 @@ def _zstd_3() -> CodecAdapter:
     )
 
 
-_REFERENCE_FLAGS = ("compress", "--preset", "lowmem-decode", "-q")
+_REFERENCE_FLAGS = ("compress", "--preset", "lowmem-decode", "--b", "1024", "-q")
 _REFERENCE_CAPABILITIES = {
     "decode": True,
     "encode": True,
@@ -387,6 +387,8 @@ def _reference_adapter() -> CodecAdapter:
             str(target),
             "--preset",
             "lowmem-decode",
+            "--b",
+            "1024",
             "-q",
         ),
         _decompress_with_target=lambda source, target: (

@@ -77,6 +77,8 @@ class AttributionGateTests(unittest.TestCase):
                 str(target),
                 "--preset",
                 "lowmem-decode",
+                "--b",
+                "1024",
                 "-q",
             ),
         )

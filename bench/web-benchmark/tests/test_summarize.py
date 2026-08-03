@@ -175,7 +175,7 @@ def reference_bundle():
         "name": "cubrim-lowmem-decode",
         "version": "cubrim 0.3.2+lowmem-decode",
         "binary_sha256": "d" * 64,
-        "flags": ["compress", "--preset", "lowmem-decode", "-q"],
+        "flags": ["compress", "--preset", "lowmem-decode", "--b", "1024", "-q"],
         "binary_package": "cubrim",
         "binary_package_version": "0.3.2",
         "source_package": "cubrim",
