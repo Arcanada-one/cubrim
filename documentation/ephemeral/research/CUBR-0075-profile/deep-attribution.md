@@ -48,13 +48,88 @@ throughput number. It is valid for locating relative work inside this run. Acros
 and the entropy-operation share ranged from 46.50% to 49.55%; the dominant split is
 structural rather than isolated to one content sample.
 
+## Mixer shape and the model-count answer
+
+The source-level answer is exact, but it is not a per-model timing measurement. In
+`code/cubrim-rs/src/cm2.rs`, the default CM2 predictor has **26 underlying providers**:
+23 adaptive counter providers (12 order, 6 sparse, 1 indirect, and 4 word) plus 3
+match providers. The 23 counter providers each emit a stationary and a state-map
+prediction, so the mixer receives **49 learned model inputs**. `NIN` is therefore
+**50** after adding the bias input.
+
+Each bit then runs five layer-1 mixers, each over those 50 slots, followed by a layer-2
+mixer over the five layer-1 outputs plus its bias. That is **`5 × 50 + 6 = 256`
+dot-product input terms per bit**, before counting the counter lookups, match prediction,
+and APM work. The requested bookkeeping quotient is therefore about **2,600 / 49 ≈
+53 cycles per learned input** for either profiled function (52.1 for `predict_bit`,
+53.9 for `update_bit`). It is not an isolated per-model cost: every learned input is
+consumed by five layer-1 mixers, and the measured function boundaries also include
+state and adaptation work.
+
+This resolves the cardinality question without guessing about cache misses or vector
+arithmetic. The profile shows a deliberately broad model design repeated through five
+context views; a follow-on implementation study would still need isolated counters or
+hardware measurements to split that work into lookup, dot-product, and adaptation cost.
+
+## Amdahl ceiling and the web-path decision
+
+The all-mode deep evidence totals **2,456,882,895,434 detailed substage cycles**. The
+two model functions account for **2,347,672,381,936 cycles**, or **95.5549%** of that
+total (displayed as 95.56% in the verdict table). The rounded Amdahl arithmetic is:
+
+| eliminated work | maximum speedup |
+|---|---:|
+| `transforms.update_bit` (48.61%) | **1.95×** |
+| `entropy.predict_bit` (46.95%) | **1.89×** |
+| both model functions (95.56%) | **22.52×** |
+
+The unrounded total gives a 22.50× ceiling; using the displayed verdict numbers gives
+`1 / (1 - 0.9556) = 22.52×`. Against the **227×** speedup required by the decode gate,
+`227 / 22.52 = 10.08×` of the gap remains even after deleting both model functions.
+Therefore **the 0.50 gate is not reachable by optimising this decoder; it requires a
+different decode path for the web profile**.
+
+That does not make model work pointless. A 10–20× model improvement would still be a
+major archival-product result, where Cubrim already leads on ratio. It cannot rescue the
+web claim; archival throughput and the web operating point are separate products.
+
+## Decoder memory-vs-compute transfer
+
+The required CUBR-0087 F10 findings include decoder rows, not only encoder rows. On a
+quiet host with the same 8-core pin and a 2 MiB `dickens` slice, native decode measured
+**27.0 s / 1.47 GiB**, while `tbits=22` measured **25.0 s / 0.40 GiB**. That is a
+**3.7× smaller decoder working set for about 8% more decode throughput**; `tbits=20`
+went to **23.5 s / 0.109 GiB**. Every row round-tripped exactly.
+
+This is the controlled transfer check the hotspot requested: the encoder's M3 result
+does transfer to decode on this slice. Shrinking the tables dramatically changes RSS
+but changes decode time only modestly, so memory latency is a secondary term and the
+mixer's compute work remains dominant. The scope is the measured pinned 2 MiB slice;
+it is not a corpus-wide throughput claim, and it does not replace hardware-counter
+work if the programme later needs a cache-versus-arithmetic decomposition.
+
+## Roadmap consequence
+
+- **CUBR-0076 `web-profile-prototype` (dependency 12) is mandatory**, not optional: the
+  current decoder cannot reach the web gate even with a zero-cost model.
+- **`simd-decode-build` (dependency 15) is insufficient alone.** SIMD may still be a
+  worthwhile archival-product investigation, but it cannot bridge a 22.5× ceiling to a
+  227× requirement.
+- **`table-driven-entropy-build` (dependency 13) is a measured negative on this path.**
+  `range_get_freq` plus `range_decode` is only about 2.01% of detailed substage cycles;
+  making it free has a maximum effect of about 1.02×.
+
+Three of the eleven registered directions are now resolved negatively by the two
+profiling runs: framing/container (14), allocator telemetry (8), and table-driven
+entropy (13). The ledger's existence was useful; the measured directions are what
+should control the next route.
+
 ## Interpretation and boundary
 
-The next bounded hypothesis, if the programme chooses to examine one, is the model
-state work in `update_bit` and `predict_bit`, not container framing, allocation
-telemetry, or the range coder’s `get_freq`/`decode` calls. This result does not
-authorize an optimization patch. The first-slice Amdahl limit and the possibility of a
-distinct web decode path remain separate decisions.
+The bounded archival hypothesis is model state and mixer work in `update_bit` and
+`predict_bit`, not container framing, allocation telemetry, or the range coder's
+`get_freq`/`decode` calls. This result does not authorize an optimization patch. The web
+route is a separate decode-path decision, now mandatory under dependency 12.
 
 The measured negatives are recorded in
 [`dependency-negatives.md`](dependency-negatives.md) and machine-readable form in

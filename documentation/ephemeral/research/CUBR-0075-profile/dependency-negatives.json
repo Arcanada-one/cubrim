@@ -3,12 +3,43 @@
   "schema_version": 1,
   "task_id": "CUBR-0075",
   "source_mandate": "/home/dev/LUNA-0075VERDICT.md",
+  "hotspot_mandate": "/home/dev/LUNA-0075HOTSPOT.md",
   "first_slice_evidence": "attribution.json",
+  "deep_slice_evidence": "deep-attribution.json",
   "observation_scope": {
     "measured_observations": 720,
     "total_observations": 792,
     "exact_roundtrips": 792,
-    "stage_cycle_total": 2259933725206
+    "stage_cycle_total": 2259933725206,
+    "deep_substage_cycle_total": 2456882895434,
+    "model_cycles_total": 2347672381936,
+    "model_share_percent": 95.5549,
+    "single_model_function_max_speedups": {
+      "transforms.update_bit": 1.94574,
+      "entropy.predict_bit": 1.88499
+    },
+    "model_max_speedup_if_free": 22.4968,
+    "required_decode_speedup": 227,
+    "remaining_gap_after_model_ceiling": 10.0903,
+    "mixer_shape": {
+      "underlying_model_providers": 26,
+      "learned_model_inputs": 49,
+      "default_mixer_inputs_including_bias": 50,
+      "layer1_mixers": 5,
+      "layer2_inputs_including_bias": 6,
+      "dot_product_terms_per_bit": 256,
+      "status": "source-derived, not an isolated per-model timing"
+    },
+    "decoder_memory_transfer": {
+      "source": "CUBR-0087 FINDINGS.md F10",
+      "native_decode_seconds": 27.0,
+      "native_decode_peak_gib": 1.47,
+      "tbits22_decode_seconds": 25.0,
+      "tbits22_decode_peak_gib": 0.40,
+      "working_set_reduction_factor": 3.675,
+      "decode_speedup_factor": 1.08,
+      "interpretation": "The encoder M3 compute-bound result transfers to decode on the measured pinned 2 MiB slice; the evidence is not corpus-wide."
+    }
   },
   "dependencies": [
     {
@@ -34,8 +65,35 @@
       "retained_state_delta_bytes": 0,
       "retained_state_observations": 792,
       "interpretation": "Allocation is not a throughput lever in this slice, and no decoder-retained bytes remained after output drop. This does not prove a bounded-memory property."
+    },
+    {
+      "dependency_id": 13,
+      "key": "table-driven-entropy-build",
+      "status": "measured-negative-throughput",
+      "measured_stage": "entropy.range_get_freq + entropy.range_decode",
+      "cycles_total": 49592573186,
+      "calls_total": 904076160,
+      "observations": 720,
+      "cycles_per_call": {
+        "range_get_freq": 51.3,
+        "range_decode": 58.4,
+        "combined_average": 54.9
+      },
+      "share_of_deep_substage_cycles_percent": 2.01852,
+      "displayed_share_percent": 2.01,
+      "max_speedup_if_free": 1.0206,
+      "interpretation": "The range coder is not the web decode bottleneck. Making both measured entropy calls free buys only about 1.02x on this deep CM2 path; dependency 12, web-profile-prototype, is the mandatory next route."
     }
   ],
+  "registered_dependency_count": 11,
+  "resolved_negative_dependencies": 3,
+  "roadmap": {
+    "mandatory_next_dependency": 12,
+    "mandatory_next_key": "web-profile-prototype",
+    "dependency_15_status": "insufficient-alone",
+    "dependency_15_key": "simd-decode-build",
+    "web_path_verdict": "The 0.50 gate is not reachable by optimising this decoder; it requires a different decode path for the web profile."
+  },
   "instrument_sanity": {
     "sample_id": "woff2-medium-inter-latin-v20",
     "mode": "raw",
