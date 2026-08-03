@@ -28,6 +28,15 @@ STAGE_NAMES = (
     "allocation",
     "output_materialization",
 )
+SUBSTAGE_SCHEMA_VERSION = 1
+SUBSTAGE_NAMES = (
+    "transforms.start_byte",
+    "entropy.predict_bit",
+    "entropy.range_get_freq",
+    "entropy.range_decode",
+    "transforms.update_bit",
+    "transforms.end_byte",
+)
 AFFINITY_MODES = ("one-core", "fixed-core")
 DEFAULT_TRIALS = 30
 DEFAULT_WARMUPS = 3
@@ -132,6 +141,16 @@ def validate_profile_record(
     names = tuple(row.get("name") for row in rows) if isinstance(rows, list) else ()
     if names != STAGE_NAMES:
         raise ProfileBlocked(f"profile stage contract mismatch: {sample_id}")
+    if profile.get("substage_schema_version") != SUBSTAGE_SCHEMA_VERSION:
+        raise ProfileBlocked(f"profile substage schema mismatch: {sample_id}")
+    substage_rows = profile.get("substages")
+    substage_names = (
+        tuple(row.get("name") for row in substage_rows)
+        if isinstance(substage_rows, list)
+        else ()
+    )
+    if substage_names != SUBSTAGE_NAMES:
+        raise ProfileBlocked(f"profile substage contract mismatch: {sample_id}")
     if profile.get("output_bytes") != original_bytes:
         raise ProfileBlocked(f"profile output size drifted: {sample_id}")
 
@@ -158,6 +177,20 @@ def summarize_observations(observations: list[dict[str, Any]]) -> dict[str, Any]
                 row["cycles_per_output_byte"] for row in rows
             ),
         }
+    substages: dict[str, dict[str, Any]] = {}
+    for index, name in enumerate(SUBSTAGE_NAMES):
+        rows = [profile["substages"][index] for profile in profile_rows]
+        substages[name] = {
+            "parent_stage": rows[0]["parent_stage"],
+            "applicable": all(row["applicable"] for row in rows),
+            "calls_median": _median(row["calls"] for row in rows),
+            "nanos_per_output_byte_median": _median(
+                row["nanos_per_output_byte"] for row in rows
+            ),
+            "cycles_per_output_byte_median": _median(
+                row["cycles_per_output_byte"] for row in rows
+            ),
+        }
     return {
         "trials": len(observations),
         "exact_roundtrip_all": all(
@@ -170,6 +203,7 @@ def summarize_observations(observations: list[dict[str, Any]]) -> dict[str, Any]
             observation["decode_profile"]["total_cycles"] for observation in observations
         ),
         "stages": stages,
+        "substages": substages,
     }
 
 
@@ -256,8 +290,10 @@ def run_profile(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_sha = sha256_file(manifest_path)
     evidence: dict[str, Any] = {
-        "kind": "cubr0075-decode-attribution",
+        "kind": "cubr0075-decode-attribution-deep",
         "schema_version": 1,
+        "substage_schema_version": SUBSTAGE_SCHEMA_VERSION,
+        "attribution_detail": "per-operation",
         "status": "complete",
         "task_id": "CUBR-0075",
         "source_sha": source_sha,

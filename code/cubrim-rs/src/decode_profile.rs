@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::time::Instant;
 
 pub const SCHEMA_VERSION: u32 = 1;
+pub const SUBSTAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Stage {
@@ -54,8 +55,70 @@ impl Stage {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Substage {
+    TransformStartByte,
+    EntropyPredictBit,
+    EntropyRangeGetFreq,
+    EntropyRangeDecode,
+    TransformUpdateBit,
+    TransformEndByte,
+}
+
+impl Substage {
+    pub const ALL: [Substage; 6] = [
+        Self::TransformStartByte,
+        Self::EntropyPredictBit,
+        Self::EntropyRangeGetFreq,
+        Self::EntropyRangeDecode,
+        Self::TransformUpdateBit,
+        Self::TransformEndByte,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::TransformStartByte => "transforms.start_byte",
+            Self::EntropyPredictBit => "entropy.predict_bit",
+            Self::EntropyRangeGetFreq => "entropy.range_get_freq",
+            Self::EntropyRangeDecode => "entropy.range_decode",
+            Self::TransformUpdateBit => "transforms.update_bit",
+            Self::TransformEndByte => "transforms.end_byte",
+        }
+    }
+
+    pub const fn parent_stage(self) -> &'static str {
+        match self {
+            Self::TransformStartByte | Self::TransformUpdateBit | Self::TransformEndByte => {
+                Stage::Transforms.name()
+            }
+            Self::EntropyPredictBit | Self::EntropyRangeGetFreq | Self::EntropyRangeDecode => {
+                Stage::Entropy.name()
+            }
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::TransformStartByte => 0,
+            Self::EntropyPredictBit => 1,
+            Self::EntropyRangeGetFreq => 2,
+            Self::EntropyRangeDecode => 3,
+            Self::TransformUpdateBit => 4,
+            Self::TransformEndByte => 5,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct StageTotals {
+    calls: u64,
+    nanos: u64,
+    cycles: Option<u64>,
+    applicable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SubstageTotals {
     calls: u64,
     nanos: u64,
     cycles: Option<u64>,
@@ -74,6 +137,18 @@ pub struct StageReport {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct SubstageReport {
+    pub name: &'static str,
+    pub parent_stage: &'static str,
+    pub calls: u64,
+    pub nanos: u64,
+    pub cycles: Option<u64>,
+    pub applicable: bool,
+    pub nanos_per_output_byte: Option<f64>,
+    pub cycles_per_output_byte: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct Report {
     pub schema_version: u32,
     pub input_bytes: usize,
@@ -83,6 +158,8 @@ pub struct Report {
     pub total_nanos: Option<u64>,
     pub total_cycles: Option<u64>,
     pub stages: Vec<StageReport>,
+    pub substage_schema_version: u32,
+    pub substages: Vec<SubstageReport>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -95,6 +172,7 @@ pub struct Timing {
 struct Accumulator {
     input_bytes: usize,
     stages: [StageTotals; 6],
+    substages: [SubstageTotals; 6],
 }
 
 impl Accumulator {
@@ -102,6 +180,7 @@ impl Accumulator {
         Self {
             input_bytes,
             stages: [StageTotals::default(); 6],
+            substages: [SubstageTotals::default(); 6],
         }
     }
 
@@ -115,11 +194,26 @@ impl Accumulator {
             total_nanos: None,
             total_cycles: None,
             stages: Vec::with_capacity(Stage::ALL.len()),
+            substage_schema_version: SUBSTAGE_SCHEMA_VERSION,
+            substages: Vec::with_capacity(Substage::ALL.len()),
         };
         for stage in Stage::ALL {
             let totals = self.stages[stage.index()];
             report.stages.push(StageReport {
                 name: stage.name(),
+                calls: totals.calls,
+                nanos: totals.nanos,
+                cycles: totals.cycles,
+                applicable: totals.applicable,
+                nanos_per_output_byte: None,
+                cycles_per_output_byte: None,
+            });
+        }
+        for substage in Substage::ALL {
+            let totals = self.substages[substage.index()];
+            report.substages.push(SubstageReport {
+                name: substage.name(),
+                parent_stage: substage.parent_stage(),
                 calls: totals.calls,
                 nanos: totals.nanos,
                 cycles: totals.cycles,
@@ -209,6 +303,15 @@ impl Report {
                 row.cycles_per_output_byte = None;
             }
         }
+        for row in &mut self.substages {
+            if row.applicable && self.output_bytes > 0 {
+                row.nanos_per_output_byte = Some(row.nanos as f64 / denominator);
+                row.cycles_per_output_byte = row.cycles.map(|cycles| cycles as f64 / denominator);
+            } else {
+                row.nanos_per_output_byte = None;
+                row.cycles_per_output_byte = None;
+            }
+        }
     }
 }
 
@@ -245,6 +348,53 @@ impl Drop for StageGuard {
         ACTIVE.with(|current| {
             if let Some(accumulator) = current.borrow_mut().as_mut() {
                 let totals = &mut accumulator.stages[self.stage.index()];
+                totals.calls = totals.calls.saturating_add(1);
+                totals.nanos = totals.nanos.saturating_add(timing.nanos);
+                if let Some(cycles) = timing.cycles {
+                    let total = totals.cycles.unwrap_or(0).saturating_add(cycles);
+                    totals.cycles = Some(total);
+                }
+            }
+        });
+    }
+}
+
+pub(crate) struct SubstageGuard {
+    substage: Substage,
+    start: Option<Clock>,
+}
+
+impl SubstageGuard {
+    pub(crate) fn enter(substage: Substage) -> Self {
+        let active = ACTIVE.with(|current| current.borrow().is_some());
+        if active {
+            ACTIVE.with(|current| {
+                if let Some(accumulator) = current.borrow_mut().as_mut() {
+                    accumulator.substages[substage.index()].applicable = true;
+                }
+            });
+            Self {
+                substage,
+                start: Some(Clock::now()),
+            }
+        } else {
+            Self {
+                substage,
+                start: None,
+            }
+        }
+    }
+}
+
+impl Drop for SubstageGuard {
+    fn drop(&mut self) {
+        let Some(start) = self.start.take() else {
+            return;
+        };
+        let timing = start.elapsed();
+        ACTIVE.with(|current| {
+            if let Some(accumulator) = current.borrow_mut().as_mut() {
+                let totals = &mut accumulator.substages[self.substage.index()];
                 totals.calls = totals.calls.saturating_add(1);
                 totals.nanos = totals.nanos.saturating_add(timing.nanos);
                 if let Some(cycles) = timing.cycles {
@@ -309,5 +459,27 @@ fn cycle_source() -> &'static str {
         "rdtsc-x86_64"
     } else {
         "unavailable"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{begin, finish, Substage, SubstageGuard};
+
+    #[test]
+    fn substage_guard_accumulates_only_inside_an_active_profile() {
+        begin(8);
+        {
+            let _first = SubstageGuard::enter(Substage::TransformStartByte);
+        }
+        let report = finish(4).expect("active profile");
+        let row = report
+            .substages
+            .iter()
+            .find(|row| row.name == "transforms.start_byte")
+            .expect("start-byte substage row");
+        assert!(row.applicable);
+        assert_eq!(row.calls, 1);
+        assert!(row.nanos_per_output_byte.is_some());
     }
 }

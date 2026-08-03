@@ -8067,6 +8067,10 @@ impl<'a> RangeDecoder<'a> {
     }
     #[inline]
     pub(crate) fn get_freq(&self, total: u32) -> u32 {
+        #[cfg(feature = "decode-profile")]
+        let _profile_substage = crate::decode_profile::SubstageGuard::enter(
+            crate::decode_profile::Substage::EntropyRangeGetFreq,
+        );
         let r = self.range / total;
         let dv = (self.code.wrapping_sub(self.low)) / r;
         if dv >= total {
@@ -8077,6 +8081,10 @@ impl<'a> RangeDecoder<'a> {
     }
     #[inline]
     pub(crate) fn decode(&mut self, cum: u32, freq: u32, total: u32) {
+        #[cfg(feature = "decode-profile")]
+        let _profile_substage = crate::decode_profile::SubstageGuard::enter(
+            crate::decode_profile::Substage::EntropyRangeDecode,
+        );
         let r = self.range / total;
         self.low = self.low.wrapping_add(r * cum);
         self.range = r * freq;

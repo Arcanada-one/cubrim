@@ -1248,7 +1248,13 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         let _profile_transforms = crate::decode_profile::StageGuard::enter(
             crate::decode_profile::Stage::Transforms,
         );
+        #[cfg(feature = "decode-profile")]
+        let _profile_substage = crate::decode_profile::SubstageGuard::enter(
+            crate::decode_profile::Substage::TransformStartByte,
+        );
         model.start_byte(&out);
+        #[cfg(feature = "decode-profile")]
+        drop(_profile_substage);
         #[cfg(feature = "decode-profile")]
         drop(_profile_transforms);
         let mut c0 = 1usize;
@@ -1258,7 +1264,13 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             let _profile_entropy = crate::decode_profile::StageGuard::enter(
                 crate::decode_profile::Stage::Entropy,
             );
+            #[cfg(feature = "decode-profile")]
+            let _profile_predict = crate::decode_profile::SubstageGuard::enter(
+                crate::decode_profile::Substage::EntropyPredictBit,
+            );
             let pf = model.predict_bit(c0, bit);
+            #[cfg(feature = "decode-profile")]
+            drop(_profile_predict);
             let f = dec.get_freq(PSCALE as u32);
             let y = if f < pf as u32 {
                 dec.decode(0, pf as u32, PSCALE as u32);
@@ -1274,7 +1286,13 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             let _profile_transforms = crate::decode_profile::StageGuard::enter(
                 crate::decode_profile::Stage::Transforms,
             );
+            #[cfg(feature = "decode-profile")]
+            let _profile_update = crate::decode_profile::SubstageGuard::enter(
+                crate::decode_profile::Substage::TransformUpdateBit,
+            );
             model.update_bit(y);
+            #[cfg(feature = "decode-profile")]
+            drop(_profile_update);
             #[cfg(feature = "decode-profile")]
             drop(_profile_transforms);
             byte = (byte << 1) | (y as u8);
@@ -1292,7 +1310,13 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         let _profile_transforms = crate::decode_profile::StageGuard::enter(
             crate::decode_profile::Stage::Transforms,
         );
+        #[cfg(feature = "decode-profile")]
+        let _profile_substage = crate::decode_profile::SubstageGuard::enter(
+            crate::decode_profile::Substage::TransformEndByte,
+        );
         model.end_byte(&out);
+        #[cfg(feature = "decode-profile")]
+        drop(_profile_substage);
         #[cfg(feature = "decode-profile")]
         drop(_profile_transforms);
         // Stall accounting (QA-F-001 part 2).

@@ -1,0 +1,49 @@
+{
+  "kind": "cubr0075-measured-negative-dependencies",
+  "schema_version": 1,
+  "task_id": "CUBR-0075",
+  "source_mandate": "/home/dev/LUNA-0075VERDICT.md",
+  "first_slice_evidence": "attribution.json",
+  "observation_scope": {
+    "measured_observations": 720,
+    "total_observations": 792,
+    "exact_roundtrips": 792,
+    "stage_cycle_total": 2259933725206
+  },
+  "dependencies": [
+    {
+      "dependency_id": 14,
+      "key": "independent-block-container",
+      "status": "measured-negative-throughput",
+      "measured_stage": "framing",
+      "cycles_total": 196008,
+      "observations": 720,
+      "share_of_all_named_stage_cycles_percent": 0.000008673,
+      "displayed_share_percent": 0.0,
+      "interpretation": "Container/framing work cannot explain the measured decode throughput gap. Streaming and first-output latency remain separate, unmeasured goals."
+    },
+    {
+      "dependency_id": 8,
+      "key": "allocator-telemetry",
+      "status": "measured-negative-throughput",
+      "measured_stage": "allocation",
+      "cycles_total": 8942160152,
+      "calls_total": 90480,
+      "observations": 720,
+      "share_of_all_named_stage_cycles_percent": 0.396,
+      "retained_state_delta_bytes": 0,
+      "retained_state_observations": 792,
+      "interpretation": "Allocation is not a throughput lever in this slice, and no decoder-retained bytes remained after output drop. This does not prove a bounded-memory property."
+    }
+  ],
+  "instrument_sanity": {
+    "sample_id": "woff2-medium-inter-latin-v20",
+    "mode": "raw",
+    "cycles_per_output_byte": 0.6,
+    "transform_cycles_percent": 0.0,
+    "entropy_cycles_percent": 0.0,
+    "interpretation": "The already-compressed raw-store sample bypasses the CM2 stages as expected."
+  },
+  "database_evaluation_rows_written": 0,
+  "pending_hypotheses_advanced": 0
+}

@@ -20,6 +20,19 @@ fn profile_report_has_the_six_stage_contract() {
     assert_eq!(report.input_bytes, 32);
     assert_eq!(report.output_bytes, 16);
     assert_eq!(report.schema_version, 1);
+    assert_eq!(report.substage_schema_version, 1);
+    let substage_names: Vec<&str> = report.substages.iter().map(|row| row.name).collect();
+    assert_eq!(
+        substage_names,
+        vec![
+            "transforms.start_byte",
+            "entropy.predict_bit",
+            "entropy.range_get_freq",
+            "entropy.range_decode",
+            "transforms.update_bit",
+            "transforms.end_byte",
+        ]
+    );
 }
 
 #[test]
