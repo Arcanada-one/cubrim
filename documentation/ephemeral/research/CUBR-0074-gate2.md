@@ -1,6 +1,6 @@
 # CUBR-0074 Gate 2: reference-channel gate
 
-**Status:** MEASURED NEGATIVE / DECODE-GATE-FAILED — the v2 corpus is 100% real and
+**Status:** CLOSED — MIXED VERDICT / DECODE-GATE-FAILED — the v2 corpus is 100% real and
 the aggregate density ratio is a WIN, but the candidate misses the fixed
 decode-throughput gate by a wide margin. Exact round-trips are proven for every
 candidate and Brotli-5 cell; dependency 5 was resolved only after the v2 harness
@@ -120,6 +120,12 @@ The candidate and comparator both used runner SHA
 | `source-map-small-sourcemap-codec-v2` | 9,700 | 1,843 | 2,319 | 0.794739 | 110.087 | 3.257 | 0.029586 | yes |
 | `woff2-medium-inter-latin-v20` | 23,664 | 23,677 | 23,623 | 1.002286 | 4.045 | 3.325 | 0.821968 | yes |
 
+The WOFF2 row needs a plain-language interpretation. It is the only sample that
+clears the `0.50` decode-throughput threshold, and it is also the only already
+compressed font: the candidate makes it 54 bytes (0.2%) larger. Its fast decode
+is therefore a sanity anchor for the measurement, not partial evidence that the
+decoder is viable; the codec is doing almost no useful work on that row.
+
 The density aggregate is `95,220 / 108,495 = 0.877644`, so the corpus-level
 ratio clears both GO (`<=1.00`) and WIN (`<=0.92`). The table remains the
 authoritative per-sample view: `json-api-small-hypotheses-v2` and WOFF2 are above
@@ -136,6 +142,15 @@ factor of `0.004410`. Only WOFF2 reaches the per-sample `0.50` threshold
 density WIN. This is the Gate2 verdict: **NEGATIVE — decode throughput gate
 failed**.
 
+WASM and SVG are explicit missing classes, not silent exclusions. Their absence
+could move either headline in principle, but the direction and size are not
+measured here. The density aggregate is anchored materially by the two largest
+JSON/HTML resources, so the missing classes are unlikely to erase that signal;
+the throughput aggregate could move either way, but changing `0.004410` to the
+`0.50` gate would require an unusually favorable missing-class mix after an
+observed 11/12 per-sample failures. This is a bounded inference, not a result
+claimed for unmeasured WASM or SVG.
+
 After the candidate v2 run completed and the exact checks passed, dependency 5
 (`instrumentation / real-world-web-corpus`) was updated in one guarded
 transaction from `pending_dependency` to `resolved`, with `resolved_by_build_id=7`.
@@ -145,6 +160,12 @@ confirmed one validated run, 120 existing summaries, zero hypothesis
 evaluations, zero evidence rows, and zero new candidate result rows. The
 immutable build-7 row was not changed; the `--b 1024` value remains a measured
 reference-channel invocation flag.
+
+The decode question is now handed to the design-only consilium in
+`documentation/ephemeral/reviews/CUBR-0074-decode-consilium.md`. Its measured
+starting point is the paired `0.877644` density WIN and `0.004410` throughput
+FAIL (about 227x slower than Brotli-5); it authorizes attribution and bounded
+opt-in experiments only, not decoder implementation in this closure.
 
 ## Diagnostic conclusion: designed large-route switch, not a codec defect
 
@@ -304,10 +325,12 @@ task.
   unstaged), and CUBR-0076 through CUBR-0080. Dependency 5 is the sole database
   mutation from this v2 reconciliation.
 - **Next session:** carry the negative decode-speed result to CUBR-0075's
-  decode-side hypothesis work and retain the measured route requirement for
-  CUBR-0076. Do not fetch third-party resources, add manifest entries, create a
-  duplicate task, or treat the v1 fixture ratio as evidence. Any evaluation or
-  evidence ingestion needs its own guarded authorization.
+  decode-side hypothesis work using the design-only consilium at
+  `documentation/ephemeral/reviews/CUBR-0074-decode-consilium.md`, and retain the
+  measured route requirement for CUBR-0076. Do not fetch third-party resources,
+  add manifest entries, create a duplicate task, or treat the v1 fixture ratio as
+  evidence. Any evaluation or evidence ingestion needs its own guarded
+  authorization.
 - **Boundary:** stop at the instructed quota boundary with this handoff committed;
   no outward-facing publication was made. The dependency transition was the one
   authorized irreversible database action and has backup/readback evidence.
