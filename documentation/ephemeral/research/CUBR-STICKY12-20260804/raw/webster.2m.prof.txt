@@ -1,0 +1,45 @@
+
+=== CUBRIM ENCODER CANDIDATE ATTRIBUTION ===
+total measured wall: 118.956 s
+candidate                      calls      seconds   share%      wins      out_bytes
+cm2                                1      117.146    98.48         1         333280
+cm2_variant_col                    2       74.102    62.29         1         666700
+cm2_variant_base                   1       43.036    36.18         1         336842
+lz_prepass                         1       24.790    20.84         0         497032
+geocm                              1        1.679     1.41         0              0
+base                               1        0.090     0.08         0              0
+columnar                           1        0.015     0.01         0              0
+record_cm                          1        0.011     0.01         0              0
+soa                                1        0.011     0.01         0              0
+med16                              1        0.009     0.01         0              0
+binfloat                           1        0.001     0.00         0              0
+vcf                                1        0.000     0.00         0              0
+bcj_cm2                            1        0.000     0.00         0              0
+bcj                                1        0.000     0.00         0              0
+cm                                 1        0.000     0.00         0              0
+=== END ATTRIBUTION (nested candidates double-count; attribution, not partition) ===
+
+compressed: 2097152 bytes -> 333280 bytes ratio=0.158920 time_ms=118958
+	Command being timed: "env CUBRIM_PROFILE=1 /home/dev/.worktrees/cubrim/CUBR-GATEDISARM/code/cubrim-rs/target/release/cubrim compress /tmp/cubr-sticky12.yK1o7n/input/webster.2m /tmp/cubr-sticky12.yK1o7n/out/webster/webster.2m.cbr"
+	User time (seconds): 139.76
+	System time (seconds): 3.16
+	Percent of CPU this job got: 120%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:58.96
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1669396
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 1766494
+	Voluntary context switches: 122
+	Involuntary context switches: 5372
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 664
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

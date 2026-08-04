@@ -1,0 +1,14 @@
+measured_utc=2026-08-04T17:22:55Z
+current_branch=CUBR-0097-skip-then-fail
+current_head=6c69f2c85f5e5e77fcbccfcef5acf802c8c8dcb1
+measured_worktree=/home/dev/.worktrees/cubrim/CUBR-GATEDISARM
+measured_worktree_branch=codex/cubr-gatedisarm
+measured_worktree_head=3a59903910aa526a5d8e1633465f784fbfb4fc65
+binary=0a327d55e6d549d4c742a4ca0e098bbc5e02946311893ccddaacc898fd3fd372
+prof_rs=0e6c3eaf2a7b8102df3dcd1837216df4022d662c24e578acd2a4fb58fac727a7
+codec_rs=ff1c27faaae9739c29a40d13582edab43558774961d55e91f2e428edaaf3fa54
+corpus_manifest=d9203058b86b39f94f20b29603a89af5229619b06c78741c64d7098730c39647
+nproc=16
+slice_bytes=2097152
+cpu_lanes=0-3,4-7,8-11,12-15
+pinned_campaign_contacted=no

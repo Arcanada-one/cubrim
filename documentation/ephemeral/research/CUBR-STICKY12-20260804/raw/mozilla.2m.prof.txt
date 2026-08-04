@@ -1,0 +1,54 @@
+
+=== CUBRIM ENCODER CANDIDATE ATTRIBUTION ===
+total measured wall: 257.607 s
+candidate                      calls      seconds   share%      wins      out_bytes
+vs_ctxmix                        384      318.130   123.49       382       23833194
+vs_geomix                        384      317.077   123.09       372       23564310
+med16                              1      219.605    85.25         1        1888765
+base                              13      219.142    85.07        12       23520316
+vs_order2_rans                   384      106.302    41.27       384       24947646
+cm2                                1       36.330    14.10         1        1563187
+cm2_variant_base                   1       36.267    14.08         1        1563181
+vs_bwt_huff                      384       24.183     9.39       351       46505768
+lz_prepass                         1       22.272     8.65         0        1598502
+vs_adaptive                      384       17.424     6.76        55       25972268
+vs_bwt_rans                      384       15.692     6.09         0       65229650
+vs_t4_huff                       384       13.711     5.32       248       46720971
+vs_lz_rans                       384       11.827     4.59        59       23774145
+geocm                              1        1.489     0.58         0              0
+columnar                           1        0.020     0.01         0              0
+soa                                1        0.013     0.01         0              0
+record_cm                          1        0.012     0.00         0              0
+binfloat                           1        0.001     0.00         0              0
+vcf                               13        0.000     0.00         0              0
+bcj                                1        0.000     0.00         0              0
+bcj_cm2                            1        0.000     0.00         0              0
+cm                                 1        0.000     0.00         0              0
+FINAL:geomix                       0        0.000     0.00       325              0
+FINAL:lz_rans                      0        0.000     0.00        59              0
+=== END ATTRIBUTION (nested candidates double-count; attribution, not partition) ===
+
+compressed: 2097152 bytes -> 1563187 bytes ratio=0.745386 time_ms=257610
+	Command being timed: "env CUBRIM_PROFILE=1 /home/dev/.worktrees/cubrim/CUBR-GATEDISARM/code/cubrim-rs/target/release/cubrim compress /tmp/cubr-sticky12.yK1o7n/input/mozilla.2m /tmp/cubr-sticky12.yK1o7n/out/mozilla/mozilla.2m.cbr"
+	User time (seconds): 585.13
+	System time (seconds): 3.49
+	Percent of CPU this job got: 228%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 4:17.65
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1949420
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 1371470
+	Voluntary context switches: 294
+	Involuntary context switches: 295574
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 3064
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
