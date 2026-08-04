@@ -1,0 +1,51 @@
+CUBR-DECODESPREAD GeoCM follow-up provenance
+Measured: 2026-08-04 UTC
+Task: CUBR-0087
+
+Canonical state verified before the follow-up:
+origin/main (git ls-remote): d5c9ea45e0799464373213500423e7212900d875
+origin/main (remote-tracking ref): d5c9ea45e0799464373213500423e7212900d875
+
+Temporary measurement instrument:
+base worktree: /tmp/cubr-decodespread-profiler
+base commit: cbdae7d42d4c7374ebee45761d8cb70c738bb7de
+temporary diff sha256: 673a0b8b0026dc6b0d8debd0e5163780a0cb1927b28885f36dff12bf784a036f
+patched profiler source sha256: ed342ddccd03d087160c0323ac2495570c1caf9d1bf0bc9a0029dc28049710eb
+patched geocm source sha256: 4259e4fb8cbbf5daf4b74840eba6609621c5dd611b60975cdfbbc71866b62ba7
+profiler binary sha256: ec1c9c3705c50315acff08f71a95fb9bf9632e521ed9c2aeb4cf7a930501387b
+instrument scope: feature-gated profiler mode recognition plus GeoCM framing, allocation, entropy, transform, and output guards; no production commit
+
+Corpus and paired inputs:
+corpus root: /home/dev/cubr-cubecore-research/corpus-silesia
+corpus manifest sha256: d9203058b86b39f94f20b29603a89af5229619b06c78741c64d7098730c39647
+mr source slice bytes: 2097152
+mr source slice sha256: 1e254e8d58a0aecd86ce44f29cf00d5531c8b29c1b24efc049371e0f11f59a64
+nci source slice bytes: 2097152
+nci source slice sha256: 6788fcc1527c0f62709103e68ac9ab9416461ab00ed1f529b3cf2ae4ab06221e
+mr archive bytes: 404341
+mr archive sha256: 6493607227016fc420d17f04778365f4386781dc97c2c0365e1c761a5fc9ff7b
+nci archive bytes: 104139
+nci archive sha256: 1dcc11fa179e3aa0a0b745fba85b5c2187aa382b4b3022ec8ecd8839962b925b
+
+Execution environment and command:
+feature: decode-profile
+profile environment: CUBRIM_PROFILE=1
+process affinity: taskset --cpu-list 0
+profiler metadata: --affinity fixed-core
+timing: /usr/bin/time -v
+output root: /tmp/cubr-decodespread-followup.3zxxSm (outside corpus)
+
+taskset --cpu-list 0 env CUBRIM_PROFILE=1 /usr/bin/time -v \
+  /tmp/cubr-decodespread-profiler/code/cubrim-rs/target/release/cubrim-decode-profile \
+  --input ARCHIVE --original PAYLOAD --output REPORT --affinity fixed-core
+
+Validation commands (all exit 0; raw output is validation.log):
+git diff --check
+cargo check --release --features decode-profile --bin cubrim-decode-profile
+cargo test --release --features decode-profile codec::tests::geocm_roundtrips_and_fails_closed -- --exact
+cargo test --release --features decode-profile profile
+
+Interpretation:
+cycles_per_compressed_byte = raw profile cycles / decode_profile.input_bytes
+nanos_per_compressed_byte = raw profile nanoseconds / decode_profile.input_bytes
+NA rows are profiler-applicable=false, not measured zeroes.
