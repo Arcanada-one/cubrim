@@ -7025,7 +7025,7 @@ fn bwt_encode_codes_wide(seq: &[usize]) -> (Vec<usize>, usize) {
 /// index, so this checked narrowing preserves the format while the wide core serves FU-01.
 pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
     let (bwt_out, primary) = bwt_encode_codes_wide(seq);
-    debug_assert!(
+    assert!(
         primary <= u16::MAX as usize,
         "primary_index {primary} exceeds u16::MAX; cube/chunk ceiling may have been raised above 65536 without updating BWT wire format"
     );
