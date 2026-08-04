@@ -12,6 +12,7 @@ corpus that underlies the NEW-29/CUBR-0092 lane, not the web corpus.
 
 - Full corpus manifest: `/home/dev/cubr-cubecore-research/corpus-silesia/SHA256SUMS.txt`
   SHA-256 `d9203058b86b39f94f20b29603a89af5229619b06c78741c64d7098730c39647`.
+- Evidence commit: `6f281f360b9670f992976b1e248b41343a7c5bd3`.
 - Measured source commit: `3a59903910aa526a5d8e1633465f784fbfb4fc65`.
 - `src/prof.rs` blob SHA-256: `0e6c3eaf2a7b8102df3dcd1837216df4022d662c24e578acd2a4fb58fac727a7`.
 - `src/codec.rs` blob SHA-256: `ff1c27faaae9739c29a40d13582edab43558774961d55e91f2e428edaaf3fa54`.
