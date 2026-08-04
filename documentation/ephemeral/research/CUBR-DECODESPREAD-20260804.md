@@ -2,7 +2,7 @@
 
 **Measured:** 2026-08-04 UTC
 **Task:** CUBR-0087
-**Status:** PARTIAL — `nci` has a valid decode profile; `mr` is byte-exact but the existing profiler rejects its mode before decoding.
+**Status:** SUPERSEDED — this initial run was partial; the GeoCM gap is closed by the [follow-up two-file profile](CUBR-DECODESPREAD-GEO-20260804.md).
 
 ## Question and boundary
 
