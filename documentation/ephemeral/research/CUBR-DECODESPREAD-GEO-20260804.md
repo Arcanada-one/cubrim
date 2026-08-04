@@ -39,8 +39,12 @@ archive's existing MIX inner mode; no claim is made for other GeoCM modes.
   `1dcc11fa179e3aa0a0b745fba85b5c2187aa382b4b3022ec8ecd8839962b925b`.
 - The temporary instrument is based on
   `codex/cubr-0075-profile` at
-  `cbdae7d42d4c7374ebee45761d8cb70c738bb7de`. Its uncommitted diff SHA-256
-  is `673a0b8b0026dc6b0d8debd0e5163780a0cb1927b28885f36dff12bf784a036f`;
+  `cbdae7d42d4c7374ebee45761d8cb70c738bb7de`. The exact feature-gated
+  measurement diff is preserved as
+  [`instrument.patch`](CUBR-DECODESPREAD-GEO-20260804/instrument.patch), whose
+  SHA-256 is `9d1a9b42004d1c33ae1f46162e3103941430eb00f3d7bcaf6d53667acadaac22`;
+  it is stored as a zero-context diff and applies to that base with
+  `git apply --unidiff-zero`;
   the patched `geocm.rs` and profiler source hashes, and the profiler binary
   hash, are recorded in [`provenance.txt`](CUBR-DECODESPREAD-GEO-20260804/provenance.txt).
 - `CUBRIM_PROFILE=1` and `/usr/bin/time -v` were used. Each profiler process
@@ -68,6 +72,10 @@ The raw JSON records `exact_roundtrip: true` for both files. The temporary
 instrument validation also passed the focused GeoCM round-trip test and the
 two profile integration tests; the complete output is
 [`raw/validation.log`](CUBR-DECODESPREAD-GEO-20260804/raw/validation.log).
+Closure hardening additionally ran the same `mr` archive and source through
+the recorded binaries as a direct mutation gate: the unpatched base profiler
+failed closed with exit 2 on unsupported mode 17, while the patched profiler
+accepted mode 17 and emitted an exact-round-trip GeoCM profile.
 
 ## Stage attribution
 
@@ -144,3 +152,10 @@ pinned host, shared backlog, or #28/#29 artifact was changed.
 - [`raw/mr.cbr`](CUBR-DECODESPREAD-GEO-20260804/raw/mr.cbr) and
   [`raw/nci.cbr`](CUBR-DECODESPREAD-GEO-20260804/raw/nci.cbr) — exact archive
   inputs.
+- [`instrument.patch`](CUBR-DECODESPREAD-GEO-20260804/instrument.patch) — exact
+  feature-gated measurement diff against the recorded base commit; it is
+  evidence for reproducing the profiler, not a production source change.
+- [`mutation-gate.log`](CUBR-DECODESPREAD-GEO-20260804/mutation-gate.log) —
+  checksummed clean-worktree transcript of the base rejection, patch check and
+  application, rebuilt binary identities, and successful GeoCM exact-roundtrip
+  replay.

@@ -1,6 +1,9 @@
 measured_utc=2026-08-04
 task=CUBR-0087
 status=PARTIAL
+superseded_by=documentation/ephemeral/research/CUBR-DECODESPREAD-GEO-20260804.md
+superseding_status=PASS_WITHIN_DECLARED_TWO_FILE_DIAGNOSTIC_SCOPE
+superseded_on_origin_main=a69340fcd17b609d5b6d09148ce960bb8a8c0880
 current_branch=CUBR-0097-skip-then-fail
 current_head_before_evidence=0dbfe3b504f6bebd84a65aba95c14624219f16fa
 origin_main_verified=611bad41fa0ab4a3fd34f71ed2e830ba351b1af1
