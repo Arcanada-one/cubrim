@@ -92,3 +92,15 @@ The guarded append in `NEW29-PROFFOUND-EXTEND.sql` changes only
 read-back timestamp, and is idempotent on marker
 `[PROF FOUND 2026-08-04]`. It does not insert a measurement row or change the
 existing `status`, `verdict`, `measured`, `measure_date`, or `measure_task`.
+
+Execution evidence: the pre-write `public.hypotheses` backup was
+`/root/cubr-backups/CUBR-0087-NEW-29-before-PROFFOUND-20260804T133015Z.dump`,
+mode `0600`, size 90,169 bytes, SHA-256
+`298aeafd0019a0acaaa8d02f71d2e2c771d3946d0e32d6cf8c25de807abef70c`; its
+restore catalog contained `TABLE DATA public hypotheses postgres`. The guarded
+transaction committed at `2026-08-04 13:30:34.802214+00` and changed one row.
+Fresh-session readback returned `new29_rows=1`, `n9_rows=1`, `n13_rows=1`,
+`prof_rows=1`, `status=closed`, `measured=true`, `measure_date=2026-08-02`,
+`measure_task=CUBR-0092`, unchanged KILLED verdict, note length `17274`, and
+note MD5 `b2bc51d5164361503b0fa427bf961438`. A separate query confirmed
+`public.measurements` has `0` rows for NEW-29.
