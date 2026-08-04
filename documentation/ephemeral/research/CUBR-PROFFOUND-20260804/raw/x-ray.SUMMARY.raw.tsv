@@ -1,0 +1,2 @@
+out-xray	orig=4096	comp=0	ratio=0.000000	enc_wall=0:00.00	dec_wall=0:00.00	enc_rss_kib=3840	dec_rss_kib=3840	rt=FAIL
+x-ray.2m	orig=2097152	comp=878363	ratio=0.418836	enc_wall=1:44.53	dec_wall=0:01.66	enc_rss_kib=783864	dec_rss_kib=81536	rt=PASS
