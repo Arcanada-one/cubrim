@@ -10859,6 +10859,62 @@ mod tests {
     /// 200,000-element `(i * 7919) % 251` sequence yields `primary 796` — the
     /// primary index is a rotation rank, not a length. Only realistic structure
     /// drives it past the ceiling, so the fixture is real corpus data.
+    /// Measures the density the decline forgoes, at the value-stream level where
+    /// the guard actually operates.
+    ///
+    /// A whole-archive probe cannot measure this: `EncodeConfig::value_scheme`
+    /// only steers `encode_base`, which is one candidate on the competitive-min
+    /// rail, so forcing a BWT scheme through the public API is inert — three
+    /// different forced schemes emit byte-identical archives. A probe at that
+    /// level reports "zero delta" whatever the guard does, including nothing.
+    #[test]
+    fn measure_forgone_density_of_bwt_decline() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../bench/web-corpus/payloads-v2");
+        let mut entries: Vec<_> = std::fs::read_dir(&root)
+            .expect("web corpus must be present")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect();
+        entries.sort();
+
+        for path in entries {
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let mut dict: Vec<u8> = bytes.clone();
+            dict.sort_unstable();
+            dict.dedup();
+            let codes: Vec<usize> = bytes
+                .iter()
+                .map(|b| dict.binary_search(b).expect("byte in dict"))
+                .collect();
+            let (bwt_out, primary_wide) = super::bwt_encode_codes_wide(&codes);
+            if primary_wide <= u16::MAX as usize {
+                continue;
+            }
+            let n = dict.len();
+
+            // What BWT+T4 *would* have cost if the v1 wire could carry a wide
+            // primary index — i.e. the density the decline gives up.
+            let forgone = 2 + super::context_huffman_size(&bwt_out, n);
+            // What the block actually gets instead.
+            let (scheme, actual) = super::encode_rans_family_value_stream(&codes, n);
+
+            println!(
+                "FORGONE-DENSITY\t{}\tlen={}\tprimary_wide={}\tbwt_would_be={}\tactual={}({})\tdelta={:+}\t({:+.2}%)",
+                path.file_name().unwrap().to_string_lossy(),
+                codes.len(),
+                primary_wide,
+                forgone,
+                actual.len(),
+                scheme.scheme_byte(),
+                actual.len() as i64 - forgone as i64,
+                (actual.len() as f64 - forgone as f64) / forgone as f64 * 100.0
+            );
+        }
+    }
+
     #[test]
     fn bwt_schemes_decline_when_primary_index_exceeds_u16() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

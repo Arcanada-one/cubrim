@@ -31,8 +31,17 @@ fn main() {
             config.use_square_limit = false;
             let blob = cubrim::encode_with_config(&payload, &config);
             let ok = cubrim::decode(&blob).map(|d| d == payload).unwrap_or(false);
+            // The emitted scheme byte is the condition that matters: round-trip
+            // success alone would also pass if the guard never fired.
+            let emitted = cubrim::header::parse_header(&blob)
+                .map(|(h, _)| h.value_scheme)
+                .map(|b| match ValueScheme::from_byte(b) {
+                    Some(s) => format!("{s:?}"),
+                    None => format!("byte:{b}"),
+                })
+                .unwrap_or_else(|_| "hdr-parse-err".to_string());
             println!(
-                "{name}\t{}\t{}\t{}\t{}",
+                "{name}\t{}\t{}\t{}\t{}\temitted={emitted}",
                 path.file_name().unwrap().to_string_lossy(),
                 payload.len(),
                 blob.len(),
