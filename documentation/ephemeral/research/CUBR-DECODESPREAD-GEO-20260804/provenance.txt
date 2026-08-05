@@ -1,0 +1,98 @@
+CUBR-DECODESPREAD GeoCM follow-up provenance
+Measured: 2026-08-04 UTC
+Task: CUBR-0087
+
+Canonical state verified before the follow-up:
+origin/main (git ls-remote): d5c9ea45e0799464373213500423e7212900d875
+origin/main (remote-tracking ref): d5c9ea45e0799464373213500423e7212900d875
+
+Temporary measurement instrument:
+base worktree: /tmp/cubr-decodespread-profiler
+base commit: cbdae7d42d4c7374ebee45761d8cb70c738bb7de
+temporary diff sha256: 9d1a9b42004d1c33ae1f46162e3103941430eb00f3d7bcaf6d53667acadaac22
+tracked diff: documentation/ephemeral/research/CUBR-DECODESPREAD-GEO-20260804/instrument.patch
+tracked diff format: zero-context unified diff
+clean-base applicability: git apply --check --unidiff-zero instrument.patch
+patched profiler source sha256: ed342ddccd03d087160c0323ac2495570c1caf9d1bf0bc9a0029dc28049710eb
+patched geocm source sha256: 4259e4fb8cbbf5daf4b74840eba6609621c5dd611b60975cdfbbc71866b62ba7
+profiler binary sha256: ec1c9c3705c50315acff08f71a95fb9bf9632e521ed9c2aeb4cf7a930501387b
+instrument scope: feature-gated profiler mode recognition plus GeoCM framing, allocation, entropy, transform, and output guards; no production commit
+
+Corpus and paired inputs:
+corpus root: /home/dev/cubr-cubecore-research/corpus-silesia
+corpus manifest sha256: d9203058b86b39f94f20b29603a89af5229619b06c78741c64d7098730c39647
+mr source slice bytes: 2097152
+mr source slice sha256: 1e254e8d58a0aecd86ce44f29cf00d5531c8b29c1b24efc049371e0f11f59a64
+nci source slice bytes: 2097152
+nci source slice sha256: 6788fcc1527c0f62709103e68ac9ab9416461ab00ed1f529b3cf2ae4ab06221e
+mr archive bytes: 404341
+mr archive sha256: 6493607227016fc420d17f04778365f4386781dc97c2c0365e1c761a5fc9ff7b
+nci archive bytes: 104139
+nci archive sha256: 1dcc11fa179e3aa0a0b745fba85b5c2187aa382b4b3022ec8ecd8839962b925b
+
+Execution environment and command:
+feature: decode-profile
+profile environment: CUBRIM_PROFILE=1
+process affinity: taskset --cpu-list 0
+profiler metadata: --affinity fixed-core
+timing: /usr/bin/time -v
+output root: /tmp/cubr-decodespread-followup.3zxxSm (outside corpus)
+
+taskset --cpu-list 0 env CUBRIM_PROFILE=1 /usr/bin/time -v \
+  /tmp/cubr-decodespread-profiler/code/cubrim-rs/target/release/cubrim-decode-profile \
+  --input ARCHIVE --original PAYLOAD --output REPORT --affinity fixed-core
+
+Validation commands (all exit 0; raw output is validation.log):
+git diff --check
+cargo check --release --features decode-profile --bin cubrim-decode-profile
+cargo test --release --features decode-profile codec::tests::geocm_roundtrips_and_fails_closed -- --exact
+cargo test --release --features decode-profile profile
+
+Direct deletion-equivalent mutation gate (closure hardening, 2026-08-04 UTC):
+base binary sha256: 7b1d1f786885c3f2866d84c7e3895d5d85aff966578be9bbbf08c0fd0fd46d04
+base result on mr mode 17: exit 2, unsupported mode 17
+patched binary sha256: ec1c9c3705c50315acff08f71a95fb9bf9632e521ed9c2aeb4cf7a930501387b
+patched result on same mr archive/source: exit 0, mode geocm, exact_roundtrip=true, decoded_sha256=original_sha256
+checksummed transcript: documentation/ephemeral/research/CUBR-DECODESPREAD-GEO-20260804/mutation-gate.log
+
+Clean-worktree reproduction sequence (run from this evidence checkout):
+EVIDENCE_REPO=$(git rev-parse --show-toplevel)
+BASE_COMMIT=cbdae7d42d4c7374ebee45761d8cb70c738bb7de
+REPLAY_ROOT=$(mktemp -d /tmp/cubr-0087-profile-replay.XXXXXX)
+PATCH=$EVIDENCE_REPO/documentation/ephemeral/research/CUBR-DECODESPREAD-GEO-20260804/instrument.patch
+ARCHIVE=$EVIDENCE_REPO/documentation/ephemeral/research/CUBR-DECODESPREAD-GEO-20260804/raw/mr.cbr
+SOURCE=/home/dev/cubr-cubecore-research/corpus-silesia/mr
+test "$(sha256sum "$PATCH" | awk '{print $1}')" = 9d1a9b42004d1c33ae1f46162e3103941430eb00f3d7bcaf6d53667acadaac22
+test "$(sha256sum "$ARCHIVE" | awk '{print $1}')" = 6493607227016fc420d17f04778365f4386781dc97c2c0365e1c761a5fc9ff7b
+git -C "$EVIDENCE_REPO" worktree add --detach "$REPLAY_ROOT/base" "$BASE_COMMIT"
+head -c 2097152 "$SOURCE" > "$REPLAY_ROOT/mr.2m"
+test "$(sha256sum "$REPLAY_ROOT/mr.2m" | awk '{print $1}')" = 1e254e8d58a0aecd86ce44f29cf00d5531c8b29c1b24efc049371e0f11f59a64
+cd "$REPLAY_ROOT/base/code/cubrim-rs"
+cargo build --release --features decode-profile --bin cubrim-decode-profile
+PROFILE_BINARY=$PWD/target/release/cubrim-decode-profile
+test "$(sha256sum "$PROFILE_BINARY" | awk '{print $1}')" = 7b1d1f786885c3f2866d84c7e3895d5d85aff966578be9bbbf08c0fd0fd46d04
+set +e
+"$PROFILE_BINARY" --input "$ARCHIVE" --original "$REPLAY_ROOT/mr.2m" --output "$REPLAY_ROOT/base.json" --affinity fixed-core 2>"$REPLAY_ROOT/base.stderr"
+BASE_RC=$?
+set -e
+test "$BASE_RC" -eq 2
+rg -Fx 'cubrim-decode-profile: unsupported mode 17; first-slice profiler supports only cube, raw, and cm2' "$REPLAY_ROOT/base.stderr"
+git -C "$REPLAY_ROOT/base" apply --check --unidiff-zero "$PATCH"
+git -C "$REPLAY_ROOT/base" apply --unidiff-zero "$PATCH"
+test "$(sha256sum "$REPLAY_ROOT/base/code/cubrim-rs/src/bin/cubrim_decode_profile.rs" | awk '{print $1}')" = ed342ddccd03d087160c0323ac2495570c1caf9d1bf0bc9a0029dc28049710eb
+test "$(sha256sum "$REPLAY_ROOT/base/code/cubrim-rs/src/geocm.rs" | awk '{print $1}')" = 4259e4fb8cbbf5daf4b74840eba6609621c5dd611b60975cdfbbc71866b62ba7
+cargo build --release --features decode-profile --bin cubrim-decode-profile
+test "$(sha256sum "$PROFILE_BINARY" | awk '{print $1}')" = ec1c9c3705c50315acff08f71a95fb9bf9632e521ed9c2aeb4cf7a930501387b
+"$PROFILE_BINARY" --input "$ARCHIVE" --original "$REPLAY_ROOT/mr.2m" --output "$REPLAY_ROOT/patched.json" --affinity fixed-core
+jq -e '.mode.name == "geocm" and .mode.byte == 17 and .exact_roundtrip == true and .decoded_sha256 == .original_sha256' "$REPLAY_ROOT/patched.json"
+
+Interpretation:
+cycles_per_compressed_byte = raw profile cycles / decode_profile.input_bytes
+nanos_per_compressed_byte = raw profile nanoseconds / decode_profile.input_bytes
+NA rows are profiler-applicable=false, not measured zeroes.
+
+Canonical closure:
+initial report status remains historical PARTIAL
+initial report superseded by: documentation/ephemeral/research/CUBR-DECODESPREAD-GEO-20260804.md
+superseding status: PASS within the declared two-file diagnostic scope
+closure commit on origin/main before provenance hardening: a69340fcd17b609d5b6d09148ce960bb8a8c0880

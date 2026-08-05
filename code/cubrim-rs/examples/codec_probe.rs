@@ -41,9 +41,7 @@ fn value_scheme(name: &str) -> Option<ValueScheme> {
 const MODE_OFFSET: usize = 5;
 
 fn usage() -> ExitCode {
-    eprintln!(
-        "usage: codec_probe encode|decode <input> <output> | mode <blob> | capabilities"
-    );
+    eprintln!("usage: codec_probe encode|decode <input> <output> | mode <blob> | capabilities");
     ExitCode::from(2)
 }
 
@@ -65,7 +63,10 @@ fn write(path: &str, bytes: &[u8]) -> Result<(), String> {
 fn capabilities() -> String {
     let fields: [(&str, &str); 6] = [
         ("codec_key", "\"cubrim-file-v1\""),
-        ("codec_version", concat!("\"", env!("CARGO_PKG_VERSION"), "\"")),
+        (
+            "codec_version",
+            concat!("\"", env!("CARGO_PKG_VERSION"), "\""),
+        ),
         ("incremental_decoder_nonempty_output", "false"),
         ("independent_block_decode", "false"),
         ("allocation_telemetry", "false"),

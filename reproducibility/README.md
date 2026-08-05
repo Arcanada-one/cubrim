@@ -11,7 +11,7 @@ external byte comparison against the original. On top of that:
 
 - **Nine of the ten archivers are held to exact archive sizes** — 216 cells,
   including **every Cubrim cell**.
-- **rar is held to its round trip plus a 256-byte bound**, and any difference is
+- **rar is held to its round trip plus a 32-byte bound**, and any difference is
   printed and counted rather than absorbed. See below for why.
 
 A run that meets this prints `"status": "PASS"` along with
@@ -67,10 +67,54 @@ timestamp and 51,195 with a recent one.
 
 ## Why rar is treated differently
 
-rar stores each source file's modification time and widens that encoding for
-recent timestamps, so its archive size depends on how the corpus was copied
-rather than on content alone. It is the only one of the ten archivers with that
-property — the other nine are byte-identical given the same input.
+Two reasons, and until 2026-07-30 we had only found one of them.
+
+**Thread count — the larger effect, now pinned.** rar's compressed output is a
+function of how many compression threads it uses, and rar 7.00 selects that from
+the CPU count visible to it when no `-mt` flag is passed. This package used to
+pass none, so **the same input produced a different archive on every
+differently-sized host**. On `silesia/mr` the spread across `-mt1` … `-mt16` is
+11,393 bytes; between 12 and 16 threads alone it is 5,716. That is what was
+behind the long-unexplained 5,732-byte disagreement on that one cell, and it
+meant this verifier would have rejected an honest third-party run on most
+machines while blaming a timestamp for it.
+
+Worse, that auto-detection cannot be contained from outside the process.
+`strace` shows rar reading **`/sys/devices/system/cpu/online`** — the machine's
+online CPU list — and never calling `sched_getaffinity`. So `taskset` does not
+change its choice, and neither does a container CPU limit: `/sys` inside a
+container still reports the host's CPUs, which means this package's own
+`docker run --cpus=4` gave no protection at all.
+
+`archiver_templates.json` now pins `-mt16`, which removes the auto-detection
+path entirely. `-mt` demonstrably controls the output — sweeping `-mt1` … `-mt64`
+on `silesia/mr` produces distinct, repeatable sizes spanning 11,393 bytes — and
+16 is the value the frozen expectations in `expected_cells.json` were produced
+at.
+
+**Confirmed on two hosts of different size**, which is the only test that
+actually settles it. Compressing `silesia/mr` with a normalised source
+timestamp:
+
+| host | online CPUs | `-mt16` pinned | no `-mt` |
+|---|---|---|---|
+| A | 16 | 2,781,302 | 2,781,302 |
+| B | 64 | **2,781,302** | 2,779,962 |
+
+Pinned, the two hosts agree to the byte. Unpinned, they disagree by 1,340 bytes
+— and that is the smaller end of the effect; the same knob moves `silesia/mr` by
+5,716 bytes between 12 and 16 threads.
+
+A full 24-file, nine-archiver run on host B with `-mt16` pinned reproduced host
+A's frozen expectations on **204 of 216 cells byte-for-byte**, all 216 round
+trips exact. The twelve that differed were the twelve silesia rar cells,
+uniformly −16 bytes — the timestamp effect below, not a compression difference.
+
+**Timestamps — 16 bytes.** rar stores each source file's modification time and
+widens that encoding for recent timestamps, so its archive size also depends on
+how the corpus was copied rather than on content alone. It is the only one of
+the ten archivers with that property — the other nine are byte-identical given
+the same input.
 
 Concretely, `canterbury/alice29.txt` compresses to 51,179 bytes with its
 original 1996 timestamp and 51,195 with a recent one.

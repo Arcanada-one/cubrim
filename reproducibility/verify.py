@@ -13,10 +13,22 @@ from typing import Any
 
 
 # The observed mtime encoding difference is exactly 16 bytes per archive. This
-# leaves 16x headroom for other timestamp spellings while staying far below any
-# real compression change -- the largest anomaly ever seen on this corpus was
-# 5,732 bytes, which this still rejects.
-MTIME_HEADER_SLACK = 256
+# leaves 2x headroom for other timestamp spellings while staying far below any
+# real compression change.
+#
+# It used to be 256, sized to reject a 5,732-byte anomaly on silesia/mr that was
+# then unexplained. That anomaly is now explained and eliminated at the source:
+# rar's archive size is a function of its compression thread count, and rar 7.00
+# picks that from the CPU count visible to it when no -mt flag is given. The
+# argv template previously gave none, so every host produced a different archive
+# from identical input -- and this verifier would have hard-failed an outside
+# reviewer's *correct* run on any box that did not resolve to 16 threads,
+# blaming a timestamp for it. rar reads /sys/devices/system/cpu/online rather
+# than the affinity mask, so neither taskset nor a container CPU limit contains
+# it. archiver_templates.json now pins -mt16, removing the auto-detection path,
+# so the only residual variation is the timestamp effect this constant is named
+# for.
+MTIME_HEADER_SLACK = 32
 META_ID = 35
 RELEASE_COMMIT = "dfb195ef089db738e51153ad4532fdd583f247bf"
 MAX_INPUT_BYTES = 64 * 1024 * 1024

@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'code/cubrim-rs/**'
+      - 'bench/web-corpus/payloads-v2/**'
+      - 'reproducibility/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'code/cubrim-rs/**'
+      - 'bench/web-corpus/payloads-v2/**'
+      - 'reproducibility/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  formatting:
+    name: Rust formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: code/cubrim-rs
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
+  scheme-roundtrip:
+    name: Lossless scheme round-trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: code/cubrim-rs
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run the silent-data-loss suite
+        run: cargo test --release --test scheme_roundtrip
+
+  reproducibility:
+    name: Reproducibility verifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: reproducibility
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Run verifier tests
+        run: python -m pytest --strict-markers test_verify.py

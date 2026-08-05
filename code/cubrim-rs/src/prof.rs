@@ -62,7 +62,11 @@ fn state() -> &'static Mutex<BTreeMap<&'static str, Slot>> {
 /// Returns `f`'s value untouched, so a call site can be wrapped without
 /// changing behaviour. `size_of` maps the result to its candidate byte length
 /// (a candidate that declined to run reports 0).
-pub(crate) fn track<T>(name: &'static str, size_of: impl Fn(&T) -> usize, f: impl FnOnce() -> T) -> T {
+pub(crate) fn track<T>(
+    name: &'static str,
+    size_of: impl Fn(&T) -> usize,
+    f: impl FnOnce() -> T,
+) -> T {
     if !enabled() {
         return f();
     }
@@ -123,5 +127,7 @@ pub(crate) fn report(total_nanos: u128) {
             s.out_bytes
         );
     }
-    eprintln!("=== END ATTRIBUTION (nested candidates double-count; attribution, not partition) ===\n");
+    eprintln!(
+        "=== END ATTRIBUTION (nested candidates double-count; attribution, not partition) ===\n"
+    );
 }

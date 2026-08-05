@@ -26,14 +26,15 @@ use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
 use crate::header::{
     parse_header, serialize_cube_header, serialize_raw_header, CubeHeaderState, MAGIC, MODE_BCJ,
-    MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_CM2, MODE_COLUMNAR, MODE_CUBE, MODE_EXECM,
-    MODE_GEOCM, MODE_LARGEBWT, MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA, MODE_TARBCJ,
-    MODE_VCF, VERSION,
+    MODE_BIFF, MODE_BINFLOAT, MODE_CHUNKED, MODE_CM, MODE_CM2, MODE_COLUMNAR, MODE_CUBE,
+    MODE_EXECM, MODE_GEOCM, MODE_LARGEBWT, MODE_LZ, MODE_MED16, MODE_RAW, MODE_RECORDCM, MODE_SOA,
+    MODE_TARBCJ, MODE_VCF, VERSION,
 };
 use crate::huffman::{
     canonical_code_lengths, huffman_bitstream_size, huffman_decode, huffman_encode,
 };
-use crate::phi::{compute_n_and_b, phi as phi_fn, phi_inv as phi_inv_fn};
+use crate::limits::DecodeLimits;
+use crate::phi::{compute_n_and_b, phi_inv as phi_inv_fn};
 use crate::rle::{
     packed_nibble_decode, packed_nibble_encode, packed_nibble_size, rle_decode, rle_encode,
     rle_size,
@@ -298,7 +299,11 @@ fn encode_with_config_inner(
     // which always beats the whole-file LZ / columnar-CSV competitors on this data — so
     // short-circuit them (they are as slow as base and never win here). Still competitive
     // against base (min), so a degenerate VCF cannot regress.
-    if let Some(vcf) = crate::prof::track("vcf", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_vcf(data, config)) {
+    if let Some(vcf) = crate::prof::track(
+        "vcf",
+        |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+        || encode_vcf(data, config),
+    ) {
         if !have_best(&best) {
             // Large path: base was deferred. Run it now, bounded by the VCF
             // candidate. Base wins ties, exactly as when it was the initial
@@ -344,9 +349,11 @@ fn encode_with_config_inner(
         std::thread::scope(|scope| {
             let lz_handle = if try_lz {
                 Some(scope.spawn(|| {
-                    let lz = crate::prof::track("lz_prepass", |v: &Vec<u8>| v.len(), || {
-                        encode_lz_prepass(data, config)
-                    });
+                    let lz = crate::prof::track(
+                        "lz_prepass",
+                        |v: &Vec<u8>| v.len(),
+                        || encode_lz_prepass(data, config),
+                    );
                     let col = crate::prof::track(
                         "columnar",
                         |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
@@ -364,13 +371,21 @@ fn encode_with_config_inner(
             // `try_binfloat` doubles as the heavy-transform recursion guard (nested calls pass
             // false). The detectors return None cheaply when their structure is absent.
             if try_binfloat {
-                if let Some(bf) = crate::prof::track("binfloat", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_binfloat(data, config)) {
+                if let Some(bf) = crate::prof::track(
+                    "binfloat",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_binfloat(data, config),
+                ) {
                     if !have_best(&best) || bf.len() < best.len() {
                         best = bf;
                         crate::prof::win("binfloat");
                     }
                 }
-                if let Some(m) = crate::prof::track("med16", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_med16(data, config)) {
+                if let Some(m) = crate::prof::track(
+                    "med16",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_med16(data, config),
+                ) {
                     if !have_best(&best) || m.len() < best.len() {
                         best = m;
                         crate::prof::win("med16");
@@ -379,19 +394,31 @@ fn encode_with_config_inner(
                 // MODE_GEOCM (D→A port): geo-context image codec, gated to periodic
                 // image-like inputs. Competitive min() — kept only when strictly
                 // smaller, so no non-image file can regress.
-                if let Some(g) = crate::prof::track("geocm", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_geocm(data, config)) {
+                if let Some(g) = crate::prof::track(
+                    "geocm",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_geocm(data, config),
+                ) {
                     if !have_best(&best) || g.len() < best.len() {
                         best = g;
                         crate::prof::win("geocm");
                     }
                 }
-                if let Some(b) = crate::prof::track("bcj", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_bcj(data, config)) {
+                if let Some(b) = crate::prof::track(
+                    "bcj",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_bcj(data, config),
+                ) {
                     if !have_best(&best) || b.len() < best.len() {
                         best = b;
                         crate::prof::win("bcj");
                     }
                 }
-                if let Some(s) = crate::prof::track("soa", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_soa(data, config)) {
+                if let Some(s) = crate::prof::track(
+                    "soa",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_soa(data, config),
+                ) {
                     if !have_best(&best) || s.len() < best.len() {
                         best = s;
                         crate::prof::win("soa");
@@ -401,13 +428,21 @@ fn encode_with_config_inner(
                 // per-type binary #1. Detector-gated via soa_detect_width;
                 // competitive min() — kept only when strictly smaller, so
                 // non-record files stay byte-identical and no file regresses.
-                if let Some(rc) = crate::prof::track("record_cm", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_record_cm(data, config)) {
+                if let Some(rc) = crate::prof::track(
+                    "record_cm",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_record_cm(data, config),
+                ) {
                     if !have_best(&best) || rc.len() < best.len() {
                         best = rc;
                         crate::prof::win("record_cm");
                     }
                 }
-                if let Some(cm) = crate::prof::track("cm", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_cm(data, config)) {
+                if let Some(cm) = crate::prof::track(
+                    "cm",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_cm(data, config),
+                ) {
                     if !have_best(&best) || cm.len() < best.len() {
                         best = cm;
                         crate::prof::win("cm");
@@ -415,7 +450,11 @@ fn encode_with_config_inner(
                 }
                 // MODE_CM2 strong context-mixing backend (gated to large
                 // text/xml/exe). Slow but a competitive min() — zero regression.
-                if let Some(cm2) = crate::prof::track("cm2", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_cm2(data, config)) {
+                if let Some(cm2) = crate::prof::track(
+                    "cm2",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_cm2(data, config),
+                ) {
                     if !have_best(&best) || cm2.len() < best.len() {
                         best = cm2;
                         crate::prof::win("cm2");
@@ -425,7 +464,11 @@ fn encode_with_config_inner(
                 // encode runs with the recursion guard set, which excludes CM2, so this
                 // pairing is otherwise unreachable. Arch-gated + strict min() ⇒ every
                 // non-executable and every non-winning input stays byte-identical.
-                if let Some(bc) = crate::prof::track("bcj_cm2", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_bcj_cm2(data, config)) {
+                if let Some(bc) = crate::prof::track(
+                    "bcj_cm2",
+                    |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+                    || encode_bcj_cm2(data, config),
+                ) {
                     if !have_best(&best) || bc.len() < best.len() {
                         best = bc;
                         crate::prof::win("bcj_cm2");
@@ -455,10 +498,16 @@ fn encode_with_config_inner(
         // No incumbent => no bound. `base` must then run to completion, because
         // it is the only candidate and there is nothing to fall back on. This is
         // the case the global-bound version got wrong.
-        let bound = if have_best(&best) { best.len() } else { usize::MAX };
-        let base = crate::prof::track("base", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || {
-            encode_base_bounded(data, config, bound)
-        });
+        let bound = if have_best(&best) {
+            best.len()
+        } else {
+            usize::MAX
+        };
+        let base = crate::prof::track(
+            "base",
+            |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+            || encode_base_bounded(data, config, bound),
+        );
         match base {
             Some(base) if !have_best(&best) || base.len() <= best.len() => {
                 crate::prof::win("base");
@@ -474,7 +523,11 @@ fn encode_with_config_inner(
         // IW-05: Canterbury `sum` is a 38 KiB SPARC ELF. Architecture detection is
         // sufficiently strict to let BCJ compete below the general multi-block gate;
         // the strict size minimum preserves the existing byte stream when it does not win.
-        if let Some(b) = crate::prof::track("bcj_small", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_bcj(data, config)) {
+        if let Some(b) = crate::prof::track(
+            "bcj_small",
+            |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+            || encode_bcj(data, config),
+        ) {
             if b.len() < best.len() {
                 best = b;
                 crate::prof::win("bcj_small");
@@ -491,7 +544,11 @@ fn encode_with_config_inner(
         // the single global VERSION const would instead change byte[4] of EVERY blob and
         // break both large-file byte-identity and old-archive decode parity (see the decode
         // gate, `blob[4] == VERSION`). The multi-block transforms keep their own gates.
-        if let Some(cm2) = crate::prof::track("cm2_small", |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()), || encode_cm2(data, config)) {
+        if let Some(cm2) = crate::prof::track(
+            "cm2_small",
+            |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+            || encode_cm2(data, config),
+        ) {
             if cm2.len() < best.len() {
                 best = cm2;
                 crate::prof::win("cm2_small");
@@ -514,14 +571,46 @@ fn encode_rans_family_value_stream(
     seq_codes: &[usize],
     n_distinct: usize,
 ) -> (ValueScheme, Vec<u8>) {
-    let rans_bytes = crate::prof::track("vs_bwt_rans", |v: &Vec<u8>| v.len(), || bwt_rans_encode(seq_codes, n_distinct));
-    let bwt_huff_bytes = crate::prof::track("vs_bwt_huff", |v: &Vec<u8>| v.len(), || bwt_entropy_encode(seq_codes, n_distinct));
-    let t4_bytes_val = crate::prof::track("vs_t4_huff", |v: &Vec<u8>| v.len(), || context_huffman_encode(seq_codes, n_distinct));
-    let order2_bytes = crate::prof::track("vs_order2_rans", |v: &Vec<u8>| v.len(), || bwt_order2_rans_encode(seq_codes, n_distinct));
-    let adaptive_bytes = crate::prof::track("vs_adaptive", |v: &Vec<u8>| v.len(), || bwt_adaptive_encode(seq_codes, n_distinct));
-    let ctxmix_bytes = crate::prof::track("vs_ctxmix", |v: &Vec<u8>| v.len(), || bwt_ctxmix_encode(seq_codes, n_distinct));
-    let geomix_bytes = crate::prof::track("vs_geomix", |v: &Vec<u8>| v.len(), || bwt_geomix_encode(seq_codes, n_distinct));
-    let lz_bytes = crate::prof::track("vs_lz_rans", |v: &Vec<u8>| v.len(), || lz_rans_encode(seq_codes, n_distinct));
+    let rans_bytes = crate::prof::track(
+        "vs_bwt_rans",
+        |v: &Vec<u8>| v.len(),
+        || bwt_rans_encode(seq_codes, n_distinct),
+    );
+    let bwt_huff_bytes = crate::prof::track(
+        "vs_bwt_huff",
+        |v: &Vec<u8>| v.len(),
+        || bwt_entropy_encode(seq_codes, n_distinct),
+    );
+    let t4_bytes_val = crate::prof::track(
+        "vs_t4_huff",
+        |v: &Vec<u8>| v.len(),
+        || context_huffman_encode(seq_codes, n_distinct),
+    );
+    let order2_bytes = crate::prof::track(
+        "vs_order2_rans",
+        |v: &Vec<u8>| v.len(),
+        || bwt_order2_rans_encode(seq_codes, n_distinct),
+    );
+    let adaptive_bytes = crate::prof::track(
+        "vs_adaptive",
+        |v: &Vec<u8>| v.len(),
+        || bwt_adaptive_encode(seq_codes, n_distinct),
+    );
+    let ctxmix_bytes = crate::prof::track(
+        "vs_ctxmix",
+        |v: &Vec<u8>| v.len(),
+        || bwt_ctxmix_encode(seq_codes, n_distinct),
+    );
+    let geomix_bytes = crate::prof::track(
+        "vs_geomix",
+        |v: &Vec<u8>| v.len(),
+        || bwt_geomix_encode(seq_codes, n_distinct),
+    );
+    let lz_bytes = crate::prof::track(
+        "vs_lz_rans",
+        |v: &Vec<u8>| v.len(),
+        || lz_rans_encode(seq_codes, n_distinct),
+    );
 
     let mut winner_scheme = ValueScheme::BwtRans;
     let mut encoded_values = rans_bytes;
@@ -587,11 +676,7 @@ fn encode_rans_family_value_stream(
 /// Returns `None` when the chunked accumulation passed the incumbent, i.e. the
 /// candidate provably cannot win. Only the competitive rail may call this — a
 /// caller that embeds the result must use `encode_base`, which always completes.
-fn encode_base_bounded(
-    data: &[u8],
-    config: &EncodeConfig,
-    bound: EncBound,
-) -> Option<Vec<u8>> {
+fn encode_base_bounded(data: &[u8], config: &EncodeConfig, bound: EncBound) -> Option<Vec<u8>> {
     if data.len() > config.cube_size_limit() {
         // Only the chunked path has an accumulation to abandon.
         encode_chunked_bounded(data, config, bound)
@@ -993,11 +1078,7 @@ fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 /// not a valid encoding, and handing one to a consumer that does not check for
 /// `None` would corrupt output. Only the competitive rail, which discards
 /// losers, may pass true.
-fn encode_chunked_bounded(
-    data: &[u8],
-    config: &EncodeConfig,
-    bound: EncBound,
-) -> Option<Vec<u8>> {
+fn encode_chunked_bounded(data: &[u8], config: &EncodeConfig, bound: EncBound) -> Option<Vec<u8>> {
     let allow_abort = bound != usize::MAX;
     let block_size = chunk_block_size(config);
     debug_assert!(block_size >= 1, "chunk block size must be positive");
@@ -1103,10 +1184,9 @@ fn encode_blocks_parallel(
                         }
                         let blob = encode_base(blocks[i], config);
                         if allow_abort {
-                            let total = emitted_ref.fetch_add(
-                                blob.len() + 4,
-                                std::sync::atomic::Ordering::Relaxed,
-                            ) + blob.len()
+                            let total = emitted_ref
+                                .fetch_add(blob.len() + 4, std::sync::atomic::Ordering::Relaxed)
+                                + blob.len()
                                 + 4;
                             if bound_exceeded(total, bound) {
                                 abandoned_ref.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -2566,7 +2646,11 @@ fn med16_forward_apm(samples: &[u16], w: usize) -> Vec<u16> {
         let x = i % w;
         let a = if x > 0 { samples[i - 1] } else { 0 };
         let b = if i >= w { samples[i - w] } else { 0 };
-        let c = if i >= w && x > 0 { samples[i - w - 1] } else { 0 };
+        let c = if i >= w && x > 0 {
+            samples[i - w - 1]
+        } else {
+            0
+        };
         let pred = med16_predict(a, b, c);
         let ctx = med16_ctx(a, b, c);
         let bias = if cnt[ctx] > 0 {
@@ -3038,7 +3122,11 @@ fn tar_members(data: &[u8]) -> Option<Vec<TarMember>> {
         let stored_checksum = tar_octal(&block[148..156])?;
         let mut sum: u64 = 0;
         for (i, &b) in block.iter().enumerate() {
-            sum += if (148..156).contains(&i) { 32 } else { b as u64 };
+            sum += if (148..156).contains(&i) {
+                32
+            } else {
+                b as u64
+            };
         }
         if sum != stored_checksum {
             return None;
@@ -3081,7 +3169,12 @@ fn alpha_bcj(payload: &mut [u8], encode: bool) {
     let words = payload.len() / 4;
     for i in 1..words {
         let at = i * 4;
-        let w = u32::from_le_bytes([payload[at], payload[at + 1], payload[at + 2], payload[at + 3]]);
+        let w = u32::from_le_bytes([
+            payload[at],
+            payload[at + 1],
+            payload[at + 2],
+            payload[at + 3],
+        ]);
         let opcode = w >> 26;
         if opcode == 0x30 || opcode == 0x34 {
             let disp = w & 0x001F_FFFF;
@@ -3129,7 +3222,9 @@ fn encode_fh18_tar_alpha_probe(data: &[u8]) -> Option<Vec<u8>> {
 fn decode_tar_bcj(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     const FIXED: usize = 10; // MAGIC4 + VER1 + MODE1 + orig4
     if blob.len() < FIXED {
-        return Err(CubrimError::Decode("MODE_TARBCJ container too short".into()));
+        return Err(CubrimError::Decode(
+            "MODE_TARBCJ container too short".into(),
+        ));
     }
     let orig_len = read_u32(blob, 6)? as usize;
     let mut stream = decode(&blob[FIXED..])?;
@@ -4919,7 +5014,32 @@ impl Drop for DecodeDepthGuard {
     }
 }
 
+/// Decode with the default deterministic resource policy.
 pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
+    decode_with_limits(blob, &DecodeLimits::default())
+}
+
+/// Decode a classic cube/raw blob under caller-selected output and
+/// reconstruction-memory limits.
+///
+/// Container modes keep their existing mode-specific fail-closed guards; the
+/// explicit policy is applied when the self-describing cube/raw header is
+/// available. This keeps the public contract useful for the Web Profile path
+/// without pretending that a nested container has a single fixed header shape.
+pub fn decode_with_limits(blob: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, CubrimError> {
+    if blob.len() >= 6 && blob[0..4] == MAGIC && blob[4] == VERSION {
+        match blob[5] {
+            MODE_CUBE | MODE_RAW => {
+                let (hdr, _) = parse_header(blob)?;
+                crate::limits::validate_header(&hdr, limits)?;
+            }
+            _ => {}
+        }
+    }
+    decode_unlimited(blob)
+}
+
+fn decode_unlimited(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     // QA-F-009 fail-closed guard: bound container nesting. Placed in `decode` itself so
     // every recursive path is covered by one check, whatever mode does the nesting.
     let depth = DECODE_DEPTH.with(|d| {
@@ -5153,12 +5273,52 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
             //
             // This is deterministic from (L, N, B) alone — no out-of-band state (R6).
 
-            let mut lex_sorted_coords: Vec<Vec<usize>> = (0..l).map(|i| phi_fn(i, n, b)).collect();
-            lex_sorted_coords.sort();
+            // Lex order over phi(i) is the digit-reversed numeric order of i.
+            // Comparing coords[0] first means comparing the LEAST significant
+            // base-B digit first, so packing coords[0] as the MOST significant
+            // digit of a scalar key reproduces that ordering exactly, and the
+            // key is a bijection so the sort stays deterministic.
+            //
+            // The previous form materialised one heap-allocated Vec<usize> per
+            // position and then sorted those vectors, chasing a pointer per
+            // comparison: L allocations plus O(L log L) indirect compares, on
+            // the hot path of every cube decode. It is also the allocation
+            // whose unbounded form produced the ~111 GB OOM, so this is the
+            // throughput ceiling and the memory hazard in one place.
+            //
+            // Digits beyond `digits` are zero for every i < L (L <= B^digits),
+            // so they are equal across all elements and cannot affect ordering.
+            let digits = {
+                let mut count = 1usize;
+                let mut capacity = b;
+                while capacity < l {
+                    capacity = capacity.saturating_mul(b);
+                    count += 1;
+                }
+                count.min(n)
+            };
+
+            // key < B^digits <= B * L, which is well inside u64 for any L the
+            // u32 length field can express.
+            let radix = b as u64;
+            let mut ranked: Vec<(u64, u32)> = (0..l)
+                .map(|i| {
+                    let mut remainder = i;
+                    let mut key: u64 = 0;
+                    for _ in 0..digits {
+                        key = key * radix + (remainder % b) as u64;
+                        remainder /= b;
+                    }
+                    (key, i as u32)
+                })
+                .collect();
+            ranked.sort_unstable();
 
             let mut result = vec![0u8; l];
-            for (j, coords) in lex_sorted_coords.iter().enumerate() {
-                let orig_idx = phi_inv_fn(coords, b);
+            for (j, &(_, index)) in ranked.iter().enumerate() {
+                // phi_inv(phi(i)) == i by construction, so the original index
+                // is carried alongside the key rather than recomputed.
+                let orig_idx = index as usize;
                 if orig_idx < l && j < values.len() {
                     result[orig_idx] = values[j] as u8;
                 }
@@ -5701,8 +5861,15 @@ pub(crate) fn context_huffman_decode(
             ));
         }
         let n_ctx = u16::from_be_bytes([blob[offset], blob[offset + 1]]) as usize;
-        // Skip context table entries.
-        let header_bytes = 2 + n_ctx * (2 + n_distinct);
+        // Skip context table entries with checked arithmetic. Even though the
+        // wire counters are bounded integers, this must remain safe on 32-bit
+        // targets and must not return a consumed span past the input.
+        let header_bytes = crate::limits::checked_context_header_span(n_ctx, n_distinct)?;
+        if header_bytes > blob.len().saturating_sub(offset) {
+            return Err(CubrimError::Decode(
+                "EntropyContext: context table header truncated".into(),
+            ));
+        }
         return Ok((vec![], header_bytes));
     }
 
@@ -5716,14 +5883,18 @@ pub(crate) fn context_huffman_decode(
     let mut pos = offset + 2;
 
     // 2. Read context tables.
-    let header_entry_size = 2 + n_distinct; // ctx_id(u16) + code_len[n_distinct]
-    if pos + n_ctx * header_entry_size > blob.len() {
+    let header_bytes = crate::limits::checked_context_header_span(n_ctx, n_distinct)?;
+    let header_end = offset.checked_add(header_bytes).ok_or_else(|| {
+        CubrimError::Decode("EntropyContext: context table header offset overflow".into())
+    })?;
+    if header_end > blob.len() {
         return Err(CubrimError::Decode(format!(
             "EntropyContext: context table header truncated: need {} bytes, have {}",
-            n_ctx * header_entry_size,
+            header_bytes - 2,
             blob.len().saturating_sub(pos)
         )));
     }
+    crate::limits::validate_context_table_entries(n_ctx, n_distinct)?;
 
     // ctx_tables: Vec<(ctx_id, decode_table)>
     // decode_table: HashMap<(codeword, length), symbol> for that context.
@@ -5735,6 +5906,12 @@ pub(crate) fn context_huffman_decode(
         pos += 2;
         let code_len: Vec<u8> = blob[pos..pos + n_distinct].to_vec();
         pos += n_distinct;
+
+        if !crate::huffman::kraft_ok(&code_len) {
+            return Err(CubrimError::Decode(format!(
+                "EntropyContext: context {ctx_id} has invalid Huffman code lengths"
+            )));
+        }
 
         // Build decode table: (codeword, length) -> symbol.
         // Reuse assign_canonical_codes from huffman.rs.
@@ -6179,7 +6356,21 @@ pub(crate) fn order2_context_huffman_decode(
     // We'll build decode tables keyed by tag+key for O(1) lookup.
     struct DecodeTable {
         decode_map: HashMap<(u32, u8), usize>,
+        /// Flat lookup table when the context's code is shallow enough to
+        /// afford one. `None` falls back to `decode_map` and the bit scan,
+        /// which is correct but costs a hash probe per candidate length.
+        fast: Option<crate::huffman::HuffTable>,
     }
+
+    // One table per context, so the per-context ceiling must be lower than the
+    // single-table case: 11 bits is 2 Ki entries, affordable a few hundred
+    // times over, where 14 bits (16 Ki) would not be. The total is capped as
+    // well, because n_ctx is attacker-influenced and a stream declaring many
+    // deep contexts must not be able to make the decoder allocate without
+    // bound — the same discipline src/limits.rs applies elsewhere.
+    const CTX_TABLE_BITS: u8 = 11;
+    const CTX_TABLE_ENTRY_BUDGET: usize = 1 << 20; // ~4 MiB of entries
+    let mut table_entries_used: usize = 0;
 
     // Parsed entries: (tag, optional prev2, prev1, decode_table)
     #[derive(Debug)]
@@ -6198,6 +6389,7 @@ pub(crate) fn order2_context_huffman_decode(
         },
     }
 
+    crate::limits::validate_context_table_entries(n_ctx, n_distinct)?;
     let mut decode_tables: Vec<DecodeTable> = Vec::with_capacity(n_ctx);
     let mut parsed_entries: Vec<ParsedEntry> = Vec::with_capacity(n_ctx);
 
@@ -6256,6 +6448,15 @@ pub(crate) fn order2_context_huffman_decode(
         let code_len: Vec<u8> = blob[code_len_start..code_len_start + n_distinct].to_vec();
         pos = code_len_start + n_distinct;
 
+        // Code lengths come from the wire.  Validate Kraft's inequality
+        // before canonical-code arithmetic so a malformed deep table cannot
+        // wrap the codeword or make the decoder panic in debug builds.
+        if !crate::huffman::kraft_ok(&code_len) {
+            return Err(CubrimError::Decode(
+                "EntropyContext2: context entry has invalid Huffman code lengths".into(),
+            ));
+        }
+
         // Build decode table.
         let canonical = crate::huffman::assign_canonical_codes(&code_len);
         let mut decode_map: HashMap<(u32, u8), usize> = HashMap::new();
@@ -6265,8 +6466,14 @@ pub(crate) fn order2_context_huffman_decode(
             }
         }
 
+        let fast = crate::huffman::HuffTable::build_bounded(&code_len, CTX_TABLE_BITS)
+            .filter(|t| {
+                table_entries_used.saturating_add(t.entry_count()) <= CTX_TABLE_ENTRY_BUDGET
+            })
+            .inspect(|t| table_entries_used += t.entry_count());
+
         let table_idx = decode_tables.len();
-        decode_tables.push(DecodeTable { decode_map });
+        decode_tables.push(DecodeTable { decode_map, fast });
 
         let parsed = match tag {
             0 => ParsedEntry::Order0 { table_idx },
@@ -6341,15 +6548,58 @@ pub(crate) fn order2_context_huffman_decode(
         // QA-F-006 fail-closed: table_idx comes from header-derived maps (and the order-0
         // fallback index); a corrupt blob can point it past the decoded table set (e.g. an
         // empty decode_tables with a nonzero count). Bounds-check instead of panicking.
-        let decode_table = &decode_tables
-            .get(table_idx)
-            .ok_or_else(|| {
-                CubrimError::Decode(format!(
-                    "EntropyContext2: table index {table_idx} out of range (have {})",
-                    decode_tables.len()
-                ))
-            })?
-            .decode_map;
+        let entry = decode_tables.get(table_idx).ok_or_else(|| {
+            CubrimError::Decode(format!(
+                "EntropyContext2: table index {table_idx} out of range (have {})",
+                decode_tables.len()
+            ))
+        })?;
+
+        // Fast path: peel the index width once and look the symbol up, instead
+        // of accumulating a bit at a time and probing a hash map per candidate
+        // length. Identical results — same canonical codes, same bitstream.
+        if let Some(table) = &entry.fast {
+            let want = table.bits() as usize;
+            let total_bits = blob.len().saturating_sub(bitstream_offset) * 8;
+            let available = total_bits.saturating_sub(bit_pos);
+            if available == 0 {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: bitstream exhausted at bit {bit_pos} decoding symbol {sym_idx}/{count}"
+                )));
+            }
+            // Near the end fewer than `want` bits remain; the codeword itself
+            // may still fit, so pad with zeros and check the decoded length
+            // against what was actually there.
+            let take = want.min(available);
+            let mut index: usize = 0;
+            for k in 0..take {
+                let at = bit_pos + k;
+                let byte_off = bitstream_offset + at / 8;
+                let bit = (blob[byte_off] >> (7 - (at % 8))) & 1;
+                index = (index << 1) | bit as usize;
+            }
+            index <<= want - take;
+
+            let (sym, len) = table.lookup(index);
+            if len == 0 {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: no codeword match at symbol {sym_idx}/{count}"
+                )));
+            }
+            if (len as usize) > available {
+                return Err(CubrimError::Decode(format!(
+                    "EntropyContext2: bitstream truncated at bit {bit_pos} decoding symbol {sym_idx}/{count}"
+                )));
+            }
+            bit_pos += len as usize;
+            let sym = sym as usize;
+            decoded.push(sym);
+            prev2 = prev1;
+            prev1 = sym as u16;
+            continue;
+        }
+
+        let decode_table = &entry.decode_map;
 
         // Huffman decode: try increasing lengths.
         let mut codeword: u32 = 0;
@@ -10500,10 +10750,17 @@ mod tests {
         let text = b"the quick brown fox jumps over the lazy dog; ";
         let cfg = EncodeConfig::v1_default();
         let data: Vec<u8> = text.iter().cycle().take(100_000).copied().collect();
-        assert!(data.len() > cfg.cube_size_limit(), "must reach the heavy-candidate block");
-        assert!(data.len() >= CM2_MIN_LEN && data.len() < (1 << 18), "inside the reclaimed window");
+        assert!(
+            data.len() > cfg.cube_size_limit(),
+            "must reach the heavy-candidate block"
+        );
+        assert!(
+            data.len() >= CM2_MIN_LEN && data.len() < (1 << 18),
+            "inside the reclaimed window"
+        );
 
-        let cm2 = encode_cm2(&data, &EncodeConfig::v1_default()).expect("CM2 must be offered below the old 256 KiB floor");
+        let cm2 = encode_cm2(&data, &EncodeConfig::v1_default())
+            .expect("CM2 must be offered below the old 256 KiB floor");
         assert_eq!(cm2[5], MODE_CM2);
         assert_eq!(decode(&cm2).expect("CM2 blob decodes"), data);
 
@@ -10519,8 +10776,16 @@ mod tests {
 
     #[test]
     fn cm2_gate_declines_below_the_floor_but_still_round_trips() {
-        let data: Vec<u8> = b"abcdefgh".iter().cycle().take(CM2_MIN_LEN - 1).copied().collect();
-        assert!(encode_cm2(&data, &EncodeConfig::v1_default()).is_none(), "CM2 must not be offered below the floor");
+        let data: Vec<u8> = b"abcdefgh"
+            .iter()
+            .cycle()
+            .take(CM2_MIN_LEN - 1)
+            .copied()
+            .collect();
+        assert!(
+            encode_cm2(&data, &EncodeConfig::v1_default()).is_none(),
+            "CM2 must not be offered below the floor"
+        );
         let blob = encode(&data);
         assert_eq!(decode(&blob).expect("fast-path blob decodes"), data);
     }
@@ -10548,7 +10813,8 @@ mod tests {
             "input must be inside the ≤64 KB freeze window"
         );
 
-        let cm2 = encode_cm2(&text, &EncodeConfig::v1_default()).expect("CM2 must be offered on a compressible ≤64 KB input");
+        let cm2 = encode_cm2(&text, &EncodeConfig::v1_default())
+            .expect("CM2 must be offered on a compressible ≤64 KB input");
         let base = encode_base(&text, &cfg);
         let blob = encode(&text);
 
@@ -10753,8 +11019,15 @@ mod tests {
         // purpose: the deep nested container (BCJ->CM2) is proven end-to-end by the corpus
         // round-trip (ooffice), not by a slow CM2 encode inside the unit suite.
         for data in [
-            (0..120_000u32).map(|i| (i % 251) as u8).collect::<Vec<u8>>(),
-            b"col1,col2,col3\n1,2,3\n4,5,6\n".iter().cloned().cycle().take(120_000).collect(),
+            (0..120_000u32)
+                .map(|i| (i % 251) as u8)
+                .collect::<Vec<u8>>(),
+            b"col1,col2,col3\n1,2,3\n4,5,6\n"
+                .iter()
+                .cloned()
+                .cycle()
+                .take(120_000)
+                .collect(),
         ] {
             let blob = encode(&data);
             assert_eq!(decode(&blob).expect("legit blob must decode"), data);
@@ -10778,7 +11051,8 @@ mod tests {
             for col in 0..width {
                 let base = col
                     .wrapping_mul(73)
-                    .wrapping_add(col.wrapping_mul(col).wrapping_mul(11)) as u8;
+                    .wrapping_add(col.wrapping_mul(col).wrapping_mul(11))
+                    as u8;
                 data.push(base.wrapping_add((row / (col % 7 + 3)) as u8));
             }
         }
@@ -10846,7 +11120,11 @@ mod tests {
         }
         // plain path is its own inverse
         let rp = med16_forward(&samples, w);
-        assert_eq!(med16_inverse(&rp, w), samples, "plain MED16 must round-trip");
+        assert_eq!(
+            med16_inverse(&rp, w),
+            samples,
+            "plain MED16 must round-trip"
+        );
         // apm path is its own inverse
         let ra = med16_forward_apm(&samples, w);
         assert_eq!(
@@ -10864,7 +11142,10 @@ mod tests {
         if let Some(blob) = encode_med16(&bytes, &cfg) {
             assert_eq!(blob[5], MODE_MED16);
             let w_field = u16::from_be_bytes([blob[10], blob[11]]);
-            assert!((w_field & 0x7FFF) as usize <= 0x7FFF, "width fits low 15 bits");
+            assert!(
+                (w_field & 0x7FFF) as usize <= 0x7FFF,
+                "width fits low 15 bits"
+            );
             assert_eq!(
                 decode_med16(&blob).expect("MODE_MED16 apm decode"),
                 bytes,
@@ -10885,11 +11166,18 @@ mod tests {
         let mut data = Vec::with_capacity(w * rows);
         for y in 0..rows {
             for x in 0..w {
-                let v = if ((x / 8) + (y / 4)) % 3 == 0 { 0u8 } else { 0xFF };
+                let v = if ((x / 8) + (y / 4)) % 3 == 0 {
+                    0u8
+                } else {
+                    0xFF
+                };
                 data.push(v ^ (((x * 31 + y) % 7 == 0) as u8));
             }
         }
-        assert!(crate::geocm::should_try(&data), "gate should fire on a periodic raster");
+        assert!(
+            crate::geocm::should_try(&data),
+            "gate should fire on a periodic raster"
+        );
         // The GeoCM candidate itself must round-trip through the SHIPPED MODE_GEOCM
         // container + dispatch (independent of whether it wins the top-level min()).
         let inner = crate::geocm::encode(&data);
@@ -10899,12 +11187,19 @@ mod tests {
         blob.push(MODE_GEOCM);
         blob.extend_from_slice(&inner);
         assert_eq!(blob[5], MODE_GEOCM);
-        assert_eq!(decode(&blob).expect("GeoCM RT"), data, "GeoCM round-trip must be byte-exact");
+        assert_eq!(
+            decode(&blob).expect("GeoCM RT"),
+            data,
+            "GeoCM round-trip must be byte-exact"
+        );
         // fail-closed: corrupt the inner CG2 FNV-1a-64 checksum field (shipped offset
         // 6 + CG2 header offset 13) -> decode must reject rather than return wrong data.
         let mut bad = blob.clone();
         bad[6 + 13] ^= 0xFF;
-        assert!(decode(&bad).is_err(), "corrupted GeoCM checksum must fail closed");
+        assert!(
+            decode(&bad).is_err(),
+            "corrupted GeoCM checksum must fail closed"
+        );
         // top-level competitive-min still round-trips (some mode wins; it is byte-exact).
         assert_eq!(decode(&encode(&data)).expect("top RT"), data);
     }
@@ -11015,7 +11310,8 @@ mod tests {
         // > 256 KiB so the CM2 gate accepts the input.
         let elf = bcj_favourable_x86_elf(300_000);
 
-        let blob = encode_bcj_cm2(&elf, &EncodeConfig::v1_default()).expect("x86 ELF must reach the BCJ+CM2 candidate");
+        let blob = encode_bcj_cm2(&elf, &EncodeConfig::v1_default())
+            .expect("x86 ELF must reach the BCJ+CM2 candidate");
         assert_eq!(blob[5], MODE_BCJ, "outer container is MODE_BCJ");
         assert_eq!(blob[10], 1, "x86 arch tag");
         assert_eq!(blob[16], MODE_CM2, "nested container is MODE_CM2");
@@ -11030,7 +11326,8 @@ mod tests {
 
         // The composition must actually beat the CM2 backend alone on BCJ-favourable code,
         // otherwise the candidate is dead weight.
-        let cm2_only = encode_cm2(&elf, &EncodeConfig::v1_default()).expect("CM2 gate must accept the fixture");
+        let cm2_only = encode_cm2(&elf, &EncodeConfig::v1_default())
+            .expect("CM2 gate must accept the fixture");
         assert!(
             blob.len() < cm2_only.len(),
             "BCJ+CM2 ({}) must beat CM2 alone ({})",
@@ -11051,7 +11348,10 @@ mod tests {
         for (i, b) in data.iter_mut().enumerate() {
             *b = (i.wrapping_mul(37).wrapping_add(i / 512)) as u8;
         }
-        assert!(bcj_detect_arch(&data).is_none(), "fixture is not an executable");
+        assert!(
+            bcj_detect_arch(&data).is_none(),
+            "fixture is not an executable"
+        );
         assert!(
             encode_bcj_cm2(&data, &EncodeConfig::v1_default()).is_none(),
             "BCJ+CM2 must not fire on non-executables"
@@ -11206,7 +11506,11 @@ mod tests {
         block[263..265].copy_from_slice(b"00");
         let mut sum: u64 = 0;
         for (i, &b) in block.iter().enumerate() {
-            sum += if (148..156).contains(&i) { 32 } else { b as u64 };
+            sum += if (148..156).contains(&i) {
+                32
+            } else {
+                b as u64
+            };
         }
         let checksum_field = format!("{sum:06o}\0 ");
         block[148..156].copy_from_slice(checksum_field.as_bytes());
@@ -11256,7 +11560,10 @@ mod tests {
             "word 0 (ECOFF magic) must never be touched"
         );
         alpha_bcj(&mut payload, false);
-        assert_eq!(payload, original, "inverse must restore the payload exactly");
+        assert_eq!(
+            payload, original,
+            "inverse must restore the payload exactly"
+        );
     }
 
     #[test]
@@ -11267,12 +11574,21 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for i in (3..256).step_by(3) {
             let at = i * 4;
-            let w = u32::from_le_bytes([payload[at], payload[at + 1], payload[at + 2], payload[at + 3]]);
+            let w = u32::from_le_bytes([
+                payload[at],
+                payload[at + 1],
+                payload[at + 2],
+                payload[at + 3],
+            ]);
             if w >> 26 == 0x30 || w >> 26 == 0x34 {
                 seen.insert(w & 0x001F_FFFF);
             }
         }
-        assert_eq!(seen.len(), 1, "absolute displacements must collapse to one value");
+        assert_eq!(
+            seen.len(),
+            1,
+            "absolute displacements must collapse to one value"
+        );
         assert!(seen.contains(&4096));
     }
 
@@ -11730,7 +12046,10 @@ mod tests {
         let blob = encode_record_cm_probe(&data).expect("fixed records must reach FH-10");
         assert_eq!(blob[5], MODE_RECORDCM);
         // width lives in the low 15 bits; bit 15 is the PORT-B per-offset SSE flag.
-        assert_eq!(u16::from_be_bytes([blob[22], blob[23]]) & !RECORD_CM_SSE_FLAG, 28);
+        assert_eq!(
+            u16::from_be_bytes([blob[22], blob[23]]) & !RECORD_CM_SSE_FLAG,
+            28
+        );
         assert_eq!(decode(&blob).expect("record-CM decode"), data);
     }
 
@@ -14007,6 +14326,28 @@ mod tests {
     }
 
     #[test]
+    fn test_order2_header_invalid_code_lengths_fail_closed() {
+        // Overfull lengths used to make canonical-code arithmetic and the fast
+        // flat-table builder unsafe. Malformed wire tables now fail closed with
+        // a typed error before either decoder is constructed.
+        let mut fake = Vec::new();
+        fake.extend_from_slice(&128u16.to_be_bytes()); // min_ctx
+        fake.extend_from_slice(&1u16.to_be_bytes()); // one Order0 context
+        fake.push(0u8); // tag = Order0
+        fake.extend_from_slice(&[1u8, 1, 1, 0]); // overfull code lengths
+        fake.push(0u8); // one valid zero bit for symbol 0
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            order2_context_huffman_decode(&fake, 0, 1, 4)
+        }));
+        assert!(result.is_ok(), "invalid lengths must not panic");
+        assert!(matches!(
+            result.unwrap(),
+            Err(CubrimError::Decode(message)) if message.contains("invalid Huffman code lengths")
+        ));
+    }
+
+    #[test]
     fn test_order2_header_rejects_short_blob() {
         // A blob that is only 3 bytes — too short for even the min_ctx+n_ctx fields.
         let fake = vec![0u8, 128u8, 0u8]; // only 3 bytes, need at least 4
@@ -14359,8 +14700,17 @@ mod tests {
                     ok_count += 1;
                 }
                 Err(e) => {
-                    // Skip if file not present in CI environment.
-                    eprintln!("SKIP corpus file '{name}' ({path}): {e}");
+                    // The fixtures are committed, so a missing file is a broken
+                    // checkout (or a bad CUBRIM_CORPUS_DIR override), and the
+                    // count assertion below WILL fail. Say so — a message that
+                    // reads "SKIP" while the test proceeds to fail cannot be
+                    // told apart from a real regression by anyone reading logs.
+                    eprintln!(
+                        "MISSING corpus fixture '{name}' ({path}): {e} — this test will FAIL; \
+                         the fixtures are committed under documentation/ephemeral/research/corpus/, \
+                         regenerable via code/corpus-gen/generate_corpus.py + \
+                         documentation/ephemeral/research/gen_cubr0030_corpus.py + gen_cubr0031_corpus.py"
+                    );
                 }
             }
         }
@@ -14463,7 +14813,10 @@ mod tests {
                     );
                     ok_count += 1;
                 }
-                Err(e) => eprintln!("SKIP corpus file '{name}' ({path}): {e}"),
+                Err(e) => eprintln!(
+                    "MISSING corpus fixture '{name}' ({path}): {e} — this test will FAIL; \
+                     fixtures are committed, see documentation/ephemeral/research/corpus/"
+                ),
             }
         }
         assert_eq!(

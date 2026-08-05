@@ -1,0 +1,169 @@
+diff --git a/code/cubrim-rs/src/bin/cubrim_decode_profile.rs b/code/cubrim-rs/src/bin/cubrim_decode_profile.rs
+index 78d5c8a..50b3834 100644
+--- a/code/cubrim-rs/src/bin/cubrim_decode_profile.rs
++++ b/code/cubrim-rs/src/bin/cubrim_decode_profile.rs
+@@ -5 +5 @@ use cubrim::decode_profile::{self, Stage, Timing};
+-use cubrim::header::{MODE_CM2, MODE_CUBE, MODE_RAW};
++use cubrim::header::{MODE_CM2, MODE_CUBE, MODE_GEOCM, MODE_RAW};
+@@ -259,0 +260 @@ fn mode_name(mode: u8) -> Option<&'static str> {
++        MODE_GEOCM => Some("geocm"),
+@@ -279 +280 @@ fn run(args: Args) -> Result<(), String> {
+-        format!("unsupported mode {mode}; first-slice profiler supports only cube, raw, and cm2")
++        format!("unsupported mode {mode}; profiler supports only cube, raw, cm2, and geocm")
+@@ -316 +317 @@ fn run(args: Args) -> Result<(), String> {
+-    if mode != MODE_CM2 {
++    if mode != MODE_CM2 && mode != MODE_GEOCM {
+diff --git a/code/cubrim-rs/src/geocm.rs b/code/cubrim-rs/src/geocm.rs
+index 7c75529..96ff753 100644
+--- a/code/cubrim-rs/src/geocm.rs
++++ b/code/cubrim-rs/src/geocm.rs
+@@ -563,0 +564,4 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
++    #[cfg(feature = "decode-profile")]
++    let _profile_allocation = crate::decode_profile::StageGuard::enter(
++        crate::decode_profile::Stage::Allocation,
++    );
+@@ -566,0 +571,2 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
++    #[cfg(feature = "decode-profile")]
++    drop(_profile_allocation);
+@@ -582,0 +589,8 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
++        #[cfg(feature = "decode-profile")]
++        let _profile_start_stage = crate::decode_profile::StageGuard::enter(
++            crate::decode_profile::Stage::Transforms,
++        );
++        #[cfg(feature = "decode-profile")]
++        let _profile_start = crate::decode_profile::SubstageGuard::enter(
++            crate::decode_profile::Substage::TransformStartByte,
++        );
+@@ -587,0 +602,4 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
++            #[cfg(feature = "decode-profile")]
++            let _profile_entropy = crate::decode_profile::StageGuard::enter(
++                crate::decode_profile::Stage::Entropy,
++            );
+@@ -589 +607,24 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
+-            let bit = dec.decode_bit(*p);
++            #[cfg(feature = "decode-profile")]
++            let _profile_predict = crate::decode_profile::SubstageGuard::enter(
++                crate::decode_profile::Substage::EntropyPredictBit,
++            );
++            let probability = *p;
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_predict);
++            #[cfg(feature = "decode-profile")]
++            let _profile_range = crate::decode_profile::SubstageGuard::enter(
++                crate::decode_profile::Substage::EntropyRangeDecode,
++            );
++            let bit = dec.decode_bit(probability);
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_range);
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_entropy);
++            #[cfg(feature = "decode-profile")]
++            let _profile_update_stage = crate::decode_profile::StageGuard::enter(
++                crate::decode_profile::Stage::Transforms,
++            );
++            #[cfg(feature = "decode-profile")]
++            let _profile_update = crate::decode_profile::SubstageGuard::enter(
++                crate::decode_profile::Substage::TransformUpdateBit,
++            );
+@@ -590,0 +632,4 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_update);
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_update_stage);
+@@ -592,0 +638,8 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
++        #[cfg(feature = "decode-profile")]
++        drop(_profile_start);
++        #[cfg(feature = "decode-profile")]
++        drop(_profile_start_stage);
++        #[cfg(feature = "decode-profile")]
++        let _profile_output = crate::decode_profile::StageGuard::enter(
++            crate::decode_profile::Stage::OutputMaterialization,
++        );
+@@ -593,0 +647,2 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
++        #[cfg(feature = "decode-profile")]
++        drop(_profile_output);
+@@ -742,0 +798,4 @@ fn decode_stream_mix(
++    #[cfg(feature = "decode-profile")]
++    let _profile_allocation = crate::decode_profile::StageGuard::enter(
++        crate::decode_profile::Stage::Allocation,
++    );
+@@ -747,0 +807,2 @@ fn decode_stream_mix(
++    #[cfg(feature = "decode-profile")]
++    drop(_profile_allocation);
+@@ -761,0 +823,8 @@ fn decode_stream_mix(
++        #[cfg(feature = "decode-profile")]
++        let _profile_start_stage = crate::decode_profile::StageGuard::enter(
++            crate::decode_profile::Stage::Transforms,
++        );
++        #[cfg(feature = "decode-profile")]
++        let _profile_start = crate::decode_profile::SubstageGuard::enter(
++            crate::decode_profile::Substage::TransformStartByte,
++        );
+@@ -763,0 +833,4 @@ fn decode_stream_mix(
++        #[cfg(feature = "decode-profile")]
++        drop(_profile_start);
++        #[cfg(feature = "decode-profile")]
++        drop(_profile_start_stage);
+@@ -765,0 +839,8 @@ fn decode_stream_mix(
++            #[cfg(feature = "decode-profile")]
++            let _profile_entropy = crate::decode_profile::StageGuard::enter(
++                crate::decode_profile::Stage::Entropy,
++            );
++            #[cfg(feature = "decode-profile")]
++            let _profile_predict = crate::decode_profile::SubstageGuard::enter(
++                crate::decode_profile::Substage::EntropyPredictBit,
++            );
+@@ -792,0 +874,6 @@ fn decode_stream_mix(
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_predict);
++            #[cfg(feature = "decode-profile")]
++            let _profile_range = crate::decode_profile::SubstageGuard::enter(
++                crate::decode_profile::Substage::EntropyRangeDecode,
++            );
+@@ -793,0 +881,12 @@ fn decode_stream_mix(
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_range);
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_entropy);
++            #[cfg(feature = "decode-profile")]
++            let _profile_update_stage = crate::decode_profile::StageGuard::enter(
++                crate::decode_profile::Stage::Transforms,
++            );
++            #[cfg(feature = "decode-profile")]
++            let _profile_update = crate::decode_profile::SubstageGuard::enter(
++                crate::decode_profile::Substage::TransformUpdateBit,
++            );
+@@ -805,0 +905,4 @@ fn decode_stream_mix(
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_update);
++            #[cfg(feature = "decode-profile")]
++            drop(_profile_update_stage);
+@@ -807,0 +911,4 @@ fn decode_stream_mix(
++        #[cfg(feature = "decode-profile")]
++        let _profile_output = crate::decode_profile::StageGuard::enter(
++            crate::decode_profile::Stage::OutputMaterialization,
++        );
+@@ -808,0 +916,10 @@ fn decode_stream_mix(
++        #[cfg(feature = "decode-profile")]
++        drop(_profile_output);
++        #[cfg(feature = "decode-profile")]
++        let _profile_end_stage = crate::decode_profile::StageGuard::enter(
++            crate::decode_profile::Stage::Transforms,
++        );
++        #[cfg(feature = "decode-profile")]
++        let _profile_end = crate::decode_profile::SubstageGuard::enter(
++            crate::decode_profile::Substage::TransformEndByte,
++        );
+@@ -809,0 +927,4 @@ fn decode_stream_mix(
++        #[cfg(feature = "decode-profile")]
++        drop(_profile_end);
++        #[cfg(feature = "decode-profile")]
++        drop(_profile_end_stage);
+@@ -908,0 +1030,4 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CodecError> {
++    #[cfg(feature = "decode-profile")]
++    let _profile_framing = crate::decode_profile::StageGuard::enter(
++        crate::decode_profile::Stage::Framing,
++    );
+@@ -931,0 +1057,2 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CodecError> {
++    #[cfg(feature = "decode-profile")]
++    drop(_profile_framing);

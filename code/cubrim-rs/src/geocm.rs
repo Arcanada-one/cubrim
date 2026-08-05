@@ -34,7 +34,13 @@ pub struct RcEnc {
 
 impl RcEnc {
     pub fn new() -> Self {
-        RcEnc { low: 0, range: u32::MAX, cache: 0, cache_size: 1, out: Vec::new() }
+        RcEnc {
+            low: 0,
+            range: u32::MAX,
+            cache: 0,
+            cache_size: 1,
+            out: Vec::new(),
+        }
     }
 
     #[inline]
@@ -88,7 +94,12 @@ impl<'a> RcDec<'a> {
         if buf.len() < 5 {
             return None;
         }
-        let mut d = RcDec { range: u32::MAX, code: 0, buf, pos: 1 };
+        let mut d = RcDec {
+            range: u32::MAX,
+            code: 0,
+            buf,
+            pos: 1,
+        };
         for _ in 0..4 {
             d.code = (d.code << 8) | d.next_byte();
         }
@@ -108,7 +119,11 @@ impl<'a> RcDec<'a> {
     fn next_byte(&mut self) -> u32 {
         // Past-the-end reads pad with 0; corruption is caught by the
         // container checksum (fail-closed at the codec layer).
-        let b = if self.pos < self.buf.len() { self.buf[self.pos] } else { 0 };
+        let b = if self.pos < self.buf.len() {
+            self.buf[self.pos]
+        } else {
+            0
+        };
         self.pos += 1;
         b as u32
     }
@@ -140,7 +155,6 @@ impl<'a> RcDec<'a> {
 // (deterministic: same code -> same tables on every IEEE-754 platform, the
 // same discipline as cubr-cm-poc cm2.rs). The per-bit predict/mix/update
 // loop is integer-only, so encoder and decoder reconstruct identical state.
-
 
 pub const STRETCH_MAX: i32 = 2047;
 
@@ -191,7 +205,10 @@ pub struct Mixer {
 impl Mixer {
     pub fn new(n_sets: usize, nm: usize) -> Self {
         // start at ~0.3 weight each so the initial mix is a mild average
-        Mixer { weights: vec![1 << 14; n_sets * nm], nm }
+        Mixer {
+            weights: vec![1 << 14; n_sets * nm],
+            nm,
+        }
     }
 
     /// Returns (p12, dot) — caller passes stretched inputs st[0..nm].
@@ -243,8 +260,8 @@ impl Apm {
         let idx = cx * 33 + (st >> 7) as usize;
         self.idx = idx;
         self.w = w;
-        (((self.t[idx] as i32) * (128 - w) + (self.t[idx + 1] as i32) * w) >> 7)
-            .clamp(1, 4095) as u16
+        (((self.t[idx] as i32) * (128 - w) + (self.t[idx + 1] as i32) * w) >> 7).clamp(1, 4095)
+            as u16
     }
 
     #[inline]
@@ -339,7 +356,6 @@ pub fn detect_slice_stride(data: &[u8], s1: usize) -> u32 {
 // over the already-decoded history, so no positions are ever transmitted
 // (BWT-class escape from the Gotcha-#7 map tax: the "coordinate" is derived,
 // not stored).
-
 
 pub const MM_HBITS: u32 = 20;
 pub const MM_ORDER: usize = 6;
@@ -467,7 +483,6 @@ impl MatchModel {
 // x-experiment-verdict.md): real-adaptive KT cost 0.552 bpb on ptt5 vs
 // champion 0.754 bpb.
 
-
 // QA-F-008 fail-closed decode guards (branch F adversarial-QA, release-candidate audit).
 // `orig_len` comes straight from the container header and sizes BOTH the output vector and
 // the decode loop, with the FNV-1a-64 checksum verified only AFTER the full decode — so a
@@ -531,11 +546,7 @@ fn header(mode: u8, orig_len: u64, check: u64, stride: u32, cfg: u8, stride2: u3
 
 /// Encode `data` bytewise: 8 bits per byte through a per-context node tree.
 /// `ctx_of(i)` must be pure and depend only on already-decoded bytes.
-fn encode_stream<F: Fn(&[u8], usize) -> usize>(
-    data: &[u8],
-    n_ctx: usize,
-    ctx_of: F,
-) -> Vec<u8> {
+fn encode_stream<F: Fn(&[u8], usize) -> usize>(data: &[u8], n_ctx: usize, ctx_of: F) -> Vec<u8> {
     let mut probs = vec![PINIT; n_ctx * 256];
     let mut enc = RcEnc::new();
     for i in 0..data.len() {
@@ -597,12 +608,20 @@ fn decode_stream<F: Fn(&[u8], usize) -> usize>(
 
 #[inline]
 fn ctx_o1(hist: &[u8], i: usize) -> usize {
-    if i == 0 { 0 } else { hist[i - 1] as usize }
+    if i == 0 {
+        0
+    } else {
+        hist[i - 1] as usize
+    }
 }
 
 #[inline]
 fn ctx_geoa(hist: &[u8], i: usize, s: usize) -> usize {
-    if i >= s { hist[i - s] as usize } else { 0 }
+    if i >= s {
+        hist[i - s] as usize
+    } else {
+        0
+    }
 }
 
 #[inline]
@@ -612,13 +631,11 @@ fn ctx_geo(hist: &[u8], i: usize, s: usize) -> usize {
     above * 16 + (prev >> 4)
 }
 
-
 // ---------------- MODE_MIX: logistic mixing of 6 geo/1D models ----------------
 
 const NTAB: usize = 10;
 const NM: usize = NTAB + 1; // + match model input
-const MIX_NCTX: [usize; NTAB] =
-    [256, 256, 256, 4096, 256, 256, 65536, 65536, 256, 4096];
+const MIX_NCTX: [usize; NTAB] = [256, 256, 256, 4096, 256, 256, 65536, 65536, 256, 4096];
 
 #[inline]
 fn med_u8(a: i32, b: i32, c: i32) -> usize {
@@ -631,8 +648,16 @@ fn mix_ctxs(hist: &[u8], i: usize, s: usize, s2: usize, ctx: &mut [usize; NTAB])
     let prev = if i > 0 { hist[i - 1] as i32 } else { 0 };
     let t2 = if i > 1 { hist[i - 2] as i32 } else { 0 };
     let ab = if i >= s { hist[i - s] as i32 } else { 0 };
-    let ab1 = if i >= s + 1 { hist[i - s - 1] as i32 } else { 0 };
-    let ab2 = if i >= s + 2 { hist[i - s - 2] as i32 } else { 0 };
+    let ab1 = if i >= s + 1 {
+        hist[i - s - 1] as i32
+    } else {
+        0
+    };
+    let ab2 = if i >= s + 2 {
+        hist[i - s - 2] as i32
+    } else {
+        0
+    };
     ctx[0] = prev as usize;
     ctx[1] = t2 as usize;
     ctx[2] = ab as usize;
@@ -641,7 +666,11 @@ fn mix_ctxs(hist: &[u8], i: usize, s: usize, s2: usize, ctx: &mut [usize; NTAB])
     ctx[5] = med_u8(t2, ab, ab2);
     ctx[6] = (prev as usize) * 256 + t2 as usize;
     ctx[7] = (ab as usize) * 256 + t2 as usize;
-    ctx[8] = if s2 > 0 && i >= s2 { hist[i - s2] as usize } else { 0 };
+    ctx[8] = if s2 > 0 && i >= s2 {
+        hist[i - s2] as usize
+    } else {
+        0
+    };
     ctx[9] = (i % s).min(4095); // offset-in-record (RECORDCM mo analogue)
 }
 
@@ -811,7 +840,6 @@ fn decode_stream_mix(
     Ok(out)
 }
 
-
 fn run_candidate(data: &[u8], mode: u8, s: u32, s2: u32, cfg: u8) -> Vec<u8> {
     let su = s as usize;
     match mode {
@@ -861,9 +889,7 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
                     .iter()
                     .enumerate()
                     .map(|(idx, &(mode, s, s2, cfg))| {
-                        scope.spawn(move || {
-                            (run_candidate(pre, mode, s, s2, cfg).len(), idx)
-                        })
+                        scope.spawn(move || (run_candidate(pre, mode, s, s2, cfg).len(), idx))
                     })
                     .collect();
                 handles.into_iter().map(|h| h.join().unwrap()).collect()
@@ -1017,7 +1043,10 @@ mod qaf_probe {
             ("zeros_1M", vec![0u8; 1 << 20]),
             ("const_1M", vec![0x5Au8; 1 << 20]),
             ("rep2_1M", (0..(1 << 20)).map(|i| (i % 2) as u8).collect()),
-            ("stride512_1M", (0..(1 << 20)).map(|i| ((i / 512) % 256) as u8).collect()),
+            (
+                "stride512_1M",
+                (0..(1 << 20)).map(|i| ((i / 512) % 256) as u8).collect(),
+            ),
             ("grad_1M", (0..(1 << 20)).map(|i| (i % 256) as u8).collect()),
         ];
         let mut worst = 0f64;
@@ -1025,9 +1054,16 @@ mod qaf_probe {
             let blob = encode(&data);
             let payload = blob.len().saturating_sub(HEADER_LEN).max(1);
             let ratio = data.len() as f64 / payload as f64;
-            if ratio > worst { worst = ratio; }
-            println!("GEO-RATIO {name}: orig={} payload={} ratio={:.1} mode={}",
-                     data.len(), payload, ratio, blob[4]);
+            if ratio > worst {
+                worst = ratio;
+            }
+            println!(
+                "GEO-RATIO {name}: orig={} payload={} ratio={:.1} mode={}",
+                data.len(),
+                payload,
+                ratio,
+                blob[4]
+            );
         }
         println!("GEO-RATIO WORST={worst:.1}");
     }

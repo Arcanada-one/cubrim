@@ -18,8 +18,15 @@ venv/
 .ipynb_checkpoints/
 
 # Benchmark corpora (large binaries — keep generators, not data)
-documentation/ephemeral/research/corpus/
+# The 10 corpus fixtures are committed: crate tests assert on them, so a
+# fresh clone must carry them (they are ~122 KB, deterministic from seeded
+# generators, and were regenerated bit-identically to the recorded sha256s).
+# The manifest stays local — its `path` entries are machine-absolute and the
+# research probes that read them run on the machine that generated it.
+documentation/ephemeral/research/corpus/manifest.json
 *.bin
+# ...except the 10 committed test fixtures (the negation must follow *.bin):
+!documentation/ephemeral/research/corpus/*.bin
 *.cube
 
 # Transient bench outputs written by the gates / loop (regenerated each run)
