@@ -392,13 +392,13 @@ listed below as a candidate, not as a result.
 | **L1** branch-and-bound: defer `base`, bound it by the incumbent, abandon when partial > bound | exe, image | **none — byte-identical by construction** | yes (output unchanged) | implemented; identity gate **3/3 PASS** (below) |
 | **L2** skip the FH4-03 column variants | text, xml, database | −0.7% to −4.8% output size | yes (column flag lives in the blob header) | knob implemented; sweep pending |
 
-| **L3** global thread budget shared across nesting levels instead of per-level `available_parallelism()` | all classes, and shared-host behaviour | expected none | yes | **UNMEASURED — attempted and abandoned, see below** |
+| **L3** global thread budget shared across nesting levels instead of per-level `available_parallelism()` | all classes, and shared-host behaviour | none — 677,605 B on all five thread levels | yes | **measured 2026-07-31 — +4.8% wall / −37% peak RSS at a 16-thread cap; see F15 addendum** |
 | **L4** CM2 table-size budget (`tbits`) as a preset-bound memory knob | memory on every CM2-won file | unknown until swept | **no** — the exponent is not in the wire format; needs a header field or preset byte first | knob implemented for sweeping only |
 
 L1 is unconditional: it costs nothing and can ship as the default. L2 costs ratio
-and therefore belongs to a preset, never to `--max`. L3 is expected to be free but
-is **not yet measured**, and is listed as a candidate so it is not mistaken for a
-result. L4 cannot ship in its current form at all: the sweep override changes a
+and therefore belongs to a preset, never to `--max`. L3 is now measured
+(2026-07-31, quiet dev-ai — see the F15 addendum): zero ratio cost, and a
+16-thread cap buys back 37% of peak RSS for 4.8% wall-clock. L4 cannot ship in its current form at all: the sweep override changes a
 value the decoder re-derives from `orig_len`, so an archive written under one cap
 is only readable under the same cap. That is a wire-format change, and it is
 called out here rather than discovered later by someone whose archive stops
@@ -769,6 +769,45 @@ recorded stays what was observed in F6 — two concurrent encodes drove a 16-cor
 box to load 82, and the mechanism (per-level `available_parallelism()` multiplying
 through nested candidates rather than sharing a budget) is read from source. That
 is a *defect description*, not a measured lever, and it is not to be quoted as one.
+
+**Addendum (2026-08-05) — the number now exists, and it was measured on the
+genuinely quiet host this section was waiting for.** The CUBR-0092 lane ran
+`/root/cubr0087/l3.sh` unchanged on dev-ai on 2026-07-31 at load 0.19–0.69, and
+the raw record is `dev-ai:/root/cubr0087/out/l3.tsv` (mtime 2026-07-31 12:38 UTC):
+
+| `CUBR_THREADS` | wall | bytes | peak RSS KiB | round-trip |
+|---|---|---|---|---|
+| default | 71.01 s | 677,605 | 3,138,340 | PASS |
+| 64 | 71.64 s | 677,605 | 3,142,136 | PASS |
+| 16 | 74.42 s | 677,605 | 1,971,260 | PASS |
+| 8 | 89.18 s | 677,605 | 1,910,824 | PASS |
+| 4 | 122.04 s | 677,605 | 1,832,824 | PASS |
+
+Output is byte-identical on all five rows and every row's decode passed `cmp`
+inside the harness, so the ratio cost is zero and measured, not assumed.
+`default == 64` confirms the default is `available_parallelism()`. Capping the
+budget to 16 costs **4.8%** wall (71.01 → 74.42 s) and returns **37%** of peak
+RSS (2.99 → 1.88 GiB); below 16 the trade inverts — 8 threads costs 25.6%, 4
+threads 71.9%, while RSS plateaus at 1.75–1.88 GiB, so the recoverable memory is
+per-thread working state and nearly all of it comes back at the first step.
+Scope unchanged from the harness design: one file (`ooffice.2m`, the
+block-parallel `base` path), one host, **unpinned by design** and therefore not
+comparable to the pinned sweep rows; it licenses no claim about CM2-won text and
+none about the corpus-level memory peak.
+
+Provenance was persisted on 2026-08-05 by this lane: `measurements` rows
+384–388 under `codec_rev` 7 and the NEW-28 flip with `measure_date` and
+`measure_task` set — the three signals whose absence correctly reverted the
+earlier premature flip. Binary `cubrim-l1v2` sha256 `534d355304eb16bf…f8192c9f`,
+source commit `06aed3a` (the branch's only code commit, merged via PR #13),
+`codec.rs` sha256 `9c23b9db…`, corpus slice `head -c 2097152 ooffice` sha256
+`5041e86f…`. Independently re-verified on arcana-devs: the same binary and slice
+give 677,605 bytes with archive sha256 `4d563b48ae509f11b65b0c71…` — equal to
+F7's identity-gate value — at both `CUBR_THREADS=default` and `=4`, round-trip
+`cmp` PASS, and a fresh release build of `06aed3a` reproduces the archive
+byte-identically. Timing was deliberately **not** re-measured on arcana-devs:
+that host carries a steady ~1.2-core soak-test load, which fails this section's
+own quiet-host standard and would bias in favour of the capping hypothesis.
 
 ## F16 — the 4.11× asymmetry is an aggregate over a 1.04–80× range, and my F2 claim over-reached
 
