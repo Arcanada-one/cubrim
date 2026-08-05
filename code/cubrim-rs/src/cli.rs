@@ -173,30 +173,36 @@ pub struct TestArgs {
 /// Speed/ratio operating point. See `cubrim::Preset` for the measured trade.
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum PresetArg {
-    /// Maximum ratio. Byte-identical to the shipped v0.3.2 encoder.
+    /// Maximum ratio, whatever it costs. Byte-identical to the v0.3.2 encoder;
+    /// 0.189007 on the full 24-file world corpus.
     Max,
-    /// Drops the CM2 column-variant passes. The strongest named result is
-    /// `enwik8`: 2.48x faster encode (4047.6 s -> 1632.6 s) with a
-    /// byte-identical 19,552,678-byte archive. Some inputs remain byte-identical;
-    /// on others it costs ratio, with a measured +0.47% corpus delta (0.189891
-    /// against max 0.189007). `reymont` reached 3.01x faster encode, while
-    /// `sao` reached a relative 1.56x and saved the most absolute encode seconds
-    /// per MiB in the measured run despite a mid-range compression ratio. These
-    /// are encode results; no decode-speed claim is made. Archives stay decodable
-    /// by every other preset.
+    /// Faster encode for a small ratio cost: +0.47% output on the full 24-file
+    /// world corpus.
+    ///
+    /// The speedup is concentrated by data class, not spread across the corpus,
+    /// so it is quoted by class rather than as an average — a mean would
+    /// describe none of these files. Measured per file, max vs balanced:
+    /// 2.5-3.0x on text/xml/database (xml 2.99x, webster 2.81x, dickens 2.77x,
+    /// osdb 2.50x, enwik8 2.48x) and NO CHANGE on executables, images and code
+    /// (mozilla, ooffice, x-ray, mr 1.00x, samba 0.99x), where the dropped CM2
+    /// column-variant passes never run and the output is byte-identical.
+    /// Corpus-wide encode throughput 0.0230 -> 0.0378 MiB/s.
+    ///
+    /// Archives stay readable by every decoder.
     Balanced,
-    /// Bounded decoder memory for wasm32 and other hard-ceiling environments:
-    /// decode peak 12.27 GiB -> 0.216 GiB on the 24-file world corpus, a 56.8x
-    /// cut. Corpus cost is +9.32% output (ratio 0.206627), which is higher than
-    /// a small-file measurement suggests: a 2 MB sample derives a 24-bit table
-    /// exponent, so capping at 20 costs four steps, while a corpus file of
-    /// 16 MB or more derives 27 and pays seven. Still ahead of ppmd (0.228592).
-    /// Needs a decoder that reads the table-exponent field; older decoders fail
-    /// closed on these archives rather than returning wrong bytes.
-    /// (Named `web` before any release shipped the flag; renamed because the
-    /// preset states a mechanism — bounded decode memory — while "web" named a
-    /// separate product area.)
-    LowmemDecode,
+    /// Bounded decoder memory, for wasm32 and other hard-ceiling environments.
+    ///
+    /// On the full 24-file world corpus, peak decode RSS falls from 12,561 MiB
+    /// to 221 MiB — a 56.8x cut, and the figure that decides whether a browser
+    /// decoder is possible at all, since wasm32 caps the address space at 4 GiB.
+    /// Peak encode RSS falls 18,603 -> 7,007 MiB. Costs +9.32% output
+    /// (0.206627 against max 0.189007), still ahead of ppmd 0.228592.
+    ///
+    /// NOTE: a decoder that predates the table-exponent field CANNOT read these
+    /// archives. It fails closed with a decode error rather than returning wrong
+    /// bytes, but it cannot open them. `max` and `balanced` archives have no
+    /// such restriction and are readable by every decoder.
+    Web,
 }
 
 impl From<PresetArg> for Preset {
@@ -204,7 +210,7 @@ impl From<PresetArg> for Preset {
         match value {
             PresetArg::Max => Preset::Max,
             PresetArg::Balanced => Preset::Balanced,
-            PresetArg::LowmemDecode => Preset::LowmemDecode,
+            PresetArg::Web => Preset::Web,
         }
     }
 }

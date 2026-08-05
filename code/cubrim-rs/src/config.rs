@@ -425,65 +425,47 @@ pub struct EncodeConfig {
 /// Every preset must state its trade in **measured** numbers. A preset whose cost
 /// has not been measured on the real corpus does not exist yet — it is not
 /// guessed into being here.
-///
-/// **Corpus ratios (24-file world corpus, 314,749,364 B; these supersede every
-/// slice figure quoted per-variant below):**
-///
-/// | preset | corpus ratio | vs `Max` | still ahead of ppmd (0.228592) |
-/// |---|---|---|---|
-/// | `Max` | 0.189007 | — | yes, by 17.3% relative |
-/// | `Balanced` | 0.189891 | +0.47% | yes, by 16.9% |
-/// | `LowmemDecode` | 0.206627 | +9.32% | yes, by 9.6% |
-///
-/// A slice can mislead in *either* direction and did in both: `Balanced` costs
-/// five times less than its slice suggested because disabling the sweep can skip
-/// exploratory passes whose candidate would not improve the final output, so the
-/// resulting archive can be byte-identical despite a real encode-time saving.
-/// When the skipped variant would have won, the output pays the measured ratio
-/// cost. `LowmemDecode` costs three times more (a 2 MB slice derives a 24-bit
-/// table exponent, so a cap at 20 costs four steps, while a corpus file of >=16 MB
-/// derives 27 and pays seven). Its measured per-file archive-size cost ranges
-/// from **+0.06% on `xargs.1` to +15.70% on `enwik8`**; the **+9.32%** above
-/// is the corpus delta, not a per-file expectation. `LowmemDecode` inherits
-/// `Balanced`'s dropped column sweep and then adds the table cap: `xml` moves
-/// from 2.99x to 3.90x faster encode and `samba` from 0.99x to 1.27x, so
-/// the cap contributes real encode-time savings on top, but those levers are not an
-/// additive claim. No decode-speed claim is made here.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Preset {
     /// Maximum ratio, whatever it costs. Byte-identical to the shipped v0.3.2
     /// encoder: every competitive candidate runs, including the CM2 column
     /// variants.
     Max,
-    /// Drops the CM2 column-variant passes. The strongest named result is
-    /// **`enwik8`: 2.48x faster encode** (4047.6 s -> 1632.6 s) with a
-    /// **byte-identical 19,552,678-byte archive**. On some inputs it emits
-    /// byte-identical output; on others it costs ratio, with a measured
-    /// **+0.47% corpus delta** (0.189891 against 0.189007). Named results include
-    /// `reymont` at 3.01x faster and `sao` at a relative 1.56x; `sao` saved the
-    /// most absolute encode seconds per MiB in the measured run despite a
-    /// mid-range compression ratio. These are encode measurements; no decode
-    /// speed is claimed. Archives stay mutually decodable with `Max`.
+    /// Drops the CM2 column-variant passes.
+    ///
+    /// **Corpus figures (these supersede the earlier slice estimates):** on the
+    /// full 24-file world corpus the cost is **+0.47% output** — five times
+    /// cheaper than the +2.35% a 2 MB `dickens` slice suggested, because the
+    /// sweep is a no-op wherever CM2 does not win and most of the corpus is in
+    /// that position.
+    ///
+    /// The *speedup* is concentrated by data class and must be quoted that way,
+    /// never as an average — a mean would describe none of these files.
+    /// Measured per file, `max` vs `balanced`: **2.5–3.0× on text/xml/database**
+    /// (xml 2.99×, webster 2.81×, dickens 2.77×, osdb 2.50×, enwik8 2.48×) and
+    /// **no change on executables, images and code** (mozilla, ooffice, x-ray,
+    /// mr 1.00×, samba 0.99×), where the output is byte-identical. Corpus-wide
+    /// encode throughput 0.0230 → 0.0378 MiB/s.
+    ///
+    /// Archives stay mutually decodable with `Max`.
     Balanced,
     /// Bounded decoder memory, for environments that have a hard ceiling —
     /// chiefly `wasm32`, whose 4 GiB address space cannot hold the 12.3 GiB of
     /// model tables a >=16 MB file otherwise demands of the **decoder**.
     ///
-    /// Caps the CM2 table exponent at 20: measured **decode peak 12.27 GiB ->
-    /// 0.216 GiB on the 24-file world corpus, a 56.8x cut** (class-independent —
-    /// decode is CM2 alone whatever won at encode time). The measured no-change
-    /// exceptions are `sao`, `mr`, and `x-ray` (0.086-0.093 GiB on both presets,
-    /// with byte-identical archives), plus Canterbury's `grammar.lsp`, `ptt5`,
-    /// and `sum`; their table exponent never reached the cap, so the cap is inert.
-    /// Output cost is **+9.32% on the corpus** (+3.32% on a 2 MB slice — the
-    /// slice structurally understates it, see the corpus table above). Per-file
-    /// archive-size cost ranges from **+0.06% on `xargs.1` to +15.70% on `enwik8`**;
-    /// the corpus delta is not a per-file expectation. Also drops the column
-    /// variants, since an environment that cares about decoder memory is not
-    /// paying 3x encode time for a fraction of a percent of ratio. This preset
-    /// inherits `Balanced`'s dropped column sweep and then adds the table cap;
-    /// the `xml` and `samba` encode results above show the two levers are not an
-    /// additive claim. No decode-speed claim is made.
+    /// Caps the CM2 table exponent at 20. On the full 24-file world corpus peak
+    /// decode RSS falls **12,561 MiB -> 221 MiB, a 56.8× cut** (the 2 MB slice
+    /// showed only 13.5×, because a slice never derives the full `tbits = 27`
+    /// model that a >= 16 MB file does). Peak encode RSS falls 18,603 -> 7,007
+    /// MiB. 221 MiB is comfortably under the wasm32 4 GiB ceiling, which is what
+    /// makes a browser decoder possible at all. **Corpus cost +9.32% output** on the full 24-file
+    /// world corpus — three times dearer than the +3.32% a 2 MB slice suggested,
+    /// because a 2 MB slice derives `tbits = 24` so capping at 20 costs four
+    /// steps, while a real file >= 16 MB derives 27 and the same cap costs seven.
+    /// Still ahead of the field: 0.206627 against ppmd 0.228592.
+    ///
+    /// Also drops the column variants, since an environment that cares about
+    /// decoder memory is not paying 3x encode time for a fraction of a percent.
     ///
     /// Readable by any decoder that understands the table-exponent field.
     /// **Not** readable by a decoder older than that field — such a decoder
@@ -491,13 +473,7 @@ pub enum Preset {
     /// (verified), but it cannot open the archive. `Max` and `Balanced` archives
     /// have no such restriction: they leave the field zero and decode
     /// everywhere, including on builds that predate it.
-    ///
-    /// Was `Web` until 2026-07-31; renamed before any release shipped the flag.
-    /// The preset names its mechanism — bounded decode-side memory — while
-    /// "web" named the separate Web Codec product area, and the encode side
-    /// still peaks at ~9.4 GiB on the corpus, so a bare "lowmem" would
-    /// over-promise exactly the way an unmeasured name does.
-    LowmemDecode,
+    Web,
 }
 
 impl Preset {
@@ -506,7 +482,7 @@ impl Preset {
         match self {
             Preset::Max => {}
             Preset::Balanced => config.cm2_column_variants = false,
-            Preset::LowmemDecode => {
+            Preset::Web => {
                 config.cm2_column_variants = false;
                 config.cm2_max_tbits = Some(20);
             }
