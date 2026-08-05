@@ -136,8 +136,13 @@ fn estimate_cube_size(
             order2_context_huffman_size(seq_codes, state.inverse_dict.len(), min_ctx)
         }
         ValueScheme::BwtEntropy => {
-            // Wire: primary_index(2) + T4 context_huffman stream of BWT output
+            // Wire: primary_index(2) + T4 context_huffman stream of BWT output.
+            // When the block is too long for the v1 two-byte primary index the
+            // scheme declines, and the encoder emits the plain T4 stream it
+            // competes against — so the estimate must be that same fallback, or
+            // the raw-vs-cube decision is made against bytes we will not produce.
             bwt_entropy_size(seq_codes, state.inverse_dict.len())
+                .unwrap_or_else(|| context_huffman_size(seq_codes, state.inverse_dict.len()))
         }
         ValueScheme::BwtRans
         | ValueScheme::Order2Rans
@@ -151,14 +156,25 @@ fn estimate_cube_size(
             // winner's scheme byte. Estimate with that same minimum so the raw-vs-cube
             // decision matches the bytes the encoder will actually produce (Gotcha #4/#6).
             let n_distinct = state.inverse_dict.len();
-            bwt_rans_size(seq_codes, n_distinct)
-                .min(bwt_entropy_size(seq_codes, n_distinct))
-                .min(context_huffman_size(seq_codes, n_distinct))
-                .min(bwt_order2_rans_size(seq_codes, n_distinct))
-                .min(bwt_adaptive_size(seq_codes, n_distinct))
-                .min(bwt_ctxmix_size(seq_codes, n_distinct))
-                .min(bwt_geomix_size(seq_codes, n_distinct))
-                .min(lz_rans_size(seq_codes, n_distinct))
+            // A scheme that declines (block too long for the v1 two-byte primary
+            // index) contributes NO candidate. Treating a decline as size 0 would
+            // make it win every comparison — the exact trap an empty-Vec sentinel
+            // would have created — so declines are filtered out, not minimised in.
+            // context_huffman is never BWT-based and so always participates.
+            [
+                bwt_rans_size(seq_codes, n_distinct),
+                bwt_entropy_size(seq_codes, n_distinct),
+                Some(context_huffman_size(seq_codes, n_distinct)),
+                bwt_order2_rans_size(seq_codes, n_distinct),
+                bwt_adaptive_size(seq_codes, n_distinct),
+                bwt_ctxmix_size(seq_codes, n_distinct),
+                bwt_geomix_size(seq_codes, n_distinct),
+            ]
+            .into_iter()
+            .flatten()
+            .min()
+            .expect("context_huffman always participates, so the set is never empty")
+            .min(lz_rans_size(seq_codes, n_distinct))
         }
     };
 
@@ -573,12 +589,12 @@ fn encode_rans_family_value_stream(
 ) -> (ValueScheme, Vec<u8>) {
     let rans_bytes = crate::prof::track(
         "vs_bwt_rans",
-        |v: &Vec<u8>| v.len(),
+        |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
         || bwt_rans_encode(seq_codes, n_distinct),
     );
     let bwt_huff_bytes = crate::prof::track(
         "vs_bwt_huff",
-        |v: &Vec<u8>| v.len(),
+        |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
         || bwt_entropy_encode(seq_codes, n_distinct),
     );
     let t4_bytes_val = crate::prof::track(
@@ -588,22 +604,22 @@ fn encode_rans_family_value_stream(
     );
     let order2_bytes = crate::prof::track(
         "vs_order2_rans",
-        |v: &Vec<u8>| v.len(),
+        |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
         || bwt_order2_rans_encode(seq_codes, n_distinct),
     );
     let adaptive_bytes = crate::prof::track(
         "vs_adaptive",
-        |v: &Vec<u8>| v.len(),
+        |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
         || bwt_adaptive_encode(seq_codes, n_distinct),
     );
     let ctxmix_bytes = crate::prof::track(
         "vs_ctxmix",
-        |v: &Vec<u8>| v.len(),
+        |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
         || bwt_ctxmix_encode(seq_codes, n_distinct),
     );
     let geomix_bytes = crate::prof::track(
         "vs_geomix",
-        |v: &Vec<u8>| v.len(),
+        |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
         || bwt_geomix_encode(seq_codes, n_distinct),
     );
     let lz_bytes = crate::prof::track(
@@ -612,60 +628,56 @@ fn encode_rans_family_value_stream(
         || lz_rans_encode(seq_codes, n_distinct),
     );
 
-    let mut winner_scheme = ValueScheme::BwtRans;
-    let mut encoded_values = rans_bytes;
-    if bwt_huff_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::BwtEntropy;
-        encoded_values = bwt_huff_bytes;
-        crate::prof::win("vs_bwt_huff");
+    // Competitive minimum over the candidates that are APPLICABLE.
+    //
+    // A BWT-family scheme returns None when the block is too long for the v1
+    // two-byte primary index (see bwt_wire_can_represent). A decline contributes
+    // no candidate at all — it must never be scored, because the natural sentinel
+    // for "no bytes" is an empty Vec whose length is 0, which would beat every
+    // real candidate and ship an empty value stream for the block.
+    //
+    // Order and tie-breaking are unchanged: candidates are visited in the
+    // documented priority order and only a STRICTLY smaller candidate displaces
+    // the incumbent, so ties still resolve to the earlier-listed scheme.
+    // context_huffman and lz_rans are not BWT-based and always participate, so
+    // the applicable set is never empty.
+    let candidates: [(ValueScheme, Option<Vec<u8>>, &str); 8] = [
+        (ValueScheme::BwtRans, rans_bytes, "vs_bwt_rans"),
+        (ValueScheme::BwtEntropy, bwt_huff_bytes, "vs_bwt_huff"),
+        (
+            ValueScheme::EntropyContext,
+            Some(t4_bytes_val),
+            "vs_t4_huff",
+        ),
+        (ValueScheme::Order2Rans, order2_bytes, "vs_order2_rans"),
+        (ValueScheme::BwtAdaptive, adaptive_bytes, "vs_adaptive"),
+        (ValueScheme::BwtContextMix, ctxmix_bytes, "vs_ctxmix"),
+        (ValueScheme::BwtGeoMix, geomix_bytes, "vs_geomix"),
+        (ValueScheme::LzRans, Some(lz_bytes), "vs_lz_rans"),
+    ];
+
+    let mut winner_scheme: Option<ValueScheme> = None;
+    let mut encoded_values: Option<Vec<u8>> = None;
+    for (scheme, bytes, label) in candidates {
+        let Some(bytes) = bytes else { continue };
+        let better = match &encoded_values {
+            None => true,
+            Some(best) => bytes.len() < best.len(),
+        };
+        if better {
+            if encoded_values.is_some() {
+                crate::prof::win(label);
+            }
+            winner_scheme = Some(scheme);
+            encoded_values = Some(bytes);
+        }
     }
-    if t4_bytes_val.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::EntropyContext;
-        encoded_values = t4_bytes_val;
-        crate::prof::win("vs_t4_huff");
-    }
-    if order2_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::Order2Rans;
-        encoded_values = order2_bytes;
-        crate::prof::win("vs_order2_rans");
-    }
-    if adaptive_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::BwtAdaptive;
-        encoded_values = adaptive_bytes;
-        crate::prof::win("vs_adaptive");
-    }
-    if ctxmix_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::BwtContextMix;
-        encoded_values = ctxmix_bytes;
-        crate::prof::win("vs_ctxmix");
-    }
-    if geomix_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::BwtGeoMix;
-        encoded_values = geomix_bytes;
-        crate::prof::win("vs_geomix");
-    }
-    if lz_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::LzRans;
-        encoded_values = lz_bytes;
-        crate::prof::win("vs_lz_rans");
-    }
-    // CUBR-0087: record the FINAL winner per block, not the running improvements.
-    // `win()` above fires every time a candidate becomes the running minimum, so
-    // several candidates "win" per block and the counts cannot answer the question
-    // that matters for a sticky-selection lever: does one scheme win *the block*,
-    // and does it keep winning across the file? If it does, the other seven passes
-    // are computing a known answer ~1,100 CPU-seconds at a time.
-    crate::prof::win(match winner_scheme {
-        ValueScheme::BwtRans => "FINAL:bwt_rans",
-        ValueScheme::BwtEntropy => "FINAL:bwt_huff",
-        ValueScheme::EntropyContext => "FINAL:t4_huff",
-        ValueScheme::Order2Rans => "FINAL:order2_rans",
-        ValueScheme::BwtAdaptive => "FINAL:adaptive",
-        ValueScheme::BwtContextMix => "FINAL:ctxmix",
-        ValueScheme::BwtGeoMix => "FINAL:geomix",
-        ValueScheme::LzRans => "FINAL:lz_rans",
-        _ => "FINAL:other",
-    });
+
+    let winner_scheme =
+        winner_scheme.expect("context_huffman always participates, so a winner always exists");
+    let encoded_values =
+        encoded_values.expect("context_huffman always participates, so a winner always exists");
+
     (winner_scheme, encoded_values)
 }
 
@@ -899,10 +911,16 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             // Which value stream wins?  Pick the smaller.
             // We have already estimated cube_size with BwtEntropy; we re-emit
             // the header with the actual winner's scheme byte.
-            let (winner_scheme, encoded_values) = if bwt_bytes.len() <= t4_bytes_val.len() {
-                (ValueScheme::BwtEntropy, bwt_bytes)
-            } else {
-                (ValueScheme::EntropyContext, t4_bytes_val)
+            // This is the BwtEntropy path, and it is NOT reached through the
+            // `rans_family` match below — that list omits BwtEntropy. A guard
+            // placed there would leave exactly this narrowing unprotected, which
+            // is why the applicability check lives in the scheme functions
+            // themselves and this site simply honours a decline.
+            let (winner_scheme, encoded_values) = match bwt_bytes {
+                Some(bwt_bytes) if bwt_bytes.len() <= t4_bytes_val.len() => {
+                    (ValueScheme::BwtEntropy, bwt_bytes)
+                }
+                _ => (ValueScheme::EntropyContext, t4_bytes_val),
             };
 
             // Re-build the cube header with the winner's scheme byte (may differ from
@@ -7021,13 +7039,52 @@ fn bwt_encode_codes_wide(seq: &[usize]) -> (Vec<usize>, usize) {
     (bwt_out, primary)
 }
 
+/// Can the v1 BWT wire format represent a block of this length?
+///
+/// Every BWT-family value scheme stores the primary index as a **two-byte
+/// field**, so a block whose primary index can exceed `u16::MAX` cannot be
+/// encoded by any of them. The primary index is a rotation position, so it is
+/// bounded by the sequence length: a block of at most `u16::MAX + 1` elements is
+/// always representable, and beyond that it may not be.
+///
+/// This is an **applicability predicate, not an error condition**. The
+/// competitive-min rail already means "try the schemes, keep the best that
+/// works", and the detector-gated transforms (`encode_med16`, `encode_geocm`,
+/// `encode_bcj`) already decline by returning `None` when their structure is
+/// absent. A BWT scheme that cannot represent this block is inapplicable in
+/// exactly the same sense, so it withdraws from the competition and the
+/// remaining schemes produce a correct — if less dense — result.
+///
+/// **Why a shared predicate rather than a check at the call site.** The obvious
+/// place to gate is `encode_base`'s `rans_family` match, but that list is
+/// `BwtRans | Order2Rans | BwtAdaptive | BwtContextMix | BwtGeoMix | LzRans` and
+/// **omits `BwtEntropy`**, which reaches the narrowing by its own path. A guard
+/// there would cover six of the seven callers, look correct in review, and leave
+/// the seventh truncating silently — the same defect this fix exists to close,
+/// reproduced one level down. Every caller consults this function instead.
+///
+/// **The estimator must agree with the encoder.** `bwt_entropy_size` feeds the
+/// competitive-min decision; if it reported a BWT size while the encoder declined
+/// BWT, the rail would select a scheme that cannot be produced. It calls this
+/// same predicate, so the two cannot diverge.
+pub(crate) fn bwt_wire_can_represent(len: usize) -> bool {
+    len <= u16::MAX as usize + 1
+}
+
 /// Existing v1 BWT wrapper. Every current value-scheme wire stores a two-byte primary
 /// index, so this checked narrowing preserves the format while the wide core serves FU-01.
+///
+/// The assertion is a hard `assert!`, not a `debug_assert!`: a `debug_assert!` is
+/// compiled out of release, which is precisely how `primary_index 134980` came to
+/// truncate to 3,908 in a release build and emit an archive that failed its own
+/// round trip. Callers must consult [`bwt_wire_can_represent`] first, so reaching
+/// this assertion means a caller skipped that check — a programming error, not a
+/// data-dependent one, and one that must not be silently discarded in release.
 pub(crate) fn bwt_encode_codes(seq: &[usize]) -> (Vec<usize>, u16) {
     let (bwt_out, primary) = bwt_encode_codes_wide(seq);
-    debug_assert!(
+    assert!(
         primary <= u16::MAX as usize,
-        "primary_index {primary} exceeds u16::MAX; cube/chunk ceiling may have been raised above 65536 without updating BWT wire format"
+        "primary_index {primary} exceeds u16::MAX; caller must gate on bwt_wire_can_represent() before invoking a BWT-family scheme"
     );
     (bwt_out, primary as u16)
 }
@@ -7106,13 +7163,20 @@ pub(crate) fn bwt_decode_codes(
 
 /// Encode the value-code stream with BWT + T4 (order-1 context Huffman).
 /// Wire: [primary_index: u16 BE] + T4 context-Huffman stream of BWT output.
-pub(crate) fn bwt_entropy_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+pub(crate) fn bwt_entropy_encode(seq_codes: &[usize], n_distinct: usize) -> Option<Vec<u8>> {
+    // v1 BWT wire stores the primary index in two bytes; a block this long
+    // cannot be represented. Withdraw from the competition rather than
+    // truncate — see bwt_wire_can_represent().
+    if !bwt_wire_can_represent(seq_codes.len()) {
+        return None;
+    }
+
     let (bwt_out, primary) = bwt_encode_codes(seq_codes);
     let ctx_bytes = context_huffman_encode(&bwt_out, n_distinct);
     let mut out = Vec::with_capacity(2 + ctx_bytes.len());
     out.extend_from_slice(&primary.to_be_bytes());
     out.extend_from_slice(&ctx_bytes);
-    out
+    Some(out)
 }
 
 /// Decode the BWT+T4 stream from blob at offset.
@@ -7148,9 +7212,16 @@ pub(crate) fn bwt_entropy_decode(
 
 /// Estimate byte size of BWT+T4 encoded stream without allocating the full output.
 /// Wire = 2 (primary_index) + T4 context_huffman_size(bwt_out).
-pub(crate) fn bwt_entropy_size(seq_codes: &[usize], n_distinct: usize) -> usize {
+pub(crate) fn bwt_entropy_size(seq_codes: &[usize], n_distinct: usize) -> Option<usize> {
+    // v1 BWT wire stores the primary index in two bytes; a block this long
+    // cannot be represented. Withdraw from the competition rather than
+    // truncate — see bwt_wire_can_represent().
+    if !bwt_wire_can_represent(seq_codes.len()) {
+        return None;
+    }
+
     let (bwt_out, _) = bwt_encode_codes(seq_codes);
-    2 + context_huffman_size(&bwt_out, n_distinct)
+    Some(2 + context_huffman_size(&bwt_out, n_distinct))
 }
 
 // ─── H-19: Order-1 Context-Adaptive rANS ─────────────────────────────────────
@@ -7740,13 +7811,20 @@ pub(crate) fn rans_order0_decode(
 
 /// Encode the value-code stream with BWT + order-1 rANS.
 /// Wire: [primary_index: u16 BE] + rANS order-1 stream of BWT output.
-pub(crate) fn bwt_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+pub(crate) fn bwt_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Option<Vec<u8>> {
+    // v1 BWT wire stores the primary index in two bytes; a block this long
+    // cannot be represented. Withdraw from the competition rather than
+    // truncate — see bwt_wire_can_represent().
+    if !bwt_wire_can_represent(seq_codes.len()) {
+        return None;
+    }
+
     let (bwt_out, primary) = bwt_encode_codes(seq_codes);
     let body = rans_order1_encode(&bwt_out, n_distinct);
     let mut out = Vec::with_capacity(2 + body.len());
     out.extend_from_slice(&primary.to_be_bytes());
     out.extend_from_slice(&body);
-    out
+    Some(out)
 }
 
 /// Decode the BWT + order-1 rANS stream from blob at offset.
@@ -7779,8 +7857,8 @@ pub(crate) fn bwt_rans_decode(
 }
 
 /// Estimate byte size of the BWT + order-1 rANS stream (full encode then len).
-pub(crate) fn bwt_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
-    bwt_rans_encode(seq_codes, n_distinct).len()
+pub(crate) fn bwt_rans_size(seq_codes: &[usize], n_distinct: usize) -> Option<usize> {
+    bwt_rans_encode(seq_codes, n_distinct).map(|v| v.len())
 }
 
 // ── H-20: order-2 context rANS ───────────────────────────────────────────────
@@ -8159,7 +8237,14 @@ fn order2_rans_decode(
 
 /// Encode the value-code stream with BWT + order-2 rANS, picking the smaller of the
 /// 3-level and 2-level wire layouts. Wire: [primary u16 BE] + order-2 rANS body.
-pub(crate) fn bwt_order2_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+pub(crate) fn bwt_order2_rans_encode(seq_codes: &[usize], n_distinct: usize) -> Option<Vec<u8>> {
+    // v1 BWT wire stores the primary index in two bytes; a block this long
+    // cannot be represented. Withdraw from the competition rather than
+    // truncate — see bwt_wire_can_represent().
+    if !bwt_wire_can_represent(seq_codes.len()) {
+        return None;
+    }
+
     let (bwt_out, primary) = bwt_encode_codes(seq_codes);
     let body3 = order2_rans_encode(&bwt_out, n_distinct, true);
     let body2 = order2_rans_encode(&bwt_out, n_distinct, false);
@@ -8171,7 +8256,7 @@ pub(crate) fn bwt_order2_rans_encode(seq_codes: &[usize], n_distinct: usize) -> 
     let mut out = Vec::with_capacity(2 + body.len());
     out.extend_from_slice(&primary.to_be_bytes());
     out.extend_from_slice(&body);
-    out
+    Some(out)
 }
 
 /// Decode the BWT + order-2 rANS stream from blob at offset.
@@ -8201,8 +8286,8 @@ pub(crate) fn bwt_order2_rans_decode(
 }
 
 /// Estimate byte size of the BWT + order-2 rANS stream (full encode then len).
-pub(crate) fn bwt_order2_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
-    bwt_order2_rans_encode(seq_codes, n_distinct).len()
+pub(crate) fn bwt_order2_rans_size(seq_codes: &[usize], n_distinct: usize) -> Option<usize> {
+    bwt_order2_rans_encode(seq_codes, n_distinct).map(|v| v.len())
 }
 
 // ── H-21: adaptive order-1 entropy coding (no transmitted frequency tables) ───
@@ -8450,7 +8535,14 @@ fn adaptive_range_o1_decode(
 /// Encode the value-code stream with BWT + adaptive order-1 range coding.
 /// Wire: [primary u16 BE] [inc u8] [rc_len u32 BE] [rc payload]. The encoder tries
 /// each candidate `inc` and keeps the smallest payload (decoder reads the winner).
-pub(crate) fn bwt_adaptive_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+pub(crate) fn bwt_adaptive_encode(seq_codes: &[usize], n_distinct: usize) -> Option<Vec<u8>> {
+    // v1 BWT wire stores the primary index in two bytes; a block this long
+    // cannot be represented. Withdraw from the competition rather than
+    // truncate — see bwt_wire_can_represent().
+    if !bwt_wire_can_represent(seq_codes.len()) {
+        return None;
+    }
+
     let (bwt_out, primary) = bwt_encode_codes(seq_codes);
     let mut best_inc = ADAPT_INCS[0];
     let mut best_payload = adaptive_range_o1_encode(&bwt_out, n_distinct, best_inc);
@@ -8466,7 +8558,7 @@ pub(crate) fn bwt_adaptive_encode(seq_codes: &[usize], n_distinct: usize) -> Vec
     out.push(best_inc as u8);
     out.extend_from_slice(&(best_payload.len() as u32).to_be_bytes());
     out.extend_from_slice(&best_payload);
-    out
+    Some(out)
 }
 
 /// Decode the BWT + adaptive order-1 range-coded stream from blob at offset.
@@ -8513,8 +8605,8 @@ pub(crate) fn bwt_adaptive_decode(
 }
 
 /// Estimate byte size of the BWT + adaptive order-1 range-coded stream.
-pub(crate) fn bwt_adaptive_size(seq_codes: &[usize], n_distinct: usize) -> usize {
-    bwt_adaptive_encode(seq_codes, n_distinct).len()
+pub(crate) fn bwt_adaptive_size(seq_codes: &[usize], n_distinct: usize) -> Option<usize> {
+    bwt_adaptive_encode(seq_codes, n_distinct).map(|v| v.len())
 }
 
 // ── H-22: context-mixing of order-1 + order-0 (adaptive, learned weight) ──────
@@ -8880,7 +8972,14 @@ fn cm_update_o0(freq: &mut [u32], total: &mut u32, s: usize, inc: u32) {
 /// Encode the value-code stream with BWT + context-mixing. The encoder evaluates pure
 /// order-1 (mode 0) over CM_PURE_INCS and learned-mix (mode 1) over CM_MIX_INCS×CM_LRS,
 /// and keeps the smallest. Wire: [primary u16][mode u8][inc u8][lr_idx u8][rc_len u32][rc].
-pub(crate) fn bwt_ctxmix_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+pub(crate) fn bwt_ctxmix_encode(seq_codes: &[usize], n_distinct: usize) -> Option<Vec<u8>> {
+    // v1 BWT wire stores the primary index in two bytes; a block this long
+    // cannot be represented. Withdraw from the competition rather than
+    // truncate — see bwt_wire_can_represent().
+    if !bwt_wire_can_represent(seq_codes.len()) {
+        return None;
+    }
+
     let (bwt_out, primary) = bwt_encode_codes(seq_codes);
     let a = n_distinct;
     let mut best_mode = 0u8;
@@ -8920,7 +9019,7 @@ pub(crate) fn bwt_ctxmix_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u
     out.push(best_lr_idx);
     out.extend_from_slice(&(best_payload.len() as u32).to_be_bytes());
     out.extend_from_slice(&best_payload);
-    out
+    Some(out)
 }
 
 /// Decode the BWT + context-mixing stream from blob at offset.
@@ -8990,8 +9089,8 @@ pub(crate) fn bwt_ctxmix_decode(
 }
 
 /// Estimate byte size of the BWT + context-mixing stream (full encode then len).
-pub(crate) fn bwt_ctxmix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
-    bwt_ctxmix_encode(seq_codes, n_distinct).len()
+pub(crate) fn bwt_ctxmix_size(seq_codes: &[usize], n_distinct: usize) -> Option<usize> {
+    bwt_ctxmix_encode(seq_codes, n_distinct).map(|v| v.len())
 }
 
 // ---------------------------------------------------------------------------
@@ -9294,7 +9393,14 @@ fn gm_sweep_combos() -> Vec<(u32, usize)> {
 /// Encode the value-code stream with BWT + geometric context-mixing. The encoder sweeps
 /// GM_INCS × GM_LRS and keeps the smallest payload.
 /// Wire: [primary u16][inc u8][lr_idx u8][rc_len u32][rc].
-pub(crate) fn bwt_geomix_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u8> {
+pub(crate) fn bwt_geomix_encode(seq_codes: &[usize], n_distinct: usize) -> Option<Vec<u8>> {
+    // v1 BWT wire stores the primary index in two bytes; a block this long
+    // cannot be represented. Withdraw from the competition rather than
+    // truncate — see bwt_wire_can_represent().
+    if !bwt_wire_can_represent(seq_codes.len()) {
+        return None;
+    }
+
     let (bwt_out, primary) = bwt_encode_codes(seq_codes);
     let a = n_distinct;
     let mut best_inc = GM_INCS[0];
@@ -9323,7 +9429,7 @@ pub(crate) fn bwt_geomix_encode(seq_codes: &[usize], n_distinct: usize) -> Vec<u
     out.push(best_lr_idx);
     out.extend_from_slice(&(best_payload.len() as u32).to_be_bytes());
     out.extend_from_slice(&best_payload);
-    out
+    Some(out)
 }
 
 /// Decode the BWT + geometric context-mixing stream from blob at offset.
@@ -9381,8 +9487,8 @@ pub(crate) fn bwt_geomix_decode(
 }
 
 /// Estimate byte size of the BWT + geometric context-mixing stream.
-pub(crate) fn bwt_geomix_size(seq_codes: &[usize], n_distinct: usize) -> usize {
-    bwt_geomix_encode(seq_codes, n_distinct).len()
+pub(crate) fn bwt_geomix_size(seq_codes: &[usize], n_distinct: usize) -> Option<usize> {
+    bwt_geomix_encode(seq_codes, n_distinct).map(|v| v.len())
 }
 
 // ─── LzRans (H-25c): LZ77 match modeling + rANS, a NON-BWT value-stream class ─
@@ -10740,6 +10846,114 @@ pub(crate) fn lz_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// The v1 BWT wire stores the primary index in two bytes. A block whose
+    /// primary index exceeds `u16::MAX` cannot be represented, and before this
+    /// fix the narrowing truncated it in release — `primary_index 134980` became
+    /// `3908` and the encoder emitted an archive that could not be decoded.
+    ///
+    /// On unmodified `main` this test FAILS in release with
+    /// `Decode("EntropyContext: bitstream exhausted at bit 290184 ...")`.
+    /// It now passes because the scheme DECLINES rather than truncating.
+    ///
+    /// Fixture note: a synthetic periodic sequence cannot exercise this. A
+    /// 200,000-element `(i * 7919) % 251` sequence yields `primary 796` — the
+    /// primary index is a rotation rank, not a length. Only realistic structure
+    /// drives it past the ceiling, so the fixture is real corpus data.
+    #[test]
+    fn bwt_schemes_decline_when_primary_index_exceeds_u16() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../bench/web-corpus/payloads-v2");
+        let mut entries: Vec<_> = std::fs::read_dir(&root)
+            .expect("web corpus must be present")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect();
+        entries.sort();
+
+        let mut exercised = false;
+        for path in entries {
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let mut dict: Vec<u8> = bytes.clone();
+            dict.sort_unstable();
+            dict.dedup();
+            let codes: Vec<usize> = bytes
+                .iter()
+                .map(|b| dict.binary_search(b).expect("byte in dict"))
+                .collect();
+            let (_o, primary_wide) = super::bwt_encode_codes_wide(&codes);
+            if primary_wide <= u16::MAX as usize {
+                continue;
+            }
+            exercised = true;
+            let n = dict.len();
+
+            // Every BWT-family scheme must decline this block, not truncate it.
+            assert!(!super::bwt_wire_can_represent(codes.len()));
+            assert!(
+                super::bwt_entropy_encode(&codes, n).is_none(),
+                "bwt_entropy_encode must decline"
+            );
+            assert!(
+                super::bwt_entropy_size(&codes, n).is_none(),
+                "bwt_entropy_size must decline"
+            );
+            assert!(
+                super::bwt_rans_encode(&codes, n).is_none(),
+                "bwt_rans_encode must decline"
+            );
+            assert!(
+                super::bwt_order2_rans_encode(&codes, n).is_none(),
+                "bwt_order2_rans_encode must decline"
+            );
+            assert!(
+                super::bwt_adaptive_encode(&codes, n).is_none(),
+                "bwt_adaptive_encode must decline"
+            );
+            assert!(
+                super::bwt_ctxmix_encode(&codes, n).is_none(),
+                "bwt_ctxmix_encode must decline"
+            );
+            assert!(
+                super::bwt_geomix_encode(&codes, n).is_none(),
+                "bwt_geomix_encode must decline"
+            );
+
+            // The estimator and the encoder must agree, or competitive-min picks
+            // a scheme the encoder then refuses to produce.
+            assert_eq!(
+                super::bwt_entropy_size(&codes, n).is_none(),
+                super::bwt_entropy_encode(&codes, n).is_none(),
+                "estimator and encoder must agree on applicability"
+            );
+
+            // The rail must still produce a winner, and it must not be BWT-family.
+            let (scheme, bytes_out) = super::encode_rans_family_value_stream(&codes, n);
+            assert!(
+                !bytes_out.is_empty(),
+                "a declined scheme must not yield an empty value stream"
+            );
+            assert!(
+                !matches!(
+                    scheme,
+                    super::ValueScheme::BwtRans
+                        | super::ValueScheme::BwtEntropy
+                        | super::ValueScheme::Order2Rans
+                        | super::ValueScheme::BwtAdaptive
+                        | super::ValueScheme::BwtContextMix
+                        | super::ValueScheme::BwtGeoMix
+                ),
+                "winner must not be a BWT-family scheme when the block exceeds the u16 ceiling, got {scheme:?}"
+            );
+            break;
+        }
+        assert!(
+            exercised,
+            "no corpus payload drove the primary index past u16::MAX; this test proves nothing"
+        );
+    }
+
     use super::*;
 
     /// The CM2 size floor is a runtime budget, not a compression judgement. Inputs in the
@@ -15354,11 +15568,13 @@ mod tests {
 
     #[test]
     fn test_ctxmix_empty_and_singleton() {
-        let enc = bwt_ctxmix_encode(&[], 0);
+        let enc =
+            bwt_ctxmix_encode(&[], 0).expect("block is far below the u16 primary-index ceiling");
         let (dec, _) = bwt_ctxmix_decode(&enc, 0, 0, 0).unwrap();
         assert!(dec.is_empty());
         let seq = vec![0usize; 800];
-        let enc = bwt_ctxmix_encode(&seq, 1);
+        let enc =
+            bwt_ctxmix_encode(&seq, 1).expect("block is far below the u16 primary-index ceiling");
         let (dec, _) = bwt_ctxmix_decode(&enc, 0, seq.len(), 1).unwrap();
         assert_eq!(dec, seq);
     }
@@ -15535,11 +15751,13 @@ mod tests {
 
     #[test]
     fn test_geomix_empty_and_singleton() {
-        let enc = bwt_geomix_encode(&[], 0);
+        let enc =
+            bwt_geomix_encode(&[], 0).expect("block is far below the u16 primary-index ceiling");
         let (dec, _) = bwt_geomix_decode(&enc, 0, 0, 0).unwrap();
         assert!(dec.is_empty());
         let seq = vec![0usize; 800];
-        let enc = bwt_geomix_encode(&seq, 1);
+        let enc =
+            bwt_geomix_encode(&seq, 1).expect("block is far below the u16 primary-index ceiling");
         let (dec, _) = bwt_geomix_decode(&enc, 0, seq.len(), 1).unwrap();
         assert_eq!(dec, seq);
     }
