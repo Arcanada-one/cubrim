@@ -1,0 +1,30 @@
+[package]
+name = "cubrim-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.cubrim]
+path = ".."
+
+[[bin]]
+name = "decode_hostile"
+path = "fuzz_targets/decode_hostile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_roundtrip"
+path = "fuzz_targets/decode_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
