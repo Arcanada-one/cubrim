@@ -176,18 +176,32 @@ pub enum PresetArg {
     /// Maximum ratio, whatever it costs. Byte-identical to the v0.3.2 encoder;
     /// 0.189007 on the full 24-file world corpus.
     Max,
-    /// Faster encode for a small ratio cost. Measured on the full 24-file world
-    /// corpus: +0.47% output. The speedup is text-class specific — 3.00x on
-    /// text/xml/database, and a byte-identical no-op on executables, where the
-    /// dropped CM2 column-variant passes never run. Archives stay readable by
-    /// every decoder.
+    /// Faster encode for a small ratio cost: +0.47% output on the full 24-file
+    /// world corpus.
+    ///
+    /// The speedup is concentrated by data class, not spread across the corpus,
+    /// so it is quoted by class rather than as an average — a mean would
+    /// describe none of these files. Measured per file, max vs balanced:
+    /// 2.5-3.0x on text/xml/database (xml 2.99x, webster 2.81x, dickens 2.77x,
+    /// osdb 2.50x, enwik8 2.48x) and NO CHANGE on executables, images and code
+    /// (mozilla, ooffice, x-ray, mr 1.00x, samba 0.99x), where the dropped CM2
+    /// column-variant passes never run and the output is byte-identical.
+    /// Corpus-wide encode throughput 0.0230 -> 0.0378 MiB/s.
+    ///
+    /// Archives stay readable by every decoder.
     Balanced,
-    /// Bounded decoder memory, for wasm32 and other hard-ceiling environments:
-    /// decode peak 1.47 GiB -> 0.109 GiB, a 13.5x cut, independent of input type.
-    /// Costs +9.32% output on the full 24-file world corpus. NOTE: a decoder that
-    /// predates the table-exponent field CANNOT read these archives — it fails
-    /// closed with a decode error rather than returning wrong bytes, but it
-    /// cannot open them. `max` and `balanced` archives have no such restriction.
+    /// Bounded decoder memory, for wasm32 and other hard-ceiling environments.
+    ///
+    /// On the full 24-file world corpus, peak decode RSS falls from 12,561 MiB
+    /// to 221 MiB — a 56.8x cut, and the figure that decides whether a browser
+    /// decoder is possible at all, since wasm32 caps the address space at 4 GiB.
+    /// Peak encode RSS falls 18,603 -> 7,007 MiB. Costs +9.32% output
+    /// (0.206627 against max 0.189007), still ahead of ppmd 0.228592.
+    ///
+    /// NOTE: a decoder that predates the table-exponent field CANNOT read these
+    /// archives. It fails closed with a decode error rather than returning wrong
+    /// bytes, but it cannot open them. `max` and `balanced` archives have no
+    /// such restriction and are readable by every decoder.
     Web,
 }
 

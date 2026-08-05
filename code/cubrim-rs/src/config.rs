@@ -439,9 +439,13 @@ pub enum Preset {
     /// sweep is a no-op wherever CM2 does not win and most of the corpus is in
     /// that position.
     ///
-    /// The *speedup* is genuinely class-specific and must be quoted that way:
-    /// **3.00× on text/xml/database**, and a **byte-identical no-op on
-    /// executables**. Never state it as a corpus-wide speedup.
+    /// The *speedup* is concentrated by data class and must be quoted that way,
+    /// never as an average — a mean would describe none of these files.
+    /// Measured per file, `max` vs `balanced`: **2.5–3.0× on text/xml/database**
+    /// (xml 2.99×, webster 2.81×, dickens 2.77×, osdb 2.50×, enwik8 2.48×) and
+    /// **no change on executables, images and code** (mozilla, ooffice, x-ray,
+    /// mr 1.00×, samba 0.99×), where the output is byte-identical. Corpus-wide
+    /// encode throughput 0.0230 → 0.0378 MiB/s.
     ///
     /// Archives stay mutually decodable with `Max`.
     Balanced,
@@ -449,9 +453,12 @@ pub enum Preset {
     /// chiefly `wasm32`, whose 4 GiB address space cannot hold the 12.3 GiB of
     /// model tables a >=16 MB file otherwise demands of the **decoder**.
     ///
-    /// Caps the CM2 table exponent at 20: **decode peak 1.47 GiB -> 0.109 GiB**,
-    /// a 13.5x cut, independent of input type because decode is CM2 alone
-    /// whatever won at encode. **Corpus cost +9.32% output** on the full 24-file
+    /// Caps the CM2 table exponent at 20. On the full 24-file world corpus peak
+    /// decode RSS falls **12,561 MiB -> 221 MiB, a 56.8× cut** (the 2 MB slice
+    /// showed only 13.5×, because a slice never derives the full `tbits = 27`
+    /// model that a >= 16 MB file does). Peak encode RSS falls 18,603 -> 7,007
+    /// MiB. 221 MiB is comfortably under the wasm32 4 GiB ceiling, which is what
+    /// makes a browser decoder possible at all. **Corpus cost +9.32% output** on the full 24-file
     /// world corpus — three times dearer than the +3.32% a 2 MB slice suggested,
     /// because a 2 MB slice derives `tbits = 24` so capping at 20 costs four
     /// steps, while a real file >= 16 MB derives 27 and the same cap costs seven.
