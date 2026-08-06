@@ -1,0 +1,13 @@
+sample_id	orig	brotli11	gzip9	zstd19	br_rt	gz_rt	zs_rt
+css-medium-tailwind-v2	65257	9161	11278	10131	PASS	PASS	PASS
+html-large-web-codec-v2	227968	11746	15804	13543	PASS	PASS	PASS
+html-medium-home-v2	25031	4763	5801	5573	PASS	PASS	PASS
+javascript-medium-magic-string-v2	42936	8672	9896	9293	PASS	PASS	PASS
+javascript-medium-sourcemap-codec-v2	14590	3280	3705	3525	PASS	PASS	PASS
+javascript-small-resolve-uri-v2	9866	2467	2895	2802	PASS	PASS	PASS
+json-api-large-world-benchmark-v2	320976	14910	21196	16664	PASS	PASS	PASS
+json-api-medium-web-benchmark-v2	98948	8344	10516	8980	PASS	PASS	PASS
+json-api-small-hypotheses-v2	13880	1383	1674	1599	PASS	PASS	PASS
+source-map-large-magic-string-v2	112594	17827	20194	18484	PASS	PASS	PASS
+source-map-small-sourcemap-codec-v2	9700	2319	2546	2390	PASS	PASS	PASS
+woff2-medium-inter-latin-v20	23664	23623	23688	23678	PASS	PASS	PASS

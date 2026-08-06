@@ -1,0 +1,19 @@
+
+=== CUBRIM ENCODER CANDIDATE ATTRIBUTION ===
+total measured wall: 0.561 s
+candidate                      calls      seconds   share%      wins      out_bytes
+base                               1        0.561   100.00         0          23677
+vs_geomix                          1        0.373    66.41         1          23658
+vs_ctxmix                          1        0.109    19.45         1          23898
+vs_order2_rans                     1        0.044     7.92         1          24421
+vs_bwt_huff                        1        0.010     1.70         0          84828
+vs_t4_huff                         1        0.006     1.06         0          84803
+vs_bwt_rans                        1        0.006     1.05         0          79308
+vs_adaptive                        1        0.006     0.99         0          25576
+vs_lz_rans                         1        0.004     0.78         0          24560
+cm2_small                          1        0.000     0.00         0              0
+vcf                                1        0.000     0.00         0              0
+bcj_small                          1        0.000     0.00         0              0
+=== END ATTRIBUTION (nested candidates double-count; attribution, not partition) ===
+
+compressed: 23664 bytes -> 23677 bytes ratio=1.000549 time_ms=561

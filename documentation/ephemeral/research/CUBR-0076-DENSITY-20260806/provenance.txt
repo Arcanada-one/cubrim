@@ -1,0 +1,64 @@
+CUBR-0076 density-void measurement provenance
+Measured: 2026-08-06 UTC
+Task: CUBR-0076
+
+Question: the actual density cost of a no-adaptive-model (static-decode)
+scheme on the real web corpus — the void named in
+CUBR-0076-PROTOTYPE-SHAPE-20260806.md. Ratio-only; load-insensitive;
+NO timing claims anywhere in this experiment.
+
+Cubrim binary:
+built from: a859d26-ancestor 96485d1 tree (code identical: PRs #36/#37 are
+  docs-only, zero src/ changes; verified by their merged diffs)
+build: cargo build --release, rustc 1.97.1 (8bab26f4f 2026-07-14)
+binary sha256: f3316a1e910cbc89f3a51913c3af0824f39b747aa282fcf9e53455874914caa3
+host: arcana-devs (Intel i9-9900K); pinning: none (byte outputs only)
+
+Baseline binaries (each byte-identical to the DB codec_build rows 4/5/6):
+/usr/bin/brotli  sha256 01969d4716e4ecc585ab1302e0a0d4e0fa9619017ab17409a54173dac5fbacef  (brotli 1.1.0, -q 11 --stdout)
+/usr/bin/gzip    sha256 afea077ce127d4fa9ad410d3066ba2b54dea19c0b44f04adf56c72d5f7b7a9bb  (gzip 1.12, -9 -c)
+/usr/bin/zstd    sha256 7c5468b370f7c47eda07281e3437fafc568f95d10420051e3aa522709f9342c5  (zstd 1.5.5, -19 --quiet --stdout)
+
+Corpus: bench/web-corpus/manifest.v2.json — every payload sha256-verified
+against the manifest before use (assert in driver.py).
+
+Round trips (byte-exact, every observation):
+- every baseline compress was decompressed and compared equal (baselines.tsv
+  rt columns, 36/36 PASS);
+- every emitted cubrim archive (21 slices + 4 whole files) was decompressed
+  and compared equal (asserts in driver.py; whole-file RT PASS lines);
+- the candidate value-scheme streams that were not emitted are covered by the
+  crate's lossless scheme round-trip gate, re-run at this source state:
+  `cargo test --release roundtrips_the_web_corpus` -> 7 passed / 0 failed.
+
+Method:
+- slices: each sample cut at 65,536-byte boundaries (the chunked path's own
+  block size; slice k = bytes [k*65536, (k+1)*65536) — offsets and slice
+  sha256 in slices.tsv), so every unit is a single cube and the per-scheme
+  profiler totals are exact per-slice wire sizes.
+- per slice: `cubrim compress --value-scheme bwt-rans <slice>` with
+  CUBRIM_PROFILE=1. Requesting a rans-family member runs the full committed
+  8-way scheme competition (codec.rs encode_rans_family_value_stream) and the
+  profiler records each candidate's complete wire stream (tables included by
+  wire layout — Gotcha #6 satisfied by construction). --value-scheme is an
+  existing CLI measurement knob; encoder DEFAULTS are untouched and the
+  emitted archive is still the stock competitive winner (CM2 on all text).
+- static class = {vs_bwt_rans, vs_bwt_huff, vs_t4_huff, vs_order2_rans,
+  vs_lz_rans} (schemes 7,6,4,8,12 — all tables on the wire, no decode-time
+  adaptation). adaptive class = {vs_adaptive, vs_ctxmix, vs_geomix}
+  (schemes 9,10,11 — decoder rebuilds the model online).
+- static-forced blob per slice = base_blob - winner_stream + min(static
+  streams), clamped at raw-store cost (len+13); winner = argmin over the 8
+  streams with the rail's earlier-listed tie order. woff2 resolves to RAW
+  parity (delta 0), matching the census.
+- whole-file profiled encodes of the 4 multi-block samples additionally
+  capture the MODE_LZ candidate (lz_prepass) — the codec's whole-file
+  LZ+entropy shape. Caveat recorded: MODE_LZ sub-streams may select adaptive
+  sub-coders per file, so it is an optimistic (lower-bound-flavoured) proxy
+  for a static scheme.
+
+Raw artifacts: raw/*.prof.txt (25 profiler tables, verbatim stderr);
+driver.py, analyze.py (exact scripts); baselines.tsv, slices.tsv,
+static-detail.tsv. Slice payloads and emitted archives are reproducible
+byte-exactly from the manifest payloads + recorded commands; their sha256s
+are in raw/UNCOMMITTED-ARTIFACTS.sha256.
