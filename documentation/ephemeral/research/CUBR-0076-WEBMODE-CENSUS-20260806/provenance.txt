@@ -1,0 +1,38 @@
+CUBR-0076 web-corpus outer-mode census provenance
+Measured: 2026-08-06 UTC
+Task: CUBR-0076
+
+Question: does the stock encoder ever select MODE_GEOCM (17) on the real web
+corpus? This is the routing half of the brief's step 2. Byte outputs only —
+no timing was measured in this census (see the ceiling document's recorded
+timing refusal).
+
+Binary:
+built from: 96485d1 (origin/main tip at census time), detached worktree
+build command: cargo build --release   (code/cubrim-rs)
+toolchain: rustc 1.97.1 (8bab26f4f 2026-07-14)
+binary sha256: f3316a1e910cbc89f3a51913c3af0824f39b747aa282fcf9e53455874914caa3
+host: arcana-devs (16 cores, Intel i9-9900K @ 3.60 GHz nominal)
+pinning: none. This census reads deterministic byte outputs, not time.
+determinism cross-check: css-medium-tailwind-v2 re-encoded under
+  CUBR_THREADS=4 is byte-identical (cmp) to the default-thread archive.
+
+Corpus:
+manifest: bench/web-corpus/manifest.v2.json (corpus_key cubr0074-web-real-v2,
+  12/12 real samples, real_world_sample_share 1.0)
+every payload's sha256 was verified against the manifest before encoding
+  (assert in the census script; any mismatch aborts).
+
+Per-sample commands (whole files; no slicing):
+  cubrim compress  <payload> <sample_id>.cbr
+  cubrim decompress <sample_id>.cbr <back>
+  round trip = byte equality of <back> with the source payload (Python bytes
+  comparison, equivalent to cmp); 12/12 PASS
+outer mode = byte 5 of the archive (header.rs: MODE_CM2=16, MODE_GEOCM=17,
+  MODE_RAW=1)
+
+Result: GEOCM selected 0 of 12; CM2 11 of 12; RAW 1 of 12 (woff2, ratio
+1.0005 — incompressible passthrough).
+
+Raw artifacts: raw/<sample_id>.cbr (12 archives), raw/SHA256SUMS.txt.
+Machine-readable rows: census.tsv (source and archive sha256 per row).
