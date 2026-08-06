@@ -23,6 +23,19 @@ nothing. `decode()`, the wire format, encoder defaults, `cube_size_limit`,
    (`table-driven-entropy-stage`, GO: `scheme_flag_effective`,
    `ratio_vs_brotli11 ≤ 1`, decode ≥ 100 MB/s; WIN: ≥ 250 MB/s).
 
+### Relation to CUBR-0075's measured negatives (added 2026-08-06)
+
+CUBR-0075's `dependency-negatives` artefact records a measured negative
+labelled "Dependency 13": the range-coder primitive calls inside CM2 decode
+are 2.0185% of substage cycles, so **retrofitting** a table-driven coder into
+the existing path is Amdahl-capped at 1.0206×. That negative is about the
+retrofit, and it is closed — do not re-measure it. The lever proposed here is
+the *other* reading of hypothesis 13, the one its ≥ 100 MB/s GO bar has always
+implied: a new value scheme whose decode has **no adaptive model at all**. The
+0075 measurement supports rather than contradicts this route — it proves the
+decode cost is the model (95.55% of cycles), not the coder. Full scope
+analysis: [`CUBR-0076-DEPSTATE-RECONCILIATION-20260806.md`](CUBR-0076-DEPSTATE-RECONCILIATION-20260806.md).
+
 ## Proposed shape (specification for the prototype slice)
 
 - **An encoder-side profile, not a decoder patch.** `--profile web` (final
