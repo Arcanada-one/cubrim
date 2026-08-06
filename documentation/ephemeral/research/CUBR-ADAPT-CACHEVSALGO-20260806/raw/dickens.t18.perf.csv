@@ -1,0 +1,9 @@
+# started on Thu Aug  6 18:40:10 2026
+
+149075483964,,cycles,19978170331,57.00,,
+198062224235,,instructions,24974118706,71.00,1.33,insn per cycle
+2147339543,,cache-references,24974689369,71.00,,
+627679728,,cache-misses,24974538255,71.00,29.23,of all cache refs
+561842155,,LLC-loads,24974093252,71.00,,
+168701892,,LLC-load-misses,24973202132,71.00,30.03,of all LL-cache accesses
+111591200,,dTLB-load-misses,19977128097,57.00,,

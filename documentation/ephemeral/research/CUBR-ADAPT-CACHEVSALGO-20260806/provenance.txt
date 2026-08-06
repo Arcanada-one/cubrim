@@ -1,0 +1,65 @@
+CUBR archival — adaptation cache-vs-algorithm discriminator provenance
+Measured: 2026-08-06 UTC
+Question (CUBR-0075, restated by the archival pivot brief): is adaptation's
+56.1 cycles per learned input a cache problem or an algorithmic one?
+
+Design: sweep the CM2 model-table exponent with the committed sweep knob
+CUBRIM_CM2_TBITS in {native(=24 for 2 MiB), 22, 20, 18, 15, 12}. The table
+working set spans ~1.5 GiB down to ~7 MiB while the adaptation arithmetic per
+bit is IDENTICAL at every point, and the per-bit call count is constant
+(8 x 2,097,152 = 16,777,216 calls) at every point — so model-split cycles per
+call are apples-to-apples across the sweep. If adaptation were cache-bound its
+cycles/call would collapse together with the misses; if algorithmic it stays.
+
+Binaries:
+encoder/decoder (round trips): built from main tree at a5151b2-ancestor
+  96485d1 (PRs #36/#37/#38 are docs-only), cargo release, rustc 1.97.1
+  sha256 f3316a1e910cbc89f3a51913c3af0824f39b747aa282fcf9e53455874914caa3
+decode profiler: cubrim-decode-profile, --features decode-profile, built at
+  the CUBR-0075 instrument base commit cbdae7d42d4c7374ebee45761d8cb70c738bb7de
+  (origin/codex/cubr-0075-profile tip; contains the tbits merge c2d4361),
+  rustc 1.97.1, sha256
+  3db19633687f4e0e85b94552abe6f99f18ef5cac93bdb50abf3e9ea7b42d04cf
+  (source-identical to the DECODESPREAD base; binary differs from the recorded
+  7b1d1f78... because the toolchain moved — identity is by source commit)
+
+Corpus slices (head -c 2097152 of the silesia files):
+dickens.2m sha256 df925056e0779c51cb2a27c014e8fc6d25d28ef2fac5b8ce4632d93b86860603
+nci.2m     sha256 6788fcc1527c0f62709103e68ac9ab9416461ab00ed1f529b3cf2ae4ab06221e
+  (byte-identical to the CUBR-0075/DECODESPREAD recorded nci slice)
+
+Knob semantics: CUBRIM_CM2_TBITS is the committed sweep-only cap (cm2.rs
+tbits_cap) — it clamps tbits_for on BOTH encode and decode; the wire field
+stays 0, so every capped archive was encoded, round-tripped, and profiled
+under the same environment value (sweep.sh; same protocol as the CUBR-0087
+memory sweep rows). No encoder default, decode(), or wire behaviour changed.
+
+Per point (12 points, 2 files x 6 caps):
+1. compress under the cap; decompress under the cap; cmp byte-exact -> 12/12 PASS.
+2. taskset --cpu-list 0 /usr/bin/time -v cubrim-decode-profile
+   --affinity fixed-core  -> rdtsc-x86_64 attribution JSON (cycle source
+   confirmed in-file; TSC = 3.600 GHz on this host), peak RSS from time -v.
+   The profiler itself asserts exact_roundtrip per run.
+3. sudo taskset --cpu-list 0 perf stat -e cycles,instructions,
+   cache-references,cache-misses,LLC-loads,LLC-load-misses,dTLB-load-misses
+   on a second profiled decode (kernel.perf_event_paranoid=4 blocks
+   unprivileged counters; sudo used for the counter run only).
+
+Host: arcana-devs, i9-9900K (16 MiB shared LLC), core 0 pinned.
+Caveats, stated rather than hidden:
+- the ~1.2-core adsessor soak shares the LLC; it can only INFLATE miss counts
+  at the large-table points, i.e. it biases toward the cache hypothesis — and
+  the verdict went against cache, so the bias is conservative;
+- wall-clock is reported nowhere as a claim; cycles under fixed pinning and
+  hardware counter COUNTS are the load-insensitive protocol this programme
+  already accepted (DECODESPREAD precedent);
+- capping tbits changes model accuracy and output size (recorded per point);
+  it does not change the call count or the per-call update arithmetic.
+- dickens at tbits=12 flips outer mode to MODE_LZ (CM2 stops winning the
+  competitive rail), so that point has no CM2 decode to profile; recorded as
+  a finding, not padded over.
+
+Raw: raw/*.profile.json (11 rdtsc attributions), raw/*.time.txt (RSS),
+raw/*.perf.csv (hardware counters), sweep-summary.tsv, sweep.sh, analyze.py.
+Archives reproducible from the slices + commands; sha256s in
+raw/ARCHIVES.sha256.
