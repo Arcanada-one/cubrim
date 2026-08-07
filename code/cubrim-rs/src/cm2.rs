@@ -33,6 +33,76 @@ use crate::error::CubrimError;
 const PBITS: u32 = 12;
 const PSCALE: i32 = 1 << PBITS; // 4096
 
+// Exact reciprocal-multiply replacement for the two per-bit count-adaptive
+// divisions (`Ctr::upd` and `StateMap::upd`). Each decoded bit performs 46
+// variable-divisor integer divisions on the serial update path; `idiv` is the
+// longest-latency scalar op in that path. A division by d in a known range
+// with a bounded numerator is computed exactly as `(n * ceil(2^K / d)) >> K`,
+// by the Granlund–Montgomery bound: with m = ceil(2^K/d), the shift is exact
+// floor division for every 0 <= n <= N provided N*(m*d - 2^K) < 2^K. Rust's
+// `/` truncates toward zero, so negative numerators go through the same
+// unsigned path on |n| and are negated — identical results bit for bit, which
+// the table constructor asserts per divisor and the byte-identity gate
+// verifies end to end.
+const CTR_RECIP_K: u32 = 24; // numerator bound PSCALE, divisors 2..=256
+const SM_RECIP_K: u32 = 33; // numerator bound 2^22, divisors 2..=1025
+
+fn ctr_recip() -> &'static [u32; 257] {
+    use std::sync::OnceLock;
+    static T: OnceLock<[u32; 257]> = OnceLock::new();
+    T.get_or_init(|| {
+        let mut t = [0u32; 257];
+        for d in 2..=256u64 {
+            let m = (1u64 << CTR_RECIP_K).div_ceil(d);
+            assert!(
+                (PSCALE as u64) * (m * d - (1u64 << CTR_RECIP_K)) < (1u64 << CTR_RECIP_K),
+                "ctr reciprocal inexact for divisor {d}"
+            );
+            t[d as usize] = m as u32;
+        }
+        t
+    })
+}
+
+fn sm_recip() -> &'static [u64; 1026] {
+    use std::sync::OnceLock;
+    static T: OnceLock<[u64; 1026]> = OnceLock::new();
+    T.get_or_init(|| {
+        let mut t = [0u64; 1026];
+        for d in 2..=1025u128 {
+            let m = (1u128 << SM_RECIP_K).div_ceil(d);
+            assert!(
+                (1u128 << 22) * (m * d - (1u128 << SM_RECIP_K)) < (1u128 << SM_RECIP_K),
+                "statemap reciprocal inexact for divisor {d}"
+            );
+            t[d as usize] = m as u64;
+        }
+        t
+    })
+}
+
+/// Exact `n / d` (truncated toward zero) for `|n| <= PSCALE`, `2 <= d <= 256`.
+#[inline]
+fn ctr_div(n: i32, d: i32) -> i32 {
+    let m = ctr_recip()[d as usize] as u64;
+    if n >= 0 {
+        ((n as u64 * m) >> CTR_RECIP_K) as i32
+    } else {
+        -(((n.unsigned_abs() as u64 * m) >> CTR_RECIP_K) as i32)
+    }
+}
+
+/// Exact `n / d` (truncated toward zero) for `|n| <= 2^22`, `2 <= d <= 1025`.
+#[inline]
+fn sm_div(n: i64, d: i64) -> i64 {
+    let m = sm_recip()[d as usize];
+    if n >= 0 {
+        ((n as u64 * m) >> SM_RECIP_K) as i64
+    } else {
+        -(((n.unsigned_abs() * m) >> SM_RECIP_K) as i64)
+    }
+}
+
 // QA-F-001 fail-closed decode guards (branch F adversarial-QA).
 // Maximum output bytes produced without the range decoder consuming a new input byte. A
 // valid stream never rides longer than the renormalization run-length: with PSCALE=4096
@@ -173,7 +243,7 @@ impl StateMap {
         let c = self.cnt[s].min(self.cap) as i64;
         let cur = self.t[s] as i64;
         let tgt = (y as i64) << 22;
-        self.t[s] = (cur + (tgt - cur) / (c + 2)) as u32;
+        self.t[s] = (cur + sm_div(tgt - cur, c + 2)) as u32;
         if self.cnt[s] < self.cap {
             self.cnt[s] += 1;
         }
@@ -232,7 +302,7 @@ impl Ctr {
         // stationary count-adaptive counter (identical to the pre-StateMap codec)
         let cur = (w >> 16) as i32;
         let cnt = ((w >> 8) & 0xFF) as i32;
-        let t = (cur + (y * PSCALE - cur) / (cnt + 2)).clamp(1, PSCALE - 1) as u32;
+        let t = (cur + ctr_div(y * PSCALE - cur, cnt + 2)).clamp(1, PSCALE - 1) as u32;
         let c = if cnt < self.lim {
             (cnt + 1) as u32
         } else {
@@ -1521,5 +1591,29 @@ mod tests {
             ceiling_pct,
         );
         assert!(rt, "self-probe RT cmp!=0");
+    }
+
+    /// The reciprocal path must equal `/` exactly on its full declared domain:
+    /// any divergence anywhere is a silent model change and therefore silent
+    /// output drift. Ctr's domain is small enough to check exhaustively; the
+    /// StateMap domain is checked at every divisor over the numerator extremes,
+    /// dense low magnitudes, and a fixed stride across the full range (the
+    /// per-divisor Granlund-Montgomery bound is asserted at table build).
+    #[test]
+    fn reciprocal_division_matches_idiv_exactly() {
+        for d in 2..=256i32 {
+            for n in -PSCALE..=PSCALE {
+                assert_eq!(super::ctr_div(n, d), n / d, "ctr n={n} d={d}");
+            }
+        }
+        let big = 1i64 << 22;
+        for d in 2..=1025i64 {
+            for n in (-big..=big).step_by(4093) {
+                assert_eq!(super::sm_div(n, d), n / d, "sm n={n} d={d}");
+            }
+            for n in [-big, -big + 1, -1, 0, 1, big - 1, big] {
+                assert_eq!(super::sm_div(n, d), n / d, "sm edge n={n} d={d}");
+            }
+        }
     }
 }
