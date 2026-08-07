@@ -192,9 +192,14 @@ impl StateMap {
 /// mixer can drive the nonstationary weight to zero where it hurts (large
 /// stationary streams) yet exploit it where it helps.
 struct Ctr {
-    t: Vec<u16>,
-    c: Vec<u8>,
-    st: Vec<u8>,
+    // One packed 4-byte record per slot — bits 16..32 stationary prob (u16),
+    // bits 8..16 count (u8), bits 0..8 bit-history state (u8). predict() and
+    // upd() hit the same hashed index in what were three parallel arrays; a
+    // single record makes that one cache line instead of two (predict) or
+    // three (update). Total memory per table is unchanged (4 B/slot either
+    // way) and the unpacked values are bit-for-bit the old ones, so emitted
+    // bytes cannot change.
+    v: Vec<u32>,
     sm: StateMap,
     mask: usize,
     lim: i32,
@@ -202,9 +207,7 @@ struct Ctr {
 impl Ctr {
     fn new(bits: usize, lim: i32, sm_cap: i32) -> Self {
         Self {
-            t: vec![(PSCALE / 2) as u16; 1usize << bits],
-            c: vec![0u8; 1usize << bits],
-            st: vec![0u8; 1usize << bits],
+            v: vec![((PSCALE / 2) as u32) << 16; 1usize << bits],
             sm: StateMap::new(256, sm_cap.clamp(2, 1023) as u16),
             mask: (1usize << bits) - 1,
             lim,
@@ -214,10 +217,10 @@ impl Ctr {
     /// The state is fed back to [`Ctr::upd`].
     #[inline]
     fn predict(&self, cx: usize) -> (i32, i32, u8) {
-        let i = cx & self.mask;
-        let s = self.st[i];
+        let w = self.v[cx & self.mask];
+        let s = (w & 0xFF) as u8;
         (
-            self.t[i] as i32,
+            (w >> 16) as i32,
             self.sm.p12(s as usize).clamp(1, PSCALE - 1),
             s,
         )
@@ -225,16 +228,16 @@ impl Ctr {
     #[inline]
     fn upd(&mut self, cx: usize, state: u8, y: i32, nex: &[[u8; 2]]) {
         let i = cx & self.mask;
+        let w = self.v[i];
         // stationary count-adaptive counter (identical to the pre-StateMap codec)
-        let cur = self.t[i] as i32;
-        let cnt = self.c[i] as i32;
-        self.t[i] = (cur + (y * PSCALE - cur) / (cnt + 2)).clamp(1, PSCALE - 1) as u16;
-        if cnt < self.lim {
-            self.c[i] = (cnt + 1) as u8;
-        }
+        let cur = (w >> 16) as i32;
+        let cnt = ((w >> 8) & 0xFF) as i32;
+        let t = (cur + (y * PSCALE - cur) / (cnt + 2)).clamp(1, PSCALE - 1) as u32;
+        let c = if cnt < self.lim { (cnt + 1) as u32 } else { cnt as u32 };
         // nonstationary bit-history state machine + StateMap
         self.sm.upd(state as usize, y);
-        self.st[i] = nex[state as usize][y as usize];
+        let st = nex[state as usize][y as usize] as u32;
+        self.v[i] = (t << 16) | (c << 8) | st;
     }
 }
 
