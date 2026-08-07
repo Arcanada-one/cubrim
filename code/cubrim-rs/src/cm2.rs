@@ -233,7 +233,11 @@ impl Ctr {
         let cur = (w >> 16) as i32;
         let cnt = ((w >> 8) & 0xFF) as i32;
         let t = (cur + (y * PSCALE - cur) / (cnt + 2)).clamp(1, PSCALE - 1) as u32;
-        let c = if cnt < self.lim { (cnt + 1) as u32 } else { cnt as u32 };
+        let c = if cnt < self.lim {
+            (cnt + 1) as u32
+        } else {
+            cnt as u32
+        };
         // nonstationary bit-history state machine + StateMap
         self.sm.upd(state as usize, y);
         let st = nex[state as usize][y as usize] as u32;
