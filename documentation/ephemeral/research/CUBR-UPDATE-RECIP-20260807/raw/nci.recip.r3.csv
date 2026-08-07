@@ -1,0 +1,7 @@
+# started on Fri Aug  7 21:18:59 2026
+
+63363895178,,cycles,16431172721,100.00,,
+152246252392,,instructions,16431172721,100.00,2.40,insn per cycle
+173263918,,LLC-loads,16431172721,100.00,,
+45086561,,LLC-load-misses,16431172721,100.00,26.02,of all LL-cache accesses
+19766562,,dTLB-load-misses,16431172721,100.00,,

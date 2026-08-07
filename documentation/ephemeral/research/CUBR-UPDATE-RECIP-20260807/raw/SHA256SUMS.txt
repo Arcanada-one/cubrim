@@ -1,0 +1,7 @@
+c8aed8ae4c39d8a463e3d2bcb3fd082ec955d60fd320bbeec41af7a65922285e  /tmp/claude-1002/-home-dev--worktrees-cubrim-CUBR-0087/06cc380e-beaa-4b5b-a463-aae4e36a0628/scratchpad/recip/dickens.cbr
+1dcc11fa179e3aa0a0b745fba85b5c2187aa382b4b3022ec8ecd8839962b925b  /tmp/claude-1002/-home-dev--worktrees-cubrim-CUBR-0087/06cc380e-beaa-4b5b-a463-aae4e36a0628/scratchpad/recip/nci.cbr
+4d563b48ae509f11b65b0c71929e0b0375b2322b26aefc489b36aefeeacd60be  /tmp/claude-1002/-home-dev--worktrees-cubrim-CUBR-0087/06cc380e-beaa-4b5b-a463-aae4e36a0628/scratchpad/recip/ooffice.cbr
+c8aed8ae4c39d8a463e3d2bcb3fd082ec955d60fd320bbeec41af7a65922285e  /tmp/claude-1002/-home-dev--worktrees-cubrim-CUBR-0087/06cc380e-beaa-4b5b-a463-aae4e36a0628/scratchpad/adapt/out/dickens.tnative.cbr
+1dcc11fa179e3aa0a0b745fba85b5c2187aa382b4b3022ec8ecd8839962b925b  /tmp/claude-1002/-home-dev--worktrees-cubrim-CUBR-0087/06cc380e-beaa-4b5b-a463-aae4e36a0628/scratchpad/adapt/out/nci.tnative.cbr
+eb7d4d9c55a705e41fb450a41822134708aeb7ca4f82d069877efb748f6c6452  /tmp/claude-1002/-home-dev--worktrees-cubrim-CUBR-0087/06cc380e-beaa-4b5b-a463-aae4e36a0628/scratchpad/main-917355e/code/cubrim-rs/target/release/cubrim
+fabe65114b5146a51df6ad19eb4878d94d0f9b7e307f1681d3cb8a7a00c0aafa  /home/dev/.worktrees/cubrim/CUBR-0076/code/cubrim-rs/target/release/cubrim
