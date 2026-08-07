@@ -1,0 +1,188 @@
+{
+  "affinity": "fixed-core",
+  "allocation": {
+    "allocation_calls": 143,
+    "bytes_allocated": 36340408,
+    "bytes_freed": 34243256,
+    "deallocation_calls": 142,
+    "live_bytes_after_decode": 2097152,
+    "peak_live_bytes": 35291830,
+    "reallocation_calls": 1,
+    "retained_state_bytes_after_output_drop": 0,
+    "timing_cycles": 9729130,
+    "timing_nanos": 2699776
+  },
+  "decode_profile": {
+    "cycle_source": "rdtsc-x86_64",
+    "cycles_supported": true,
+    "input_bytes": 499852,
+    "model_split_schema_version": 1,
+    "model_splits": [
+      {
+        "applicable": true,
+        "calls": 16777216,
+        "cycles": 24879634956,
+        "cycles_per_output_byte": 11863.53442955017,
+        "name": "model.counter_state_lookup",
+        "nanos": 7468156171,
+        "nanos_per_output_byte": 3561.0943655967712
+      },
+      {
+        "applicable": true,
+        "calls": 16777216,
+        "cycles": 16108338376,
+        "cycles_per_output_byte": 7681.054294586182,
+        "name": "model.dot_products",
+        "nanos": 4985517212,
+        "nanos_per_output_byte": 2377.2798595428467
+      },
+      {
+        "applicable": true,
+        "calls": 16777216,
+        "cycles": 43492330418,
+        "cycles_per_output_byte": 20738.75924015045,
+        "name": "model.adaptation",
+        "nanos": 12652836897,
+        "nanos_per_output_byte": 6033.342789173126
+      }
+    ],
+    "output_bytes": 2097152,
+    "schema_version": 1,
+    "stages": [
+      {
+        "applicable": true,
+        "calls": 1,
+        "cycles": 180,
+        "cycles_per_output_byte": 0.0000858306884765625,
+        "name": "framing",
+        "nanos": 96,
+        "nanos_per_output_byte": 0.0000457763671875
+      },
+      {
+        "applicable": true,
+        "calls": 16777216,
+        "cycles": 64290713094,
+        "cycles_per_output_byte": 30656.200930595398,
+        "name": "entropy",
+        "nanos": 18369668030,
+        "nanos_per_output_byte": 8759.340300559998
+      },
+      {
+        "applicable": true,
+        "calls": 20971520,
+        "cycles": 56435592736,
+        "cycles_per_output_byte": 26910.587661743164,
+        "name": "transforms",
+        "nanos": 16318411999,
+        "nanos_per_output_byte": 7781.225203990936
+      },
+      {
+        "applicable": false,
+        "calls": 0,
+        "cycles": null,
+        "cycles_per_output_byte": null,
+        "name": "match_copy",
+        "nanos": 0,
+        "nanos_per_output_byte": null
+      },
+      {
+        "applicable": true,
+        "calls": 144,
+        "cycles": 9729130,
+        "cycles_per_output_byte": 4.6392107009887695,
+        "name": "allocation",
+        "nanos": 2699776,
+        "nanos_per_output_byte": 1.287353515625
+      },
+      {
+        "applicable": true,
+        "calls": 2097152,
+        "cycles": 152730180,
+        "cycles_per_output_byte": 72.82742500305176,
+        "name": "output_materialization",
+        "nanos": 106521771,
+        "nanos_per_output_byte": 50.79353857040405
+      }
+    ],
+    "substage_schema_version": 1,
+    "substages": [
+      {
+        "applicable": true,
+        "calls": 2097152,
+        "cycles": 1117577952,
+        "cycles_per_output_byte": 532.9026947021484,
+        "name": "transforms.start_byte",
+        "nanos": 375539141,
+        "nanos_per_output_byte": 179.07101678848267,
+        "parent_stage": "transforms"
+      },
+      {
+        "applicable": true,
+        "calls": 16777216,
+        "cycles": 51118402688,
+        "cycles_per_output_byte": 24375.153869628906,
+        "name": "entropy.predict_bit",
+        "nanos": 14708067753,
+        "nanos_per_output_byte": 7013.353229999542,
+        "parent_stage": "entropy"
+      },
+      {
+        "applicable": true,
+        "calls": 16777216,
+        "cycles": 809752058,
+        "cycles_per_output_byte": 386.11987018585205,
+        "name": "entropy.range_get_freq",
+        "nanos": 738963465,
+        "nanos_per_output_byte": 352.3652386665344,
+        "parent_stage": "entropy"
+      },
+      {
+        "applicable": true,
+        "calls": 16777216,
+        "cycles": 933618326,
+        "cycles_per_output_byte": 445.18390941619873,
+        "name": "entropy.range_decode",
+        "nanos": 765980156,
+        "nanos_per_output_byte": 365.24780082702637,
+        "parent_stage": "entropy"
+      },
+      {
+        "applicable": true,
+        "calls": 16777216,
+        "cycles": 48266017650,
+        "cycles_per_output_byte": 23015.030694007874,
+        "name": "transforms.update_bit",
+        "nanos": 13918899625,
+        "nanos_per_output_byte": 6637.048542499542,
+        "parent_stage": "transforms"
+      },
+      {
+        "applicable": true,
+        "calls": 2097152,
+        "cycles": 1733435626,
+        "cycles_per_output_byte": 826.566517829895,
+        "name": "transforms.end_byte",
+        "nanos": 546194231,
+        "nanos_per_output_byte": 260.4457049369812,
+        "parent_stage": "transforms"
+      }
+    ],
+    "total_cycles": 128951043076,
+    "total_nanos": 35819737496
+  },
+  "decoded_bytes": 2097152,
+  "decoded_sha256": "df925056e0779c51cb2a27c014e8fc6d25d28ef2fac5b8ce4632d93b86860603",
+  "exact_roundtrip": true,
+  "input_bytes": 499852,
+  "input_path": "/tmp/claude-1002/-home-dev--worktrees-cubrim-CUBR-0087/06cc380e-beaa-4b5b-a463-aae4e36a0628/scratchpad/adapt/out/dickens.t18.cbr",
+  "kind": "cubrim-decode-attribution",
+  "mode": {
+    "byte": 16,
+    "name": "cm2"
+  },
+  "original_bytes": 2097152,
+  "original_path": "/tmp/claude-1002/-home-dev--worktrees-cubrim-CUBR-0087/06cc380e-beaa-4b5b-a463-aae4e36a0628/scratchpad/adapt/dickens.2m",
+  "original_sha256": "df925056e0779c51cb2a27c014e8fc6d25d28ef2fac5b8ce4632d93b86860603",
+  "profiler_version": "0.3.2",
+  "schema_version": 1
+}
