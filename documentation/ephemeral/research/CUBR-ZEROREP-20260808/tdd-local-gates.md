@@ -64,6 +64,30 @@ the GREEN control:
 | Remove the `predict` read XOR | stationary probability left `0`, right `2048` | both focused tests passed |
 | Remove the updated-probability write XOR | logical probability left `1024`, right `3072` | both focused tests passed |
 
+The mutations were replayed before measurement in a clean detached worktree at
+the exact code commit `f047523fcdc15561baa05fee597819fd6bdb53d3`. The exact
+commands and process statuses were:
+
+```text
+# Old non-zero initializer restored
+cargo test --release --lib ctr_zero_representation_starts_zero_and_predicts_midpoint
+exit 101; physical-zero assertion failed
+
+# predict() read XOR removed
+cargo test --release --lib ctr_zero_representation_starts_zero_and_predicts_midpoint
+exit 101; logical probability left 0, right 2048
+
+# upd() write XOR removed
+cargo test --release --lib ctr_zero_representation_update_preserves_logical_fields
+exit 101; logical probability left 1024, right 3072
+
+# All three mutations removed
+cargo test --release --lib ctr_zero_representation
+exit 0; 2 passed, 0 failed, 331 filtered out
+```
+
+The replay worktree was clean after restoration.
+
 Final focused control:
 
 ```text
