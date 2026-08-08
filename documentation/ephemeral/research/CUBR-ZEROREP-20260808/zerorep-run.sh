@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT=/root/cubr-levers/zerorep-20260808
 INPUT=/root/cubr-levers/bench/nci.2m
 CANON=/root/cubr-levers/preset-rss/nci.max.base.cbr
-BASE_ROOT=/root/cubr-levers/baseline-e70
-CURRENT_ROOT=/root/cubr-levers
+BASE_ROOT=/root/cubr-levers/zerorep-baseline-e70
+CURRENT_ROOT=/root/cubr-levers/zerorep-current-49e
 ZERO_ROOT=/root/cubr-levers/zerorep-code
 BASE=$BASE_ROOT/code/cubrim-rs/target/release/cubrim
 CURRENT=$CURRENT_ROOT/code/cubrim-rs/target/release/cubrim
@@ -23,7 +23,7 @@ BASE_SHA=a195c2271a8aafbe9363d89d4047db4554e0e8840869997072d0c011086a7fbd
 CURRENT_SHA=12eaff4d9df9e3b8f51567cd930311f343680b5cc55e3426f30a78456fc5830c
 ZERO_SHA=771fdb0f091df2e419d66ae9b28169a2dc69f1d57cab62d948a9ef716dac6e20
 ZERO_CM2_SHA=1594578cc98f4ef55ae102cbe31fc5cdde02d6c647941787cc009464abe8addf
-TEST_EVIDENCE_SHA=0207ddcc07a36e67ba8e5c64adaeaa25873ab3e1b71b628f0d2de9e101f4f37b
+TEST_EVIDENCE_SHA=358b057f3991ddc0ea97944d5e5854fb5b64a325800c33890ce2534b89807cfb
 INPUT_SHA=6788fcc1527c0f62709103e68ac9ab9416461ab00ed1f529b3cf2ae4ab06221e
 ARCHIVE_SHA=1dcc11fa179e3aa0a0b745fba85b5c2187aa382b4b3022ec8ecd8839962b925b
 ARCHIVE_BYTES=104139
@@ -111,7 +111,10 @@ git -C "$ZERO_ROOT" merge-base --is-ancestor "$ZERO_SOURCE" HEAD \
     || fail "zero source is not an ancestor of runner head"
 git -C "$ZERO_ROOT" diff --quiet "$ZERO_SOURCE"..HEAD -- code/cubrim-rs \
     || fail "codec changed after pinned zero source"
-[[ -z "$(git -C "$ZERO_ROOT" status --porcelain)" ]] || fail "zero checkout is dirty"
+for checkout in "$BASE_ROOT" "$CURRENT_ROOT" "$ZERO_ROOT"; do
+    [[ -z "$(git -C "$checkout" status --porcelain)" ]] \
+        || fail "checkout is dirty: $checkout"
+done
 runner_sha=$(actual_sha "$ZERO_ROOT/$RUNNER_REL")
 committed_runner_sha=$(git -C "$ZERO_ROOT" show "HEAD:$RUNNER_REL" | sha256sum | cut -d ' ' -f1)
 [[ "$runner_sha" == "$committed_runner_sha" ]] || fail "runner differs from HEAD blob"
@@ -125,16 +128,18 @@ if pgrep -x cubrim >/dev/null \
     fail "foreign Cubrim process present"
 fi
 
-printf 'kind\tname\tvalue\n' > "$HASHES"
-printf 'source\tbase\t%s\nsource\tcurrent\t%s\nsource\tzero\t%s\n' \
-    "$BASE_SOURCE" "$CURRENT_SOURCE" "$ZERO_SOURCE" >> "$HASHES"
-printf 'source\trunner-head\t%s\nrunner\tcommitted-blob\t%s\n' \
-    "$(git -C "$ZERO_ROOT" rev-parse HEAD)" "$committed_runner_sha" >> "$HASHES"
-printf 'binary\tbase\t%s\nbinary\tcurrent\t%s\nbinary\tzero\t%s\n' \
-    "$BASE_SHA" "$CURRENT_SHA" "$ZERO_SHA" >> "$HASHES"
-printf 'input\t%s\t%s\narchive\t%s/%s\t%s\n' \
-    "$FILE" "$INPUT_SHA" "$FILE" "$PRESET" "$ARCHIVE_SHA" >> "$HASHES"
-printf 'test-evidence\tlocal-gates\t%s\n' "$TEST_EVIDENCE_SHA" >> "$HASHES"
+{
+    printf 'kind\tname\tvalue\n'
+    printf 'source\tbase\t%s\nsource\tcurrent\t%s\nsource\tzero\t%s\n' \
+        "$BASE_SOURCE" "$CURRENT_SOURCE" "$ZERO_SOURCE"
+    printf 'source\trunner-head\t%s\nrunner\tcommitted-blob\t%s\n' \
+        "$(git -C "$ZERO_ROOT" rev-parse HEAD)" "$committed_runner_sha"
+    printf 'binary\tbase\t%s\nbinary\tcurrent\t%s\nbinary\tzero\t%s\n' \
+        "$BASE_SHA" "$CURRENT_SHA" "$ZERO_SHA"
+    printf 'input\t%s\t%s\narchive\t%s/%s\t%s\n' \
+        "$FILE" "$INPUT_SHA" "$FILE" "$PRESET" "$ARCHIVE_SHA"
+    printf 'test-evidence\tlocal-gates\t%s\n' "$TEST_EVIDENCE_SHA"
+} > "$HASHES"
 cp "$ZERO_ROOT/$TEST_EVIDENCE_REL" "$ROOT/tdd-local-gates.md"
 log "admission loadavg=$load1 pin=$PIN threads=4 run_mode=$RUN_MODE"
 log "runner_head=$(git -C "$ZERO_ROOT" rev-parse HEAD) runner_sha=$runner_sha zero_source=$ZERO_SOURCE"
