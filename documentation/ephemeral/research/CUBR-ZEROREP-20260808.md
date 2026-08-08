@@ -79,11 +79,11 @@ bring the decode RSS back to the pre‑PR41 baseline of 1 430 016 KiB (1�
 but memory‑allocator metadata and kernel overhead will consume some of the freed
 pages. We therefore set a conservative target: no more than 64 MiB above the
 same-run pre‑PR41 baseline while reclaiming at least 75% of the same-run packed
-penalty. On the historical +273.5 MiB observation, those thresholds correspond
-to at least 205.1 MiB reclaimed and at most 68.4 MiB residual. The nearby
-209.5 MiB / 76.6% figures obtained by subtracting 64 MiB from the historical
-observation are context, not a separate same-run threshold. The 64 MiB allowance
-is explicit acceptance headroom, not an estimate of known fixed overhead.
+penalty. On the historical +273.5 MiB observation, the 75% condition alone means
+at least 205.1 MiB reclaimed and at most 68.4 MiB residual; the independent
+64 MiB residual condition is stricter, meaning at least 209.5 MiB / 76.6%
+reclaimed. Both conditions must pass. The 64 MiB allowance is explicit acceptance
+headroom, not an estimate of known fixed overhead.
 
 ---
 
@@ -207,8 +207,13 @@ the negative result, leave `evaluation` at 0, and do not ship the code change.
    - Admission gate: 1‑min load average < 2.0, no other `cubrim` process.
    - Per-command caps are fixed before measurement: 1,800 seconds for each
      compression and 300 seconds for every warm-up or measured decode.
-   - The runner is launched exactly once as
-     `timeout 14400 systemd-run --wait --collect --unit=cubr-zerorep-20260808.service --property=RuntimeMaxSec=7200 /root/cubr-levers/zerorep-20260808/zerorep-run.sh`.
+   - The runner is executed directly from the clean stand checkout at the pinned
+     runner commit, not from a copied script. Before launch, require the checkout
+     `HEAD` to equal that commit, both index and worktree diffs to be empty, and
+     the runner's SHA-256 to equal the value derived from the reviewed committed
+     blob. Record all four values.
+   - After those provenance gates pass, launch the runner exactly once as
+     `timeout 14400 systemd-run --wait --collect --unit=cubr-zerorep-20260808.service --property=RuntimeMaxSec=7200 /root/cubr-levers/zerorep-code/documentation/ephemeral/research/CUBR-ZEROREP-20260808/zerorep-run.sh`.
      The systemd unit's two-hour runtime cap is the primary envelope; the
      four-hour caller timeout is a hard outer watchdog. Neither may be widened.
    - Record the unit result, main exit status, peak memory, and swap peak.

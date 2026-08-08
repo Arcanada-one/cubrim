@@ -204,6 +204,11 @@ never reset or check out paths.
    implementation commit. Obtain an independent review of the complete range
    before execution. No runner edit is allowed after the first measured process
    starts.
+8. On the stand, keep the runner in the clean zero-rep source checkout. Derive
+   its SHA-256 from `git show <runner-commit>:<runner-path>`, verify the checked-out
+   file has the same SHA-256, require `HEAD` to equal the reviewed runner commit,
+   and require both index and worktree diffs to be empty. Execute that checked-out
+   path directly; do not copy or install an untracked stand script.
 
 ## Task 9: Independent review before the live run
 
