@@ -1,0 +1,9 @@
+unit=cubr-preset-rss-20260808.service
+systemctl_show_allowlist:
+Result=success
+ExecMainStatus=0
+journal_allowlisted_messages:
+Started cubr-preset-rss-20260808.service - /root/cubr-levers/preset-rss-run.sh.
+[2026-08-08T09:15:13Z] PRESET-RSS-COMPLETE
+cubr-preset-rss-20260808.service: Deactivated successfully.
+cubr-preset-rss-20260808.service: Consumed 1h 29min 27.017s CPU time, 1.9G memory peak, 0B memory swap peak.
