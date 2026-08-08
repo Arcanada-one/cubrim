@@ -30,15 +30,16 @@ accepted as evidence.
 - Verify: `documentation/ephemeral/plans/CUBR-ZEROREP-20260808-plan.md`
 
 1. Confirm the document records the 768 MiB packed-regression ceiling, the
-   1,536 MiB total zero-word ceiling, the compound RSS/speed/identity prediction,
-   the three pinned source/binary/input/archive identities, and the distinction
-   between a void run and a complete negative result.
+   1,536 MiB total zero-word ceiling, the archive/round-trip validity gates, the
+   compound RSS/speed prediction, all pinned source/binary/input/archive
+   identities, and the distinction between a void run and a complete negative
+   result.
 2. Run:
 
    ```bash
    git diff --check origin/main...HEAD
    git diff --name-only origin/main...HEAD
-   git grep -nE 'decode\(|cube_size_limit|cm_should_try' origin/main...HEAD -- code || true
+   git diff --exit-code origin/main...HEAD -- code
    ```
 
    Expected: only the two documentation files differ; no product code differs.
@@ -47,7 +48,7 @@ accepted as evidence.
 4. Fetch and verify the resulting `origin/main` contains the exact two landed
    document blobs. Record the resulting main SHA; it is the implementation base.
 
-## Task 2: Create a fresh implementation worktree
+## Task 2: Prepare the isolated implementation checkout
 
 1. Fetch the current remote and refuse a stale local base:
 
@@ -57,11 +58,15 @@ accepted as evidence.
    git status --short
    ```
 
-2. Create a new branch and isolated worktree from that exact `origin/main`.
-   Derive a collision-free worktree path and branch name at execution time; do
-   not reuse the preregistration worktree or disturb any foreign worktree.
-3. Re-read the landed preregistration and this plan from the new worktree before
-   editing code.
+2. Confirm this checkout is already a linked worktree by comparing its Git dir
+   and common dir. Per the worktree isolation contract, do not create a nested
+   worktree. Once the preregistration branch is merged and clean, create a fresh
+   implementation branch in this isolated checkout from the exact fetched
+   `origin/main`; never switch a shared canonical checkout or disturb a foreign
+   worktree.
+3. Re-read the landed preregistration and this plan from the new branch before
+   editing code, then run `cargo test --release` from `code/cubrim-rs` as the
+   clean baseline suite and record the actual counts.
 
 ## Task 3: Add focused RED tests
 
@@ -157,7 +162,10 @@ never reset or check out paths.
 1. Use the preregistered source identities:
    - pre-PR41: `e70d1cdca6226e994c0393149e364f252f7c0a1f`;
    - current packed: `49e429e58722f730c4f3cbb0a69731fec430bb56`;
-   - zero-rep: the reviewed implementation commit created by this plan.
+   - zero-rep: a dedicated implementation-and-tests commit created after the
+     full local gates. Record this code commit before authoring the runner; it is
+     the candidate source identity even though a later runner-only commit will
+     become the branch head.
 2. On the measurement stand, use separate clean source/build directories. Build
    each with the same release command and toolchain. Verify the preregistered
    baseline/current binary SHA-256 values; derive and record the zero-rep binary
@@ -175,8 +183,9 @@ never reset or check out paths.
 
 1. Encode the exact three source and binary hashes, input hash, canonical archive
    hash, file (`nci`), preset (`max`), CPU set (`0-15`), thread count (`4`), and
-   output root into the runner. Derive the candidate hash and a new unique
-   run-mode identifier at execution time; never fabricate them in advance.
+   output root into the runner. Derive the candidate hash after building the
+   recorded code commit and derive a new unique run-mode identifier before
+   committing the runner; never fabricate either value in advance.
 2. Make the runner fail closed on load average >= 2.0, an existing Cubrim
    process, any hash mismatch, archive mismatch, warm-up failure, timeout, or
    `cmp` failure.
@@ -186,13 +195,15 @@ never reset or check out paths.
    per build in interleaved order: pre-PR41, current-packed, zero-rep, repeated
    for samples 1 through 3.
 5. Every decode must use `taskset -c 0-15`, four threads, `/usr/bin/time -v`, and
-   the preregistered timeout. Verify `cmp` after every decode.
+   the fixed 300-second timeout; each compression has a fixed 1,800-second
+   timeout. Verify `cmp` after every decode.
 6. Emit raw logs, a machine-readable sample TSV, hashes, test evidence, and a
    terminal `DONE` marker only after all gates pass. Partial output is a void and
    goes to the stand journal only.
-7. Shell-check the runner, commit it with the implementation, and obtain an
-   independent review before execution. No runner edit is allowed after the first
-   measured process starts.
+7. Shell-check the runner and commit it in a runner-only commit after the pinned
+   implementation commit. Obtain an independent review of the complete range
+   before execution. No runner edit is allowed after the first measured process
+   starts.
 
 ## Task 9: Independent review before the live run
 
@@ -202,14 +213,17 @@ never reset or check out paths.
    byte identity, logical equivalence, test sensitivity, hash pinning, fail-closed
    behavior, void semantics, DB semantics, and forbidden surfaces.
 3. Resolve every Critical and Important finding. If any change affects the
-   prediction or runner, recommit and re-review before measuring.
+   implementation, rebuild it, re-run the full suite, derive its new binary hash,
+   update the runner, recommit, and re-review. A runner-only change still requires
+   a new runner commit and re-review before measuring.
 
 ## Task 10: Execute the one-file experiment
 
-1. Re-run the stand admission checks immediately before execution. Use the
-   bounded systemd envelope from the preregistration; do not widen time, CPU,
-   corpus, preset, repetitions, or restart a pinned campaign after a valid
-   measured process begins.
+1. Re-run the stand admission checks immediately before execution. Invoke the
+   committed runner exactly as preregistered with a two-hour systemd
+   `RuntimeMaxSec` and four-hour caller watchdog; do not widen time, CPU, corpus,
+   preset, repetitions, or restart a pinned campaign after a valid measured
+   process begins.
 2. Execute the committed runner exactly once for `nci/max`.
 3. For a complete valid run, calculate per-build median wall time and peak RSS
    from the three samples. Report:
@@ -219,7 +233,9 @@ never reset or check out paths.
    - zero/current time ratio;
    - pre-PR41/zero speedup;
    - all archive and round-trip identities.
-4. Judge each preregistered axis independently, then the compound prediction.
+4. Treat archive identity and every `cmp` as validity gates, not performance
+   refutations. On a valid run, judge the RSS residual, same-run reclaim fraction,
+   and both speed ratios independently, then the compound prediction.
    Do not soften a failed threshold or tune a follow-up in this campaign.
 
 ## Task 11: Record a valid result or a void without conflating them
@@ -227,13 +243,18 @@ never reset or check out paths.
 1. If the run is partial or any validity gate fails, write a void-journal entry
    with the exact failure and observed partial values. Add no DB rows, do not
    extend NEW-30, and do not claim a result.
-2. If the run completes validly, insert exactly three median rows under the
-   existing NEW-30 hypothesis using the new run mode, one per revision. Keep
-   encode duration/RSS NULL and `evaluation = 0`; create no new hypothesis.
-3. Extend NEW-30 with the compound verdict and per-file medians. Read back the
-   rows through the DB/API/site surfaces required by the existing publication
-   contract without exposing credentials.
-4. If the prediction is refuted, preserve the negative result but remove the
+2. Before DB mutation, capture a scoped backup/readback of NEW-30 and prove the
+   new run mode has zero rows. If it already has exactly three byte-for-byte
+   equivalent rows and the identical note, treat the operation as an idempotent
+   no-op; any partial or conflicting state aborts.
+3. If the run completes validly, write the NEW-30 note extension and exactly
+   three median rows in one transaction, one per pinned revision. Inside the
+   transaction assert exactly three rows and three distinct revisions, required
+   decode values present, encode duration/RSS NULL, and `evaluation = 0`; roll
+   back on any failed assertion and create no new hypothesis.
+4. After commit, read back the rows through the DB/API/site surfaces required by
+   the existing publication contract without exposing credentials.
+5. If the prediction is refuted, preserve the negative result but remove the
    implementation from the deliverable; do not ship a speed trade-back. If it
    passes, keep the implementation eligible for integration.
 

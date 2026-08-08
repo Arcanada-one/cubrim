@@ -78,29 +78,38 @@ defer *all* stationary slots, the maximum reclaimable RSS is the fraction of tho
 bring the decode RSS back to the pre‑PR41 baseline of 1 430 016 KiB (1 396.5 MiB),
 but memory‑allocator metadata and kernel overhead will consume some of the freed
 pages. We therefore set a conservative target: no more than 64 MiB above the
-pre‑PR41 baseline, reclaiming at least 209.5 MiB (76.6 % of the penalty). The
-remaining 64 MiB is an explicit acceptance allowance, not an estimate of a known
-fixed overhead.
+same-run pre‑PR41 baseline while reclaiming at least 75% of the same-run packed
+penalty. On the historical +273.5 MiB observation, those thresholds correspond
+to at least 205.1 MiB reclaimed and at most 68.4 MiB residual. The nearby
+209.5 MiB / 76.6% figures obtained by subtracting 64 MiB from the historical
+observation are context, not a separate same-run threshold. The 64 MiB allowance
+is explicit acceptance headroom, not an estimate of known fixed overhead.
 
 ---
 
 ## Falsifiable prediction (preregistered)
 
-All conditions must hold on the `nci` file under the `max` preset, measured on the
-quiet `dev-ai` stand with CPUs pinned to 0–15 and `CUBR_THREADS=4`:
+The archive and round-trip checks below are validity preconditions on the `nci`
+file under the `max` preset, measured on the quiet `dev-ai` stand with CPUs
+pinned to 0–15 and `CUBR_THREADS=4`:
 
 1. **Archive identity and round‑trip**
    The pre-PR41, current-packed, and zero-rep encoders produce archives that are
    mutually byte-identical and equal the canonical `nci/max` SHA-256. Every
    measured decode round-trips byte-exactly with `cmp` returning 0.
 
+If and only if those validity gates pass, both performance conditions below must
+hold for the compound prediction to pass:
+
 2. **RSS reduction**
    The same-run median decode RSS of the zero-rep binary is **at most 64 MiB
    (65,536 KiB)** above the same-run pre-PR41 baseline. The previous baseline
    median was 1,430,016 KiB, but the decision uses the new interleaved run rather
-   than freezing a host-noise-sensitive absolute number.
-   This reclaims at least **209.5 MiB** (76.6 %) of the observed +273.5 MiB penalty,
-   equivalent to ≤ 64 MiB residual above baseline.
+   than freezing a host-noise-sensitive absolute number. In addition, the
+   same-run packed penalty must be positive and the zero-rep build must reclaim
+   at least **75%** of it, calculated as
+   `(current_rss - zero_rss) / (current_rss - baseline_rss)`. The historical
+   209.5 MiB / 76.6% calculation is reported for context only.
 
 3. **Speed preservation**
    The same-run median decode time of the zero-rep binary is **no more than 5%
@@ -109,12 +118,16 @@ quiet `dev-ai` stand with CPUs pinned to 0–15 and `CUBR_THREADS=4`:
    and 18.76 s respectively, but both ratios are recomputed from this run.
 
 **Refutation**
-Any one of the following refutes the prediction for this lever:
+On a complete, identity-valid run, either of the following refutes the prediction
+for this lever:
 
-- The archives are not byte‑identical or any decode fails `cmp`.
-- The zero-rep median RSS exceeds the same-run baseline by 65,536 KiB.
+- The zero-rep median RSS exceeds the same-run baseline by 65,536 KiB, the
+  same-run packed penalty is non-positive, or the reclaim fraction is below 75%.
 - The zero-rep/current-packed median-time ratio exceeds 1.05, or the
   pre-PR41/zero-rep speedup is below 1.10×.
+
+An archive mismatch or failed `cmp` is not a refutation result: it violates a
+hard validity gate, voids the run, and makes the implementation ineligible.
 
 A refutation does not mean the zero‑representation idea is wrong, only that the
 XOR‑bias mechanism as described does not achieve the stated threshold on `nci` / `max`.
@@ -138,7 +151,7 @@ The measurement run halts before any timed decode if:
 
 After measurement, the lever is stopped without further tuning if:
 
-- The compound falsifiable prediction is refuted on any of the three axes.
+- The compound falsifiable prediction is refuted on either performance axis.
 - The zero‑rep binary violates the hard constraints (e.g., it touches `decode`, the
   wire format, or any excluded file).
 
@@ -192,7 +205,13 @@ the negative result, leave `evaluation` at 0, and do not ship the code change.
 4. **Measurement host and admission**
    - Host: `dev-ai` (quiet stand, CPUs pinned 0–15), `CUBR_THREADS=4`.
    - Admission gate: 1‑min load average < 2.0, no other `cubrim` process.
-   - The bounded systemd unit and swap-peak evidence follow the preset-RSS protocol.
+   - Per-command caps are fixed before measurement: 1,800 seconds for each
+     compression and 300 seconds for every warm-up or measured decode.
+   - The runner is launched exactly once as
+     `timeout 14400 systemd-run --wait --collect --unit=cubr-zerorep-20260808.service --property=RuntimeMaxSec=7200 /root/cubr-levers/zerorep-20260808/zerorep-run.sh`.
+     The systemd unit's two-hour runtime cap is the primary envelope; the
+     four-hour caller timeout is a hard outer watchdog. Neither may be widened.
+   - Record the unit result, main exit status, peak memory, and swap peak.
 
 5. **Runner script** (per‑build, interleaved)
    For each of the three binaries (pre‑PR41, current packed, zero‑rep):
@@ -208,15 +227,24 @@ the negative result, leave `evaluation` at 0, and do not ship the code change.
    - Wall clock time ([s]) and peak RSS ([KiB]) from `time -v`.
    - Medians computed over the three samples per build; no cherry‑picking.
    - Report the zero-rep RSS reduction from current-packed as a fraction of the
-     768 MiB regression ceiling, plus the residual versus pre-PR41. Do not average
-     this file with any other file.
+     768 MiB regression ceiling, the same-run reclaim fraction, and the residual
+     versus pre-PR41. Do not average this file with any other file.
    - If the run completes with valid observations, insert exactly three median
      measurement rows under existing **NEW-30**, whether the compound prediction
      is confirmed or refuted: one per codec revision with one new run-mode
      identifier. Encode duration/RSS remain NULL; no duplicate hypothesis is
      created and `evaluation` remains 0. The implementation is eligible to ship
      only when the compound prediction passes.
-   - Any partial or failed run goes to the stand journal only; no DB entry.
+   - Before mutation, capture a scoped backup/readback of NEW-30 and prove the
+     new run-mode identifier has zero rows. Write the hypothesis note extension
+     and all three measurements in one transaction; inside that transaction,
+     assert exactly three rows, three distinct pinned revisions, required
+     decode values present, encode values NULL, and `evaluation = 0` before
+     commit. Roll back on any failed assertion.
+   - An exact rerun is idempotent: three already-identical rows plus the identical
+     note are a no-op; any partial or conflicting pre-existing state aborts.
+   - Any partial or failed measurement run goes to the stand journal only; no DB
+     entry.
 
 7. **Constraints checklist**
    - `decode()` untouched.
