@@ -1,0 +1,7 @@
+Running as unit: cubr-zerorep-20260808.service; invocation ID: fb6f9bdc69fc403e928312b7a3913528
+Finished with result: success
+Main processes terminated with: code=exited/status=0
+Service runtime: 9min 294ms
+CPU time consumed: 17min 51.834s
+Memory peak: 1.8G
+Memory swap peak: 0B

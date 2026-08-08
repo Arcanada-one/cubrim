@@ -1,0 +1,9 @@
+2026-08-08T15:39:21+02:00 dev-ai systemd[1]: Started cubr-zerorep-20260808.service - /root/cubr-levers/zerorep-code/documentation/ephemeral/research/CUBR-ZEROREP-20260808/zerorep-run.sh.
+2026-08-08T15:39:21+02:00 dev-ai zerorep-run.sh[2808016]: [2026-08-08T13:39:21Z] admission loadavg=0.16 pin=0-15 threads=4 run_mode=zerorep-nci-max-pin0-15-t4
+2026-08-08T15:39:21+02:00 dev-ai zerorep-run.sh[2808020]: [2026-08-08T13:39:21Z] runner_head=e227b1e0d41541b8c40d4e5f4c60ba5f5484f3e7 runner_sha=bb6c8893a9be5ce20480759e39f1485496f0f5b7d83fa24244e5f38fd0d8fca7 zero_source=f047523fcdc15561baa05fee597819fd6bdb53d3
+2026-08-08T15:45:02+02:00 dev-ai zerorep-run.sh[2814504]: [2026-08-08T13:45:02Z] archive_identity=PASS sha256=1dcc11fa179e3aa0a0b745fba85b5c2187aa382b4b3022ec8ecd8839962b925b bytes=104139
+2026-08-08T15:45:52+02:00 dev-ai zerorep-run.sh[2815535]: [2026-08-08T13:45:52Z] warmups=PASS
+2026-08-08T15:48:21+02:00 dev-ai zerorep-run.sh[2818428]: [2026-08-08T13:48:21Z] post-run 1.46 1.68 1.38 3/4390 2818426
+2026-08-08T15:48:21+02:00 dev-ai zerorep-run.sh[2818431]: [2026-08-08T13:48:21Z] ZEROREP-COMPLETE compound_pass=TRUE
+2026-08-08T15:48:21+02:00 dev-ai systemd[1]: cubr-zerorep-20260808.service: Deactivated successfully.
+2026-08-08T15:48:21+02:00 dev-ai systemd[1]: cubr-zerorep-20260808.service: Consumed 17min 51.834s CPU time, 1.8G memory peak, 0B memory swap peak.

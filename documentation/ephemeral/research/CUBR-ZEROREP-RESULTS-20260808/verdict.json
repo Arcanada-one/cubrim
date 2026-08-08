@@ -1,0 +1,12 @@
+{
+  "base_zero_speedup": 1.2268852459016395,
+  "ceiling_fraction_reclaimed": 0.9049479166666666,
+  "compound_pass": true,
+  "packed_penalty_kib": 280576,
+  "reclaim_fraction": 2.5364963503649633,
+  "reclaimed_kib": 711680,
+  "residual_kib": -431104,
+  "rss_pass": true,
+  "speed_pass": true,
+  "zero_current_time_ratio": 0.9769378603459321
+}
