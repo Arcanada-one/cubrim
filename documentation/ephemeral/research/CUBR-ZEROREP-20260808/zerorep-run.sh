@@ -171,7 +171,9 @@ for build in base current zero; do
     esac
     archive=$ROOT/$FILE.$PRESET.$build.cbr
     back=$ROOT/$FILE.$PRESET.$build.warm.back
-    if ! timeout 300 taskset -c "$PIN" "$binary" decompress "$archive" "$back" >/dev/null; then
+    timing=$ROOT/time.$build.warm.txt
+    if ! taskset -c "$PIN" /usr/bin/time -v timeout 300 \
+        "$binary" decompress "$archive" "$back" >/dev/null 2> "$timing"; then
         fail "warmup decode $build"
     fi
     cmp -s "$INPUT" "$back" || fail "warmup round-trip $build"
