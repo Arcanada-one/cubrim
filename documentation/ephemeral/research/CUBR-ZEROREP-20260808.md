@@ -4,6 +4,19 @@
 recorded here. The prediction must be committed before the candidate is built
 or measured.
 
+### Pre-measurement clerical erratum — 2026-08-08
+
+The original text below spells the packed probability-field midpoint and XOR
+bias as `32768` / `0x8000`. Those spellings are incorrect for this Ctr:
+`PSCALE` is 4096, so the logical midpoint and XOR bias are **2048 / `0x0800`**.
+Accordingly, the old initialized full `u32` word was `0x08000000`. The plan and
+implementation use `PSCALE / 2` correctly.
+
+This corrects representation notation only. It does not change the mechanism,
+falsifiable prediction, ceilings, thresholds, corpus, repetitions, timeouts, or
+stop rules. It is recorded before any live measurement; no result is reported
+in this erratum. The original spellings remain visible below for auditability.
+
 ## Design
 
 PR #41’s packed Ctr stores each table entry as a single `u32`:

@@ -1,0 +1,17 @@
+api_url=https://api.cubrim.com/api/hypotheses
+api_http_status=200
+api_hypothesis=NEW-30
+api_measure_task_contains=zero-representation nci/max extension 2026-08-08 (zerorep.tsv)
+api_note_contains=[EXTENSION 2026-08-08 · CUBR-ZEROREP]
+api_run_mode=zerorep-nci-max-pin0-15-t4
+api_run_mode_rows=3
+api_comp_bytes_unique=104139
+api_note_ends_evaluation_untouched=true
+
+site_url=https://cubrim.com/en/evolution/hypotheses/1
+site_http_status=200
+site_contains=NEW-30
+site_contains=[EXTENSION 2026-08-08 · CUBR-ZEROREP]
+site_contains=zero-representation nci/max
+site_contains=998912 KiB
+site_contains=Compound prediction PASS

@@ -261,8 +261,11 @@ impl StateMap {
 /// Keeping BOTH (rather than replacing #1 with #2) is regression-proof: the
 /// mixer can drive the nonstationary weight to zero where it hurts (large
 /// stationary streams) yet exploit it where it helps.
+const CTR_PROB_BIAS: u32 = (PSCALE / 2) as u32;
+
 struct Ctr {
     // One packed 4-byte record per slot — bits 16..32 stationary prob (u16),
+    // XOR-biased by the initial midpoint so an untouched record is all-zero;
     // bits 8..16 count (u8), bits 0..8 bit-history state (u8). predict() and
     // upd() hit the same hashed index in what were three parallel arrays; a
     // single record makes that one cache line instead of two (predict) or
@@ -277,7 +280,7 @@ struct Ctr {
 impl Ctr {
     fn new(bits: usize, lim: i32, sm_cap: i32) -> Self {
         Self {
-            v: vec![((PSCALE / 2) as u32) << 16; 1usize << bits],
+            v: vec![0u32; 1usize << bits],
             sm: StateMap::new(256, sm_cap.clamp(2, 1023) as u16),
             mask: (1usize << bits) - 1,
             lim,
@@ -290,7 +293,7 @@ impl Ctr {
         let w = self.v[cx & self.mask];
         let s = (w & 0xFF) as u8;
         (
-            (w >> 16) as i32,
+            ((w >> 16) ^ CTR_PROB_BIAS) as i32,
             self.sm.p12(s as usize).clamp(1, PSCALE - 1),
             s,
         )
@@ -300,7 +303,7 @@ impl Ctr {
         let i = cx & self.mask;
         let w = self.v[i];
         // stationary count-adaptive counter (identical to the pre-StateMap codec)
-        let cur = (w >> 16) as i32;
+        let cur = ((w >> 16) ^ CTR_PROB_BIAS) as i32;
         let cnt = ((w >> 8) & 0xFF) as i32;
         let t = (cur + ctr_div(y * PSCALE - cur, cnt + 2)).clamp(1, PSCALE - 1) as u32;
         let c = if cnt < self.lim {
@@ -311,7 +314,7 @@ impl Ctr {
         // nonstationary bit-history state machine + StateMap
         self.sm.upd(state as usize, y);
         let st = nex[state as usize][y as usize] as u32;
-        self.v[i] = (t << 16) | (c << 8) | st;
+        self.v[i] = ((t ^ CTR_PROB_BIAS) << 16) | (c << 8) | st;
     }
 }
 
@@ -1365,6 +1368,34 @@ mod tests {
         let out = cm2_decode(&blob).expect("cm2 decode");
         assert_eq!(out, data, "CM2 round-trip cmp!=0 for len {}", data.len());
         blob.len()
+    }
+
+    #[test]
+    fn ctr_zero_representation_starts_zero_and_predicts_midpoint() {
+        let ctr = Ctr::new(4, 15, 512);
+
+        assert!(ctr.v.iter().all(|&word| word == 0));
+        let (stationary, _, state) = ctr.predict(7);
+        assert_eq!(stationary, PSCALE / 2);
+        assert_eq!(state, 0);
+    }
+
+    #[test]
+    fn ctr_zero_representation_update_preserves_logical_fields() {
+        let mut ctr = Ctr::new(4, 15, 512);
+        let nex = build_nex();
+        let cx = 7;
+        let (initial, _, state) = ctr.predict(cx);
+        let expected = (initial + ctr_div(PSCALE - initial, 2)).clamp(1, PSCALE - 1) as u32;
+
+        ctr.upd(cx, state, 1, &nex);
+
+        let word = ctr.v[cx & ctr.mask];
+        let (stationary, _, next_state) = ctr.predict(cx);
+        assert_eq!(stationary, expected as i32);
+        assert_eq!(next_state, nex[state as usize][1]);
+        assert_eq!((word >> 8) & 0xFF, 1);
+        assert_eq!(word >> 16, expected ^ ((PSCALE / 2) as u32));
     }
 
     /// QA-F-007 calibration guard: every blob the ENCODER can produce must satisfy the
