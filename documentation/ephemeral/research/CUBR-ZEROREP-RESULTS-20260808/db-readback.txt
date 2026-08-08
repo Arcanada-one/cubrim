@@ -1,4 +1,5 @@
 before:
+restorable_capture=db-before.json
 hypothesis_rows=1
 run_mode=zerorep-nci-max-pin0-15-t4
 measurement_rows=[]

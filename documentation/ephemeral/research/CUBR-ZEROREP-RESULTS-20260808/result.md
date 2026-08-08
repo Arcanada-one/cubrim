@@ -37,7 +37,8 @@ other files or presets.
 - Input: 2 MiB `nci`, SHA-256 `6788fcc1...21e`.
 - All three archives: 104,139 bytes, SHA-256 `1dcc11fa...925b`, mutually
   byte-identical and equal to the prior canonical archive.
-- One warm-up and all nine timed decodes passed byte-exact `cmp` round-trip.
+- One warm-up per build and all nine timed decodes passed byte-exact `cmp`
+  round-trip.
 - Admission: load average 0.16, no Cubrim process, CPUs 0-15, four threads.
 - Exact runner head: `e227b1e0d41541b8c40d4e5f4c60ba5f5484f3e7`.
 - Runner SHA-256: `bb6c8893...8fca7`, equal to the committed blob.

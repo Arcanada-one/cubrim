@@ -1,0 +1,31 @@
+{
+  "capture_phase": "pre-mutation",
+  "hypothesis_before": {
+    "id": "NEW-30",
+    "title": "NEW-30 - decode-speed levers: packed counter record + exact reciprocal-multiply",
+    "measured": true,
+    "measure_date": "2026-08-08",
+    "measure_task": "CUBR archival levers; stand wall-clock run 2026-08-08 (levers-timing.tsv); preset RSS extension 2026-08-08 (preset-rss.tsv)",
+    "measure_note": "Protocol: fresh clone of main 49e429e built ON dev-ai (binary sha256 12eaff4d...5830c, rustc 1.96.1) vs the rev-7 L1v2 binary already resident (sha256 re-verified 534d3553...92c9f). Slices sha-verified (dickens.2m df925056..., nci.2m 6788fcc1..., ooffice.2m 5041e86f...). taskset 0-15, CUBR_THREADS=RAYON=OMP=4 (meta-35 semantics), admission loadavg 1.40 < 2.0 with process snapshot recorded; builds interleaved within every sample round; post-run 1-min load 2.05 attributed to self-decay (final 110 s threads-4 encode) - pre/post ps snapshots show the identical light resident daemons with < 0.05 cores total delta and nothing new; per-cell sample spread <= 0.7% across 48 minutes. Raw journal: repo documentation/ephemeral/research/CUBR-LEVERS-STAND-20260808/ (levers-timing.tsv + log). Unmeasured cells left empty; evaluation untouched (0).\n\n[CORRECTION 2026-08-08 · CUBR-PR43-COLSHIFT] Decode RSS is per-file: dickens +11.4%, nci +19.6%, ooffice +4.4% from the three-sample medians. The earlier ~11% shorthand described dickens only and is not a corpus figure. Encode RSS is too noisy at three samples for a trend claim. The nine-column TSV was revalidated: 18 rows, three samples per file/build, rt=PASS on all 18, and retained old/new warm archives cmp byte-identical.\n\n[EXTENSION 2026-08-08 · CUBR-PRESET-RSS] Preregistered runner completed under systemd with result=success/exit 0, admission loadavg 0.24, pin 0-15, threads 4, one warmup and median of three interleaved decode samples per build/file/preset. Public evidence: documentation/ephemeral/research/CUBR-LEVERS-PRESET-RSS-20260808/; preset-rss.tsv sha256 8c58098bd669855f3d50ef2dc5c89d2b05d3e90cec0696db2a5eeadca805659a; preset-rss.public.log sha256 3162fce4ca1a3ce883a0fe4a3da8b6e4e330b19a911d8bcb4b9a4768a1b30829; systemd-show.public.txt sha256 2208c94d97341d4d2c02308e96253fe507623b69d5d3b62901500523085ab441; archive-model-inspection.txt sha256 7d28886f5ec817bad0f61cd306414ee27919e15c76820fb79153e5a751d15f3a. Unredacted log sha256 e8b4f6aa1235b474fb99751e4256e20083d9b38218bd9767dab5c44e6d139469 is retained only in access-controlled stand evidence. Mechanism ceilings used: 768 MiB for max column-model dickens/nci, 736 MiB for uncapped base-model cells, 46 MiB for web. Evaluation remains untouched (0).",
+    "updated_at": "2026-08-08T09:34:01.395875+00:00"
+  },
+  "revisions_before": [
+    {
+      "id": 8,
+      "sha": "cli-sha256:12eaff4d9df9e3b8f51567cd930311f343680b5cc55e3426f30a78456fc5830c",
+      "label": "main 49e429e decode-speed levers build (packed Ctr record PR#41 + exact reciprocal-multiply PR#42; src commit 49e429e58722f730c4f3cbb0a69731fec430bb56, cm2.rs sha256 20580fa07722879d474d523a3a57b0c8e4500b38a0ce5ee1af6224f20fdcf412, codec.rs sha256 108c45b2fb1a03d98f56032c838c1464d97b81e1956b95178f6a1b0e08cd7a8b; fresh clone built ON dev-ai, rustc 1.96.1)",
+      "built_at": "2026-08-08T04:15:00+00:00",
+      "host": "dev-ai/162.55.81.5 (built and measured; AMD EPYC 7502P)"
+    },
+    {
+      "id": 9,
+      "sha": "cli-sha256:a195c2271a8aafbe9363d89d4047db4554e0e8840869997072d0c011086a7fbd",
+      "label": "pre-PR41 baseline e70d1cdca6226e994c0393149e364f252f7c0a1f (all presets; cm2.rs sha256 151a685f8e443b95f7069448507bd3e73d467cffaff77bb9e59347dcc1c7da1c; fresh worktree built on dev-ai, rustc 1.96.1)",
+      "built_at": "2026-08-08T08:19:04+00:00",
+      "host": "dev-ai (built and measured; AMD EPYC 7502P)"
+    }
+  ],
+  "measurements_before": [],
+  "evaluation_before": 0,
+  "reference_ratio": 0.049657344818115234
+}
