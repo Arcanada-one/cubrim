@@ -1,0 +1,40 @@
+[2026-08-08T04:19:34Z] admission: loadavg 1.40, no foreign cubrim; pin=0-15 threads=4
+1.40 0.78 0.45 1/4398 2149295
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root     2149296  600  0.0  12664  5836 ?        R    06:19   0:00 ps aux --sort=-%cpu
+root     2149111 19.6  0.0  20952 12048 ?        Ss   06:19   0:00 /usr/lib/systemd/systemd --user
+aether     23041  3.4  0.5 8457820 688304 pts/7  Sl+  Aug01 342:01 claude --dangerously-skip-permissions
+root     4002994  2.9  4.5 22282672 6003128 ?    Sl   Jul23 665:20 /usr/local/bin/python3.11 /usr/local/bin/uvicorn app:app --host 0.0.0.0 --port 8300
+root     2149197  2.8  0.0  14968 10700 ?        Ss   06:19   0:00 sshd: root@notty
+vault     313356  2.1  0.7 4631404 1001384 ?     Ssl  Jul08 964:58 mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-use-native-aio=0 --max_allowed_packet=268435456 --skip-name-resolve --connect_timeout=60 --net_read_timeout=120 --net_write_timeout=120
+aether   2597793  1.6  0.4 7270204 589936 pts/9  Sl+  Aug03 119:35 claude --dangerously-skip-permissions
+[2026-08-08T04:22:39Z] dickens: cross-build archives BYTE-IDENTICAL
+dickens	old	1	461437	78.67	1631244	26.32	1543680	PASS
+dickens	new	1	461437	59.95	1812584	20.06	1719296	PASS
+dickens	old	2	461437	78.45	1631360	26.51	1543680	PASS
+dickens	new	2	461437	59.57	1812908	19.90	1719808	PASS
+dickens	old	3	461437	78.20	1631384	26.43	1543168	PASS
+dickens	new	3	461437	59.53	1813672	19.91	1719808	PASS
+[2026-08-08T04:36:15Z] nci: cross-build archives BYTE-IDENTICAL
+nci	old	1	104139	116.74	1721868	18.04	1429504	PASS
+nci	new	1	104139	111.43	1833900	15.62	1710080	PASS
+nci	old	2	104139	116.94	1699260	18.05	1429504	PASS
+nci	new	2	104139	111.25	1953708	15.62	1709568	PASS
+nci	old	3	104139	116.67	1873468	18.15	1428992	PASS
+nci	new	3	104139	111.18	1863676	15.65	1709568	PASS
+[2026-08-08T04:53:57Z] ooffice: cross-build archives BYTE-IDENTICAL
+ooffice	old	1	677605	121.71	1906912	24.99	1634816	PASS
+ooffice	new	1	677605	110.91	1889832	19.06	1707520	PASS
+ooffice	old	2	677605	122.17	1842384	25.02	1634304	PASS
+ooffice	new	2	677605	110.47	2039436	19.06	1707008	PASS
+ooffice	old	3	677605	122.00	1858580	25.06	1634816	PASS
+ooffice	new	3	677605	110.87	1938700	19.02	1707520	PASS
+[2026-08-08T05:07:48Z] post-run: 2.05 2.64 2.55 1/4402 2203002
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+aether     23041  3.4  0.5 8457820 688324 pts/7  Sl+  Aug01 342:27 claude --dangerously-skip-permissions
+root     4002994  2.9  4.5 22282672 6003128 ?    Sl   Jul23 665:23 /usr/local/bin/python3.11 /usr/local/bin/uvicorn app:app --host 0.0.0.0 --port 8300
+vault     313356  2.1  0.7 4631404 1001384 ?     Ssl  Jul08 964:59 mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-use-native-aio=0 --max_allowed_packet=268435456 --skip-name-resolve --connect_timeout=60 --net_read_timeout=120 --net_write_timeout=120
+aether   2597793  1.6  0.4 7270204 590596 pts/9  Sl+  Aug03 119:58 claude --dangerously-skip-permissions
+aether   3961563  1.5  0.4 7269840 639748 pts/8  Sl+  Aug02 124:32 claude --dangerously-skip-permissions
+aether   2419752  1.2  0.4 7339484 574176 pts/1  Sl+  Jul30 158:12 claude --dangerously-skip-permissions
+vault     206547  1.1  0.9 7087196 1274420 ?     Ssl  Jul01 606:28 mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-use-native-aio=0

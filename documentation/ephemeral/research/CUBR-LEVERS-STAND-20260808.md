@@ -56,14 +56,21 @@ unchanged — identical archives, identical bytes.
    startup/IO the cycle A/B excluded, and cycle counters are not wall
    clock. The stand numbers are the record; the DEVS ratios remain what
    they always were — pinned relative counters.
-2. **The new build's decode peak RSS is ~11% higher** (dickens 1,543,680 →
-   1,719,808 KiB). Cause read from the code, not guessed: the packed
-   record's non-zero initializer (`vec![(PSCALE/2)<<16; n]`) commits every
-   table page up front, while the old layout's zero-filled `c`/`st` arrays
-   came from `alloc_zeroed` and stayed lazily allocated until touched. A
-   real trade, recorded in NEW-30; a zero-representation offset (store
-   `t − PSCALE/2` biased) is the obvious later fix if the memory matters —
-   a candidate, not a commitment.
+2. **The decode peak-RSS increase is file-dependent, not ~11% in general:**
+   dickens 1,543,680 → 1,719,808 KiB (**+11.4%**), nci 1,429,504 →
+   1,709,568 KiB (**+19.6%**), and ooffice 1,634,816 → 1,707,520 KiB
+   (**+4.4%**), using the same medians as the timing table. The file with
+   the smallest decode speedup, nci, has the largest RSS increase. No
+   corpus-level RSS figure is claimed. Encode RSS is noisier at three
+   samples (for example, old ooffice spans 1,842,384–1,906,912 KiB), so
+   these observations do not establish an encode-RSS trend. The mechanism
+   is read from the code, not guessed: the packed record's non-zero
+   initializer (`vec![(PSCALE/2)<<16; n]`) commits every table page up front,
+   while the old layout's zero-filled `c`/`st` arrays came from
+   `alloc_zeroed` and stayed lazily allocated until touched. This is a real
+   per-file trade recorded in NEW-30; a zero-representation offset (store
+   `t − PSCALE/2` biased) is the obvious later candidate if the memory
+   matters, not a commitment.
 
 ## What entered the record
 
