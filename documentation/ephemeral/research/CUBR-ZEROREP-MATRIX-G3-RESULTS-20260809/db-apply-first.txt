@@ -1,0 +1,24 @@
+executed_at=2026-08-09T12:29:04Z
+reviewed_head=95582e19454ab0ca7bd1f2b65503c3ff1b3f20be
+origin_main=368bc17df4a6b2f91d5896c86d963eba7acfe256
+external_gate=PASS
+BEGIN
+SET
+SET
+ pg_advisory_xact_lock 
+-----------------------
+ 
+(1 row)
+
+LOCK TABLE
+SELECT 1
+DO
+UPDATE 1
+INSERT 0 24
+DO
+      label       | rows | modes | revisions 
+------------------+------+-------+-----------
+ transaction_rows |   24 |     8 |         3
+(1 row)
+
+COMMIT

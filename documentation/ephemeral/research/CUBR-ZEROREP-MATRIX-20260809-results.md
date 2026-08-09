@@ -80,11 +80,27 @@ design.
 
 ## Database status
 
-The database is **not yet mutated** by this result lane. The required atomic,
-idempotent 24-row NEW-30 transaction must be generated from these medians and
-independently reviewed before execution. `web_benchmark_hypothesis_evaluation`
-must remain at zero rows. No API, site, social, or publication action has been
-taken.
+The database transaction is complete. Two independent reviewers accepted exact
+commit `95582e19454ab0ca7bd1f2b65503c3ff1b3f20be` with no Critical or
+Important findings before execution. The external gate pinned that clean HEAD,
+wrapper SHA-256 `e86c4c6a42ab0461a8e97e934d9c42a47639a29e57fcae4d4354db1877235b1a`,
+SQL SHA-256 `79dd34bf23e7b58d0015288a9eaec8fdefcfc2087aa38ccba192408dd67423ef`,
+and the exact remote host, machine, container image, PostgreSQL cluster,
+database OID, and server version.
+
+The first application at `2026-08-09T12:29:04Z` committed `UPDATE 1` and
+`INSERT 0 24`; every in-transaction assertion passed. The exact replay at
+`2026-08-09T12:29:20Z` committed `UPDATE 0` and `INSERT 0 0`. Independent
+readback found 51 total NEW-30 rows across 13 modes, with exactly 24 matrix
+rows across eight modes and three revisions (IDs 416-439). All 24 rows match
+the reviewed medians and metadata exactly. The original 27-row snapshot is
+byte-identical to its pre-transaction TSV (SHA-256
+`2cf311fda0c951dd051100c2a8923201a2943ea8a7e056a077d34be2ba07abfc`),
+the note marker occurs once with the exact suffix, and
+`web_benchmark_hypothesis_evaluation` remains at zero rows. The committed
+readback artifacts include both transaction outputs, the matrix-only TSV, and
+the complete post-transaction TSV. No API, site, social, or publication action
+has been taken.
 
 ## Scope
 
