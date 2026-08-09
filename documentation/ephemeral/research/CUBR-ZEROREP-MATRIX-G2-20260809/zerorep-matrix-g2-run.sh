@@ -7,6 +7,7 @@ readonly CARGO_PROGRAM=${CARGO##*/}
 [[ -x "$CARGO" ]] || { printf 'CARGO not executable: %s\n' "$CARGO" >&2; exit 1; }
 CARGO_VERSION=$("$CARGO" --version) || { printf 'CARGO version check failed: %s\n' "$CARGO" >&2; exit 1; }
 readonly CARGO_VERSION_PREFIX="$CARGO_PROGRAM 1.96.1"
+readonly PROGRAM_IDENTIFIER_LINES_SHA256=105222ab0ab9a0dac70385b83175d5416926a214fc28d8fa11fcd64bd1cedd31
 if [[ $CARGO_VERSION != "$CARGO_VERSION_PREFIX" && $CARGO_VERSION != "$CARGO_VERSION_PREFIX "* ]]; then
  printf 'wrong CARGO version: %s\n' "$CARGO_VERSION" >&2
  exit 1
@@ -101,6 +102,16 @@ program_command_refs_absent() {
  if grep -nE "$pattern" "$source" >/dev/null; then return 1; else status=$?; fi
  [[ $status == 1 ]]
 }
+identifier_lines_digest() {
+ local source=$1 identifier='CARGO_'
+ identifier+='PROGRAM'
+ LC_ALL=C awk -v identifier="$identifier" 'index($0, identifier) { print }' "$source" | sha256sum | awk '{print $1}'
+}
+identifier_lines_allowed() {
+ local digest
+ digest=$(identifier_lines_digest "$1") || return 1
+ [[ $digest == "$PROGRAM_IDENTIFIER_LINES_SHA256" ]]
+}
 source_contract() {
  local source=$1 count identifier='CARGO_' identifier_count
  identifier+='PROGRAM'
@@ -109,6 +120,7 @@ source_contract() {
  grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" "$source" || return 1
  identifier_count=$(grep -oF "$identifier" "$source" | wc -l) || return 1
  [[ $identifier_count == 15 ]] || return 1
+ identifier_lines_allowed "$source" || return 1
  program_command_refs_absent "$source" || return 1
  suite_lines_exact_once "$source"
 }
@@ -262,6 +274,30 @@ self_test() {
  suite_lines_exact_once "$combined_source" || return 1
  ! program_command_refs_absent "$combined_source" || return 1
  ! source_contract "$combined_source" || return 1
+ local braced_ref value_ref manifest_allowed manifest_value balanced_form
+ braced_ref="${dollar}{${identifier}}"; value_ref="${dollar}{CARGO##*/}"
+ manifest_allowed=" ${double_quote}012a973200c31c92f5447961e7915735a7ae0311f628d9f7a89c375fcc998615 ${braced_ref}-test-release.log${double_quote}"
+ manifest_value=" ${double_quote}012a973200c31c92f5447961e7915735a7ae0311f628d9f7a89c375fcc998615 ${value_ref}-test-release.log${double_quote}"
+ local -a balanced_forms=(
+  "else ${command_refs[0]}"
+  "exec ${command_refs[0]}"
+  "X=1 ${command_refs[0]}"
+  "X=1 ${command_refs[1]}"
+  "X=1 ${command_refs[2]}"
+  "X=1 ${command_refs[3]}"
+  ">out ${command_refs[0]} test"
+ )
+ for balanced_form in "${balanced_forms[@]}"; do
+  mutation_index=$((mutation_index + 1)); mutation_source="$d/balanced-allowlist-mutation-$mutation_index.sh"
+  mutate_exact_line "${BASH_SOURCE[0]}" "$manifest_allowed" "$manifest_value" "$mutation_source" || return 1
+  printf '\n%s\n' "$balanced_form" >>"$mutation_source"
+  [[ $(grep -oF "$identifier" "$mutation_source" | wc -l) == 15 ]] || return 1
+  grep -Fxq "readonly CARGO=/root/.$program_name/bin/$program_name" "$mutation_source" || return 1
+  suite_lines_exact_once "$mutation_source" || return 1
+  program_command_refs_absent "$mutation_source" || return 1
+  ! identifier_lines_allowed "$mutation_source" || return 1
+  ! source_contract "$mutation_source" || return 1
+ done
  local -a unsafe_forms=(
   "if $program_name; then :; fi"
   "! $program_name"
