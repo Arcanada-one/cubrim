@@ -81,8 +81,9 @@ identically to the original plan using the new generation‑2 paths and names.
     `"$CARGO_PROGRAM"` independently and reject both variants.
   - A combined mutation that replaces both live invocations and places the two
     expected lines in an `if false; then ... fi` decoy block must be rejected.
-  - Count-balanced `else`, `exec`, and assignment-prefixed command mutations
-    that replace one allowed data-only reference must also be rejected.
+  - Count-balanced `else`, `exec`, all quoted/unquoted and braced/unbraced
+    assignment-prefixed forms, and a redirection-prefixed command mutation that
+    replace one allowed data-only reference must also be rejected.
   - A failing `git status` probe must be rejected, never interpreted as clean.
   - A missing, changed, extra, symlinked, or non-empty G1 entry must be rejected
     before the Rust suite; the only directory allowed is empty `timing_logs/`.

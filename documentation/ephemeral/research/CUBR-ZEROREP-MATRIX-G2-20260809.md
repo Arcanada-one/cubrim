@@ -101,7 +101,9 @@ must contain **only** the following changes relative to the original
    Thus any permitted-line substitution plus a new command reference fails even
    when the total count is unchanged. Negative controls must cover `else`,
    `exec`, and assignment-prefixed command positions with a compensating removal
-   of one allowed data-only identifier reference.
+   of one allowed data-only identifier reference. Cover quoted, unquoted,
+   quoted-braced, and unquoted-braced assignment-prefixed forms, plus a
+   redirection-prefixed command.
 5. Correct the inherited checkout-cleanliness helper so a failed `git status`
    is fatal; only a successful command with empty output is accepted as clean.
 6. Before the Rust suite, verify the exact generation-1 root in §7: the five
