@@ -38,3 +38,11 @@ for the unit. `systemd-terminal.txt` records the terminal service readback and
 the systemd warning that `RuntimeMaxSec` is ineffective with `Type=oneshot`.
 The runner's independent 14,400-second monotonic budget remained active; the
 campaign completed normally in 3,533.695031 seconds and was never restarted.
+
+The sibling `db-*` files prove the only post-landing database action: one
+guarded `NEW-24.measure_note` pointer. `db-before.json` is the complete row
+backup; `db-pointer.sql` and `db-apply.sh` are the authenticated idempotent
+transaction; `db-restore.sql` and `db-restore.sh` are the exact recovery
+path; and `db-readback.txt` records first apply, replay, and fresh-process
+readback. No measurement, evaluation, or web-benchmark hypothesis row was
+created.

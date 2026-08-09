@@ -1,0 +1,77 @@
+warning: unused attribute
+   --> src/geocm.rs:103:5
+    |
+103 |     #[inline]
+    |     ^^^^^^^^^ help: remove this attribute
+    |
+note: attribute also specified here
+   --> src/geocm.rs:98:5
+    |
+ 98 |     #[inline]
+    |     ^^^^^^^^^
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: `#[warn(unused_attributes)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `allow_abort`
+   --> src/codec.rs:984:9
+    |
+984 |     let allow_abort = bound != usize::MAX;
+    |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_allow_abort`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `wshift` is never read
+   --> src/cm2.rs:533:5
+    |
+498 | struct CmModel {
+    |        ------- field in this struct
+...
+533 |     wshift: i32,
+    |     ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: associated function `new` is never used
+   --> src/cm2.rs:566:8
+    |
+565 | impl CmModel {
+    | ------------ associated function in this implementation
+566 |     fn new(tbits: usize) -> Self {
+    |        ^^^
+
+warning: function `cm2_encode` is never used
+   --> src/cm2.rs:929:15
+    |
+929 | pub(crate) fn cm2_encode(data: &[u8]) -> Vec<u8> {
+    |               ^^^^^^^^^^
+
+warning: function `cm2_encode_audit` is never used
+    --> src/cm2.rs:1071:15
+     |
+1071 | pub(crate) fn cm2_encode_audit(data: &[u8]) -> (Vec<u8>, f64, f64) {
+     |               ^^^^^^^^^^^^^^^^
+
+warning: function `cm2_encode_audit_variant` is never used
+    --> src/cm2.rs:1079:4
+     |
+1079 | fn cm2_encode_audit_variant(data: &[u8], col_delim: Option<u8>) -> (Vec<u8>, f64, f64) {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `cubrim` (lib) generated 7 warnings (run `cargo fix --lib -p cubrim` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 0.09s
+     Running tests/differential.rs (/root/cubr-decode-attrib-g2-20260809.partial/cargo-target/release/deps/differential-cdd95c9543388964)
+
+running 10 tests
+test all_distinct_256 ... ok
+test all_same_100 ... ok
+test empty ... ok
+test hello_world_test ... ok
+test single_byte ... ok
+test random_1kb ... ok
+test text_1kb ... ok
+test text_entropy ... ok
+test sparse_clustered_rlecodes ... ok
+test text_entropy_context ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+

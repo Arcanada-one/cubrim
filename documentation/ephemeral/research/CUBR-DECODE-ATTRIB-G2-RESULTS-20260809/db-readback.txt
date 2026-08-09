@@ -1,0 +1,72 @@
+NEW-24 valid-G2 database pointer evidence
+pointer_updated_at=2026-08-09T17:16:48.985583Z
+fresh_process_readback_at=2026-08-09T17:20:37Z
+report_main_commit=7d341bf4f9a84cc290f2261616ff46bf9c1aafcc
+pointer_sql_sha256=7c7f662ae75aaf23204beb16ea4317353eeafe7728c5780742435a74801b2a64
+restore_sql_sha256=2c9919ac77afebec3d15bf8c029f28d2408ad0de8be9491a9b719abdf77d1032
+
+[first authenticated transaction]
+preflight=PASS
+update_count=1
+postcondition=PASS
+id=NEW-24
+status=in_progress
+measured=false
+measure_date=NULL
+measure_task=NULL
+value_scheme=NULL
+updated_at=2026-08-09 17:16:48.985583+00
+row_md5=5225fa156218ce15b2a420b98651b4eb
+measure_note_md5=3d2b6127529b9c9b6a07e0ef7805273b
+measure_note_length=1406
+canonical_marker_count=1
+canonical_suffix_exact=true
+canonical_suffix_md5=7baa7ac7db9c8949f6a3964ee8061a16
+expected_suffix_md5=7baa7ac7db9c8949f6a3964ee8061a16
+measurement_count=0
+evaluation_count=0
+web_benchmark_hypothesis_count=0
+commit=PASS
+
+[exact authenticated replay]
+preflight=PASS
+update_count=0
+postcondition=PASS
+updated_at=2026-08-09 17:16:48.985583+00
+row_md5=5225fa156218ce15b2a420b98651b4eb
+measure_note_md5=3d2b6127529b9c9b6a07e0ef7805273b
+measure_note_length=1406
+canonical_marker_count=1
+canonical_suffix_exact=true
+canonical_suffix_md5=7baa7ac7db9c8949f6a3964ee8061a16
+expected_suffix_md5=7baa7ac7db9c8949f6a3964ee8061a16
+measurement_count=0
+evaluation_count=0
+web_benchmark_hypothesis_count=0
+commit=PASS
+
+[fresh-process readback]
+hostname=arcana-dbs
+machine_id_sha256=748cf0730699f386dd0887f621659bc50704eea120753ea9ce0d52aae9e0327e
+container_image=sha256:42e7f6b4e1eceb02ff14e3e6bc6108bbe259abbe83879dc1845d0da1ddeb555d
+postgres_system_identifier=7648390441241305131
+database=arcanada_cubrim
+database_oid=55835
+server_version_num=180004
+id=NEW-24
+status=in_progress
+measured=false
+measure_date=NULL
+measure_task=NULL
+value_scheme=NULL
+updated_at=2026-08-09 17:16:48.985583+00
+row_md5=5225fa156218ce15b2a420b98651b4eb
+measure_note_md5=3d2b6127529b9c9b6a07e0ef7805273b
+measure_note_length=1406
+canonical_marker_count=1
+canonical_suffix_exact=true
+canonical_suffix_md5=7baa7ac7db9c8949f6a3964ee8061a16
+expected_suffix_md5=7baa7ac7db9c8949f6a3964ee8061a16
+measurement_count=0
+evaluation_count=0
+web_benchmark_hypothesis_count=0
