@@ -216,6 +216,7 @@ Fetch and rebase on current `origin/main`, repeat exact-SHA reviews if the SHA c
 - Execute from landed: `documentation/ephemeral/research/decode-attrib-run.sh`
 - Preserve remote: `/root/cubr-decode-attrib-20260809`
 - Create remote: `/root/cubr-decode-attrib-g2-code`
+- Create remote transfer: `/root/cubr-decode-attrib-g2-test-overlay.patch`
 - Create remote: `/root/cubr-decode-attrib-g2-20260809.partial`
 - Final remote: `/root/cubr-decode-attrib-g2-20260809`
 
@@ -229,7 +230,7 @@ From the existing `/root/cubr-levers` repository, create `/root/cubr-decode-attr
 
 - [ ] **Step 3: Copy and authenticate exact-main runner bytes**
 
-Fetch current main locally, verify the landed runner/test/amendment blobs, copy the runner once to a new remote path, and verify its SHA-256 after transfer. The external launch command must pin current main, the reviewed runner hash, the remote host, and absence of the G2 output paths.
+Fetch current main locally; verify the landed runner, test, amendment, and overlay blobs; copy the runner and overlay once to their new remote paths; and verify both SHA-256 values after transfer. The main run must use only its reauthenticated read-only evidence copy of the overlay. The external launch command must pin current main, the reviewed runner/overlay hashes, the remote host, and absence of the G2 output paths.
 
 - [ ] **Step 4: Run bounded preflight without measurement**
 

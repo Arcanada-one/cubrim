@@ -82,11 +82,11 @@ required_literals=(
     '"$CUBRIM_SHA_EXPECT" "$CODE_COMMIT"'
     '"$CARGO" test --release)'
     '"$CARGO" test --release --test differential -- --nocapture)'
-    '/usr/bin/git -C "$CODE_DIR" apply --check "$TEST_OVERLAY"'
+    '/usr/bin/git -C "$CODE_DIR" apply --unidiff-zero --check "$TEST_OVERLAY"'
     '/usr/bin/git -C "$CODE_DIR" diff --no-ext-diff --binary --unified=0 "$CODE_COMMIT" "$TEST_OVERLAY_SOURCE_COMMIT"'
-    '/usr/bin/git -C "$CODE_DIR" apply "$TEST_OVERLAY"'
-    '/usr/bin/git -C "$CODE_DIR" apply -R --check "$TEST_OVERLAY"'
-    '/usr/bin/git -C "$CODE_DIR" apply -R "$TEST_OVERLAY"'
+    '/usr/bin/git -C "$CODE_DIR" apply --unidiff-zero "$TEST_OVERLAY"'
+    '/usr/bin/git -C "$CODE_DIR" apply --unidiff-zero -R --check "$TEST_OVERLAY"'
+    '/usr/bin/git -C "$CODE_DIR" apply --unidiff-zero -R "$TEST_OVERLAY"'
     'test overlay SHA mismatch'
     'test overlay source diff mismatch'
     'code checkout dirty after test overlay removal'
@@ -97,6 +97,12 @@ required_literals=(
     'cargo-generated.lock'
     'generated Cargo lock missing after suites'
     'code checkout dirty after test input cleanup'
+    'unexpected test fixture path set'
+    'CARGO_TARGET_DIR="$PARTIAL/cargo-target"'
+    '/usr/bin/find "$PARTIAL/cargo-target" -depth -delete'
+    'status --porcelain --ignored --untracked-files=all'
+    'TEST_OVERLAY=$PARTIAL/decode-attrib-g2-test-overlay.patch'
+    '/usr/bin/chmod a-w -- "$TEST_OVERLAY"'
     '[[ $(sha "$src") == "$want_sha" ]]'
     '[[ $actual == "$EXPECTED_RUNNER_SHA" ]]'
     'readonly PERF_VALUE_RE='\''^[0-9]+([.][0-9]+)?$'\'''
@@ -140,6 +146,21 @@ require_fixed 'verify_runner_provenance'
 require_fixed 'verify_manifest_source'
 require_fixed 'reject_orphan_processes'
 
+require_function_live() {
+    local name=$1 first
+    first=$(/usr/bin/awk -v signature="$name() {" '
+        $0 == signature { getline; print; found=1; exit }
+        END { if (!found) exit 1 }
+    ' "$RUNNER") || fail "missing critical function: $name"
+    [[ ! $first =~ ^[[:space:]]*return[[:space:]]+0[[:space:]]*$ ]] ||
+        fail "critical function starts with early return: $name"
+}
+for critical_function in admission run_suites authenticate_test_overlay verify_test_fixtures \
+    apply_test_overlay verify_test_overlay_applied remove_test_overlay cleanup_test_inputs \
+    write_manifests reject_orphan_processes; do
+    require_function_live "$critical_function"
+done
+
 refusal_call_count=$({ /usr/bin/grep -F 'refuse_existing_output || exit 1' "$RUNNER" || true; } | /usr/bin/wc -l)
 [[ $refusal_call_count == 2 ]] || fail 'output refusal call count must be 2'
 
@@ -163,6 +184,12 @@ line_of_call() {
     [[ -n $line ]] || fail "missing ordered call: $pattern"
     printf '%s\n' "$line"
 }
+
+main_admission_line=$(line_of_call '^[[:space:]]{4}admission "\$PARTIAL"$')
+main_suites_line=$(line_of_call '^[[:space:]]{4}run_suites$')
+main_cells_line=$(line_of_call '^[[:space:]]{4}for cell in "\$\{CELLS\[@\]\}"; do$')
+(( main_admission_line < main_suites_line && main_suites_line < main_cells_line )) ||
+    fail 'main ordering must be admission -> suites -> cells'
 
 manifest_line=$(line_of_call '^write_manifests$')
 marker_line=$(line_of_call '^write_completion_marker$')
@@ -237,10 +264,18 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     expect_mutant_red cycles 's/readonly CYCLE_DISAGREEMENT_MAX=0.10/readonly CYCLE_DISAGREEMENT_MAX=0.20/' 'missing literal: readonly CYCLE_DISAGREEMENT_MAX=0.10'
     expect_mutant_red suite 's/"\$CARGO" test --release --test differential/"\$CARGO" test --release differential/' 'missing literal: "$CARGO" test --release --test differential -- --nocapture)'
     expect_mutant_red overlay-sha 's/b0c09568746bf7ecce5466a98b5e62166b6fbd64d98726ffd2538214d486e7ec/c0c09568746bf7ecce5466a98b5e62166b6fbd64d98726ffd2538214d486e7ec/' 'missing literal: b0c09568746bf7ecce5466a98b5e62166b6fbd64d98726ffd2538214d486e7ec'
-    expect_mutant_red overlay-apply 's@/usr/bin/git -C "\$CODE_DIR" apply "\$TEST_OVERLAY"@/usr/bin/true@' 'missing literal: /usr/bin/git -C "$CODE_DIR" apply "$TEST_OVERLAY"'
-    expect_mutant_red overlay-reverse 's@/usr/bin/git -C "\$CODE_DIR" apply -R "\$TEST_OVERLAY"@/usr/bin/true@' 'missing literal: /usr/bin/git -C "$CODE_DIR" apply -R "$TEST_OVERLAY"'
+    expect_mutant_red overlay-apply 's@/usr/bin/git -C "\$CODE_DIR" apply --unidiff-zero "\$TEST_OVERLAY"@/usr/bin/true@' 'missing literal: /usr/bin/git -C "$CODE_DIR" apply --unidiff-zero "$TEST_OVERLAY"'
+    expect_mutant_red overlay-reverse 's@/usr/bin/git -C "\$CODE_DIR" apply --unidiff-zero -R "\$TEST_OVERLAY"@/usr/bin/true@' 'missing literal: /usr/bin/git -C "$CODE_DIR" apply --unidiff-zero -R "$TEST_OVERLAY"'
     expect_mutant_red fixture-tree 's/8248283bcab58b4c4078b4a78425cd8717f165f7/9248283bcab58b4c4078b4a78425cd8717f165f7/' 'missing literal: 8248283bcab58b4c4078b4a78425cd8717f165f7'
     expect_mutant_red fixture-clean 's@/usr/bin/git -C "\$CODE_DIR" clean -fdX -- "\$TEST_FIXTURE_DIR" "\$GENERATED_CARGO_LOCK"@/usr/bin/true@' 'missing literal: /usr/bin/git -C "$CODE_DIR" clean -fdX -- "$TEST_FIXTURE_DIR" "$GENERATED_CARGO_LOCK"'
+    expect_mutant_red main-admission 's/^[[:space:]]*admission "\$PARTIAL"$/    : admission "$PARTIAL"/' 'missing ordered call: ^[[:space:]]{4}admission "\$PARTIAL"$'
+    expect_mutant_red main-suites 's/^[[:space:]]*run_suites$/    : run_suites/' 'missing ordered call: ^[[:space:]]{4}run_suites$'
+
+    for critical_function in admission run_suites authenticate_test_overlay verify_test_fixtures \
+        apply_test_overlay verify_test_overlay_applied remove_test_overlay cleanup_test_inputs \
+        write_manifests reject_orphan_processes; do
+        expect_mutant_red "early-return-$critical_function" "/^$critical_function() {/a\\    return 0" "critical function starts with early return: $critical_function"
+    done
     expect_mutant_red provenance 's@\[\[ \$actual == "\$EXPECTED_RUNNER_SHA" \]\]@/usr/bin/true@' 'missing literal: [[ $actual == "$EXPECTED_RUNNER_SHA" ]]'
     expect_mutant_red monotonic 's@/proc/uptime@/tmp/non-monotonic-clock@g' 'missing literal: /proc/uptime'
     expect_mutant_red refusal 's/refuse_existing_output || exit 1/:/g' 'output refusal call count must be 2'
