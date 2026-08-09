@@ -35,6 +35,11 @@ used here.
   path set is exhaustive except for the manifest and completion marker. The
   completion marker SHA-256 is
   `3ab438a6f25f6c9a829ffd750de321c6ed5a9931d73185290b3051a2c3e90d37`.
+  A post-merge parity audit found that Git had omitted the ignored
+  `cargo-test-differential.log` and `cargo-test-release.log` even though both
+  were present in that manifest. This follow-up recovered their exact
+  read-only bytes from the preserved campaign tree; SHA-256 and `cmp` match
+  the source, and the full 95-entry manifest now verifies from the checkout.
 - Admission, full release suite and focused differential suite passed. All
   four canonical archive pairs matched the registered archive SHA by
   SHA-256 and `cmp`; all 16 decode observations matched their source by
@@ -187,3 +192,15 @@ nothing to `world_benchmark_*`. After independent review and landing, the
 only authorized DB change is one idempotent pointer to this report in the
 existing NEW-24 `measure_note`, while NEW-24 remains `in_progress`,
 `measurements` stays empty and evaluation remains zero.
+
+That pointer transaction committed at 2026-08-09T17:16:48.985583Z after the
+report landed on `main`. The authenticated first application reported
+`UPDATE 1`; an exact replay reported `UPDATE 0` and preserved the same
+timestamp. A separate process then read back row MD5
+`5225fa156218ce15b2a420b98651b4eb`, exactly one canonical marker, an exact
+suffix with matching MD5 `7baa7ac7db9c8949f6a3964ee8061a16`, and zero
+measurements, evaluations, and web-benchmark hypothesis rows. The prior PR
+#54/#58 path remains explicitly quarantined as exploratory-only in the new
+suffix. Transaction, backup, recovery, and readback evidence live beside the
+raw and analysis directories in
+`CUBR-DECODE-ATTRIB-G2-RESULTS-20260809/`.
