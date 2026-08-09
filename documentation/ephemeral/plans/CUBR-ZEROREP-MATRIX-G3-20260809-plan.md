@@ -69,10 +69,14 @@ product code is changed.
       - writes a single‑line evidence log `side-effect-restore.log` in the
         output root with pre‑restore hashes, the exit code of the second
         `git status`, and the post‑restore hashes.
-    - Extend `--self-test` with the nine mutation tests (a‑i) listed in the
+    - Extend `--self-test` with the mutation tests (a-j) listed in the
       amendment §4.2, covering unexpected paths, missing files, `git show`
       failure, restore not applied, stray untracked file, hash mismatch,
-      skipped tree check, and `git status` failure.
+      skipped tree check, `git status` failure, and live-root-only clean-gate
+      bypasses.
+    - Freeze complete marker-bounded SHA-256 blocks for the inherited clean
+      helper, every restoration helper body, and the live restore/clean/rehash
+      sequence; require unique ordered markers and reject decoy copies.
     - No other logic, admission gates, or paths are changed; the G3 runner
       renames all checkpoint paths to use `g3` identifiers.
   - All other gates, identities, timings, and DB protocol are strictly and

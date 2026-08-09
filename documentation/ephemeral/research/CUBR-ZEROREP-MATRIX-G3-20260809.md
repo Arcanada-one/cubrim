@@ -129,10 +129,24 @@ generation‑2 runner:
    i. Mutation: the `git status` command fails (e.g., `exit 1`). The
       check must treat that as fatal, not skip. Expected: aborts.
 
+   j. Mutation: either the inherited `clean()` predicate or the
+      `post_restore_clean_gate()` predicate is changed to accept dirt only when
+      its root argument equals the live `ZERO_ROOT`. Expected: the source
+      contract rejects the runner even though temporary-repository functional
+      tests would otherwise pass.
+
    The self-test harness may use a temporary Git repository; it must not touch
    live campaign paths. The exact hard-coded committed hashes must be embedded
    in the runner and admission must verify them against `HEAD:<path>` before
    the suite.
+
+   The source contract must freeze by SHA-256 three complete marker-bounded
+   blocks: the full inherited `clean()` definition, the entire G3
+   preservation/restoration helper block, and the live suite-restore through
+   clean/rehash block. Each begin/end marker must occur exactly once and in
+   order. Hashing only helper names or call lines is insufficient; every
+   predicate/body line must be covered so dead-code decoys and live-root-only
+   exceptions cannot balance the guard.
 
 The original generation‑2 runner remains untouched in the G2 checkout and
 is never overwritten.
