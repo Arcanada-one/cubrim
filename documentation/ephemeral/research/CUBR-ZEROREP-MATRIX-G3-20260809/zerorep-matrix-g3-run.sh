@@ -64,10 +64,11 @@ readonly -a SIDE_EFFECT_SPECS=(
  "$SIDE_EFFECT_28_HEAD_SHA $SIDE_EFFECT_28"
  "$SIDE_EFFECT_31_HEAD_SHA $SIDE_EFFECT_31"
 )
-readonly POST_RESTORE_GATE_LINES_SHA256=846b30635c2fc2ef20f5ef5e0b21b485ae062fd9b8b34d8feef20347f8c8778a
+readonly POST_RESTORE_GATE_LINES_SHA256=a9244cbf10e44d558bd484234c6b81b278976cb9d6e30702fb0f40c2a0bd051c
 readonly CLEAN_BLOCK_SHA256=5b1286bf098d721759604104f3be900b17a23694f1932c1ff298779ee9f3a61a
-readonly HELPERS_BLOCK_SHA256=d7da850d7392b4c6db19039545e7685455f5a69ec22bfddb9ca325229f8cfe6e
+readonly HELPERS_BLOCK_SHA256=0e9b8db564ce9daa9f03bb502d072178eb0b05865ecda68e50b395a080958e92
 readonly LIVE_BLOCK_SHA256=390d66a0f5f189c70ff0231c0493a22a4d9084da2361d11f29138646fbdddc7c
+readonly FULL_SOURCE_CONTRACT_SHA256=d8641fa3b13f4dda212c201896b05870835ebc69779509b8d706a1741b6ff9bc
 # G3-END preservation-and-side-effect-contract
 
 export CUBR_THREADS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 CUBRIM_ACCEPT_LICENSE=1
@@ -152,6 +153,7 @@ source_contract() {
  # G3-BEGIN source-contract-extension
  frozen_blocks_allowed "$source" || return 1
  post_restore_gate_allowed "$source" || return 1
+ full_source_allowed "$source" || return 1
  # G3-END source-contract-extension
  suite_lines_exact_once "$source"
 }
@@ -197,6 +199,28 @@ marker_block_digest() {
    for (line=begin_line; line<=end_line; line++) print lines[line]
   }
  ' "$source" | sha256sum | awk '{print $1}'
+}
+normalized_full_source_digest() {
+ python3 - "$1" <<'PY'
+import hashlib
+import re
+import sys
+
+source = sys.argv[1]
+prefix = b'readonly FULL_SOURCE_' + b'CONTRACT_SHA256='
+with open(source, 'rb') as handle:
+    lines = handle.readlines()
+matches = [index for index, line in enumerate(lines) if line.startswith(prefix)]
+if len(matches) != 1 or re.fullmatch(prefix + rb'[0-9a-f]{64}\n?', lines[matches[0]]) is None:
+    raise SystemExit(1)
+payload = b''.join(line for index, line in enumerate(lines) if index != matches[0])
+sys.stdout.write(hashlib.sha256(payload).hexdigest())
+PY
+}
+full_source_allowed() {
+ local digest
+ digest=$(normalized_full_source_digest "$1") || return 1
+ [[ $digest == "$FULL_SOURCE_CONTRACT_SHA256" ]]
 }
 frozen_blocks_allowed() {
  local source=$1 prefix='# G3-FROZEN-' clean_begin clean_end helper_begin helper_end live_begin live_end digest
@@ -407,7 +431,7 @@ g3_clone_dirty_repo() {
 }
 g3_self_test() {
  local d=$1 template="$1/g3-template" repo status log hash28 hash31 expected_log mutation_source mutation_source2 gate_name live_gate_call
- local clean_line clean_mutant post_line post_mutant marker_prefix clean_begin clean_end dollar='$'
+ local clean_line clean_mutant post_line post_mutant marker_prefix clean_begin clean_end live_begin live_end full_prefix comment dollar='$'
  local spec28 spec31
  local -a specs
  mkdir -p "$template/$(dirname "$SIDE_EFFECT_28")" || return 1
@@ -494,6 +518,45 @@ g3_self_test() {
  mutate_exact_line "${BASH_SOURCE[0]}" "$clean_begin" '# G3-ORDER-SWAP-TEMP' "$mutation_source" || return 1
  mutate_exact_line "$mutation_source" "$clean_end" "$clean_begin" "$mutation_source2" || return 1
  mutate_exact_line "$mutation_source2" '# G3-ORDER-SWAP-TEMP' "$clean_end" "$mutation_source" || return 1
+ ! source_contract "$mutation_source" || return 1
+
+ live_begin="${marker_prefix}BEGIN live-restore-clean-rehash"; live_end="${marker_prefix}END live-restore-clean-rehash"
+ mutation_source="$d/live-block-dead-wrapper.sh"
+ awk -v begin="$live_begin" -v end="$live_end" '
+  $0 == begin { print "if false; then"; begin_count++ }
+  { print }
+  $0 == end { print "fi"; end_count++ }
+  END { if (begin_count != 1 || end_count != 1) exit 1 }
+ ' "${BASH_SOURCE[0]}" >"$mutation_source" || return 1
+ frozen_blocks_allowed "$mutation_source" || return 1
+ post_restore_gate_allowed "$mutation_source" || return 1
+ ! full_source_allowed "$mutation_source" || return 1
+ ! source_contract "$mutation_source" || return 1
+
+ comment='# Nothing above this point touches the live campaign paths.'
+ mutation_source2="$d/live-block-dead-wrapper-compensated.sh"
+ awk -v comment="$comment" '
+  $0 == comment {
+   if (!held || previous != "") exit 1
+   held=0; removed++; next
+  }
+  held { print previous }
+  { previous=$0; held=1 }
+  END {
+   if (held) print previous
+   if (removed != 1) exit 1
+  }
+ ' "$mutation_source" >"$mutation_source2" || return 1
+ frozen_blocks_allowed "$mutation_source2" || return 1
+ post_restore_gate_allowed "$mutation_source2" || return 1
+ ! full_source_allowed "$mutation_source2" || return 1
+ ! source_contract "$mutation_source2" || return 1
+
+ full_prefix='readonly FULL_SOURCE_'; full_prefix+='CONTRACT_SHA256='
+ mutation_source="$d/full-source-declaration-duplicate.sh"
+ cp "${BASH_SOURCE[0]}" "$mutation_source" || return 1
+ printf '%s%s\n' "$full_prefix" 0000000000000000000000000000000000000000000000000000000000000000 >>"$mutation_source"
+ ! normalized_full_source_digest "$mutation_source" >/dev/null || return 1
  ! source_contract "$mutation_source" || return 1
 }
 # G3-END isolated-side-effect-self-test
