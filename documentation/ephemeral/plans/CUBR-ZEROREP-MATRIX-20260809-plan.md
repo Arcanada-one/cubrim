@@ -84,6 +84,10 @@ The runner is a bash script with **no placeholders**.  It must contain, in machi
   capture their complete logs, assert the source tree remains clean, and record
   exact pass/fail/ignored counts. The earlier mutation-sensitive evidence must
   also be present at its tracked path and match its committed blob.
+- **Post-suite stabilization:** sample load and the complete process list every
+  15 seconds for at most 180 seconds. Require two consecutive samples with load
+  < 2.0 and no competing Cubrim workload. A competitor voids immediately; a
+  failure to stabilize within the fixed window also voids. No restart or widening.
 - **Static control seam:** the script must accept `--self-test`, which validates
   contract tables, exact 72-row/order expectations, parser arithmetic, and
   positive/negative synthetic verdict cases without claiming any live admission,
@@ -178,6 +182,9 @@ cargo test --release --lib ctr_zero_representation_update_preserves_logical_fiel
   3. Temporarily remove write‑side XOR – red, revert – green.
   (Each surgical edit must leave the tree clean afterwards.)
 - All outputs must be captured; the final tree must be identical to the committed candidate source.
+- Immediately before compression, enforce the preregistered post-suite
+  stabilization window: 15-second sampling, 180-second maximum, two consecutive
+  load < 2.0 samples, and no competing Cubrim workload.
 
 ## 9. Verify base and current packed checkout & binary identities
 

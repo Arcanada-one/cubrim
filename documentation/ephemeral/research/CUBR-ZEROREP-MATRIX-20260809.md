@@ -208,6 +208,13 @@ Before any cell is measured, the runner asserts:
    (exact counts recorded), including the XOR‑bias‑specific mutation‑tested
    unit tests and the scheme round‑trip suite. The suite must pass on the exact
    source tree used for the stand build.
+8. **Post-suite stabilization:** Because the suite itself may raise the one-minute
+   load average, the runner samples load and the complete process list every
+   15 seconds for at most 180 seconds. It requires two consecutive samples with
+   load < 2.0 and no competing Cubrim workload before compression begins. A
+   competing Cubrim workload voids immediately; failure to obtain two quiet
+   samples inside 180 seconds also voids. The window is fixed and is never
+   widened or restarted.
 
 If any admission gate fails, the whole campaign is void and no DB rows are added.
 
@@ -275,8 +282,9 @@ or any non-PASS value voids the whole campaign.
 
 - **Void (no DB entry):** The campaign is void if any admission gate fails, any
   compress‑timeout expires, any round‑trip `cmp` fails, any binary hash mismatches,
-  or the build/test‑suite check fails. A void run is not a refutation; it is
-  a broken instrument. The journal alone records the reason.
+  the build/test‑suite check fails, or the fixed post-suite stabilization gate
+  does not obtain two quiet samples. A void run is not a refutation; it is a
+  broken instrument. The journal alone records the reason.
 - **Valid observation but refuted prediction:** If all gates pass and 72 valid
   decode observations exist, but on a given cell the compound product prediction
   fails, that cell is marked REFUTED. Its medians are inserted into NEW‑30 with a
