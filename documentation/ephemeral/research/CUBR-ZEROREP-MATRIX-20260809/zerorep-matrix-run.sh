@@ -69,6 +69,16 @@ detect_cubrim_processes() {
  END { exit(found ? 1 : 0) }
  '
 }
+stabilization_step() {
+ local load=$1 competitors=$2 consecutive=$3
+ [[ $competitors == 0 ]] || return 2
+ if load_below_limit "$load"; then printf '%s\n' "$((consecutive + 1))"; else printf '0\n'; fi
+}
+stabilization_sleep_seconds() {
+ local elapsed=$1 remaining
+ [[ $elapsed =~ ^[0-9]+$ && $elapsed -lt 180 ]] || return 1
+ remaining=$((180 - elapsed)); (( remaining < 15 )) && printf '%s\n' "$remaining" || printf '15\n'
+}
 wall_rss() {
  python3 - "$1" <<'PY'
 import re, sys
@@ -131,6 +141,10 @@ self_test() {
  printf '101 bash /usr/bin/harmless\n102 worker /tmp/enc\n' | detect_cubrim_processes || return 1
  ! printf '101 cubrim-worker /usr/bin/worker\n' | detect_cubrim_processes >/dev/null || return 1
  ! printf '101 python python /opt/tools/cubrim-alt\n' | detect_cubrim_processes >/dev/null || return 1
+ [[ $(stabilization_step 1.9 0 0) == 1 && $(stabilization_step 1.8 0 1) == 2 && $(stabilization_step 2.0 0 1) == 0 ]] || return 1
+ ! stabilization_step 1.0 1 0 >/dev/null || return 1
+ [[ $(stabilization_sleep_seconds 0) == 15 && $(stabilization_sleep_seconds 166) == 14 && $(stabilization_sleep_seconds 179) == 1 ]] || return 1
+ ! stabilization_sleep_seconds 180 >/dev/null || return 1
  printf 'Elapsed (wall clock) time (h:mm:ss or m:ss): 1:02.50\nMaximum resident set size (kbytes): 123\n' >"$d/time-m.log"
  [[ $(wall_rss "$d/time-m.log") == $'62.500000\t123' ]] || return 1
  printf 'Elapsed (wall clock) time (h:mm:ss or m:ss): 1:02:03.25\nMaximum resident set size (kbytes): 456\n' >"$d/time-h.log"
@@ -148,6 +162,7 @@ self_test() {
  cp "$d/good-rt.tsv" "$d/duplicate.tsv"; sed -n '2p' "$d/good-rt.tsv" >>"$d/duplicate.tsv"; ! parse_verdicts "$d/results.tsv" "$d/duplicate.tsv" "$d/x" "$d/y" 2>/dev/null || return 1
  sed '2s/PASS/FAIL/' "$d/good-rt.tsv" >"$d/nonpass.tsv"; ! parse_verdicts "$d/results.tsv" "$d/nonpass.tsv" "$d/x" "$d/y" 2>/dev/null || return 1
  awk 'NR==2{a=$0;next} NR==3{print;print a;next} {print}' "$d/good-rt.tsv" >"$d/swapped.tsv"; ! parse_verdicts "$d/results.tsv" "$d/swapped.tsv" "$d/x" "$d/y" 2>/dev/null || return 1
+ awk 'NR==2{a=$0;next} NR==3{print;print a;next} {print}' "$d/results.tsv" >"$d/swapped-results.tsv"; ! parse_verdicts "$d/swapped-results.tsv" "$d/good-rt.tsv" "$d/x" "$d/y" 2>/dev/null || return 1
  cp "$d/results.tsv" "$d/nonpositive.tsv"; sed -i '/^nci\/balanced.*\tbase\t/s/100000/200000/' "$d/nonpositive.tsv"; parse_verdicts "$d/nonpositive.tsv" "$d/good-rt.tsv" "$d/nonpositive.json" "$d/nonpositive.out"
  grep -q '^nci/balanced.*REFUTED' "$d/nonpositive.out" || return 1
  cp "$d/results.tsv" "$d/slow.tsv"; sed -i '/\tzero\t1.00\t120000$/s/1.00/1.06/' "$d/slow.tsv"; parse_verdicts "$d/slow.tsv" "$d/good-rt.tsv" "$d/slow.json" "$d/slow.out"
@@ -170,8 +185,8 @@ if process_hits=$(detect_cubrim_processes <<<"$process_snapshot"); then :; else 
 [[ $(git -C "$CURRENT_ROOT" rev-parse HEAD) == "$CURRENT_SOURCE" ]] || die 'current source'
 timeout 60 git -C "$ZERO_ROOT" fetch --quiet origin main || die 'fresh origin/main fetch'
 candidate_head=$(git -C "$ZERO_ROOT" rev-parse HEAD) || die 'candidate HEAD unavailable'
-fetched_main=$(git -C "$ZERO_ROOT" rev-parse refs/remotes/origin/main) || die 'fetched origin/main unavailable'
-[[ $candidate_head == "$fetched_main" ]] || die 'candidate HEAD is not freshly fetched origin/main'
+fetched_sha=$(git -C "$ZERO_ROOT" rev-parse FETCH_HEAD) || die 'FETCH_HEAD unavailable'
+[[ $candidate_head == "$fetched_sha" ]] || die 'candidate HEAD is not freshly fetched main'
 git -C "$ZERO_ROOT" merge-base --is-ancestor "$ZERO_ANCHOR" HEAD || die 'zero anchor absent'
 git -C "$ZERO_ROOT" diff --quiet "$ZERO_ANCHOR"..HEAD -- code/cubrim-rs || die 'zero code differs from anchor'
 clean "$BASE_ROOT"; clean "$CURRENT_ROOT"; clean "$ZERO_ROOT"
@@ -182,14 +197,14 @@ for f in nci dickens ooffice; do need_sha "$(input_for "$f")" "${INPUT_SHA[$f]}"
 for line in "${CELLS[@]}"; do read -r f p bytes sum _ _ <<<"$line"; need_sha "$(canon_for "$f" "$p")" "$sum"; [[ $(stat -c %s "$(canon_for "$f" "$p")") == "$bytes" ]] || die "canonical bytes $f/$p"; done
 
 on_error() { local status=$?; journal "FAIL: rc=$status line=$1 command=$2"; return "$status"; }
-on_exit() { local status=$?; if [[ $status -ne 0 && ${completed:-0} -ne 1 ]]; then journal "FAIL: unexpected exit rc=$status"; fi; }
+on_exit() { local status=$?; if [[ ${completed:-0} -ne 1 ]]; then rm -f "$OUT/DONE.STAMP" "$OUT/.DONE.STAMP.tmp" || journal 'FAIL: incomplete marker cleanup'; fi; if [[ $status -ne 0 && ${completed:-0} -ne 1 ]]; then journal "FAIL: unexpected exit rc=$status"; fi; return "$status"; }
 mkdir -p "$OUT/timing_logs"; LOG="$OUT/journal.log"; completed=0
 trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 trap on_exit EXIT
 runner_committed_sha=$(git -C "$ZERO_ROOT" show "HEAD:$RUNNER_REL" | sha256sum | awk '{print $1}')
 {
  printf 'kind\tname\tvalue\n'
- printf 'source\tbase\t%s\nsource\tcurrent\t%s\nsource\tzero-anchor\t%s\nsource\tcandidate-head\t%s\nsource\tfetched-origin-main\t%s\n' "$BASE_SOURCE" "$CURRENT_SOURCE" "$ZERO_ANCHOR" "$candidate_head" "$fetched_main"
+ printf 'source\tbase\t%s\nsource\tcurrent\t%s\nsource\tzero-anchor\t%s\nsource\tcandidate-head\t%s\nsource\tfetched-FETCH_HEAD\t%s\n' "$BASE_SOURCE" "$CURRENT_SOURCE" "$ZERO_ANCHOR" "$candidate_head" "$fetched_sha"
  printf 'runner\tcommitted-sha256\t%s\n' "$runner_committed_sha"
  printf 'binary\tbase\t%s\nbinary\tcurrent\t%s\nbinary\tzero\t%s\n' "$BASE_SHA" "$CURRENT_SHA" "$ZERO_SHA"
  for f in nci dickens ooffice; do printf 'input\t%s\t%s\n' "$f" "${INPUT_SHA[$f]}"; done
@@ -202,9 +217,23 @@ journal "admission load1=$load1 pin=$PIN threads=$CUBR_THREADS candidate_head=$c
 clean "$ZERO_ROOT"
 need_sha "$ZERO" "$ZERO_SHA"; need_sha "$ZERO_ROOT/code/cubrim-rs/src/cm2.rs" "$ZERO_CM2_SHA"
 [[ $(git -C "$ZERO_ROOT" show "HEAD:$RUNNER_REL" | sha256sum | awk '{print $1}') == "$runner_committed_sha" ]] || die 'runner changed during suite'
-[[ $(git -C "$ZERO_ROOT" rev-parse HEAD) == "$candidate_head" && $(git -C "$ZERO_ROOT" rev-parse refs/remotes/origin/main) == "$candidate_head" ]] || die 'candidate identity changed during suite'
+[[ $(git -C "$ZERO_ROOT" rev-parse HEAD) == "$candidate_head" && $(git -C "$ZERO_ROOT" rev-parse FETCH_HEAD) == "$fetched_sha" && $candidate_head == "$fetched_sha" ]] || die 'candidate identity changed during suite'
 git -C "$ZERO_ROOT" diff --quiet "$ZERO_ANCHOR"..HEAD -- code/cubrim-rs || die 'zero code changed during suite'
 journal 'suite completion: cargo test --release and scheme_roundtrip passed'
+stabilization_start=$SECONDS; quiet_samples=0
+while (( SECONDS - stabilization_start <= 180 )); do
+ stabilization_load=$(awk '{print $1}' /proc/loadavg) || die 'stabilization load read'
+ stabilization_ps=$(ps -eo pid=,comm=,args=) || die 'stabilization process snapshot'
+ if stabilization_hits=$(detect_cubrim_processes <<<"$stabilization_ps"); then competitors=0; else journal "stabilization competitor: $stabilization_hits"; die 'Cubrim workload appeared during stabilization'; fi
+ quiet_samples=$(stabilization_step "$stabilization_load" "$competitors" "$quiet_samples") || die 'stabilization decision'
+ stabilization_elapsed=$((SECONDS - stabilization_start)); journal "stabilization sample elapsed=${stabilization_elapsed}s load1=$stabilization_load quiet_consecutive=$quiet_samples"
+ if (( quiet_samples >= 2 )); then break; fi
+ if (( stabilization_elapsed >= 180 )); then break; fi
+ stabilization_sleep=$(stabilization_sleep_seconds "$stabilization_elapsed") || die 'stabilization sleep deadline'
+ journal "stabilization wait=${stabilization_sleep}s"; sleep "$stabilization_sleep"
+done
+(( quiet_samples >= 2 )) || die 'post-suite stabilization timed out after 180s'
+journal "stabilization complete elapsed=$((SECONDS - stabilization_start))s quiet_consecutive=$quiet_samples"
 for line in "${CELLS[@]}"; do
  read -r f p bytes sum _ _ <<<"$line"; cell="$f/$p"; input=$(input_for "$f"); canon=$(canon_for "$f" "$p")
  for b in base current zero; do binary=$(bin_for "$b"); archive="$OUT/$f.$p.$b.cbr"; timeout 1800 taskset -c "$PIN" "$binary" compress --preset "$p" --quiet "$input" "$archive" || die "compression $cell/$b"; need_sha "$archive" "$sum"; [[ $(stat -c %s "$archive") == "$bytes" ]] || die "archive bytes $cell/$b"; cmp -s "$archive" "$canon" || die "canonical cmp $cell/$b"; done
@@ -215,9 +244,9 @@ done
 parse_verdicts "$OUT/results.tsv" "$OUT/roundtrips.tsv" "$OUT/verdict.json" "$OUT/verdicts.tsv" || die 'final parser and schedule validation'
 if [[ $(tail -n +2 "$OUT/results.tsv" | wc -l) != 72 || $(tail -n +2 "$OUT/roundtrips.tsv" | wc -l) != 96 || $(tail -n +2 "$OUT/verdicts.tsv" | wc -l) != 8 ]]; then die 'final structural counts'; fi
 completion_utc=$(date -u +%FT%TZ) || die 'completion timestamp'
+journal 'completion gates passed; installing marker'
 printf 'candidate_sha=%s\ncompletion_utc=%s\nresults=72\nroundtrips=96\nverdicts=8\n' "$candidate_head" "$completion_utc" >"$OUT/.DONE.STAMP.tmp" || die 'DONE.STAMP write'
 sync -f "$OUT/.DONE.STAMP.tmp" || die 'DONE.STAMP file durability'
 mv "$OUT/.DONE.STAMP.tmp" "$OUT/DONE.STAMP" || die 'DONE.STAMP atomic install'
 sync -f "$OUT" || die 'DONE.STAMP directory durability'
-journal "DONE: all assertions passed candidate_sha=$candidate_head"
 completed=1
