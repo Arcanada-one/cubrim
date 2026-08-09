@@ -10,6 +10,13 @@ readonly CUBRIM=$ROOT/cubrim-3a13f48
 readonly CUBRIM_SHA_EXPECT=d4b9fc85a242f887fb1a49bd849c35779c48b8fda04480969309f2d0bb0211cb
 readonly CODE_DIR=/root/cubr-decode-attrib-g2-code
 readonly CODE_COMMIT=3a13f486aea51470e2079ba66abb94d99fd782d9
+readonly TEST_OVERLAY=/root/cubr-decode-attrib-g2-test-overlay.patch
+readonly TEST_OVERLAY_SHA_EXPECT=b0c09568746bf7ecce5466a98b5e62166b6fbd64d98726ffd2538214d486e7ec
+readonly TEST_OVERLAY_SOURCE_COMMIT=3c06a213ce0c45ee16e1452fbe9ab2346ccb6a2a
+readonly TEST_FIXTURE_COMMIT=a3d399f57aa8ee5b7c172afd5322a7f7a1e14392
+readonly TEST_FIXTURE_TREE_EXPECT=8248283bcab58b4c4078b4a78425cd8717f165f7
+readonly TEST_FIXTURE_DIR=documentation/ephemeral/research/corpus
+readonly GENERATED_CARGO_LOCK=code/cubrim-rs/Cargo.lock
 readonly CORPUS_ROOT=/root/corpus-full/silesia
 readonly CORPUS_MANIFEST=$ROOT/corpus_manifest.tsv
 readonly OUT=/root/cubr-decode-attrib-g2-20260809
@@ -43,6 +50,7 @@ CURRENT_CELL=
 PREFLIGHT_DIR=
 CELL_RESULT=
 DECODE_RESULT=
+TEST_OVERLAY_ACTIVE=0
 
 now() { /usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ; }
 sha() { /usr/bin/sha256sum "$1" | /usr/bin/awk '{print $1}'; }
@@ -189,6 +197,16 @@ verify_binary_and_code() {
         die 'code checkout is not detached'
     fi
     [[ -z $(/usr/bin/git -C "$CODE_DIR" status --porcelain) ]] || die 'code checkout is dirty before suites'
+    [[ -f $TEST_OVERLAY && ! -L $TEST_OVERLAY ]] || die 'test overlay is missing or unsafe'
+    [[ $(sha "$TEST_OVERLAY") == "$TEST_OVERLAY_SHA_EXPECT" ]] || die 'test overlay SHA mismatch'
+    /usr/bin/git -C "$CODE_DIR" diff --no-ext-diff --binary --unified=0 "$CODE_COMMIT" "$TEST_OVERLAY_SOURCE_COMMIT" -- \
+        code/cubrim-rs/src/config.rs code/cubrim-rs/tests/differential.rs |
+        /usr/bin/cmp -s -- "$TEST_OVERLAY" - || die 'test overlay source diff mismatch'
+    /usr/bin/git -C "$CODE_DIR" apply --check "$TEST_OVERLAY" || die 'test overlay does not apply to frozen code'
+    [[ $(/usr/bin/git -C "$CODE_DIR" rev-parse "$TEST_FIXTURE_COMMIT:$TEST_FIXTURE_DIR") == "$TEST_FIXTURE_TREE_EXPECT" ]] ||
+        die 'test fixture tree mismatch'
+    [[ ! -e $CODE_DIR/$TEST_FIXTURE_DIR && ! -L $CODE_DIR/$TEST_FIXTURE_DIR ]] || die 'test fixture path exists before preparation'
+    [[ ! -e $CODE_DIR/$GENERATED_CARGO_LOCK && ! -L $CODE_DIR/$GENERATED_CARGO_LOCK ]] || die 'generated Cargo lock path exists before preparation'
 }
 
 verify_manifest_source() {
@@ -248,12 +266,83 @@ admission() {
         verify_manifest_source "$corpus" "$file" "$orig_sha" "$orig_bytes" >/dev/null
         verify_journal_archive "$corpus" "$file" "$preset" "$archive_sha"
     done
-    /usr/bin/printf 'host=%s\ntopology=%s\nload1=%s\npin=0-15\nrunner_sha256=%s\nbinary_sha256=%s\ncode_commit=%s\ncode_detached=true\ncode_clean=true\nperf_stat_smoke=PASS\nperf_record_smoke=PASS\ncorpus_manifest_cells=4/4\njournal_archive_cells=4/4\n' \
+    /usr/bin/printf 'host=%s\ntopology=%s\nload1=%s\npin=0-15\nrunner_sha256=%s\nbinary_sha256=%s\ncode_commit=%s\ncode_detached=true\ncode_clean=true\ntest_overlay_sha256=%s\ntest_overlay_source_commit=%s\ntest_overlay_apply_check=PASS\ntest_fixture_commit=%s\ntest_fixture_tree=%s\nperf_stat_smoke=PASS\nperf_record_smoke=PASS\ncorpus_manifest_cells=4/4\njournal_archive_cells=4/4\n' \
         "$host" 'cpu0-31=core0-31;cpu32-63=smt0-31' "$load" "$runner_sha" \
-        "$CUBRIM_SHA_EXPECT" "$CODE_COMMIT" >"$evidence/PROVENANCE.txt"
-    printf -v admission_record '{"t":"%s","event":"admission_pass","host":"%s","topology":"cpu0-31=core0-31;cpu32-63=smt0-31","load1":%s,"pin":"0-15","runner_sha256":"%s","binary_sha256":"%s","code_commit":"%s","code_detached":true,"code_clean":true,"perf_stat_smoke":"PASS","perf_record_smoke":"PASS","corpus_manifest_cells":"4/4","journal_archive_cells":"4/4"}' \
-        "$(now)" "$host" "$load" "$runner_sha" "$CUBRIM_SHA_EXPECT" "$CODE_COMMIT"
+        "$CUBRIM_SHA_EXPECT" "$CODE_COMMIT" "$TEST_OVERLAY_SHA_EXPECT" "$TEST_OVERLAY_SOURCE_COMMIT" \
+        "$TEST_FIXTURE_COMMIT" "$TEST_FIXTURE_TREE_EXPECT" >"$evidence/PROVENANCE.txt"
+    printf -v admission_record '{"t":"%s","event":"admission_pass","host":"%s","topology":"cpu0-31=core0-31;cpu32-63=smt0-31","load1":%s,"pin":"0-15","runner_sha256":"%s","binary_sha256":"%s","code_commit":"%s","code_detached":true,"code_clean":true,"test_overlay_sha256":"%s","test_overlay_source_commit":"%s","test_overlay_apply_check":"PASS","test_fixture_commit":"%s","test_fixture_tree":"%s","perf_stat_smoke":"PASS","perf_record_smoke":"PASS","corpus_manifest_cells":"4/4","journal_archive_cells":"4/4"}' \
+        "$(now)" "$host" "$load" "$runner_sha" "$CUBRIM_SHA_EXPECT" "$CODE_COMMIT" "$TEST_OVERLAY_SHA_EXPECT" "$TEST_OVERLAY_SOURCE_COMMIT" \
+        "$TEST_FIXTURE_COMMIT" "$TEST_FIXTURE_TREE_EXPECT"
     jlog "$admission_record"
+}
+
+verify_test_fixtures() {
+    local -a paths
+    local path
+    mapfile -t paths < <(/usr/bin/git -C "$CODE_DIR" ls-tree -r --name-only "$TEST_FIXTURE_COMMIT" -- "$TEST_FIXTURE_DIR")
+    [[ ${#paths[@]} == 10 ]] || die 'test fixture count mismatch'
+    for path in "${paths[@]}"; do
+        [[ -f $CODE_DIR/$path && ! -L $CODE_DIR/$path ]] || die "test fixture missing or unsafe: $path"
+        /usr/bin/git -C "$CODE_DIR" cat-file blob "$TEST_FIXTURE_COMMIT:$path" |
+            /usr/bin/cmp -s -- - "$CODE_DIR/$path" || die "test fixture bytes mismatch: $path"
+    done
+}
+
+prepare_test_inputs() {
+    [[ ! -e $CODE_DIR/$TEST_FIXTURE_DIR && ! -L $CODE_DIR/$TEST_FIXTURE_DIR ]] || die 'test fixture path collision'
+    [[ ! -e $CODE_DIR/$GENERATED_CARGO_LOCK && ! -L $CODE_DIR/$GENERATED_CARGO_LOCK ]] || die 'generated Cargo lock path collision'
+    /usr/bin/git -C "$CODE_DIR" archive "$TEST_FIXTURE_COMMIT" -- "$TEST_FIXTURE_DIR" |
+        /usr/bin/tar -x -C "$CODE_DIR"
+    verify_test_fixtures
+    jlog "{\"t\":\"$(now)\",\"event\":\"test_fixtures_prepared\",\"commit\":\"$TEST_FIXTURE_COMMIT\",\"tree\":\"$TEST_FIXTURE_TREE_EXPECT\"}"
+}
+
+cleanup_test_inputs() {
+    local -a paths
+    local path
+    verify_test_fixtures
+    mapfile -t paths < <(/usr/bin/git -C "$CODE_DIR" ls-tree -r --name-only "$TEST_FIXTURE_COMMIT" -- "$TEST_FIXTURE_DIR")
+    : >"$PARTIAL/test-fixtures.sha256"
+    for path in "${paths[@]}"; do
+        /usr/bin/printf '%s  %s\n' "$(sha "$CODE_DIR/$path")" "$path" >>"$PARTIAL/test-fixtures.sha256"
+    done
+    [[ -e $CODE_DIR/$GENERATED_CARGO_LOCK || -L $CODE_DIR/$GENERATED_CARGO_LOCK ]] ||
+        die 'generated Cargo lock missing after suites'
+    [[ -f $CODE_DIR/$GENERATED_CARGO_LOCK && ! -L $CODE_DIR/$GENERATED_CARGO_LOCK ]] || die 'generated Cargo lock is unsafe'
+    /usr/bin/cp -- "$CODE_DIR/$GENERATED_CARGO_LOCK" "$PARTIAL/cargo-generated.lock"
+    /usr/bin/git -C "$CODE_DIR" clean -fdX -- "$TEST_FIXTURE_DIR" "$GENERATED_CARGO_LOCK"
+    [[ ! -e $CODE_DIR/$TEST_FIXTURE_DIR && ! -L $CODE_DIR/$TEST_FIXTURE_DIR ]] || die 'test fixture cleanup failed'
+    [[ ! -e $CODE_DIR/$GENERATED_CARGO_LOCK && ! -L $CODE_DIR/$GENERATED_CARGO_LOCK ]] || die 'generated Cargo lock cleanup failed'
+    [[ -z $(/usr/bin/git -C "$CODE_DIR" status --porcelain) ]] || die 'code checkout dirty after test input cleanup'
+    jlog "{\"t\":\"$(now)\",\"event\":\"test_inputs_removed\",\"code_clean\":true}"
+}
+
+verify_test_overlay_applied() {
+    local status expected
+    status=$(/usr/bin/git -C "$CODE_DIR" status --porcelain)
+    expected=$' M code/cubrim-rs/src/config.rs\n M code/cubrim-rs/tests/differential.rs'
+    [[ $status == "$expected" ]] || die "test overlay status mismatch: $status"
+    /usr/bin/git -C "$CODE_DIR" diff --no-ext-diff --binary --unified=0 -- \
+        code/cubrim-rs/src/config.rs code/cubrim-rs/tests/differential.rs |
+        /usr/bin/cmp -s -- "$TEST_OVERLAY" - || die 'applied test overlay bytes mismatch'
+}
+
+apply_test_overlay() {
+    [[ -z $(/usr/bin/git -C "$CODE_DIR" status --porcelain) ]] || die 'code checkout dirty before test overlay'
+    /usr/bin/git -C "$CODE_DIR" apply --check "$TEST_OVERLAY" || die 'test overlay apply check failed'
+    /usr/bin/git -C "$CODE_DIR" apply "$TEST_OVERLAY" || die 'test overlay apply failed'
+    TEST_OVERLAY_ACTIVE=1
+    verify_test_overlay_applied
+    jlog "{\"t\":\"$(now)\",\"event\":\"test_overlay_applied\",\"sha256\":\"$TEST_OVERLAY_SHA_EXPECT\"}"
+}
+
+remove_test_overlay() {
+    verify_test_overlay_applied
+    /usr/bin/git -C "$CODE_DIR" apply -R --check "$TEST_OVERLAY" || die 'test overlay reverse check failed'
+    /usr/bin/git -C "$CODE_DIR" apply -R "$TEST_OVERLAY" || die 'test overlay reverse failed'
+    TEST_OVERLAY_ACTIVE=0
+    [[ -z $(/usr/bin/git -C "$CODE_DIR" status --porcelain) ]] || die 'code checkout dirty after test overlay removal'
+    jlog "{\"t\":\"$(now)\",\"event\":\"test_overlay_removed\",\"code_clean\":true}"
 }
 
 restore_suite_side_effects() {
@@ -262,6 +351,10 @@ restore_suite_side_effects() {
     [[ -n $status ]] || return 0
     while IFS= read -r line; do
         case $line in
+            " M code/cubrim-rs/src/config.rs" | " M code/cubrim-rs/tests/differential.rs")
+                (( TEST_OVERLAY_ACTIVE == 1 )) || die "unexpected test overlay state: $line"
+                continue
+                ;;
             " M $SIDE_EFFECT_28") path=$SIDE_EFFECT_28 ;;
             " M $SIDE_EFFECT_31") path=$SIDE_EFFECT_31 ;;
             *) die "unexpected suite side effect: $line" ;;
@@ -273,26 +366,50 @@ restore_suite_side_effects() {
         /usr/bin/chmod --reference="$CODE_DIR/$path" "$tmp"
         /usr/bin/mv -- "$tmp" "$CODE_DIR/$path"
     done <<<"$status"
-    [[ -z $(/usr/bin/git -C "$CODE_DIR" status --porcelain) ]] || die 'code checkout dirty after suite restore'
-    /usr/bin/printf '%s\n' "$status" >"$PARTIAL/suite-side-effects-restored.txt"
+    if (( TEST_OVERLAY_ACTIVE == 1 )); then
+        verify_test_overlay_applied
+    else
+        [[ -z $(/usr/bin/git -C "$CODE_DIR" status --porcelain) ]] || die 'code checkout dirty after suite restore'
+    fi
+    /usr/bin/printf '%s\n' "$status" >>"$PARTIAL/suite-side-effects-restored.txt"
 }
 
 run_suites() {
-    local remaining
+    local remaining suite_rc
     remaining=$(remaining_budget_seconds)
     (( remaining > 0 )) || die 'campaign budget expired before suites'
+    prepare_test_inputs
+    apply_test_overlay
     # Required exact commands: cargo test --release
+    set +e
     (cd "$CODE_DIR/code/cubrim-rs" &&
         /usr/bin/timeout --signal=TERM --kill-after=10s "${remaining}s" "$CARGO" test --release) \
-        >"$PARTIAL/cargo-test-release.log" 2>&1 || die 'cargo test --release failed'
+        >"$PARTIAL/cargo-test-release.log" 2>&1
+    suite_rc=$?
+    set -e
     restore_suite_side_effects
+    if (( suite_rc != 0 )); then
+        remove_test_overlay
+        cleanup_test_inputs
+        die 'cargo test --release failed'
+    fi
     remaining=$(remaining_budget_seconds)
-    (( remaining > 0 )) || die 'campaign budget expired before differential suite'
+    if (( remaining == 0 )); then
+        remove_test_overlay
+        cleanup_test_inputs
+        die 'campaign budget expired before differential suite'
+    fi
     # Required exact command: cargo test --release --test differential -- --nocapture
+    set +e
     (cd "$CODE_DIR/code/cubrim-rs" &&
         /usr/bin/timeout --signal=TERM --kill-after=10s "${remaining}s" "$CARGO" test --release --test differential -- --nocapture) \
-        >"$PARTIAL/cargo-test-differential.log" 2>&1 || die 'differential integration test failed'
+        >"$PARTIAL/cargo-test-differential.log" 2>&1
+    suite_rc=$?
+    set -e
     restore_suite_side_effects
+    remove_test_overlay
+    cleanup_test_inputs
+    (( suite_rc == 0 )) || die 'differential integration test failed'
     jlog "{\"t\":\"$(now)\",\"event\":\"suites_pass\"}"
 }
 
@@ -497,6 +614,7 @@ main_run() {
     DEADLINE_MONOTONIC=$(( $(monotonic_seconds) + CAMPAIGN_BUDGET_SECONDS ))
     trap on_exit EXIT
     /usr/bin/cp -- "${BASH_SOURCE[0]}" "$PARTIAL/decode-attrib-run.sh"
+    /usr/bin/cp -- "$TEST_OVERLAY" "$PARTIAL/decode-attrib-g2-test-overlay.patch"
     printf -v run_start_record '{"t":"%s","event":"run_start","pin":"0-15","threads":4,"budget_s":%s,"deadline_monotonic_s":%s}' \
         "$(now)" "$CAMPAIGN_BUDGET_SECONDS" "$DEADLINE_MONOTONIC"
     jlog "$run_start_record"

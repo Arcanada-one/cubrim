@@ -40,6 +40,9 @@ taskset -c 0-15
 /root/corpus-full/silesia
 d4b9fc85a242f887fb1a49bd849c35779c48b8fda04480969309f2d0bb0211cb
 3a13f48
+b0c09568746bf7ecce5466a98b5e62166b6fbd64d98726ffd2538214d486e7ec
+a3d399f57aa8ee5b7c172afd5322a7f7a1e14392
+8248283bcab58b4c4078b4a78425cd8717f165f7
 cargo test --release
 cargo test --release --test differential -- --nocapture
 cmp --
@@ -123,10 +126,11 @@ git commit -m "research: harden NEW-24 attribution admission"
 **Files:**
 - Modify: `documentation/ephemeral/research/decode-attrib-run.sh`
 - Modify: `documentation/ephemeral/research/decode-attrib-run-test.sh`
+- Create: `documentation/ephemeral/research/decode-attrib-g2-test-overlay.patch`
 
 - [ ] **Step 1: Run exact-code suites before any cell**
 
-Run `/root/.cargo/bin/cargo test --release` and `/root/.cargo/bin/cargo test --release --test differential -- --nocapture` in the detached `3a13f48` checkout. The focused target is the round-trip/back-compat integration target that actually exists at the frozen commit; the later `scheme_roundtrip` target is not present and must not be overlaid. If the suites modify the two known tracked benchmark JSON files, verify that exact allowlist, restore their HEAD blobs atomically, and prove the checkout clean; any other side effect fails the campaign.
+First prove the detached `3a13f48` checkout exact-clean. Authenticate and materialise the exact ten-fixture tree from repository commit `a3d399f57…`, then authenticate and apply `decode-attrib-g2-test-overlay.patch`, the exact four-line test-only repair from repository commit `3c06a213…`. Verify the fixture tree/blob identities, overlay SHA, and exact two-path diff, then run `/root/.cargo/bin/cargo test --release` and `/root/.cargo/bin/cargo test --release --test differential -- --nocapture`. The focused target is the round-trip/back-compat integration target that actually exists at the frozen commit; the later `scheme_roundtrip` target is not present and must not be overlaid. If the suites modify the two known tracked benchmark JSON files, verify that exact allowlist and restore their HEAD blobs atomically. Reverse the overlay, capture the generated Cargo lock and fixture SHA manifest, remove the suite-only inputs, and prove the checkout exact-clean before any measurement; any other side effect fails the campaign.
 
 - [ ] **Step 2: Resolve and freeze every source through the manifest**
 
