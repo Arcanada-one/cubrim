@@ -1,0 +1,6 @@
+prediction	status	detail_json
+P1	NOT-EVALUATED	{"admissible":false,"reason":"The attribution join failed before any target-share predicate could be evaluated.","reason_code":"PERF_MAP_SYMBOL_NAMESPACE_MISMATCH"}
+P2	NOT-EVALUATED	{"admissible":false,"reason":"The attribution join failed before any target-share predicate could be evaluated.","reason_code":"PERF_MAP_SYMBOL_NAMESPACE_MISMATCH"}
+P3	NOT-EVALUATED	{"admissible":false,"reason":"The attribution join failed before any target-share predicate could be evaluated.","reason_code":"PERF_MAP_SYMBOL_NAMESPACE_MISMATCH"}
+P4	NOT-EVALUATED	{"admissible":false,"reason":"The attribution join failed before any target-share predicate could be evaluated.","reason_code":"PERF_MAP_SYMBOL_NAMESPACE_MISMATCH"}
+P5	NOT-EVALUATED	{"admissible":false,"reason":"The attribution join failed before any target-share predicate could be evaluated.","reason_code":"PERF_MAP_SYMBOL_NAMESPACE_MISMATCH"}

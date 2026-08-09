@@ -1,0 +1,8 @@
+objdump_version=GNU objdump (GNU Binutils for Ubuntu) 2.42
+addr2line_version=GNU addr2line (GNU Binutils for Ubuntu) 2.42
+perf_version=perf version 6.8.12
+readelf_version=GNU readelf (GNU Binutils for Ubuntu) 2.42
+objdump_raw_command=/usr/bin/objdump --disassemble --line-numbers BINARY
+objdump_demangled_command=/usr/bin/objdump --disassemble --line-numbers --demangle BINARY
+addr2line_command=/usr/bin/addr2line -a -f -C -i -e BINARY
+perf_script_command=/usr/bin/perf script --show-lost-events -F period,ip,sym,symoff,dso

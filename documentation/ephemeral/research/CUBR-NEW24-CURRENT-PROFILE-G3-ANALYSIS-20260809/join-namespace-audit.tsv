@@ -1,0 +1,16 @@
+metric	value
+binary_dso	/root/cubr-new24-current-profile-g3-target/release/cubrim
+exact_join_key_intersection_count	0
+join_contract	exact (dso, symbol_offset) equality
+limitation	No demangling, address salvage, normalization, or post-hoc attribution is admissible for the frozen campaign.
+map_join_key_count	9412
+map_mangled_join_key_count	9412
+perf_demangled_join_key_count	2550
+perf_exact_binary_sample_rows	414343
+perf_exact_binary_sample_rows_by_file	{"dickens.max/perf1.script.txt":91035,"dickens.max/perf2.script.txt":91206,"dickens.web/perf1.script.txt":78052,"dickens.web/perf2.script.txt":78215,"xml.max/perf1.script.txt":37912,"xml.max/perf2.script.txt":37923}
+perf_record_count	6
+perf_script_paths	["dickens.max/perf1.script.txt","dickens.max/perf2.script.txt","xml.max/perf1.script.txt","xml.max/perf2.script.txt","dickens.web/perf1.script.txt","dickens.web/perf2.script.txt"]
+perf_unique_join_key_count	2550
+reason_code	PERF_MAP_SYMBOL_NAMESPACE_MISMATCH
+reattribution_performed	false
+status	FAIL
