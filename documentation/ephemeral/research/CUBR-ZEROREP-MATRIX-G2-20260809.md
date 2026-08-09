@@ -90,7 +90,11 @@ must contain **only** the following changes relative to the original
    suite command line using `"$CARGO" test --release` and
    `"$CARGO" test --release --test scheme_roundtrip`. Replacing either command
    position with `"$CARGO_PROGRAM"` must fail self-test even though it adds no
-   lowercase source token.
+   lowercase source token. The guard must explicitly reject quoted, braced, or
+   unquoted `$CARGO_PROGRAM` in shell command position and must freeze the
+   reviewed total count of the `CARGO_PROGRAM` identifier. A mutation that
+   changes both live commands and hides copies of the expected lines inside an
+   `if false; then ... fi` decoy block must fail.
 5. Correct the inherited checkout-cleanliness helper so a failed `git status`
    is fatal; only a successful command with empty output is accepted as clean.
 6. Before the Rust suite, verify the exact generation-1 root in §7: the five
