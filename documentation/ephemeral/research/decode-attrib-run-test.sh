@@ -3,6 +3,7 @@
 # Literal regex contracts intentionally contain shell-looking tokens.
 # shellcheck disable=SC2016
 set -euo pipefail
+IFS=$'\n\t'
 export LC_ALL=C
 
 TEST_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -103,6 +104,7 @@ reject_fixed '/usr/bin/mapfile'
 reject_fixed '/usr/bin/date +%s'
 reject_fixed '/usr/bin/psql'
 reject_fixed 'if ! run_cell'
+require_fixed "IFS=\$'\\n\\t'"
 require_regex '^[[:space:]]*(readonly[[:space:]]+)?OUT=/root/cubr-decode-attrib-g2-20260809$' 'exact G2 OUT assignment'
 require_regex '^[[:space:]]*local corpus=\$1 file=\$2 preset=\$3 want_sha=\$4$' 'journal inputs bind before journal path'
 require_regex '^[[:space:]]*local journal=\$ROOT/journal\.\$preset\.jsonl$' 'journal path binds after preset'

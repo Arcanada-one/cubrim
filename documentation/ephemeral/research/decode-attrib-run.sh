@@ -2,6 +2,7 @@
 # Fail-closed Generation G2 decode-time attribution runner for NEW-24.
 # Protocol: CUBR-DECODE-ATTRIB-20260809.md plus its 2026-08-09 amendment.
 set -euo pipefail
+IFS=$'\n\t'
 export LC_ALL=C
 
 readonly ROOT=/root/phaseC
