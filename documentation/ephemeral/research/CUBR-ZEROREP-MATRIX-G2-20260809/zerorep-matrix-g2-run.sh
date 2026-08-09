@@ -81,18 +81,36 @@ suite_contract_lines() {
  scheme_tail=" test --release --test scheme_roundtrip ) >\"\$OUT/\${CARGO_PROGRAM}-test-scheme-roundtrip.log\" 2>&1 || die ${quote}scheme roundtrip test${quote}"
  printf '%s\n' "$prefix$command_ref$release_tail" "$prefix$command_ref$scheme_tail"
 }
-source_contract() {
- local source=$1 count expected line_count
+suite_lines_exact_once() {
+ local source=$1 expected line_count
  local -a suite_lines
- count=$(grep -oF "$CARGO_PROGRAM" "$source" | wc -l) || return 1
- [[ $count == 2 ]] || return 1
- grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" "$source" || return 1
  mapfile -t suite_lines < <(suite_contract_lines)
  [[ ${#suite_lines[@]} == 2 ]] || return 1
  for expected in "${suite_lines[@]}"; do
   line_count=$(awk -v expected="$expected" '$0 == expected { count++ } END { print count + 0 }' "$source") || return 1
   [[ $line_count == 1 ]] || return 1
  done
+}
+program_command_refs_absent() {
+ local source=$1 identifier='CARGO_' prefix reference suffix pattern status
+ identifier+='PROGRAM'
+ prefix='(^[[:space:]]*|(^|[;&|()])[[:space:]]*|(^|[[:space:]])(if|then|elif|while|until|do|!|time|command)[[:space:]]+|(^|[[:space:]])env([[:space:]]+[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+)*[[:space:]]+)'
+ reference="\"?\\\$(\\{${identifier}\\}|${identifier})\"?"
+ suffix='([[:space:];&|()]|$)'
+ pattern="${prefix}${reference}${suffix}"
+ if grep -nE "$pattern" "$source" >/dev/null; then return 1; else status=$?; fi
+ [[ $status == 1 ]]
+}
+source_contract() {
+ local source=$1 count identifier='CARGO_' identifier_count
+ identifier+='PROGRAM'
+ count=$(grep -oF "$CARGO_PROGRAM" "$source" | wc -l) || return 1
+ [[ $count == 2 ]] || return 1
+ grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" "$source" || return 1
+ identifier_count=$(grep -oF "$identifier" "$source" | wc -l) || return 1
+ [[ $identifier_count == 15 ]] || return 1
+ program_command_refs_absent "$source" || return 1
+ suite_lines_exact_once "$source"
 }
 mutate_exact_line() {
  local source=$1 expected=$2 replacement=$3 output=$4
@@ -208,7 +226,7 @@ PY
 self_test() {
  local d; d=$(mktemp -d); trap 'rm -rf "$d"' RETURN
  source_contract "${BASH_SOURCE[0]}" || return 1
- local mutation_index=0 unsafe_form mutation_source suite_line replacement dollar='$' double_quote='"' command_ref program_ref
+ local mutation_index=0 unsafe_form mutation_source suite_line replacement dollar='$' double_quote='"' command_ref program_ref program_name=${CARGO##*/}
  local -a suite_lines
  command_ref="${double_quote}${dollar}CARGO${double_quote}"; program_ref="${double_quote}${dollar}CARGO_PROGRAM${double_quote}"
  mapfile -t suite_lines < <(suite_contract_lines); [[ ${#suite_lines[@]} == 2 ]] || return 1
@@ -221,13 +239,36 @@ self_test() {
   grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" "$mutation_source" || return 1
   ! source_contract "$mutation_source" || return 1
  done
+ local identifier='CARGO_' combined_first combined_source
+ identifier+='PROGRAM'
+ local -a command_refs=(
+  "${double_quote}${dollar}${identifier}${double_quote}"
+  "${double_quote}${dollar}{${identifier}}${double_quote}"
+  "${dollar}${identifier}"
+  "${dollar}{${identifier}}"
+ )
+ for program_ref in "${command_refs[@]}"; do
+  mutation_index=$((mutation_index + 1)); mutation_source="$d/variable-command-mutation-$mutation_index.sh"
+  cp "${BASH_SOURCE[0]}" "$mutation_source"; printf '\n%s --version\n' "$program_ref" >>"$mutation_source"
+  ! program_command_refs_absent "$mutation_source" || return 1
+  ! source_contract "$mutation_source" || return 1
+ done
+ combined_first="$d/combined-first.sh"; combined_source="$d/combined-dead-branch.sh"
+ replacement=${suite_lines[0]/"$command_ref"/"${command_refs[0]}"}
+ mutate_exact_line "${BASH_SOURCE[0]}" "${suite_lines[0]}" "$replacement" "$combined_first" || return 1
+ replacement=${suite_lines[1]/"$command_ref"/"${command_refs[0]}"}
+ mutate_exact_line "$combined_first" "${suite_lines[1]}" "$replacement" "$combined_source" || return 1
+ printf '\nif false; then\n%s\n%s\nfi\n' "${suite_lines[0]}" "${suite_lines[1]}" >>"$combined_source"
+ suite_lines_exact_once "$combined_source" || return 1
+ ! program_command_refs_absent "$combined_source" || return 1
+ ! source_contract "$combined_source" || return 1
  local -a unsafe_forms=(
-  "if $CARGO_PROGRAM; then :; fi"
-  "! $CARGO_PROGRAM"
-  "( $CARGO_PROGRAM )"
-  "time $CARGO_PROGRAM"
-  "command $CARGO_PROGRAM"
-  "env X=1 $CARGO_PROGRAM"
+  "if $program_name; then :; fi"
+  "! $program_name"
+  "( $program_name )"
+  "time $program_name"
+  "command $program_name"
+  "env X=1 $program_name"
  )
  for unsafe_form in "${unsafe_forms[@]}"; do
   mutation_index=$((mutation_index + 1)); mutation_source="$d/source-mutation-$mutation_index.sh"
