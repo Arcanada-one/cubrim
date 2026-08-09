@@ -9244,7 +9244,213 @@ fn gm_o2(map: &mut std::collections::HashMap<usize, CmCtx>, key: usize, a: usize
     map.entry(key).or_insert_with(|| CmCtx::new(a))
 }
 
-fn gm_mix_encode(bwt_out: &[usize], a: usize, inc: u32, lr: f64, ln: &[f64]) -> Vec<u8> {
+// ─── NEW-08: competed identity-init APM (SSE) calibration stage over the geomix coder ───
+//
+// One APM stage refining the per-symbol probability of the geometric mix before range
+// coding (prereg: documentation/ephemeral/research/CUBR-NEW08-APM-20260809.md; probe:
+// probes-20260809/probe_new08_sse.py — table shape, stretch scale, blend and update rate
+// are mirrored from the probe). 33-knot interpolated table over quantised stretch(p),
+// context = low 9 bits of the coder's order-1 symbol context (512 rows). Identity-
+// initialised AND virgin-tracked: a cell pair that has never been updated returns the
+// input probability byte-exactly, so the untrained stage is a strict no-op on the coded
+// stream (the probe's squash-knot init alone is only approximately identity — the virgin
+// check makes it exact, which the wire byte-identity guarantee requires). Competed per
+// block by the encoder: the APM arm is emitted only when STRICTLY smaller than the best
+// no-APM arm (ties → incumbent), with the flag in the high bit of the wire lr_idx byte.
+// Old decoders validate the raw lr byte against GM_LRS and reject a flagged block with
+// "lr_idx out of range" — fail closed, never corrupt.
+
+/// 12-bit probability domain of the APM stage (probe parity).
+const GM_APM_PSCALE: u32 = 4096;
+/// Interpolation knots per context row.
+const GM_APM_KNOTS: usize = 33;
+/// Context rows (low 9 bits of the order-1 symbol context).
+const GM_APM_NCTX: usize = 512;
+/// Wire flag: high bit of the lr_idx byte marks an APM-coded geomix payload.
+const GM_APM_FLAG: u8 = 0x80;
+
+/// Shared stretch table st(p) = round(256·ln(p/(1−p))) clamped to ±2047, plus the
+/// identity knot values squash(knot stretch) used to initialise every row.
+fn gm_apm_tables() -> &'static (Vec<i32>, [u16; GM_APM_KNOTS]) {
+    static T: std::sync::OnceLock<(Vec<i32>, [u16; GM_APM_KNOTS])> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let mut st = vec![0i32; GM_APM_PSCALE as usize];
+        for (p, slot) in st.iter_mut().enumerate().skip(1) {
+            let x = ((p as f64) / ((GM_APM_PSCALE as usize - p) as f64)).ln() * 256.0;
+            *slot = (x.round() as i32).clamp(-2047, 2047);
+        }
+        st[0] = -2047;
+        let mut knots = [0u16; GM_APM_KNOTS];
+        for (i, k) in knots.iter_mut().enumerate() {
+            let x = (i as f64) * 2.0 * 2048.0 / 32.0 - 2048.0;
+            let p = (GM_APM_PSCALE as f64) / (1.0 + (-x / 256.0).exp());
+            *k = (p.round() as i64).clamp(1, GM_APM_PSCALE as i64 - 1) as u16;
+        }
+        (st, knots)
+    })
+}
+
+/// Identity-initialised APM over quantised stretch(p) with virgin-cell tracking.
+/// Deterministic integer state, updated identically on encode and decode.
+struct GmApm {
+    t: Vec<u16>,
+    virgin: Vec<bool>,
+}
+
+impl GmApm {
+    fn new() -> Self {
+        let (_, knots) = gm_apm_tables();
+        let mut t = Vec::with_capacity(GM_APM_NCTX * GM_APM_KNOTS);
+        for _ in 0..GM_APM_NCTX {
+            t.extend_from_slice(knots);
+        }
+        GmApm {
+            t,
+            virgin: vec![true; GM_APM_NCTX * GM_APM_KNOTS],
+        }
+    }
+
+    /// Refine a 12-bit probability under context row `ctx`. Returns
+    /// (refined p, cell base, interpolation weight, exact). `exact` = both involved
+    /// cells are untrained and the input was returned unchanged (byte-exact no-op).
+    #[inline]
+    fn refine(&self, p12: u32, ctx: usize) -> (u32, usize, u32, bool) {
+        let (st, _) = gm_apm_tables();
+        let v = (st[p12 as usize] + 2048) as u32; // 1..=4095
+        let pos = v * 32;
+        let lo = ((pos >> 12) as usize).min(GM_APM_KNOTS - 2);
+        let wfrac = pos - ((lo as u32) << 12); // 0..=4095
+        let base = ctx * GM_APM_KNOTS + lo;
+        if self.virgin[base] && self.virgin[base + 1] {
+            return (p12, base, wfrac, true);
+        }
+        let pa = ((self.t[base] as u32) * (4096 - wfrac) + (self.t[base + 1] as u32) * wfrac)
+            >> 12;
+        let pa = pa.clamp(1, GM_APM_PSCALE - 1);
+        // Final blend (p + 3·p_apm)/4 — same shape the probe and apm5 use.
+        let pf = ((p12 + 3 * pa) >> 2).clamp(1, GM_APM_PSCALE - 1);
+        (pf, base, wfrac, false)
+    }
+
+    /// Move the two involved knots toward the observed a-ary outcome (probe rate:
+    /// (g − t)·weight ≫ 14) and mark them trained.
+    #[inline]
+    fn update(&mut self, base: usize, wfrac: u32, bit: bool) {
+        let g = (bit as i32) << 12;
+        let t0 = self.t[base] as i32;
+        let t1 = self.t[base + 1] as i32;
+        let n0 = t0 + (((g - t0) * (4096 - wfrac as i32)) >> 14);
+        let n1 = t1 + (((g - t1) * (wfrac as i32)) >> 14);
+        self.t[base] = n0.clamp(1, GM_APM_PSCALE as i32 - 1) as u16;
+        self.t[base + 1] = n1.clamp(1, GM_APM_PSCALE as i32 - 1) as u16;
+        self.virgin[base] = false;
+        self.virgin[base + 1] = false;
+    }
+}
+
+/// Per-step scratch for the APM stage (one slot per alphabet symbol).
+struct GmApmScratch {
+    apm: GmApm,
+    pf: Vec<u32>,
+    base: Vec<usize>,
+    wf: Vec<u32>,
+}
+
+impl GmApmScratch {
+    fn new(a: usize) -> Self {
+        GmApmScratch {
+            apm: GmApm::new(),
+            pf: vec![0u32; a],
+            base: vec![0usize; a],
+            wf: vec![0u32; a],
+        }
+    }
+
+    /// Refine the whole mixed distribution `ex/z` for this step. If any involved cell
+    /// is trained, rebuild `q` from the refined weights; otherwise leave the base
+    /// quantisation untouched (byte-exact identity while untrained).
+    #[inline]
+    fn refine_step(&mut self, ex: &[f64], z: f64, a: usize, prev1: usize, q: &mut [u32]) {
+        let ctx = prev1 & (GM_APM_NCTX - 1);
+        let mut all_exact = true;
+        for x in 0..a {
+            let p = ex[x] / z;
+            let mut p12 = (p * GM_APM_PSCALE as f64) as u32;
+            p12 = p12.clamp(1, GM_APM_PSCALE - 1);
+            let (pf, base, wf, exact) = self.apm.refine(p12, ctx);
+            self.pf[x] = pf;
+            self.base[x] = base;
+            self.wf[x] = wf;
+            all_exact &= exact;
+        }
+        if !all_exact {
+            gm_apm_quantize(&self.pf, a, q);
+        }
+    }
+
+    /// Train every involved cell with the a-ary outcome: positive for the coded
+    /// symbol, negative for every other candidate — the calibration semantics.
+    #[inline]
+    fn update_step(&mut self, a: usize, s: usize) {
+        for x in 0..a {
+            self.apm.update(self.base[x], self.wf[x], x == s);
+        }
+    }
+}
+
+/// Quantise the refined integer weights to a frequency table summing to CM_MIX_TOTAL
+/// (floor 1, reconcile on the max symbol — same scheme as gm_predict).
+fn gm_apm_quantize(wts: &[u32], a: usize, q: &mut [u32]) {
+    let mut s: u64 = 0;
+    for &w in &wts[..a] {
+        s += w as u64;
+    }
+    let mut sum: u32 = 0;
+    let mut maxv: u32 = 0;
+    let mut maxi: usize = 0;
+    for x in 0..a {
+        let mut qv = ((wts[x] as f64 / s as f64) * CM_MIX_TOTAL as f64 + 0.5) as u32;
+        if qv < 1 {
+            qv = 1;
+        }
+        q[x] = qv;
+        sum += qv;
+        if qv > maxv {
+            maxv = qv;
+            maxi = x;
+        }
+    }
+    if sum < CM_MIX_TOTAL {
+        q[maxi] += CM_MIX_TOTAL - sum;
+    } else if sum > CM_MIX_TOTAL {
+        let mut surplus = sum - CM_MIX_TOTAL;
+        while surplus > 0 {
+            let mut mi = 0usize;
+            let mut mv = 0u32;
+            for (x, &qx) in q.iter().enumerate().take(a) {
+                if qx > mv {
+                    mv = qx;
+                    mi = x;
+                }
+            }
+            let take = surplus.min(q[mi] - 1);
+            if take == 0 {
+                break;
+            }
+            q[mi] -= take;
+            surplus -= take;
+        }
+    }
+}
+
+fn gm_mix_encode(
+    bwt_out: &[usize],
+    a: usize,
+    inc: u32,
+    lr: f64,
+    ln: &[f64],
+    use_apm: bool,
+) -> Vec<u8> {
     let mut o2: std::collections::HashMap<usize, CmCtx> = std::collections::HashMap::new();
     let mut o1: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
     let mut o0 = CmCtx::new(a);
@@ -9254,6 +9460,11 @@ fn gm_mix_encode(bwt_out: &[usize], a: usize, inc: u32, lr: f64, ln: &[f64]) -> 
     let mut lnp0 = vec![0.0f64; a];
     let mut ex = vec![0.0f64; a];
     let mut q = vec![0u32; a];
+    let mut apm = if use_apm {
+        Some(GmApmScratch::new(a))
+    } else {
+        None
+    };
     let mut enc = CmRangeEncoder::new();
     let mut prev2 = 0usize;
     let mut prev1 = 0usize;
@@ -9280,12 +9491,18 @@ fn gm_mix_encode(bwt_out: &[usize], a: usize, inc: u32, lr: f64, ln: &[f64]) -> 
                 &mut q,
             )
         };
+        if let Some(ap) = apm.as_mut() {
+            ap.refine_step(&ex, z, a, prev1, &mut q);
+        }
         let mut cum = 0u32;
         for &f in &q[..s] {
             cum += f;
         }
         enc.encode(cum, q[s], CM_MIX_TOTAL);
         gm_update_weights(&mut w, &lnp2, &lnp1, &lnp0, &ex, z, a, s, lr);
+        if let Some(ap) = apm.as_mut() {
+            ap.update_step(a, s);
+        }
         gm_o2(&mut o2, key, a).update(s, inc);
         o1[prev1].update(s, inc);
         o0.update(s, inc);
@@ -9302,6 +9519,7 @@ fn gm_mix_decode(
     inc: u32,
     lr: f64,
     ln: &[f64],
+    use_apm: bool,
 ) -> Vec<usize> {
     let mut o2: std::collections::HashMap<usize, CmCtx> = std::collections::HashMap::new();
     let mut o1: Vec<CmCtx> = (0..a).map(|_| CmCtx::new(a)).collect();
@@ -9312,6 +9530,11 @@ fn gm_mix_decode(
     let mut lnp0 = vec![0.0f64; a];
     let mut ex = vec![0.0f64; a];
     let mut q = vec![0u32; a];
+    let mut apm = if use_apm {
+        Some(GmApmScratch::new(a))
+    } else {
+        None
+    };
     let mut dec = CmRangeDecoder::new(payload);
     let mut out = Vec::with_capacity(count.min(DECODE_PREALLOC_CAP));
     let mut prev2 = 0usize;
@@ -9337,6 +9560,9 @@ fn gm_mix_decode(
                 &mut q,
             )
         };
+        if let Some(ap) = apm.as_mut() {
+            ap.refine_step(&ex, z, a, prev1, &mut q);
+        }
         let dv = dec.get_freq(CM_MIX_TOTAL);
         let mut cum = 0u32;
         let mut s = 0usize;
@@ -9349,6 +9575,9 @@ fn gm_mix_decode(
         }
         dec.decode(cum, q[s], CM_MIX_TOTAL);
         gm_update_weights(&mut w, &lnp2, &lnp1, &lnp0, &ex, z, a, s, lr);
+        if let Some(ap) = apm.as_mut() {
+            ap.update_step(a, s);
+        }
         gm_o2(&mut o2, key, a).update(s, inc);
         o1[prev1].update(s, inc);
         o0.update(s, inc);
@@ -9391,9 +9620,19 @@ fn gm_sweep_combos() -> Vec<(u32, usize)> {
 }
 
 /// Encode the value-code stream with BWT + geometric context-mixing. The encoder sweeps
-/// GM_INCS × GM_LRS and keeps the smallest payload.
-/// Wire: [primary u16][inc u8][lr_idx u8][rc_len u32][rc].
+/// GM_INCS × GM_LRS (both without and with the NEW-08 APM stage) and keeps the smallest
+/// payload; the APM arm is kept only when STRICTLY smaller than the best no-APM arm
+/// (ties resolve to the incumbent, keeping the output old-decoder-readable).
+/// Wire: [primary u16][inc u8][lr u8 = apm_flag(0x80)|lr_idx][rc_len u32][rc].
 pub(crate) fn bwt_geomix_encode(seq_codes: &[usize], n_distinct: usize) -> Option<Vec<u8>> {
+    bwt_geomix_encode_impl(seq_codes, n_distinct, true)
+}
+
+fn bwt_geomix_encode_impl(
+    seq_codes: &[usize],
+    n_distinct: usize,
+    enable_apm: bool,
+) -> Option<Vec<u8>> {
     // v1 BWT wire stores the primary index in two bytes; a block this long
     // cannot be represented. Withdraw from the competition rather than
     // truncate — see bwt_wire_can_represent().
@@ -9407,26 +9646,49 @@ pub(crate) fn bwt_geomix_encode(seq_codes: &[usize], n_distinct: usize) -> Optio
     let mut best_lr_idx = 0u8;
     let mut best_payload: Vec<u8> = Vec::new();
     let mut have = false;
+    // Best APM-arm candidate, tracked separately so the tie rule is exact:
+    // the flag is set only when the APM arm beats the best no-APM arm STRICTLY.
+    let mut apm_inc = GM_INCS[0];
+    let mut apm_lr_idx = 0u8;
+    let mut apm_payload: Vec<u8> = Vec::new();
+    let mut apm_have = false;
 
     if a > 0 && !bwt_out.is_empty() {
         let ln = gm_ln_table(CM_RESCALE + 128);
         let sweep = gm_sweep_combos();
         for &(inc, li) in &sweep {
             let lr = GM_LRS[li];
-            let p = gm_mix_encode(&bwt_out, a, inc, lr, &ln);
+            let p = gm_mix_encode(&bwt_out, a, inc, lr, &ln, false);
             if !have || p.len() < best_payload.len() {
                 best_payload = p;
                 best_inc = inc;
                 best_lr_idx = li as u8;
                 have = true;
             }
+            if enable_apm {
+                let pa = gm_mix_encode(&bwt_out, a, inc, lr, &ln, true);
+                if !apm_have || pa.len() < apm_payload.len() {
+                    apm_payload = pa;
+                    apm_inc = inc;
+                    apm_lr_idx = li as u8;
+                    apm_have = true;
+                }
+            }
         }
+    }
+
+    let mut apm_won = false;
+    if apm_have && apm_payload.len() < best_payload.len() {
+        best_payload = apm_payload;
+        best_inc = apm_inc;
+        best_lr_idx = apm_lr_idx;
+        apm_won = true;
     }
 
     let mut out = Vec::with_capacity(8 + best_payload.len());
     out.extend_from_slice(&primary.to_be_bytes());
     out.push(best_inc as u8);
-    out.push(best_lr_idx);
+    out.push(best_lr_idx | if apm_won { GM_APM_FLAG } else { 0 });
     out.extend_from_slice(&(best_payload.len() as u32).to_be_bytes());
     out.extend_from_slice(&best_payload);
     Some(out)
@@ -9439,6 +9701,20 @@ pub(crate) fn bwt_geomix_decode(
     count: usize,
     n_distinct: usize,
 ) -> Result<(Vec<usize>, usize), CubrimError> {
+    bwt_geomix_decode_impl(blob, offset, count, n_distinct, true)
+}
+
+/// `apm_supported = false` reproduces the pre-NEW-08 parse byte-for-byte: the raw lr
+/// byte is validated against GM_LRS without masking, so an APM-flagged block
+/// (lr byte ≥ 0x80) fails closed with "lr_idx out of range" exactly as an old decoder
+/// does. Used by tests to prove the fail-closed property of the legacy parse.
+fn bwt_geomix_decode_impl(
+    blob: &[u8],
+    offset: usize,
+    count: usize,
+    n_distinct: usize,
+    apm_supported: bool,
+) -> Result<(Vec<usize>, usize), CubrimError> {
     if offset + 8 > blob.len() {
         return Err(CubrimError::Decode(
             "BwtGeoMix: blob too short for header".into(),
@@ -9446,7 +9722,7 @@ pub(crate) fn bwt_geomix_decode(
     }
     let primary = u16::from_be_bytes([blob[offset], blob[offset + 1]]);
     let inc = blob[offset + 2] as u32;
-    let lr_idx = blob[offset + 3] as usize;
+    let lr_field = blob[offset + 3] as usize;
     let rc_len = u32::from_be_bytes([
         blob[offset + 4],
         blob[offset + 5],
@@ -9468,11 +9744,19 @@ pub(crate) fn bwt_geomix_decode(
     let bwt_out: Vec<usize> = if count == 0 || n_distinct == 0 {
         vec![]
     } else {
+        let (use_apm, lr_idx) = if apm_supported {
+            (
+                (lr_field & GM_APM_FLAG as usize) != 0,
+                lr_field & (GM_APM_FLAG as usize - 1),
+            )
+        } else {
+            (false, lr_field)
+        };
         if lr_idx >= GM_LRS.len() {
             return Err(CubrimError::Decode("BwtGeoMix: lr_idx out of range".into()));
         }
         let ln = gm_ln_table(CM_RESCALE + 128);
-        gm_mix_decode(payload, count, n_distinct, inc, GM_LRS[lr_idx], &ln)
+        gm_mix_decode(payload, count, n_distinct, inc, GM_LRS[lr_idx], &ln, use_apm)
     };
 
     let seq_codes = bwt_decode_codes(&bwt_out, primary, n_distinct)?;
@@ -11007,6 +11291,130 @@ mod tests {
         assert!(
             exercised,
             "no corpus payload drove the primary index past u16::MAX; this test proves nothing"
+        );
+    }
+
+    // ─── NEW-08: competed identity-init APM over the geomix coder ────────────────
+
+    /// Untrained APM stage is a byte-exact no-op: refine() on a virgin table returns
+    /// the input probability unchanged for every representable probability and
+    /// context, and a coded stream whose steps involve only virgin cells is
+    /// byte-identical with and without the stage.
+    #[test]
+    fn geomix_apm_untrained_stage_is_byte_exact_identity() {
+        let apm = super::GmApm::new();
+        for &ctx in &[0usize, 7, 255, super::GM_APM_NCTX - 1] {
+            for p12 in 1..super::GM_APM_PSCALE {
+                let (pf, _, _, exact) = apm.refine(p12, ctx);
+                assert!(exact, "virgin cells must report exact (p={p12}, ctx={ctx})");
+                assert_eq!(
+                    pf, p12,
+                    "untrained APM must return input unchanged (p={p12}, ctx={ctx})"
+                );
+            }
+        }
+        // Stream level: predict precedes the first update, so a single-symbol stream
+        // must be byte-identical across the two arms.
+        let ln = super::gm_ln_table(super::CM_RESCALE + 128);
+        let bwt = vec![0usize];
+        let base = super::gm_mix_encode(&bwt, 2, super::GM_INCS[0], super::GM_LRS[0], &ln, false);
+        let with = super::gm_mix_encode(&bwt, 2, super::GM_INCS[0], super::GM_LRS[0], &ln, true);
+        assert_eq!(base, with, "untrained stage must not change coded bytes");
+    }
+
+    /// Flag round-trip: an APM-coded payload carrying the wire flag decodes to the
+    /// original codes through the public decoder, and the trained stage genuinely
+    /// diverges from the base coder (guards against a silently-inert stage).
+    #[test]
+    fn geomix_apm_flag_round_trip() {
+        let mut codes = Vec::with_capacity(4096);
+        let mut x = 1u32;
+        for i in 0..4096usize {
+            x = x.wrapping_mul(1103515245).wrapping_add(12345);
+            let s = if x % 100 < 85 {
+                i % 3
+            } else {
+                (x as usize >> 16) % 7
+            };
+            codes.push(s);
+        }
+        let n = 7usize;
+        let (bwt_out, primary) = super::bwt_encode_codes(&codes);
+        let ln = super::gm_ln_table(super::CM_RESCALE + 128);
+        let inc = super::GM_INCS[1];
+        let payload = super::gm_mix_encode(&bwt_out, n, inc, super::GM_LRS[0], &ln, true);
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&primary.to_be_bytes());
+        blob.push(inc as u8);
+        blob.push(super::GM_APM_FLAG); // lr_idx 0 + APM flag
+        blob.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        blob.extend_from_slice(&payload);
+        let (decoded, consumed) = super::bwt_geomix_decode(&blob, 0, codes.len(), n)
+            .expect("new decoder must read an APM-flagged block");
+        assert_eq!(consumed, blob.len(), "consumed length must cover the blob");
+        assert_eq!(decoded, codes, "flagged payload must round-trip");
+        let base_payload = super::gm_mix_encode(&bwt_out, n, inc, super::GM_LRS[0], &ln, false);
+        assert_ne!(
+            payload, base_payload,
+            "trained APM arm must produce a different coded stream than the base arm"
+        );
+    }
+
+    /// Old decoders must fail closed on an APM-flagged block: the pre-NEW-08 parse
+    /// (apm_supported = false — byte-for-byte the legacy validation) rejects the
+    /// flagged lr byte instead of mis-decoding.
+    #[test]
+    fn geomix_apm_flagged_block_fails_closed_on_legacy_parse() {
+        let codes = vec![0usize, 1, 2, 1, 0, 2, 2, 1];
+        let n = 3usize;
+        let (bwt_out, primary) = super::bwt_encode_codes(&codes);
+        let ln = super::gm_ln_table(super::CM_RESCALE + 128);
+        let inc = super::GM_INCS[0];
+        let payload = super::gm_mix_encode(&bwt_out, n, inc, super::GM_LRS[0], &ln, true);
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&primary.to_be_bytes());
+        blob.push(inc as u8);
+        blob.push(super::GM_APM_FLAG);
+        blob.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        blob.extend_from_slice(&payload);
+        // New parse reads it…
+        let (decoded, _) = super::bwt_geomix_decode(&blob, 0, codes.len(), n)
+            .expect("new decoder must read the flagged block");
+        assert_eq!(decoded, codes);
+        // …the legacy parse must error out, not corrupt.
+        let err = super::bwt_geomix_decode_impl(&blob, 0, codes.len(), n, false)
+            .expect_err("legacy parse must reject an APM-flagged block");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("lr_idx out of range"),
+            "legacy parse must fail on the lr byte, got: {msg}"
+        );
+    }
+
+    /// Wire byte-identity guarantee: on a block where the APM arm does not strictly
+    /// win, the public encoder's output is byte-identical to the APM-disabled
+    /// encoder (prereg prediction 3 at the coder level).
+    #[test]
+    fn geomix_apm_non_winning_block_is_byte_identical_to_incumbent() {
+        // Uniform pseudo-random codes: calibration has nothing to correct, so the
+        // APM arm cannot strictly beat the incumbent.
+        let mut x = 99991u32;
+        let mut codes = Vec::with_capacity(8192);
+        for _ in 0..8192 {
+            x = x.wrapping_mul(1103515245).wrapping_add(12345);
+            codes.push((x >> 16) as usize % 16);
+        }
+        let with = super::bwt_geomix_encode(&codes, 16).expect("encode must succeed");
+        let without =
+            super::bwt_geomix_encode_impl(&codes, 16, false).expect("encode must succeed");
+        assert_eq!(
+            with[3] & super::GM_APM_FLAG,
+            0,
+            "APM must not win on uniform data"
+        );
+        assert_eq!(
+            with, without,
+            "non-winning APM must leave the output byte-identical"
         );
     }
 
@@ -15784,9 +16192,14 @@ mod tests {
         let ln = gm_ln_table(CM_RESCALE + 128);
         for inc in GM_INCS {
             for &lr in &GM_LRS {
-                let enc = gm_mix_encode(&seq, a, inc, lr, &ln);
-                let dec = gm_mix_decode(&enc, seq.len(), a, inc, lr, &ln);
-                assert_eq!(dec, seq, "geomix round-trip mismatch (inc={inc}, lr={lr})");
+                for use_apm in [false, true] {
+                    let enc = gm_mix_encode(&seq, a, inc, lr, &ln, use_apm);
+                    let dec = gm_mix_decode(&enc, seq.len(), a, inc, lr, &ln, use_apm);
+                    assert_eq!(
+                        dec, seq,
+                        "geomix round-trip mismatch (inc={inc}, lr={lr}, apm={use_apm})"
+                    );
+                }
             }
         }
     }
@@ -15799,9 +16212,14 @@ mod tests {
         let seq: Vec<usize> = (0..40000).map(|i| ((i * 97 + 13) % 256) as usize).collect();
         let ln = gm_ln_table(CM_RESCALE + 128);
         for &lr in &GM_LRS {
-            let enc = gm_mix_encode(&seq, a, 16, lr, &ln);
-            let dec = gm_mix_decode(&enc, seq.len(), a, 16, lr, &ln);
-            assert_eq!(dec, seq, "geomix high-entropy/rescale mismatch (lr={lr})");
+            for use_apm in [false, true] {
+                let enc = gm_mix_encode(&seq, a, 16, lr, &ln, use_apm);
+                let dec = gm_mix_decode(&enc, seq.len(), a, 16, lr, &ln, use_apm);
+                assert_eq!(
+                    dec, seq,
+                    "geomix high-entropy/rescale mismatch (lr={lr}, apm={use_apm})"
+                );
+            }
         }
     }
 
