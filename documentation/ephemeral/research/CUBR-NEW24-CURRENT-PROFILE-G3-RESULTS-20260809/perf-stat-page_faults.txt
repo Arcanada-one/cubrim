@@ -1,0 +1,3 @@
+# started on Sun Aug  9 21:58:30 2026
+
+112		page-faults	1373575	100.00		

@@ -1,0 +1,7 @@
+fixture_bytes=65536
+fixture_sha256=de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31
+preset=max
+archive_sha256=352840f3350619078b42ff316ade28a2b4a9e2ce5dd9385c439ed2a27bb0cae3
+archive_bytes=50
+encode_replays=2
+roundtrip=PASS

@@ -1,0 +1,5 @@
+88176f406c83b93f6bc3b0816b57606ee8711992 [kernel.kallsyms]
+e0fcfd50c3326a5d544ec2ff72a65fc383cb3d1d [cfg80211]
+4fcfe70fabdef757cae784dc49f2885f07237e24 [kvm]
+79c3e39eb4014ffb10437ded4ea8b172bdb5ab8e [vdso]
+649a0cd9dab6d31cf3bbf45aab1f4aa3b890fadf /root/cubr-new24-current-profile-g3-target/release/cubrim

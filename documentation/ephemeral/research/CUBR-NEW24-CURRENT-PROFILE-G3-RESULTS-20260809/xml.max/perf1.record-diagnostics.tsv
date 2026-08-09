@@ -1,0 +1,10 @@
+metric	value
+lost_record_count	0
+target_sample_count	0
+target_sum_period	0
+target_sum_period_squared	0
+target_unresolved_sample_count	0
+target_unresolved_sum_period	0
+effective_sample_size	NA
+simultaneous_upper_bound	NA
+candidate_gate	INDETERMINATE

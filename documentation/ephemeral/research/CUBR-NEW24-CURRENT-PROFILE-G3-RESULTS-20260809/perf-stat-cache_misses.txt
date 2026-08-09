@@ -1,0 +1,3 @@
+# started on Sun Aug  9 21:58:30 2026
+
+54406		cache-misses	1652381	100.00		

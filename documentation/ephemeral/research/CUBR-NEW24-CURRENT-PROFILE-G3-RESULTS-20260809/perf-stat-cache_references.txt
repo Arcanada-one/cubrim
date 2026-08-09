@@ -1,0 +1,3 @@
+# started on Sun Aug  9 21:58:30 2026
+
+187795		cache-references	1436915	100.00		
