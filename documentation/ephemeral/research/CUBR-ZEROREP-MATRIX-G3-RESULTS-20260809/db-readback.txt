@@ -1,0 +1,24 @@
+readback_at|2026-08-09 12:30:39.021564 UTC
+new30_total_rows|51
+new30_distinct_modes|13
+matrix_rows|24
+matrix_distinct_modes|8
+matrix_distinct_revisions|3
+matrix_id_range|416..439
+matrix_bad_rt|0
+matrix_bad_nullable_encode_fields|0
+matrix_timestamps|2026-08-09 11:47:09+00
+matrix_hosts|dev-ai/0-15
+matrix_note_markers|1
+matrix_note_suffix_exact|true
+hypothesis_updated_at|2026-08-09 12:29:05.692853+00
+new30_evaluation_rows|0
+pg_system_identifier|7648390441241305131
+database_oid|55835
+server_version_num|180004
+exact_expected_rows|24
+unrelated_snapshot|UNCHANGED
+after_snapshot|LIVE_EXACT
+preexisting_snapshot_sha256|2cf311fda0c951dd051100c2a8923201a2943ea8a7e056a077d34be2ba07abfc
+matrix_snapshot_sha256|a51b26aed4b975fcccb6a74ccf066a46d500851c62a2098ee407f441f85b46e9
+after_snapshot_sha256|c8f6e9da870a80955975b95947b41ca19e0771883e3f3a2f1a21bfe5f776e278

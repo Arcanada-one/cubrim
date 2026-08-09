@@ -1,0 +1,15 @@
+Independent audit source: /root/cubr-levers/zerorep-matrix-g3-20260809 copied read-only to /tmp/cubr-g3-independent-audit after unit success.
+
+cell	base_wall	current_wall	zero_wall	base_rss	current_rss	zero_rss	reclaim	residual	zero_current	base_zero	verdict
+nci/balanced	18.17	15.07	14.68	1385472	1645056	991744	2.516765	-393728	0.974121	1.237738	PASS
+nci/web	15.77	13.39	13.08	108032	111616	92672	5.285714	-15360	0.976848	1.205657	PASS
+dickens/max	26.94	19.95	20.06	1543680	1719808	1154560	3.209302	-389120	1.005514	1.342971	PASS
+dickens/balanced	25.71	19.25	19.33	1486848	1654272	1135104	3.100917	-351744	1.004156	1.330057	PASS
+dickens/web	22.54	17.17	17.08	110080	113152	104960	2.666667	-5120	0.994758	1.319672	PASS
+ooffice/max	25.53	19.08	19.21	1635328	1708544	1474048	3.202797	-161280	1.006813	1.328995	PASS
+ooffice/balanced	25.54	19.07	19.34	1635328	1708032	1474048	3.218310	-161280	1.014158	1.320579	PASS
+ooffice/web	22.29	17.12	16.80	112640	115200	108032	2.800000	-4608	0.981308	1.326786	PASS
+
+INDEPENDENT_AUDIT=PASS rows=72 roundtrips=96 logs=96 verdicts=8
+
+The independent parser asserted the exact preregistered row order and uniqueness, all 96 cmp values PASS, the exact 96-name timing-log set, status 0 plus wall/RSS parity for every timed log, warmup-log shape, all medians/formulas/thresholds, and TSV/JSON verdict parity.
