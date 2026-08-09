@@ -3,10 +3,12 @@
 set -euo pipefail
 
 readonly CARGO=/root/.cargo/bin/cargo
+readonly CARGO_PROGRAM=${CARGO##*/}
 [[ -x "$CARGO" ]] || { printf 'CARGO not executable: %s\n' "$CARGO" >&2; exit 1; }
 CARGO_VERSION=$("$CARGO" --version) || { printf 'CARGO version check failed: %s\n' "$CARGO" >&2; exit 1; }
-if [[ $CARGO_VERSION != 'cargo 1.96.1' && $CARGO_VERSION != 'cargo 1.96.1 '* ]]; then
- printf 'wrong cargo version: %s\n' "$CARGO_VERSION" >&2
+readonly CARGO_VERSION_PREFIX="$CARGO_PROGRAM 1.96.1"
+if [[ $CARGO_VERSION != "$CARGO_VERSION_PREFIX" && $CARGO_VERSION != "$CARGO_VERSION_PREFIX "* ]]; then
+ printf 'wrong CARGO version: %s\n' "$CARGO_VERSION" >&2
  exit 1
 fi
 readonly CARGO_VERSION
@@ -32,6 +34,15 @@ CURRENT_SHA=12eaff4d9df9e3b8f51567cd930311f343680b5cc55e3426f30a78456fc5830c
 ZERO_SHA=771fdb0f091df2e419d66ae9b28169a2dc69f1d57cab62d948a9ef716dac6e20
 ZERO_CM2_SHA=1594578cc98f4ef55ae102cbe31fc5cdde02d6c647941787cc009464abe8addf
 EVIDENCE_SHA=358b057f3991ddc0ea97944d5e5854fb5b64a325800c33890ce2534b89807cfb
+readonly G1_OUT=/root/cubr-levers/zerorep-matrix-20260809
+readonly G1_EMPTY_DIR=timing_logs
+readonly -a G1_MANIFEST=(
+ 'b6b96126eefa1a9b00581b1c7f2439ca5c605e1b8b4dceb14d4757a28c9fefbf HASHES.tsv'
+ "012a973200c31c92f5447961e7915735a7ae0311f628d9f7a89c375fcc998615 ${CARGO_PROGRAM}-test-release.log"
+ '7ffd8ea16586b73ca67e645fb79d68e6b83dd647b2068bdeb256e4708e4ae2d4 journal.log'
+ '544748ffc2ffbcd9218ff43f09b7292811d6ab00e1fad789105adfc5d31fd19f results.tsv'
+ '7ae44fbaaaf4cf26cc68d1643cc49da562434914dbade295605aaf5972944cdf roundtrips.tsv'
+)
 
 export CUBR_THREADS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 CUBRIM_ACCEPT_LICENSE=1
 
@@ -57,7 +68,38 @@ journal() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }
 die() { journal "FAIL: $*"; exit 1; }
 sha() { sha256sum "$1" | awk '{print $1}'; }
 need_sha() { [[ -f $1 && $(sha "$1") == "$2" ]] || die "sha256 mismatch: $1"; }
-clean() { [[ -z $(git -C "$1" status --porcelain) ]] || die "dirty checkout: $1"; }
+clean() {
+ local checkout=$1 status
+ if ! status=$(git -C "$checkout" status --porcelain); then die "git status failed: $checkout"; fi
+ [[ -z $status ]] || die "dirty checkout: $checkout"
+}
+source_contract() {
+ local source=$1 count
+ count=$(grep -oF "$CARGO_PROGRAM" "$source" | wc -l) || return 1
+ [[ $count == 2 ]] || return 1
+ grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" "$source"
+}
+verify_exact_manifest() (
+ local root=$1 empty_dir=$2 spec expected name extra path actual first_entry
+ shift 2
+ local -a entries
+ shopt -s dotglob nullglob
+ entries=("$root"/*)
+ [[ -d $root && ! -L $root && -r $root && -x $root && ${#entries[@]} -eq $(($# + 1)) ]] || return 1
+ path="$root/$empty_dir"
+ [[ -d $path && ! -L $path && -r $path && -x $path ]] || return 1
+ first_entry=$(find "$path" -mindepth 1 -maxdepth 1 -print -quit) || return 1
+ [[ -z $first_entry ]] || return 1
+ for spec in "$@"; do
+  read -r expected name extra <<<"$spec"
+  [[ -n $expected && -n $name && -z $extra ]] || return 1
+  path="$root/$name"
+  [[ -f $path && ! -L $path ]] || return 1
+  actual=$(sha "$path") || return 1
+  [[ $actual == "$expected" ]] || return 1
+ done
+)
+verify_g1_manifest() { verify_exact_manifest "$G1_OUT" "$G1_EMPTY_DIR" "${G1_MANIFEST[@]}"; }
 bin_for() { case "$1" in base) printf %s "$BASE";; current) printf %s "$CURRENT";; zero) printf %s "$ZERO";; *) die "invalid build: $1";; esac; }
 input_for() { printf '%s/%s.2m' "$INPUT" "$1"; }
 canon_for() { printf '%s/%s.%s.base.cbr' "$CANON" "$1" "$2"; }
@@ -142,7 +184,52 @@ PY
 }
 self_test() {
  local d; d=$(mktemp -d); trap 'rm -rf "$d"' RETURN
- if grep -nE '(^|&&|[;|])[[:space:]]*cargo([[:space:]]|$)' "${BASH_SOURCE[0]}" >"$d/bare-cargo.matches"; then return 1; fi
+ source_contract "${BASH_SOURCE[0]}" || return 1
+ local mutation_index=0 unsafe_form mutation_source
+ local -a unsafe_forms=(
+  "if $CARGO_PROGRAM; then :; fi"
+  "! $CARGO_PROGRAM"
+  "( $CARGO_PROGRAM )"
+  "time $CARGO_PROGRAM"
+  "command $CARGO_PROGRAM"
+  "env X=1 $CARGO_PROGRAM"
+ )
+ for unsafe_form in "${unsafe_forms[@]}"; do
+  mutation_index=$((mutation_index + 1)); mutation_source="$d/source-mutation-$mutation_index.sh"
+  cp "${BASH_SOURCE[0]}" "$mutation_source"; printf '\n%s\n' "$unsafe_form" >>"$mutation_source"
+  ! source_contract "$mutation_source" || return 1
+ done
+ mutation_source="$d/source-declaration-mutation.sh"; cp "${BASH_SOURCE[0]}" "$mutation_source"
+ sed -i 's/^readonly CARGO=/CARGO=/' "$mutation_source"; ! source_contract "$mutation_source" || return 1
+ mkdir "$d/clean-repo"; git -C "$d/clean-repo" init -q
+ clean "$d/clean-repo"
+ if ( clean "$d/not-a-repository" ) >/dev/null 2>&1; then return 1; fi
+ printf 'dirty\n' >"$d/clean-repo/untracked"; if ( clean "$d/clean-repo" ) >/dev/null 2>&1; then return 1; fi
+ local manifest_dir="$d/g1-manifest" manifest_name manifest_hash
+ local -a manifest_names=(HASHES.tsv "${CARGO_PROGRAM}-test-release.log" journal.log results.tsv roundtrips.tsv) test_manifest=()
+ mkdir "$manifest_dir" "$manifest_dir/$G1_EMPTY_DIR"
+ for manifest_name in "${manifest_names[@]}"; do
+  printf '%s\n' "$manifest_name" >"$manifest_dir/$manifest_name"
+  manifest_hash=$(sha "$manifest_dir/$manifest_name") || return 1
+  test_manifest+=("$manifest_hash $manifest_name")
+ done
+ verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ printf 'changed\n' >>"$manifest_dir/results.tsv"; ! verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ printf '%s\n' results.tsv >"$manifest_dir/results.tsv"; verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ mv "$manifest_dir/HASHES.tsv" "$d/HASHES.tsv.saved"; ! verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ mv "$d/HASHES.tsv.saved" "$manifest_dir/HASHES.tsv"; verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ printf 'extra\n' >"$manifest_dir/extra"; ! verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ unlink "$manifest_dir/extra"; verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ mv "$manifest_dir/HASHES.tsv" "$d/HASHES.tsv.saved"; ln -s "$d/HASHES.tsv.saved" "$manifest_dir/HASHES.tsv"
+ ! verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ unlink "$manifest_dir/HASHES.tsv"; mv "$d/HASHES.tsv.saved" "$manifest_dir/HASHES.tsv"
+ mv "$manifest_dir/$G1_EMPTY_DIR" "$d/$G1_EMPTY_DIR.saved"; ! verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ mv "$d/$G1_EMPTY_DIR.saved" "$manifest_dir/$G1_EMPTY_DIR"; verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ rmdir "$manifest_dir/$G1_EMPTY_DIR"; mkdir "$d/alternate-empty-dir"; ln -s "$d/alternate-empty-dir" "$manifest_dir/$G1_EMPTY_DIR"
+ ! verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ unlink "$manifest_dir/$G1_EMPTY_DIR"; mkdir "$manifest_dir/$G1_EMPTY_DIR"
+ printf 'not empty\n' >"$manifest_dir/$G1_EMPTY_DIR/entry"; ! verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
+ unlink "$manifest_dir/$G1_EMPTY_DIR/entry"; verify_exact_manifest "$manifest_dir" "$G1_EMPTY_DIR" "${test_manifest[@]}" || return 1
  [[ ${CELLS[*]} == 'nci balanced 108014 c812943fd63414bf4ec185ee048b6550cc6b1a0a523dd3a63afe242bdf133066 736 1472 nci web 108624 2caaa78101082ccfb753909440a60e7381f94210fd8817ac89ccc02d7b6d6848 46 92 dickens max 461437 c8aed8ae4c39d8a463e3d2bcb3fd082ec955d60fd320bbeec41af7a65922285e 768 1536 dickens balanced 472253 25378abf1cbe18e016143c0f0401aac055db8fb1c2964e5a4525371ba400a5ad 736 1472 dickens web 487506 0f3677eeadf937facb8c3b3fd79d6fc04677f19e0b648b983dd732db8a92ba0f 46 92 ooffice max 677605 4d563b48ae509f11b65b0c71929e0b0375b2322b26aefc489b36aefeeacd60be 736 1472 ooffice balanced 677605 4d563b48ae509f11b65b0c71929e0b0375b2322b26aefc489b36aefeeacd60be 736 1472 ooffice web 704087 a8e04efd9c890c8f72a645571ebfd230774e638e9bef7c3118d22a5fffeb0be4 46 92' ]] || return 1
  [[ ${INPUT_SHA[nci]} == 6788fcc1527c0f62709103e68ac9ab9416461ab00ed1f529b3cf2ae4ab06221e && ${INPUT_SHA[dickens]} == df925056e0779c51cb2a27c014e8fc6d25d28ef2fac5b8ce4632d93b86860603 && ${INPUT_SHA[ooffice]} == 5041e86f07bf17d7a8b3b0ab496a1b6413256399848709f8be543bbdca12de09 ]] || return 1
  [[ $(sample_order 1 | paste -sd /) == base/current/zero && $(sample_order 2 | paste -sd /) == current/zero/base && $(sample_order 3 | paste -sd /) == zero/base/current ]] || return 1
@@ -177,7 +264,7 @@ self_test() {
  grep -q '^nci/balanced.*REFUTED' "$d/nonpositive.out" || return 1
  cp "$d/results.tsv" "$d/slow.tsv"; sed -i '/\tzero\t1.00\t120000$/s/1.00/1.06/' "$d/slow.tsv"; parse_verdicts "$d/slow.tsv" "$d/good-rt.tsv" "$d/slow.json" "$d/slow.out"
  grep -q '^nci/balanced.*REFUTED' "$d/slow.out" || return 1
- printf 'SELF_TEST_ONLY: absolute-Cargo contract, 72/96 structures, rejection controls, and parser cases passed\n'
+ printf 'SELF_TEST_ONLY: whole-source Cargo, clean-status, exact-manifest, 72/96 structures, rejection controls, and parser cases passed\n'
 }
 
 [[ $# -le 1 ]] || die 'unknown arguments'
@@ -205,6 +292,7 @@ need_sha "$ZERO_ROOT/code/cubrim-rs/src/cm2.rs" "$ZERO_CM2_SHA"; need_sha "$ZERO
 [[ $(sha "$ZERO_ROOT/$RUNNER_REL") == $(git -C "$ZERO_ROOT" show "HEAD:$RUNNER_REL" | sha256sum | awk '{print $1}') ]] || die 'runner not committed'
 for f in nci dickens ooffice; do need_sha "$(input_for "$f")" "${INPUT_SHA[$f]}"; done
 for line in "${CELLS[@]}"; do read -r f p bytes sum _ _ <<<"$line"; need_sha "$(canon_for "$f" "$p")" "$sum"; [[ $(stat -c %s "$(canon_for "$f" "$p")") == "$bytes" ]] || die "canonical bytes $f/$p"; done
+verify_g1_manifest || die 'generation-1 preservation manifest'
 
 on_error() { local status=$?; journal "FAIL: rc=$status line=$1 command=$2"; return "$status"; }
 on_exit() { local status=$?; if [[ ${completed:-0} -ne 1 ]]; then rm -f "$OUT/DONE.STAMP" "$OUT/.DONE.STAMP.tmp" || journal 'FAIL: incomplete marker cleanup'; fi; if [[ $status -ne 0 && ${completed:-0} -ne 1 ]]; then journal "FAIL: unexpected exit rc=$status"; fi; return "$status"; }
@@ -222,14 +310,14 @@ runner_committed_sha=$(git -C "$ZERO_ROOT" show "HEAD:$RUNNER_REL" | sha256sum |
 } >"$OUT/HASHES.tsv"
 journal "admission load1=$load1 pin=$PIN threads=$CUBR_THREADS candidate_head=$candidate_head"
 { printf 'cell\tstep\tsample\tbuild\twall_s\tpeak_rss_kib\n' >"$OUT/results.tsv"; printf 'cell\tphase\tsample\tbuild\tcmp\n' >"$OUT/roundtrips.tsv"; }
-( cd "$ZERO_ROOT/code/cubrim-rs" && "$CARGO" test --release ) >"$OUT/cargo-test-release.log" 2>&1 || die 'cargo test --release'
-( cd "$ZERO_ROOT/code/cubrim-rs" && "$CARGO" test --release --test scheme_roundtrip ) >"$OUT/cargo-test-scheme-roundtrip.log" 2>&1 || die 'scheme roundtrip test'
+( cd "$ZERO_ROOT/code/cubrim-rs" && "$CARGO" test --release ) >"$OUT/${CARGO_PROGRAM}-test-release.log" 2>&1 || die 'Cargo test --release'
+( cd "$ZERO_ROOT/code/cubrim-rs" && "$CARGO" test --release --test scheme_roundtrip ) >"$OUT/${CARGO_PROGRAM}-test-scheme-roundtrip.log" 2>&1 || die 'scheme roundtrip test'
 clean "$ZERO_ROOT"
 need_sha "$ZERO" "$ZERO_SHA"; need_sha "$ZERO_ROOT/code/cubrim-rs/src/cm2.rs" "$ZERO_CM2_SHA"
 [[ $(git -C "$ZERO_ROOT" show "HEAD:$RUNNER_REL" | sha256sum | awk '{print $1}') == "$runner_committed_sha" ]] || die 'runner changed during suite'
 [[ $(git -C "$ZERO_ROOT" rev-parse HEAD) == "$candidate_head" && $(git -C "$ZERO_ROOT" rev-parse FETCH_HEAD) == "$fetched_sha" && $candidate_head == "$fetched_sha" ]] || die 'candidate identity changed during suite'
 git -C "$ZERO_ROOT" diff --quiet "$ZERO_ANCHOR"..HEAD -- code/cubrim-rs || die 'zero code changed during suite'
-journal 'suite completion: cargo test --release and scheme_roundtrip passed'
+journal 'suite completion: Cargo test --release and scheme_roundtrip passed'
 stabilization_start=$SECONDS; quiet_samples=0
 while (( SECONDS - stabilization_start <= 180 )); do
  stabilization_load=$(awk '{print $1}' /proc/loadavg) || die 'stabilization load read'
