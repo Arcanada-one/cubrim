@@ -1,0 +1,21 @@
+2026-08-09T10:40:28Z admission load1=1.29 pin=0-15 threads=4 candidate_head=368bc17df4a6b2f91d5896c86d963eba7acfe256
+2026-08-09T10:43:43Z suite completion: Cargo test --release and scheme_roundtrip passed
+2026-08-09T10:43:43Z stabilization sample elapsed=0s load1=6.64 quiet_consecutive=0
+2026-08-09T10:43:43Z stabilization wait=15s
+2026-08-09T10:43:58Z stabilization sample elapsed=15s load1=5.45 quiet_consecutive=0
+2026-08-09T10:43:58Z stabilization wait=15s
+2026-08-09T10:44:13Z stabilization sample elapsed=30s load1=4.32 quiet_consecutive=0
+2026-08-09T10:44:13Z stabilization wait=15s
+2026-08-09T10:44:28Z stabilization sample elapsed=45s load1=3.43 quiet_consecutive=0
+2026-08-09T10:44:28Z stabilization wait=15s
+2026-08-09T10:44:43Z stabilization sample elapsed=60s load1=3.15 quiet_consecutive=0
+2026-08-09T10:44:43Z stabilization wait=15s
+2026-08-09T10:44:58Z stabilization sample elapsed=75s load1=2.61 quiet_consecutive=0
+2026-08-09T10:44:58Z stabilization wait=15s
+2026-08-09T10:45:14Z stabilization sample elapsed=91s load1=2.03 quiet_consecutive=0
+2026-08-09T10:45:14Z stabilization wait=15s
+2026-08-09T10:45:29Z stabilization sample elapsed=106s load1=1.65 quiet_consecutive=1
+2026-08-09T10:45:29Z stabilization wait=15s
+2026-08-09T10:45:44Z stabilization sample elapsed=121s load1=1.29 quiet_consecutive=2
+2026-08-09T10:45:44Z stabilization complete elapsed=121s quiet_consecutive=2
+2026-08-09T11:47:09Z completion gates passed; installing marker
