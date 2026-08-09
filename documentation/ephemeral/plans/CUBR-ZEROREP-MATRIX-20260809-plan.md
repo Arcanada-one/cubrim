@@ -21,9 +21,9 @@ Rust/Cargo, PostgreSQL/psql, Git/GitHub protected PR flow.
 ---
 
 - [x] 1. Audit and harden the pre‑registered matrix design
-- [ ] 2. Create fail‑closed runner and static control seam
-- [ ] 3. Test runner syntax, ShellCheck, control cases and TSV/verdict parser
-- [ ] 4. Independent pre‑measurement review of preregistration & runner
+- [x] 2. Create fail‑closed runner and static control seam
+- [x] 3. Test runner syntax, ShellCheck, control cases and TSV/verdict parser
+- [x] 4. Independent pre‑measurement review of preregistration & runner
 - [ ] 5. Push preregistration + runner PR and merge normally
 - [ ] 6. Fetch exact resulting `origin/main`
 - [ ] 7. Create clean stand candidate checkout & fresh release build with reproducibility gates
