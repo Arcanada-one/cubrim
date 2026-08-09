@@ -422,9 +422,7 @@ impl HuffTable {
             // low (max_len - len) bits are don't-cares.
             let shift = max_len - len;
             let base = (codeword as usize) << shift;
-            for slot in base..base + (1usize << shift) {
-                entries[slot] = (sym as u16, len);
-            }
+            entries[base..base + (1usize << shift)].fill((sym as u16, len));
         }
         Some(Self {
             bits: max_len,
@@ -554,7 +552,7 @@ mod tests {
     #[test]
     fn huffman_round_trip_uniform_alphabet() {
         // All 8 symbols equally likely (32 occurrences each)
-        let seq_codes: Vec<usize> = (0..8).flat_map(|s| std::iter::repeat(s).take(32)).collect();
+        let seq_codes: Vec<usize> = (0..8).flat_map(|s| std::iter::repeat_n(s, 32)).collect();
         let n_distinct = 8;
         let lengths = canonical_code_lengths(&seq_codes, n_distinct);
         assert!(
@@ -646,10 +644,10 @@ mod tests {
     fn huffman_length_determinism_three_equal_freq() {
         // Three symbols each appearing 10 times
         let n_distinct = 3;
-        let seq_a: Vec<usize> = (0..3).flat_map(|s| std::iter::repeat(s).take(10)).collect();
+        let seq_a: Vec<usize> = (0..3).flat_map(|s| std::iter::repeat_n(s, 10)).collect();
         let seq_b: Vec<usize> = vec![2usize, 1, 0]
             .into_iter()
-            .flat_map(|s| std::iter::repeat(s).take(10))
+            .flat_map(|s| std::iter::repeat_n(s, 10))
             .collect();
         let lengths_a = canonical_code_lengths(&seq_a, n_distinct);
         let lengths_b = canonical_code_lengths(&seq_b, n_distinct);

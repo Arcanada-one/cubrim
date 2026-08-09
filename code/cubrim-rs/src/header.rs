@@ -91,9 +91,9 @@ pub const MODE_VCF: u8 = 5;
 /// float input the cube/BWT/LZ path cannot reach. Emitted only when strictly smaller than
 /// the base encoding (competitive min) AND only on detected plausible-float input gated
 /// >cube_size_limit, so every non-matching input (the whole tuned/holdout corpus) is
-/// byte-identical to v1.
-/// Wire: [MAGIC 4B][VERSION 1B][MODE_BINFLOAT 1B][orig_len 4B][rec_width 1B][n_cols 1B]
-///       [col_modes n_cols B][tail_len 1B][tail bytes] then n_cols length-prefixed sub-blobs.
+/// > byte-identical to v1.
+/// > Wire: [MAGIC 4B][VERSION 1B][MODE_BINFLOAT 1B][orig_len 4B][rec_width 1B][n_cols 1B]
+/// > [col_modes n_cols B][tail_len 1B][tail bytes] then n_cols length-prefixed sub-blobs.
 pub const MODE_BINFLOAT: u8 = 6;
 
 /// 16-bit grayscale image MED predictor (H-60 x-ray / H-63 MR-DICOM). For a detected 16-bit

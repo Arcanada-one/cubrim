@@ -19,6 +19,10 @@ const CORPUS_TOTAL: usize = 51456;
 const T4_TOTAL_BYTES: usize = 30217;
 const T4_BASELINE_AGG: f64 = 0.587240;
 
+// `t4_bytes` / `size_bytes` are the recorded CUBR-0027 baseline figures. They are
+// kept as documentation of the corpus even though the assertions below only use
+// the aggregate constants.
+#[allow(dead_code)]
 struct CorpusFile {
     name: &'static str,
     t4_bytes: usize,
@@ -100,7 +104,7 @@ fn bench_cubr0027_aggregate() {
         "T4 baseline: {:.6} ({} bytes)",
         T4_BASELINE_AGG, T4_TOTAL_BYTES
     );
-    println!("");
+    println!();
 
     // Verify 7/7 round-trip for T5 at default min_ctx=128.
     let mut round_trip_ok = 0usize;
@@ -119,11 +123,11 @@ fn bench_cubr0027_aggregate() {
     assert_eq!(round_trip_ok, 7, "All 7 corpus files must round-trip");
 
     // V7: Measure real T4 sizes vs T5.
-    println!("");
+    println!();
     println!("V7: Per-file T4 vs T5 (min_ctx=128):");
     println!(
-        "{:<18} {:>8} {:>8} {:>8}  {}",
-        "file", "T4_bytes", "T5_bytes", "delta", "mode"
+        "{:<18} {:>8} {:>8} {:>8}  mode",
+        "file", "T4_bytes", "T5_bytes", "delta"
     );
     let mut t4_total = 0usize;
     let mut t5_128_total = 0usize;
@@ -155,7 +159,7 @@ fn bench_cubr0027_aggregate() {
     println!("{:<18} {:>8.6} {:>8.6}", "AGGREGATE", t4_agg, t5_128_agg);
 
     // MIN_CTX_COUNT sweep (Option A).
-    println!("");
+    println!();
     println!("Option A (3-level wire) — MIN_CTX_COUNT sweep:");
     println!(
         "{:>12} {:>12} {:>10} {:>12}",
@@ -184,7 +188,7 @@ fn bench_cubr0027_aggregate() {
             best_a_bytes = total;
         }
     }
-    println!("");
+    println!();
     println!(
         "Option A best: min_ctx={}, aggregate={:.6}, bytes={}",
         best_a_ctx, best_a_ratio, best_a_bytes
@@ -197,7 +201,7 @@ fn bench_cubr0027_aggregate() {
     // Summary for JSON output.
     let code_sha = "8ab23d6ae45ab8f67acf468d6073f825865c04ab"; // set at commit time
 
-    println!("");
+    println!();
     println!("=== VERDICT ===");
     if best_a_ratio < T4_BASELINE_AGG {
         println!(

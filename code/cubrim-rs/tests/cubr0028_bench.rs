@@ -137,8 +137,8 @@ fn bench_cubr0028_bwt_aggregate() {
     // ── Step 2: Per-file size comparison vs T4 ─────────────────────────────
     println!("Step 2: Per-file BWT vs T4");
     println!(
-        "{:<18} {:>8} {:>8} {:>8}  {}",
-        "file", "T4_bytes", "BWT_bytes", "delta", "mode"
+        "{:<18} {:>8} {:>8} {:>8}  mode",
+        "file", "T4_bytes", "BWT_bytes", "delta"
     );
 
     let mut t4_total = 0usize;

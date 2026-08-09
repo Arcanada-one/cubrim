@@ -194,27 +194,25 @@ fn build_nex() -> Vec<[u8; 2]> {
         };
         match mode {
             1 => d = d.min(winner_new + bnd),
-            2 => {
-                if winner_new >= 4 {
-                    d = d.min(3);
-                }
+            2 if winner_new >= 4 => {
+                d = d.min(3);
             }
             _ => {}
         }
         d.max(0)
     };
     let mut nex = vec![[0u8; 2]; 256];
-    for s in 0..256usize {
+    for (s, slot) in nex.iter_mut().enumerate() {
         let n0 = (s >> 4) as i32;
         let n1 = (s & 15) as i32;
         // observe bit 1
         let a1 = (n1 + 1).min(15);
         let d0 = discount(n0, a1);
-        nex[s][1] = ((d0 << 4) | a1) as u8;
+        slot[1] = ((d0 << 4) | a1) as u8;
         // observe bit 0
         let a0 = (n0 + 1).min(15);
         let d1 = discount(n1, a0);
-        nex[s][0] = ((a0 << 4) | d1) as u8;
+        slot[0] = ((a0 << 4) | d1) as u8;
     }
     nex
 }
@@ -258,6 +256,7 @@ impl StateMap {
 ///   2. a NONSTATIONARY bit-history state (`st`) mapped through a `StateMap`
 ///      (the lpaq/zpaq counter) — forgets stale statistics after a regime
 ///      change, best on short/changing contexts.
+///
 /// Keeping BOTH (rather than replacing #1 with #2) is regression-proof: the
 /// mixer can drive the nonstationary weight to zero where it hurts (large
 /// stationary streams) yet exploit it where it helps.
@@ -383,8 +382,11 @@ impl Mixer {
     fn mix(&mut self, lg: &Logistic, inp: &[i32], ctx: usize) -> i32 {
         self.set = ctx * self.nin;
         let mut dot: i64 = 0;
-        for i in 0..self.nin {
-            dot += self.w[self.set + i] as i64 * inp[i] as i64;
+        for (&wt, &x) in self.w[self.set..self.set + self.nin]
+            .iter()
+            .zip(&inp[..self.nin])
+        {
+            dot += wt as i64 * x as i64;
         }
         let x = (dot >> 16) as i32;
         self.raw = x;
@@ -394,8 +396,12 @@ impl Mixer {
     #[inline]
     fn update(&mut self, inp: &[i32], y: i32) {
         let err = y * PSCALE - self.px;
-        for i in 0..self.nin {
-            self.w[self.set + i] += (inp[i] * err) >> self.shift;
+        let shift = self.shift;
+        for (wt, &x) in self.w[self.set..self.set + self.nin]
+            .iter_mut()
+            .zip(&inp[..self.nin])
+        {
+            *wt += (x * err) >> shift;
         }
     }
 }
@@ -531,7 +537,7 @@ impl Match {
     #[inline]
     fn stretch_in(&mut self, lg: &Logistic, bit: u32) -> i32 {
         if self.predbyte >= 0 {
-            self.predbit = ((self.predbyte >> (7 - bit)) & 1) as i32;
+            self.predbit = (self.predbyte >> (7 - bit)) & 1;
             self.bucket = self.len.min(MM_CAP);
             let mm = self.prob[self.bucket] as i32;
             let p = if self.predbit == 1 { mm } else { PSCALE - mm };
@@ -614,7 +620,6 @@ struct CmModel {
     // 2-layer mixer
     l1: Vec<Mixer>,
     l2: Mixer,
-    wshift: i32,
     l2in: [i32; NL1 + 1],
     mctx: [usize; NL1],
     // SSE chain
@@ -710,7 +715,6 @@ impl CmModel {
                 Mixer::new(1024, nin, ws), // order-3 hash
             ],
             l2: Mixer::new(64, NL1 + 1, ws),
-            wshift: ws,
             l2in: [0; NL1 + 1],
             mctx: [0; NL1],
             apm1,
@@ -1122,11 +1126,11 @@ fn detect_col_delims(data: &[u8]) -> Vec<u8> {
         count[b as usize] += 1;
     }
     let mut scored: Vec<(f64, u8)> = Vec::new();
-    for cand in 0..256usize {
-        if (count[cand] as usize) < 32 {
+    for (cand, &cnt) in count.iter().enumerate() {
+        if (cnt as usize) < 32 {
             continue;
         }
-        let mean = s.len() as f64 / count[cand] as f64;
+        let mean = s.len() as f64 / cnt as f64;
         if !(4.0..=512.0).contains(&mean) {
             continue;
         }

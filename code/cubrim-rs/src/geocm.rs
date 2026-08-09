@@ -111,7 +111,6 @@ impl<'a> RcDec<'a> {
     /// advances `pos` unconditionally while feeding zero-padding past the end, so an
     /// unclamped value would keep advancing forever and any stall guard built on it would
     /// be unfirable (the QA-F-001 defect, ported here as QA-F-008).
-    #[inline]
     pub fn progress(&self) -> usize {
         self.pos.min(self.buf.len())
     }
@@ -304,7 +303,7 @@ pub fn detect_strides(data: &[u8], k: usize) -> Vec<u32> {
             i += step;
         }
         // normalize to per-2^20 samples to compare across strides fairly
-        let score = if cnt > 0 { eq * (1 << 20) / cnt } else { 0 };
+        let score = (eq * (1 << 20)).checked_div(cnt).unwrap_or(0);
         scored.push((score, s));
     }
     // sort by score desc, then stride asc (deterministic tie-break)
@@ -427,7 +426,7 @@ impl MatchModel {
         let pc = self.probs[self.idx]; // P(actual bit == predicted bit)
         let p1: u16 = if self.pb == 1 { pc } else { PMAX - pc };
         self.active_bit = true;
-        tabs.stretch[p1.clamp(1, (PMAX - 1) as u16) as usize]
+        tabs.stretch[p1.clamp(1, PMAX - 1) as usize]
     }
 
     #[inline]
@@ -648,11 +647,7 @@ fn mix_ctxs(hist: &[u8], i: usize, s: usize, s2: usize, ctx: &mut [usize; NTAB])
     let prev = if i > 0 { hist[i - 1] as i32 } else { 0 };
     let t2 = if i > 1 { hist[i - 2] as i32 } else { 0 };
     let ab = if i >= s { hist[i - s] as i32 } else { 0 };
-    let ab1 = if i >= s + 1 {
-        hist[i - s - 1] as i32
-    } else {
-        0
-    };
+    let ab1 = if i > s { hist[i - s - 1] as i32 } else { 0 };
     let ab2 = if i >= s + 2 {
         hist[i - s - 2] as i32
     } else {
@@ -843,7 +838,7 @@ fn decode_stream_mix(
 fn run_candidate(data: &[u8], mode: u8, s: u32, s2: u32, cfg: u8) -> Vec<u8> {
     let su = s as usize;
     match mode {
-        MODE_O1 => encode_stream(data, 256, |h, i| ctx_o1(h, i)),
+        MODE_O1 => encode_stream(data, 256, ctx_o1),
         MODE_GEO => encode_stream(data, 4096, |h, i| ctx_geo(h, i, su)),
         MODE_GEOA => encode_stream(data, 256, |h, i| ctx_geoa(h, i, su)),
         MODE_MIX => encode_stream_mix(data, su, s2 as usize, cfg),
@@ -967,7 +962,7 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CodecError> {
             if orig_len == 0 {
                 Vec::new()
             } else {
-                decode_stream(payload, orig_len, 256, |h, i| ctx_o1(h, i))?
+                decode_stream(payload, orig_len, 256, ctx_o1)?
             }
         }
         MODE_GEO => {
@@ -1006,7 +1001,7 @@ pub fn decode(blob: &[u8]) -> Result<Vec<u8>, CodecError> {
 /// competitive-min discards GeoCM whenever it is not strictly smaller.
 pub fn should_try(data: &[u8]) -> bool {
     let n = data.len();
-    if n < 8192 || n > 12_000_000 {
+    if !(8192..=12_000_000).contains(&n) {
         return false;
     }
     let max_s = MAX_STRIDE.min(n - 1);
@@ -1026,7 +1021,7 @@ pub fn should_try(data: &[u8]) -> bool {
             cnt += 1;
             i += step;
         }
-        scores.push(if cnt > 0 { eq * (1 << 20) / cnt } else { 0 });
+        scores.push((eq * (1 << 20)).checked_div(cnt).unwrap_or(0));
     }
     let best = *scores.iter().max().unwrap_or(&0);
     best >= (1u64 << 20) * 15 / 100
