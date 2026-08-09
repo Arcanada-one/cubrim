@@ -187,7 +187,7 @@ git commit -m "research: enforce NEW-24 attribution gates"
 
 - [ ] **Step 1: Independent spec review**
 
-Give the exact commit SHA to a read-only subagent. Require confirmation that every original cell/prediction/sample count is unchanged, all operator hard constraints are encoded, G0 is preserved/invalid, and no measurement or Fast-CM lever is claimed.
+Give the exact commit SHA to a read-only subagent. Require confirmation that every original cell/prediction/sample count is unchanged, all operator hard constraints are encoded, G0 and the invalid PR #54/#58 continuations are preserved/classified, and no measurement or Fast-CM lever is claimed.
 
 - [ ] **Step 2: Independent quality review**
 
@@ -267,4 +267,4 @@ Prepare an independently reviewed, idempotent transaction that appends one exact
 
 - [ ] **Step 5: Land the result through a normal PR**
 
-Commit raw evidence, parser output, report, and DB readback; run all checks; open a normal PR; wait for exact-head CI; merge; then fetch and verify current `origin/main`. Only after this closure may the next stage select and preregister a NEW-24 Fast-CM candidate from the measured attribution.
+Commit raw evidence, parser output, report, and DB readback; run all checks; open a normal PR; wait for exact-head CI; merge; then fetch and verify current `origin/main`. Only after this closure may the next stage select and preregister a NEW-24 Fast-CM candidate independently from the valid G2 attribution. The landed PR #58 tier record remains exploratory only because it derives from invalid PR #54 and preregisters pin 16–19; a later selection must disclose that exposure and use a fresh 0–15 protocol.

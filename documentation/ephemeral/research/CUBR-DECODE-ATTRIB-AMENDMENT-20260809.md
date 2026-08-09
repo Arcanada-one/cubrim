@@ -33,6 +33,12 @@ The coordinator read the complete 130-line landed PR #54 report only to reconcil
 
 PR #54 and `/root/cubr-decode-attrib-20260809` are foreign landed outputs and remain preserved unchanged. They are classified as invalid evidence, not reverted or rewritten.
 
+### Post-amendment reconciliation of PR #58
+
+After the G2 contract and its test-repair gates were frozen locally, `origin/main` advanced to `8a4e062c19a4b0f4465258c0d8864702c520b2d8`, including PR #58 (`28a9cc98257a12833da29e4ed6fe67a39dd9e519`). Its `CUBR-NEW24-TIERS-20260809.md` explicitly bases its speed model and tier selection on invalid PR #54, and preregisters the resulting real-codec measurements on pin 16–19. That conflicts with both the mandated sequence (valid decode characterisation before lever selection) and the hard 0–15 pin constraint. PR #58 therefore does not close NEW-24, authorise its F12/M8 implementation, or qualify as a valid post-G2 lever preregistration.
+
+The landed PR #58 files are foreign outputs and remain preserved unchanged. Their analogue density probe may be treated only as disclosed exploratory material; its tier selection, speed predictions, and 16–19 measurement protocol cannot influence the valid G2 report or database. If a later lever resembles F12 or M8, its post-G2 selection record must derive independently from valid G2 evidence, disclose exposure to PR #58, and preregister fresh 0–15 measurements. No G2 cell, prediction, threshold, instrument, sample count, timeout, or gate changed during this reconciliation.
+
 ### Return to plan: exact-commit suite correction
 
 An adversarial review performed before G2 was launched found that the originally specified focused command, `cargo test --release --test scheme_roundtrip -- --nocapture`, cannot run at the frozen source commit `3a13f486aea51470e2079ba66abb94d99fd782d9`: that tree has no `tests/scheme_roundtrip.rs` and no explicit `scheme_roundtrip` test target. The target exists only in later source and importing it would dirty the checkout and break the frozen source/binary provenance. Leaving the command unchanged would deterministically stop the campaign before any cell and would provide no safety evidence.
