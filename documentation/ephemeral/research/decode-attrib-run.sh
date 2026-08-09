@@ -287,11 +287,11 @@ run_suites() {
         >"$PARTIAL/cargo-test-release.log" 2>&1 || die 'cargo test --release failed'
     restore_suite_side_effects
     remaining=$(remaining_budget_seconds)
-    (( remaining > 0 )) || die 'campaign budget expired before scheme suite'
-    # Required exact command: cargo test --release --test scheme_roundtrip -- --nocapture
+    (( remaining > 0 )) || die 'campaign budget expired before differential suite'
+    # Required exact command: cargo test --release --test differential -- --nocapture
     (cd "$CODE_DIR/code/cubrim-rs" &&
-        /usr/bin/timeout --signal=TERM --kill-after=10s "${remaining}s" "$CARGO" test --release --test scheme_roundtrip -- --nocapture) \
-        >"$PARTIAL/cargo-test-scheme-roundtrip.log" 2>&1 || die 'scheme_roundtrip integration test failed'
+        /usr/bin/timeout --signal=TERM --kill-after=10s "${remaining}s" "$CARGO" test --release --test differential -- --nocapture) \
+        >"$PARTIAL/cargo-test-differential.log" 2>&1 || die 'differential integration test failed'
     restore_suite_side_effects
     jlog "{\"t\":\"$(now)\",\"event\":\"suites_pass\"}"
 }

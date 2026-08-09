@@ -41,7 +41,7 @@ taskset -c 0-15
 d4b9fc85a242f887fb1a49bd849c35779c48b8fda04480969309f2d0bb0211cb
 3a13f48
 cargo test --release
-cargo test --release --test scheme_roundtrip -- --nocapture
+cargo test --release --test differential -- --nocapture
 cmp --
 corpus_manifest.tsv
 perf stat
@@ -126,7 +126,7 @@ git commit -m "research: harden NEW-24 attribution admission"
 
 - [ ] **Step 1: Run exact-code suites before any cell**
 
-Run `/root/.cargo/bin/cargo test --release` and `/root/.cargo/bin/cargo test --release --test scheme_roundtrip -- --nocapture` in the detached `3a13f48` checkout. If the suites modify the two known tracked benchmark JSON files, verify that exact allowlist, restore their HEAD blobs atomically, and prove the checkout clean; any other side effect fails the campaign.
+Run `/root/.cargo/bin/cargo test --release` and `/root/.cargo/bin/cargo test --release --test differential -- --nocapture` in the detached `3a13f48` checkout. The focused target is the round-trip/back-compat integration target that actually exists at the frozen commit; the later `scheme_roundtrip` target is not present and must not be overlaid. If the suites modify the two known tracked benchmark JSON files, verify that exact allowlist, restore their HEAD blobs atomically, and prove the checkout clean; any other side effect fails the campaign.
 
 - [ ] **Step 2: Resolve and freeze every source through the manifest**
 

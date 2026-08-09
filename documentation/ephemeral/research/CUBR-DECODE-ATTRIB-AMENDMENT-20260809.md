@@ -33,6 +33,12 @@ The coordinator read the complete 130-line landed PR #54 report only to reconcil
 
 PR #54 and `/root/cubr-decode-attrib-20260809` are foreign landed outputs and remain preserved unchanged. They are classified as invalid evidence, not reverted or rewritten.
 
+### Return to plan: exact-commit suite correction
+
+An adversarial review performed before G2 was launched found that the originally specified focused command, `cargo test --release --test scheme_roundtrip -- --nocapture`, cannot run at the frozen source commit `3a13f486aea51470e2079ba66abb94d99fd782d9`: that tree has no `tests/scheme_roundtrip.rs` and no explicit `scheme_roundtrip` test target. The target exists only in later source and importing it would dirty the checkout and break the frozen source/binary provenance. Leaving the command unchanged would deterministically stop the campaign before any cell and would provide no safety evidence.
+
+The prospective G6 contract is therefore corrected before measurement. The exact detached commit must pass the complete `cargo test --release` suite and its existing focused round-trip/back-compat target, `cargo test --release --test differential -- --nocapture`. The frozen commit contains `tests/differential.rs`; that target exercises ordinary and configured value-scheme round trips, old-archive decoding, and entropy/context/RLE branches. Direct G2 execution independently performs byte comparison and original-SHA verification after every profiled decode. The source commit, measured binary, cells, predictions, thresholds, instruments, sample counts, and all other gates remain unchanged. The operator mandate delegates ordinary implementation forks for autonomous resolution; this correction removes an impossible command without expanding scope or weakening the losslessness requirement.
+
 ## Corrected Generation G2 contract
 
 A single systemd‑invoked, non‑restartable campaign is the only valid continuation of the decode‑attribution characterisation.
@@ -65,7 +71,7 @@ Every gate listed here must pass for a cell before any number from that cell is 
   - CPU topology must match the observed EPYC 7502P layout: logical CPUs 0‑31 map one-to-one to physical core IDs 0‑31, and logical CPUs 32‑63 are their SMT siblings. The 0‑15 pin therefore contains 16 distinct physical cores and no SMT siblings.
   - The runner’s own provenance (SHA256 of the runner script/binary) must be logged and must match the exact landed version authorised for this campaign.
 - **G5 — Historical archive absent; independent encode requirement.** The historical archive bytes are not present on the measurement host. G1’s correction (two independent fresh encodes) is the only permitted canonical‑identity gate.
-- **G6 — Full release and scheme-roundtrip suites.** Before profiling, an exact detached checkout of code commit `3a13f48` must pass `cargo test --release` and `cargo test --release --test scheme_roundtrip -- --nocapture`. The explicit `--test` selector is mandatory: the positional filter `cargo test --release scheme_roundtrip -- --nocapture` matches none of this target's seven test names and is not suite evidence. The measured binary remains the frozen Phase C binary above; a freshly built test binary is never substituted. Failure fails the entire campaign.
+- **G6 — Full release and focused differential suites.** Before profiling, an exact detached checkout of code commit `3a13f48` must pass `cargo test --release` and `cargo test --release --test differential -- --nocapture`. The explicit `--test` selector is mandatory so Cargo executes the frozen commit's real integration-test target rather than treating `differential` as a name filter. The measured binary remains the frozen Phase C binary above; a freshly built test binary is never substituted. Failure fails the entire campaign.
 - **G7 — Per‑step 3× timeout.** Every per‑cell step (encode, plain decode, each perf‑stat decode, perf‑record decode) is subject to a wall‑clock limit of 3× the DB‑derived expected duration for that step. Any step exceeding its limit voids the cell to the journal.
 
   The frozen timeout constants below are the Phase C `world_benchmark_timing_file` encode/decode durations multiplied by three and rounded upward to the next five seconds. Both independent encodes use the encode timeout; every decode instrument uses the decode timeout.
