@@ -88,8 +88,9 @@ must contain **only** the following changes relative to the original
    The contract must also assert that the exact declaration line is present.
 5. Correct the inherited checkout-cleanliness helper so a failed `git status`
    is fatal; only a successful command with empty output is accepted as clean.
-6. Before the Rust suite, verify the exact five-file generation-1 manifest in
-   §7 and reject missing, changed, or additional entries.
+6. Before the Rust suite, verify the exact generation-1 root in §7: the five
+   hashed files plus one real, empty `timing_logs/` directory. Reject missing,
+   changed, additional, symlinked, or non-empty entries.
 
 The source-contract check must be part of `--self-test`, for example:
 
@@ -174,6 +175,10 @@ b6b96126eefa1a9b00581b1c7f2439ca5c605e1b8b4dceb14d4757a28c9fefbf  HASHES.tsv
 544748ffc2ffbcd9218ff43f09b7292811d6ab00e1fad789105adfc5d31fd19f  results.tsv
 7ae44fbaaaf4cf26cc68d1643cc49da562434914dbade295605aaf5972944cdf  roundtrips.tsv
 ```
+
+The root also contains exactly one directory, `timing_logs/`, which is real
+(not a symlink) and empty. Therefore the preserved root has exactly six
+top-level entries: the five files above and that empty directory.
 
 ---
 

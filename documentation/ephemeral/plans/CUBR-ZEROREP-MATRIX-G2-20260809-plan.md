@@ -46,7 +46,8 @@ and distinct generation‑2 artefacts; no product code is changed.
   - Extend `--self-test` with the exact whole-source occurrence contract; only
     the two lowercase tokens in `/root/.cargo/bin/cargo` are permitted.
   - Make checkout cleanliness fail closed when `git status` errors.
-  - Enforce the exact five-file G1 preservation manifest before the Rust suite.
+  - Enforce the exact G1 preservation root before the Rust suite: five hashed
+    files plus one real, empty `timing_logs/` directory.
 - All other gates, identities, timings, and DB protocol are strictly and
   exclusively those of the original preregistration and original plan.
 
@@ -73,8 +74,8 @@ identically to the original plan using the new generation‑2 paths and names.
   - Mutation tests must reject the reviewer examples `if cargo`, `! cargo`,
     `( cargo )`, `time cargo`, `command cargo`, and `env X=1 cargo`.
   - A failing `git status` probe must be rejected, never interpreted as clean.
-  - A missing, changed, or extra G1 manifest entry must be rejected before the
-    Rust suite.
+  - A missing, changed, extra, symlinked, or non-empty G1 entry must be rejected
+    before the Rust suite; the only directory allowed is empty `timing_logs/`.
   - Commit message: “Add generation‑2 zero‑rep matrix amendment, plan, and runner”
   - Record the script’s SHA‑256 after commit: `git show HEAD:… | sha256sum`
 
