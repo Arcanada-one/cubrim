@@ -64,7 +64,10 @@ readonly -a SIDE_EFFECT_SPECS=(
  "$SIDE_EFFECT_28_HEAD_SHA $SIDE_EFFECT_28"
  "$SIDE_EFFECT_31_HEAD_SHA $SIDE_EFFECT_31"
 )
-readonly POST_RESTORE_GATE_LINES_SHA256=fffcf9764cc3c8fd909a468b644925451fa3607a8e171b1263459c9d19e06319
+readonly POST_RESTORE_GATE_LINES_SHA256=846b30635c2fc2ef20f5ef5e0b21b485ae062fd9b8b34d8feef20347f8c8778a
+readonly CLEAN_BLOCK_SHA256=5b1286bf098d721759604104f3be900b17a23694f1932c1ff298779ee9f3a61a
+readonly HELPERS_BLOCK_SHA256=d7da850d7392b4c6db19039545e7685455f5a69ec22bfddb9ca325229f8cfe6e
+readonly LIVE_BLOCK_SHA256=390d66a0f5f189c70ff0231c0493a22a4d9084da2361d11f29138646fbdddc7c
 # G3-END preservation-and-side-effect-contract
 
 export CUBR_THREADS=4 RAYON_NUM_THREADS=4 OMP_NUM_THREADS=4 CUBRIM_ACCEPT_LICENSE=1
@@ -91,11 +94,13 @@ journal() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }
 die() { journal "FAIL: $*"; exit 1; }
 sha() { sha256sum "$1" | awk '{print $1}'; }
 need_sha() { [[ -f $1 && $(sha "$1") == "$2" ]] || die "sha256 mismatch: $1"; }
+# G3-FROZEN-BEGIN inherited-clean
 clean() {
  local checkout=$1 status
  if ! status=$(git -C "$checkout" status --porcelain); then die "git status failed: $checkout"; fi
  [[ -z $status ]] || die "dirty checkout: $checkout"
 }
+# G3-FROZEN-END inherited-clean
 suite_contract_lines() {
  local dollar='$' double_quote='"' quote="'" command_ref prefix release_tail scheme_tail
  command_ref="${double_quote}${dollar}CARGO${double_quote}"
@@ -145,6 +150,7 @@ source_contract() {
  identifier_lines_allowed "$source" || return 1
  program_command_refs_absent "$source" || return 1
  # G3-BEGIN source-contract-extension
+ frozen_blocks_allowed "$source" || return 1
  post_restore_gate_allowed "$source" || return 1
  # G3-END source-contract-extension
  suite_lines_exact_once "$source"
@@ -180,6 +186,31 @@ verify_exact_manifest() (
 verify_g1_manifest() { verify_exact_manifest "$G1_OUT" "$G1_EMPTY_DIR" "${G1_MANIFEST[@]}"; }
 # G3-BEGIN preservation-and-side-effect-functions
 verify_g2_manifest() { verify_exact_manifest "$G2_OUT" "$G2_EMPTY_DIR" "${G2_MANIFEST[@]}"; }
+marker_block_digest() {
+ local source=$1 begin=$2 end=$3
+ LC_ALL=C awk -v begin="$begin" -v end="$end" '
+  $0 == begin { begin_count++; if (!begin_line) begin_line=NR }
+  $0 == end { end_count++; if (!end_line) end_line=NR }
+  { lines[NR]=$0 }
+  END {
+   if (begin_count != 1 || end_count != 1 || begin_line >= end_line) exit 1
+   for (line=begin_line; line<=end_line; line++) print lines[line]
+  }
+ ' "$source" | sha256sum | awk '{print $1}'
+}
+frozen_blocks_allowed() {
+ local source=$1 prefix='# G3-FROZEN-' clean_begin clean_end helper_begin helper_end live_begin live_end digest
+ clean_begin="${prefix}BEGIN inherited-clean"; clean_end="${prefix}END inherited-clean"
+ helper_begin='# G3-BEGIN '; helper_begin+='preservation-and-side-effect-functions'
+ helper_end='# G3-END '; helper_end+='preservation-and-side-effect-functions'
+ live_begin="${prefix}BEGIN live-restore-clean-rehash"; live_end="${prefix}END live-restore-clean-rehash"
+ digest=$(marker_block_digest "$source" "$clean_begin" "$clean_end") || return 1
+ [[ $digest == "$CLEAN_BLOCK_SHA256" ]] || return 1
+ digest=$(marker_block_digest "$source" "$helper_begin" "$helper_end") || return 1
+ [[ $digest == "$HELPERS_BLOCK_SHA256" ]] || return 1
+ digest=$(marker_block_digest "$source" "$live_begin" "$live_end") || return 1
+ [[ $digest == "$LIVE_BLOCK_SHA256" ]]
+}
 repo_status() { git -C "$1" status --porcelain; }
 head_blob_sha() { git -C "$1" show "HEAD:$2" | sha256sum | awk '{print $1}'; }
 worktree_file_sha() {
@@ -375,7 +406,8 @@ g3_clone_dirty_repo() {
  g3_dirty_side_effects "$clone"
 }
 g3_self_test() {
- local d=$1 template="$1/g3-template" repo status log hash28 hash31 expected_log mutation_source gate_name live_gate_call
+ local d=$1 template="$1/g3-template" repo status log hash28 hash31 expected_log mutation_source mutation_source2 gate_name live_gate_call
+ local clean_line clean_mutant post_line post_mutant marker_prefix clean_begin clean_end dollar='$'
  local spec28 spec31
  local -a specs
  mkdir -p "$template/$(dirname "$SIDE_EFFECT_28")" || return 1
@@ -440,6 +472,28 @@ g3_self_test() {
  [[ $(awk -v expected="$live_gate_call" '$0 == expected { count++ } END { print count + 0 }' "$mutation_source") == 1 ]] || return 1
  suite_lines_exact_once "$mutation_source" || return 1
  identifier_lines_allowed "$mutation_source" || return 1
+ ! source_contract "$mutation_source" || return 1
+
+ clean_line=" [[ -z ${dollar}status ]] || die \"dirty checkout: ${dollar}checkout\""
+ clean_mutant=" [[ -z ${dollar}status || ${dollar}checkout == \"${dollar}ZERO_ROOT\" ]] || die \"dirty checkout: ${dollar}checkout\""
+ mutation_source="$d/live-root-clean-bypass.sh"
+ mutate_exact_line "${BASH_SOURCE[0]}" "$clean_line" "$clean_mutant" "$mutation_source" || return 1
+ ! source_contract "$mutation_source" || return 1
+ post_line=" [[ -z ${dollar}status ]]"
+ post_mutant=" [[ -z ${dollar}status || ${dollar}root == \"${dollar}ZERO_ROOT\" ]]"
+ mutation_source="$d/live-root-post-restore-bypass.sh"
+ mutate_exact_line "${BASH_SOURCE[0]}" "$post_line" "$post_mutant" "$mutation_source" || return 1
+ ! source_contract "$mutation_source" || return 1
+
+ marker_prefix='# G3-FROZEN-'; clean_begin="${marker_prefix}BEGIN inherited-clean"; clean_end="${marker_prefix}END inherited-clean"
+ mutation_source="$d/marker-decoy-duplicate.sh"
+ cp "${BASH_SOURCE[0]}" "$mutation_source" || return 1
+ printf '\nif false; then\n%s\n%s\nfi\n' "$clean_begin" "$clean_end" >>"$mutation_source"
+ ! source_contract "$mutation_source" || return 1
+ mutation_source="$d/marker-order-first.sh"; mutation_source2="$d/marker-order-second.sh"
+ mutate_exact_line "${BASH_SOURCE[0]}" "$clean_begin" '# G3-ORDER-SWAP-TEMP' "$mutation_source" || return 1
+ mutate_exact_line "$mutation_source" "$clean_end" "$clean_begin" "$mutation_source2" || return 1
+ mutate_exact_line "$mutation_source2" '# G3-ORDER-SWAP-TEMP' "$clean_end" "$mutation_source" || return 1
  ! source_contract "$mutation_source" || return 1
 }
 # G3-END isolated-side-effect-self-test
@@ -644,14 +698,14 @@ journal "admission load1=$load1 pin=$PIN threads=$CUBR_THREADS candidate_head=$c
 { printf 'cell\tstep\tsample\tbuild\twall_s\tpeak_rss_kib\n' >"$OUT/results.tsv"; printf 'cell\tphase\tsample\tbuild\tcmp\n' >"$OUT/roundtrips.tsv"; }
 ( cd "$ZERO_ROOT/code/cubrim-rs" && "$CARGO" test --release ) >"$OUT/${CARGO_PROGRAM}-test-release.log" 2>&1 || die 'Cargo test --release'
 ( cd "$ZERO_ROOT/code/cubrim-rs" && "$CARGO" test --release --test scheme_roundtrip ) >"$OUT/${CARGO_PROGRAM}-test-scheme-roundtrip.log" 2>&1 || die 'scheme roundtrip test'
-# G3-BEGIN suite-side-effect-restoration
+# G3-FROZEN-BEGIN live-restore-clean-rehash
 restore_suite_side_effects "$ZERO_ROOT" "$OUT/side-effect-restore.log" "${SIDE_EFFECT_SPECS[@]}" || die 'suite side-effect restore'
-# G3-END suite-side-effect-restoration
 clean "$ZERO_ROOT"
 need_sha "$ZERO" "$ZERO_SHA"; need_sha "$ZERO_ROOT/code/cubrim-rs/src/cm2.rs" "$ZERO_CM2_SHA"
 [[ $(git -C "$ZERO_ROOT" show "HEAD:$RUNNER_REL" | sha256sum | awk '{print $1}') == "$runner_committed_sha" ]] || die 'runner changed during suite'
 [[ $(git -C "$ZERO_ROOT" rev-parse HEAD) == "$candidate_head" && $(git -C "$ZERO_ROOT" rev-parse FETCH_HEAD) == "$fetched_sha" && $candidate_head == "$fetched_sha" ]] || die 'candidate identity changed during suite'
 git -C "$ZERO_ROOT" diff --quiet "$ZERO_ANCHOR"..HEAD -- code/cubrim-rs || die 'zero code changed during suite'
+# G3-FROZEN-END live-restore-clean-rehash
 journal 'suite completion: Cargo test --release and scheme_roundtrip passed'
 stabilization_start=$SECONDS; quiet_samples=0
 while (( SECONDS - stabilization_start <= 180 )); do
