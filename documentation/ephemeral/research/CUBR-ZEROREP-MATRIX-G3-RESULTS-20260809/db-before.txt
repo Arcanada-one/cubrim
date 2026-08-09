@@ -1,8 +1,13 @@
 Read-only preflight UTC date: 2026-08-09
 Host: arcana-dbs (100.97.136.74)
+Host machine-id SHA-256: 748cf0730699f386dd0887f621659bc50704eea120753ea9ce0d52aae9e0327e
 Container: arcana-postgres
+Container image ID: sha256:42e7f6b4e1eceb02ff14e3e6bc6108bbe259abbe83879dc1845d0da1ddeb555d
 Database: arcanada_cubrim
+Database OID: 55835
 Role: postgres
+PostgreSQL system identifier: 7648390441241305131
+PostgreSQL server_version_num: 180004
 
 new30_hypotheses=1
 new30_total_measurements=27
@@ -14,7 +19,13 @@ existing_matrix_rows=0
 existing_matrix_modes=0
 matrix_note_markers=0
 new30_evaluation_rows=0
+preexisting_snapshot_path=documentation/ephemeral/research/CUBR-ZEROREP-MATRIX-G3-RESULTS-20260809/db-before.tsv
+preexisting_snapshot_rows=27
+preexisting_snapshot_sha256=2cf311fda0c951dd051100c2a8923201a2943ea8a7e056a077d34be2ba07abfc
+preexisting_jsonb_sha256=c1be3e5d5b32fe21db314762de9c0c56bd6040e109a7648f48b6771f2e79bb8e
 
 Relevant live measurement types: codec_rev integer; orig_bytes/comp_bytes bigint; ratio double precision; rt_ok boolean; duration_ms integer nullable; measured_at timestamptz; peak_rss_kib bigint nullable; decode_ms integer nullable; decode_peak_rss_kib bigint nullable; host/cpu_pin text nullable.
+
+The full 27-row preexisting NEW-30 measurement snapshot is committed as a canonical, ID-ordered TSV. The transaction also embeds the exact JSONB representation of every row and compares it before and after insertion while holding write-conflicting locks on its complete read set.
 
 No credential values were printed. No database mutation was performed.
