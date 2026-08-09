@@ -104,7 +104,7 @@ pub(crate) fn report(total_nanos: u128) {
         Err(_) => return,
     };
     let mut rows: Vec<(&'static str, Slot)> = map.into_iter().collect();
-    rows.sort_by(|a, b| b.1.nanos.cmp(&a.1.nanos));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.1.nanos));
     eprintln!("\n=== CUBRIM ENCODER CANDIDATE ATTRIBUTION ===");
     eprintln!("total measured wall: {:.3} s", total_nanos as f64 / 1e9);
     eprintln!(

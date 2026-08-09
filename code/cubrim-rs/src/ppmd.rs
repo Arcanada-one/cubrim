@@ -699,24 +699,25 @@ impl PpmModel {
             if let Some(ctx) = self.ctx[k].get(key).filter(|ctx| context_admitted(ctx, k)) {
                 let (run, base_esc) = escape_band(ctx, &excluded);
                 if base_esc > 0 {
-                    if self.bin.is_some() && ctx.stats.len() == 1 && k >= 4 {
+                    if let Some(bin) = self.bin.as_mut().filter(|_| ctx.stats.len() == 1 && k >= 4)
+                    {
                         // Deterministic (single-symbol) context → BinSumm binary
                         // coding. `s0` is non-excluded here (base_esc > 0).
                         let (s0, c) = ctx.stats[0];
                         let i = bin_count_bucket(c);
                         let j = k.min(BIN_CTX - 1);
-                        let pm = self.bin.as_ref().unwrap().predict(i, j);
+                        let pm = bin.predict(i, j);
                         if s0 == sym {
                             enc.encode(0, pm, BIN_TOTAL);
+                            bin.update(i, j, true);
                             self.ideal_bits += -((pm as f64) / (BIN_TOTAL as f64)).log2();
-                            self.bin.as_mut().unwrap().update(i, j, true);
                             return k;
                         }
                         enc.encode(pm, BIN_TOTAL - pm, BIN_TOTAL);
                         let eb = -(((BIN_TOTAL - pm) as f64) / (BIN_TOTAL as f64)).log2();
+                        bin.update(i, j, false);
                         self.ideal_bits += eb;
                         self.esc_bits += eb;
-                        self.bin.as_mut().unwrap().update(i, j, false);
                         excluded[s0 as usize] = true;
                     } else {
                         let masked = excluded.iter().filter(|&&v| v).count();
@@ -838,19 +839,20 @@ impl PpmModel {
             if let Some(ctx) = self.ctx[k].get(key).filter(|ctx| context_admitted(ctx, k)) {
                 let (run, base_esc) = escape_band(ctx, &excluded);
                 if base_esc > 0 {
-                    if self.bin.is_some() && ctx.stats.len() == 1 && k >= 4 {
+                    if let Some(bin) = self.bin.as_mut().filter(|_| ctx.stats.len() == 1 && k >= 4)
+                    {
                         let (s0, c) = ctx.stats[0];
                         let i = bin_count_bucket(c);
                         let j = k.min(BIN_CTX - 1);
-                        let pm = self.bin.as_ref().unwrap().predict(i, j);
+                        let pm = bin.predict(i, j);
                         let f = dec.get_freq(BIN_TOTAL);
                         if f < pm {
                             dec.decode(0, pm, BIN_TOTAL);
-                            self.bin.as_mut().unwrap().update(i, j, true);
+                            bin.update(i, j, true);
                             return (s0, k);
                         }
                         dec.decode(pm, BIN_TOTAL - pm, BIN_TOTAL);
-                        self.bin.as_mut().unwrap().update(i, j, false);
+                        bin.update(i, j, false);
                         excluded[s0 as usize] = true;
                     } else {
                         let masked = excluded.iter().filter(|&&v| v).count();
@@ -1690,7 +1692,7 @@ mod tests {
         let bits: Vec<u8> = (0..n)
             .map(|_| {
                 x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                if (x >> 27) % 32 == 0 {
+                if (x >> 27).is_multiple_of(32) {
                     1
                 } else {
                     0
