@@ -236,14 +236,27 @@ verify_topology() {
 }
 
 reject_orphan_processes() {
-    local found
-    if ! found=$(/usr/bin/ps -eo pid=,ppid=,comm=,args= | /usr/bin/awk -v self="$$" -v parent="$PPID" '
-        $1 != self && $1 != parent &&
+    local found snapshot matches
+    snapshot=$(/usr/bin/mktemp /tmp/cubr-current-profile-g3-processes.XXXXXX) ||
+        die 'process snapshot allocation failed'
+    matches=$(/usr/bin/mktemp /tmp/cubr-current-profile-g3-process-matches.XXXXXX) || {
+        /usr/bin/rm -f -- "$snapshot"
+        die 'process match allocation failed'
+    }
+    if ! /usr/bin/ps -eo pid=,ppid=,comm=,args= >"$snapshot"; then
+        /usr/bin/rm -f -- "$snapshot" "$matches"
+        die 'process snapshot failed'
+    fi
+    if ! /usr/bin/awk -v runner="$$" -v parent="$PPID" '
+        $1 != runner && $1 != parent &&
         ($3 ~ /^(cubrim|perf|cargo|rust|rustc)$/ ||
          ($3 == "bash" && $0 ~ /current-profile-g3-run[.]sh/)) { print }
-    '); then
-        die 'process scan failed'
+    ' "$snapshot" >"$matches"; then
+        /usr/bin/rm -f -- "$snapshot" "$matches"
+        die 'process classification failed'
     fi
+    found=$(<"$matches")
+    /usr/bin/rm -f -- "$snapshot" "$matches"
     [[ -z $found ]] || {
         /usr/bin/printf '%s\n' "$found" >&2
         die 'orphan candidate/perf process or competing Cubrim/Cargo/Rust/current-profile runner'
@@ -394,7 +407,7 @@ discover_perf_events() {
         run_bounded 10 "$d/perf-stat-$safe.out" "$d/perf-stat-$safe.err" \
             /usr/bin/perf stat -x $'\t' -e "$event" -o "$d/perf-stat-$safe.txt" -- \
             /usr/bin/taskset -c 0 /usr/bin/true || rc=$LAST_RC
-        if IFS='|' read -r status value <<<"$(parse_perf_event_probe "$d/perf-stat-$safe.txt")"; then
+        if IFS='|' read -r status value <<<"$(parse_perf_event_probe "$d/perf-stat-$safe.txt" "$event")"; then
             : "$value"
         else
             die "perf event discovery failed: $event rc=$rc"
