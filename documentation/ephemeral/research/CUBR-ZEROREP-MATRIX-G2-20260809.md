@@ -95,6 +95,13 @@ must contain **only** the following changes relative to the original
    reviewed total count of the `CARGO_PROGRAM` identifier. A mutation that
    changes both live commands and hides copies of the expected lines inside an
    `if false; then ... fi` decoy block must fail.
+   Because regex enumeration and a count alone can be balanced, the final
+   contract must hash the complete ordered set of every source line containing
+   the `CARGO_PROGRAM` identifier and compare it with the prereviewed digest.
+   Thus any permitted-line substitution plus a new command reference fails even
+   when the total count is unchanged. Negative controls must cover `else`,
+   `exec`, and assignment-prefixed command positions with a compensating removal
+   of one allowed data-only identifier reference.
 5. Correct the inherited checkout-cleanliness helper so a failed `git status`
    is fatal; only a successful command with empty output is accepted as clean.
 6. Before the Rust suite, verify the exact generation-1 root in §7: the five
