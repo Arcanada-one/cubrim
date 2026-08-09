@@ -86,6 +86,11 @@ must contain **only** the following changes relative to the original
    whole-source invariant rejects every executable form, including `if cargo`,
    `! cargo`, `( cargo )`, `time cargo`, `command cargo`, and `env X=1 cargo`.
    The contract must also assert that the exact declaration line is present.
+   It must additionally require exactly one copy of each complete preregistered
+   suite command line using `"$CARGO" test --release` and
+   `"$CARGO" test --release --test scheme_roundtrip`. Replacing either command
+   position with `"$CARGO_PROGRAM"` must fail self-test even though it adds no
+   lowercase source token.
 5. Correct the inherited checkout-cleanliness helper so a failed `git status`
    is fatal; only a successful command with empty output is accepted as clean.
 6. Before the Rust suite, verify the exact generation-1 root in §7: the five

@@ -45,6 +45,8 @@ and distinct generation‑2 artefacts; no product code is changed.
   - Replace every bare `cargo` invocation with `"$CARGO"`.
   - Extend `--self-test` with the exact whole-source occurrence contract; only
     the two lowercase tokens in `/root/.cargo/bin/cargo` are permitted.
+  - Assert the two exact full suite lines use `"$CARGO"` in command position;
+    reject a mutation to `"$CARGO_PROGRAM"`.
   - Make checkout cleanliness fail closed when `git status` errors.
   - Enforce the exact G1 preservation root before the Rust suite: five hashed
     files plus one real, empty `timing_logs/` directory.
@@ -73,6 +75,8 @@ identically to the original plan using the new generation‑2 paths and names.
     self‑test described in the amendment.
   - Mutation tests must reject the reviewer examples `if cargo`, `! cargo`,
     `( cargo )`, `time cargo`, `command cargo`, and `env X=1 cargo`.
+  - Mutation tests must also replace each absolute suite invocation with
+    `"$CARGO_PROGRAM"` independently and reject both variants.
   - A failing `git status` probe must be rejected, never interpreted as clean.
   - A missing, changed, extra, symlinked, or non-empty G1 entry must be rejected
     before the Rust suite; the only directory allowed is empty `timing_logs/`.
