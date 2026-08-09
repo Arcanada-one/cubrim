@@ -509,6 +509,7 @@ main_run() {
             continue
         fi
         run_cell "$corpus" "$file" "$preset" "$archive_sha" "$orig_sha" "$orig_bytes" "$enc_timeout" "$dec_timeout"
+        reject_orphan_processes
         if [[ $CELL_RESULT != PASS ]]; then
             jlog "{\"t\":\"$(now)\",\"cell\":\"$file/$preset\",\"event\":\"cell_failed_or_void\"}"
             CURRENT_CELL=

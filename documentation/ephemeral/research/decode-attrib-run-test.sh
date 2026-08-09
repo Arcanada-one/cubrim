@@ -124,6 +124,14 @@ require_fixed 'reject_orphan_processes'
 refusal_call_count=$({ /usr/bin/grep -F 'refuse_existing_output || exit 1' "$RUNNER" || true; } | /usr/bin/wc -l)
 [[ $refusal_call_count == 2 ]] || fail 'output refusal call count must be 2'
 
+post_cell_exit_gate_count=$(/usr/bin/awk '
+    /^[[:space:]]*run_cell / { state=1; next }
+    state==1 && /^[[:space:]]*reject_orphan_processes$/ { state=2; next }
+    state==2 && /^[[:space:]]*if \[\[ \$CELL_RESULT != PASS \]\]; then$/ { count++; state=0 }
+    END { print count+0 }
+' "$RUNNER")
+[[ $post_cell_exit_gate_count == 1 ]] || fail 'post-cell exit gate ordering must occur once'
+
 # Every candidate encode/decode must be routed through the bounded-command seam.
 if /usr/bin/grep -qE '^[[:space:]]*("?\$CUBRIM"?|\$\{CUBRIM\})[[:space:]]+(compress|decompress)' "$RUNNER"; then
     fail 'unbounded direct candidate invocation'
@@ -212,6 +220,7 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     expect_mutant_red provenance 's@\[\[ \$actual == "\$EXPECTED_RUNNER_SHA" \]\]@/usr/bin/true@' 'missing literal: [[ $actual == "$EXPECTED_RUNNER_SHA" ]]'
     expect_mutant_red monotonic 's@/proc/uptime@/tmp/non-monotonic-clock@g' 'missing literal: /proc/uptime'
     expect_mutant_red refusal 's/refuse_existing_output || exit 1/:/g' 'output refusal call count must be 2'
+    expect_mutant_red post-cell-exit '/^[[:space:]]*run_cell /{n;/reject_orphan_processes/d;}' 'post-cell exit gate ordering must occur once'
     expect_self_test_mutant_red perf-values "s@readonly PERF_VALUE_RE=.*@readonly PERF_VALUE_RE='.*'@" 'perf_events_non_numeric_accepted'
 
     marker_mutant=$mutation_root/marker-order.sh
