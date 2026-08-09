@@ -1,0 +1,20 @@
+Read-only preflight UTC date: 2026-08-09
+Host: arcana-dbs (100.97.136.74)
+Container: arcana-postgres
+Database: arcanada_cubrim
+Role: postgres
+
+new30_hypotheses=1
+new30_total_measurements=27
+new30_distinct_modes=5
+codec_rev_8=cli-sha256:12eaff4d9df9e3b8f51567cd930311f343680b5cc55e3426f30a78456fc5830c
+codec_rev_9=cli-sha256:a195c2271a8aafbe9363d89d4047db4554e0e8840869997072d0c011086a7fbd
+codec_rev_10=cli-sha256:771fdb0f091df2e419d66ae9b28169a2dc69f1d57cab62d948a9ef716dac6e20
+existing_matrix_rows=0
+existing_matrix_modes=0
+matrix_note_markers=0
+new30_evaluation_rows=0
+
+Relevant live measurement types: codec_rev integer; orig_bytes/comp_bytes bigint; ratio double precision; rt_ok boolean; duration_ms integer nullable; measured_at timestamptz; peak_rss_kib bigint nullable; decode_ms integer nullable; decode_peak_rss_kib bigint nullable; host/cpu_pin text nullable.
+
+No credential values were printed. No database mutation was performed.

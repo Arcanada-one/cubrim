@@ -1,0 +1,3 @@
+2026-08-09T12:40:28+02:00 dev-ai systemd[1]: Started cubr-zerorep-matrix-g3-20260809.service - /root/cubr-levers/zerorep-matrix-g3-code/documentation/ephemeral/research/CUBR-ZEROREP-MATRIX-G3-20260809/zerorep-matrix-g3-run.sh.
+2026-08-09T13:47:09+02:00 dev-ai systemd[1]: cubr-zerorep-matrix-g3-20260809.service: Deactivated successfully.
+2026-08-09T13:47:09+02:00 dev-ai systemd[1]: cubr-zerorep-matrix-g3-20260809.service: Consumed 2h 27min 37.004s CPU time, 4.7G memory peak, 0B memory swap peak.
