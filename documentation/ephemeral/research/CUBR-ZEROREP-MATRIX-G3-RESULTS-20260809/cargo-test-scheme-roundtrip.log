@@ -1,0 +1,48 @@
+warning: unused attribute
+   --> src/geocm.rs:114:5
+    |
+114 |     #[inline]
+    |     ^^^^^^^^^ help: remove this attribute
+    |
+note: attribute also specified here
+   --> src/geocm.rs:109:5
+    |
+109 |     #[inline]
+    |     ^^^^^^^^^
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: `#[warn(unused_attributes)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `allow_abort`
+    --> src/codec.rs:1100:9
+     |
+1100 |     let allow_abort = bound != usize::MAX;
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_allow_abort`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `wshift` is never read
+   --> src/cm2.rs:617:5
+    |
+582 | struct CmModel {
+    |        ------- field in this struct
+...
+617 |     wshift: i32,
+    |     ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cubrim` (lib) generated 3 warnings (run `cargo fix --lib -p cubrim` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 0.09s
+     Running tests/scheme_roundtrip.rs (target/release/deps/scheme_roundtrip-a955601342883c5e)
+
+running 7 tests
+test bitpack_fixed_roundtrips_the_web_corpus ... ok
+test entropy_roundtrips_the_web_corpus ... ok
+test rle_codes_roundtrips_the_web_corpus ... ok
+test entropy_context_roundtrips_the_web_corpus ... ok
+test entropy_context2_roundtrips_the_web_corpus ... ok
+test bwt_entropy_roundtrips_the_web_corpus ... ok
+test bwt_geo_mix_roundtrips_the_web_corpus ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 36.84s
+

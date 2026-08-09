@@ -1,0 +1,492 @@
+   Compiling rustix v1.1.4
+   Compiling linux-raw-sys v0.12.1
+   Compiling bitflags v2.13.1
+   Compiling fastrand v2.5.0
+warning: unused attribute
+   --> src/geocm.rs:114:5
+    |
+114 |     #[inline]
+    |     ^^^^^^^^^ help: remove this attribute
+    |
+note: attribute also specified here
+   --> src/geocm.rs:109:5
+    |
+109 |     #[inline]
+    |     ^^^^^^^^^
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: `#[warn(unused_attributes)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `allow_abort`
+    --> src/codec.rs:1100:9
+     |
+1100 |     let allow_abort = bound != usize::MAX;
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_allow_abort`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `wshift` is never read
+   --> src/cm2.rs:617:5
+    |
+582 | struct CmModel {
+    |        ------- field in this struct
+...
+617 |     wshift: i32,
+    |     ^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cubrim` (lib) generated 3 warnings (run `cargo fix --lib -p cubrim` to apply 2 suggestions)
+   Compiling tempfile v3.27.0
+   Compiling cubrim v0.3.2 (/root/cubr-levers/zerorep-matrix-g3-code/code/cubrim-rs)
+warning: fields `t4_bytes` and `size_bytes` are never read
+  --> tests/cubr0027_bench.rs:24:5
+   |
+22 | struct CorpusFile {
+   |        ---------- fields in this struct
+23 |     name: &'static str,
+24 |     t4_bytes: usize,
+   |     ^^^^^^^^
+25 |     t4_mode: &'static str,
+26 |     size_bytes: usize,
+   |     ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cubrim` (test "cubr0027_bench") generated 1 warning
+warning: `cubrim` (lib test) generated 3 warnings (3 duplicates)
+    Finished `release` profile [optimized] target(s) in 9.79s
+     Running unittests src/lib.rs (target/release/deps/cubrim-2c600afc82fddd4d)
+
+running 333 tests
+test bitpack::tests::test_bitpack_all_256_bytes ... ok
+test bitpack::tests::test_bitpack_empty ... ok
+test bitpack::tests::test_bitpack_decode_rejects_empty_data_nonzero_count ... ok
+test bitpack::tests::test_bitpack_msb_first_layout ... ok
+test bitpack::tests::test_bitpack_round_trip_basic ... ok
+test bitpack::tests::test_bitpack_single_value ... ok
+test bitpack::tests::test_compute_width_edge_cases ... ok
+test bitpack::tests::test_build_value_dict_basic ... ok
+test cm2::tests::cm2_decode_bogus_orig_len_is_err_not_oom ... ok
+test cm2::tests::cm2_decode_implausible_expansion_is_err_before_alloc ... ok
+test cm2::tests::ctr_zero_representation_starts_zero_and_predicts_midpoint ... ok
+test cm2::tests::self_probe ... ignored
+test cm2::tests::ctr_zero_representation_update_preserves_logical_fields ... ok
+test codec::tests::cm2_dispatch_probe ... ignored
+test codec::tests::checked_out_vec_rejects_absurd_len ... ok
+test codec::tests::decode_cm_bogus_framing_is_err_not_oom ... ok
+test codec::tests::decode_cube_inflated_l_is_err_not_oom ... ok
+test codec::tests::cm2_gate_declines_below_the_floor_but_still_round_trips ... ok
+test codec::tests::range_decoder_progress_saturates_past_input_end ... ok
+test codec::tests::med16_apm_forward_inverse_roundtrips ... ok
+test codec::tests::systemic_gate_every_mode_rejects_implausible_length ... ok
+test codec::tests::systemic_gate_nesting_depth_is_bounded ... ok
+test codec::tests::test_bcj_cm2_declines_non_executable ... ok
+test codec::tests::test_bcj_sparc_round_trip ... ok
+test codec::tests::test_bcj_detects_big_endian_sparc_elf ... ok
+test codec::tests::test_biff_rejects_bad_counts_lengths_and_hash ... ok
+test codec::tests::test_binfloat_col_delta_is_reversible ... ok
+test codec::tests::test_biff_record_groups_round_trip_with_truncated_tail ... ok
+test codec::tests::test_bwt_adaptive_scheme_byte ... ok
+test codec::tests::test_bwt_ctxmix_scheme_byte ... ok
+test codec::tests::test_bwt_geomix_scheme_byte ... ok
+test codec::tests::test_bwt_rans_scheme_byte ... ok
+test codec::tests::test_decode_rejects_truncated ... ok
+test codec::tests::test_columnar_decimal_unit_canonical_and_round_trip ... ok
+test codec::tests::test_columnar_delta_unit_canonical_and_round_trip ... ok
+test codec::tests::test_cube_path_clustered_input ... ok
+test codec::tests::test_ctxmix_empty_and_singleton ... ok
+test codec::tests::test_cube_path_forced_clustered ... ok
+test codec::tests::test_encode_starts_with_magic ... ok
+test codec::tests::test_default_gap_scheme_byte_identical_to_v1 ... ok
+test codec::tests::test_default_value_scheme_byte_identical_to_v1 ... ok
+test codec::tests::test_ctxmix_pure_and_mix_unit_round_trip ... ok
+test codec::tests::test_default_byte_identity_after_entropy_addition ... ok
+test codec::tests::test_decode_rejects_bad_magic ... ok
+test codec::tests::test_bcj_small_sparc_elf_container_round_trip ... ok
+test cm2::tests::reciprocal_division_matches_idiv_exactly ... ok
+test cm2::tests::cm2_decode_truncated_stream_stalls_to_err ... ok
+test codec::tests::test_entropy_context2_scheme_byte_is_5 ... ok
+test codec::tests::test_entropy_context2_non_regression_149_tests ... ok
+test codec::tests::test_bwt_u16_wrapper_matches_wide_core ... ok
+test codec::tests::test_entropy_context2_round_trip_synthetic_fixtures ... ok
+test codec::tests::test_bwt_wide_round_trip_across_u16_length_boundary ... ok
+test codec::tests::test_entropy_context2_header_value_scheme_byte_is_5 ... ok
+test codec::tests::test_entropy_context2_diverges_from_t4 ... ok
+test codec::tests::test_entropy_decode_robustness_kraft_violation ... ok
+test codec::tests::test_entropy_decode_truncated_bitstream_returns_error ... ok
+test codec::tests::test_entropy_diverges_from_bitpack_fixed ... ok
+test codec::tests::test_fh07_actual_files_spike ... ignored, FH-07 actual-file spike runs sequentially on dev-ai
+test codec::tests::test_fh08_actual_files_spike ... ignored, FH-08 actual-file spike runs sequentially on dev-ai
+test codec::tests::test_fh10_actual_file_spike ... ignored, FH-10 actual-file spike runs sequentially on dev-ai
+test codec::tests::test_fh18_actual_file_spike ... ignored, FH-18 actual-file spike runs sequentially on dev-ai
+test codec::tests::test_entropy_header_value_scheme_byte_is_3 ... ok
+test codec::tests::test_entropy_context2_size_matches_encode_len ... ok
+test codec::tests::test_entropy_smaller_than_bitpack_on_skewed ... ok
+test codec::tests::test_entropy_round_trip_all_classes ... ok
+test codec::tests::test_fh18_alpha_bcj_is_bijective ... ok
+test cm2::tests::cm2_rt_edge ... ok
+test codec::tests::test_ctxmix_high_entropy_and_rescale ... ok
+test codec::tests::bwt_schemes_decline_when_primary_index_exceeds_u16 ... ok
+test codec::tests::test_entropy_context2_decode_malformed_blob ... ok
+test codec::tests::test_fh19_dickens_scaling_probe ... ignored, FH-19 dickens scaling probe runs on demand (local, ~minutes)
+test codec::tests::test_fh_biff2_actual_file_spike ... ignored, FH-BIFF2 actual-file spike runs sequentially on dev-ai
+test codec::tests::test_entropy_context_non_regression_over_t3 ... ok
+test codec::tests::test_fu01_large_bwt_spike ... ignored, FU-01 heavy spike runs sequentially on dev-ai
+test codec::tests::test_fh18_probe_refuses_non_tar_and_non_alpha ... ok
+test codec::tests::test_fh18_tar_members_walk_and_rejects ... ok
+test codec::tests::test_entropy_context_round_trip_all_classes ... ok
+test codec::tests::test_fh18_alpha_bcj_makes_targets_identical ... ok
+test codec::tests::test_geomix_empty_and_singleton ... ok
+test cm2::tests::cm2_rt_all_bytes ... ok
+test codec::tests::test_bwt_rans_truncated_blob_errors_no_panic ... ok
+test codec::tests::test_geomix_unit_round_trip ... ok
+test codec::tests::test_entropy_context_round_trip_text ... ok
+test codec::tests::test_large_bwt_multi_block_round_trip ... ok
+test cm2::tests::cm2_guard_preserves_valid_roundtrip ... ok
+test codec::tests::test_lz_rans_scheme_byte ... ok
+test codec::tests::test_lz_rans_truncated_blob_errors_no_panic ... ok
+test codec::tests::test_bwt_geomix_truncated_blob_errors_no_panic ... ok
+test codec::tests::test_large_bwt_rejects_malformed_metadata_and_hash ... ok
+test codec::tests::test_bwt_ctxmix_truncated_blob_errors_no_panic ... ok
+test codec::tests::test_n_override_below_minimum_clamped_to_min ... ok
+test codec::tests::test_n_override_none_is_minimal ... ok
+test cm2::tests::cm2_text_compresses ... ok
+test codec::tests::test_non_minimal_n_round_trips ... ok
+test codec::tests::test_lz_rans_codes_round_trip_direct ... ok
+test codec::tests::test_bwt_adaptive_truncated_blob_errors_no_panic ... ok
+test codec::tests::test_offcode_token_coder_round_trips ... ok
+test codec::tests::small_file_freeze_open_reaches_cm2_without_regression ... ok
+test codec::tests::test_order2_build_tables_threshold ... ok
+test codec::tests::test_order2_context_sentinel_single_element ... ok
+test codec::tests::test_order2_fallback_chain_selection ... ok
+test codec::tests::measure_forgone_density_of_bwt_decline ... ok
+test codec::tests::test_order2_header_round_trip ... ok
+test codec::tests::test_order2_rans_empty_and_singletons ... ok
+test codec::tests::test_order2_rans_high_entropy_round_trip ... ok
+test codec::tests::test_order2_context_keys_with_sentinels ... ok
+test codec::tests::test_order2_header_rejects_truncated ... ok
+test codec::tests::test_order2_header_invalid_code_lengths_fail_closed ... ok
+test codec::tests::test_fh18_probe_roundtrip_synthetic_tar ... ok
+test codec::tests::test_order2_header_rejects_bad_tag ... ok
+test codec::tests::test_packed_nibble_header_map_scheme_byte ... ok
+test codec::tests::test_packed_nibble_round_trips_all_classes ... ok
+test codec::tests::test_packed_nibble_round_trips_cube_mode ... ok
+test codec::tests::test_packed_nibble_scheme_diverges_from_rle ... ok
+test codec::tests::test_pbwt_round_trips_random_binary_matrix ... ok
+test codec::tests::test_r3_1_worked_example_via_distance_map ... ok
+test codec::tests::test_range_coder_empty_and_singletons ... ok
+test codec::tests::test_range_coder_high_entropy_and_rescale ... ok
+test codec::tests::test_range_coder_unit_round_trip ... ok
+test codec::tests::test_rans_high_entropy_round_trip ... ok
+test codec::tests::test_rans_normalize_sums_to_m ... ok
+test cm2::tests::cm2_rt_pseudo_random ... ok
+test codec::tests::test_lz_rans_wins_on_long_range_and_dispatch_round_trips ... ok
+test codec::tests::test_rans_order1_empty_and_singletons ... ok
+test codec::tests::test_order2_rans_scheme_byte ... ok
+test codec::tests::test_order2_rans_unit_round_trip_both_submodes ... ok
+test codec::tests::test_order2_header_rejects_short_blob ... ok
+test codec::tests::test_rle_codes_encode_decode_primitives ... ok
+test codec::tests::test_rle_codes_diverges_from_bitpack_fixed ... ok
+test codec::tests::test_rans_order1_unit_round_trip ... ok
+test codec::tests::test_raw_store_for_small_input ... ok
+test codec::tests::test_rle_codes_sequential_order_property ... ok
+test codec::tests::test_rle_codes_round_trip_all_classes ... ok
+test codec::tests::test_rle_codes_size_matches_encode_len ... ok
+test codec::tests::test_rle_codes_header_value_scheme_byte ... ok
+test codec::tests::test_round_trip_all_256_distinct ... ok
+test codec::tests::test_round_trip_empty ... ok
+test codec::tests::test_lz_rans_full_codec_round_trip ... ok
+test codec::tests::test_round_trip_single_byte ... ok
+test codec::tests::test_round_trip_all_same_byte ... ok
+test codec::tests::test_round_trip_all_classes ... ok
+test codec::tests::test_entropy_context2_min_ctx_count_config ... ok
+test codec::tests::test_round_trip_text ... ok
+test codec::tests::test_lz_rans_competitive_never_regresses ... ok
+test codec::tests::test_rle_codes_round_trip_hand_made_run_heavy ... ok
+test config::tests::test_encode_equals_encode_with_config_on_fixtures ... ok
+test codec::tests::test_round_trip_random_bytes ... ok
+test config::tests::test_gap_scheme_byte_roundtrip ... ok
+test config::tests::test_gap_scheme_default_is_1 ... ok
+test config::tests::test_v1_default_values ... ok
+test config::tests::test_non_default_config_round_trips ... ok
+test config::tests::test_value_scheme_byte_roundtrip ... ok
+test codec::tests::test_entropy_context2_round_trip_all_classes ... ok
+test codec::tests::test_bcj_cm_probe_round_trip ... ok
+test cube::tests::test_build_cube_empty ... ok
+test cube::tests::test_build_cube_lex_order ... ok
+test config::tests::test_value_scheme_default_is_1 ... ok
+test cube::tests::test_build_cube_single_byte ... ok
+test cube::tests::test_build_cube_with_params_default_n_matches_build_cube ... ok
+test cube::tests::test_build_cube_with_params_non_minimal_n ... ok
+test cube::tests::test_cube_all_256_values_round_trip ... ok
+test cube::tests::test_cube_b_k_is_all_b ... ok
+test distance_map::tests::test_empty_coords ... ok
+test distance_map::tests::test_gap1_means_zero_skipped_slots ... ok
+test distance_map::tests::test_gap_invariant_rejects_out_of_range ... ok
+test distance_map::tests::test_gap_invariant_rejects_zero_gap ... ok
+test distance_map::tests::test_r3_1_worked_example_decode ... ok
+test distance_map::tests::test_first_element_at_slot_0 ... ok
+test distance_map::tests::test_first_element_at_slot_3 ... ok
+test distance_map::tests::test_r3_1_worked_example_encode ... ok
+test cube::tests::test_rebuild_from_cube_round_trip ... ok
+test distance_map::tests::test_validate_gaps_rejects_exceeds_bk ... ok
+test domainize::tests::test_domainize_empty ... ok
+test distance_map::tests::test_round_trip_various_coords ... ok
+test distance_map::tests::test_validate_gaps_valid ... ok
+test distance_map::tests::test_validate_gaps_rejects_zero ... ok
+test codec::tests::test_fh19_scaled_22_is_byte_identical_to_stock ... ok
+test geocm::qaf_probe::geocm_expansion_ratio_probe ... ignored
+test header::tests::test_fixed_header_size ... ok
+test header::tests::test_inverse_dict_is_u8 ... ok
+test domainize::tests::test_domainize_preserves_byte_values ... ok
+test domainize::tests::test_domainize_round_trip ... ok
+test domainize::tests::test_domainize_single_byte ... ok
+test header::tests::test_b_k_is_u16_not_u8 ... ok
+test header::tests::test_magic_bytes_exact ... ok
+test header::tests::test_map_scheme_packed_nibble_survives_header_round_trip ... ok
+test header::tests::test_parse_rejects_bad_version ... ok
+test header::tests::test_serialize_parse_raw_mode ... ok
+test header::tests::test_parse_rejects_bad_magic ... ok
+test header::tests::test_serialize_round_trip_golden_vector ... ok
+test header::tests::test_value_scheme_rle_codes_survives_header_round_trip ... ok
+test huffman::tests::canonical_assignment_oversized_shift_is_total ... ok
+test header::tests::test_serialize_parse_cube_mode ... ok
+test huffman::tests::canonical_codes_absent_symbol_is_zero ... ok
+test huffman::tests::canonical_codes_mixed_lengths ... ok
+test huffman::tests::huffman_decode_never_panics_on_empty_lengths ... ok
+test huffman::tests::huffman_decode_no_match_returns_error ... ok
+test huffman::tests::huffman_decode_truncation_returns_error ... ok
+test huffman::tests::huffman_length_determinism_three_equal_freq ... ok
+test huffman::tests::huffman_length_determinism_under_permutation ... ok
+test huffman::tests::huffman_msb_first_two_symbols ... ok
+test huffman::tests::huffman_bitstream_size_matches_encode_len ... ok
+test huffman::tests::huffman_msb_first_zero_pad ... ok
+test huffman::tests::huffman_round_trip_empty_seq_codes ... ok
+test huffman::tests::huffman_round_trip_full_256_alphabet ... ok
+test huffman::tests::huffman_round_trip_long_run_single_value ... ok
+test huffman::tests::huffman_round_trip_skewed_alphabet ... ok
+test huffman::tests::huffman_round_trip_two_symbols ... ok
+test huffman::tests::huffman_round_trip_uniform_alphabet ... ok
+test huffman::tests::kraft_fail_incomplete ... ok
+test huffman::tests::kraft_fail_over_full ... ok
+test huffman::tests::kraft_ok_all_zeros_empty_alphabet ... ok
+test huffman::tests::kraft_ok_actual_huffman_output ... ok
+test huffman::tests::huff_table_rejects_invalid_lengths_without_panicking ... ok
+test huffman::tests::kraft_ok_valid_two_symbols ... ok
+test huffman::tests::huffman_decode_kraft_violation_returns_error ... ok
+test huffman::tests::kraft_ok_valid_uniform_8 ... ok
+test limits::tests::context_header_span_is_checked ... ok
+test huffman::tests::huffman_bitstream_size_single_symbol ... ok
+test limits::tests::context_table_entry_budget_is_checked ... ok
+test limits::tests::memory_estimate_is_monotonic ... ok
+test huffman::tests::canonical_codes_two_equal_length ... ok
+test phi::tests::test_compute_n_and_b_large ... ok
+test phi::tests::test_phi_inv_basic ... ok
+test phi::tests::test_compute_n_and_b_small ... ok
+test phi::tests::test_phi_basic_n2_b256 ... ok
+test phi::tests::test_compute_n_and_b_empty ... ok
+test phi::tests::test_phi_round_trip_n2_b256 ... ok
+test phi::tests::test_phi_lex_order ... ok
+test ppmd::tests::bits_biased_compresses ... ok
+test ppmd::tests::bits_rt_all_zero ... ok
+test ppmd::tests::bits_rt_all_one ... ok
+test ppmd::tests::bits_rt_alternating ... ok
+test ppmd::tests::bits_rt_pseudo_random ... ok
+test ppmd::tests::bounded_edge_cases_round_trip ... ok
+test ppmd::tests::bin_and_apm_compose_round_trip ... ok
+test ppmd::tests::inherited_context_seeds_only_target_symbol ... ok
+test codec::tests::test_sais_bwt_matches_naive ... ok
+test ppmd::tests::loe_skips_sparse_high_order_contexts ... ok
+test ppmd::tests::bounded_disabled_is_byte_identical_to_champion ... ok
+test ppmd::tests::ppm_rt_edge_cases ... ok
+test ppmd::tests::apm_off_is_byte_identical_to_champion ... ok
+test ppmd::tests::ppm_rt_all_byte_values ... ok
+test ppmd::tests::ppm_rt_text_multi_order ... ok
+test ppmd::tests::rt_all_byte_values ... ok
+test ppmd::tests::rt_empty ... ok
+test ppmd::tests::rt_pseudo_random ... ok
+test ppmd::tests::rt_short_run ... ok
+test ppmd::tests::rt_single_byte ... ok
+test ppmd::tests::rt_text ... ok
+test ppmd::tests::see_bucket_separates_masking_and_high_order ... ok
+test ppmd::tests::see_escape_frequency_rises_on_escape_and_falls_on_hits ... ok
+test ppmd::tests::self_probe ... ignored
+test ppmd::tests::successor_inheritance_tracks_parent_probability ... ok
+test rle::tests::test_packed_nibble_decode_partial_offset ... ok
+test rle::tests::test_packed_nibble_empty ... ok
+test rle::tests::test_packed_nibble_gap_128_is_two_bytes ... ok
+test rle::tests::test_packed_nibble_roundtrip_various ... ok
+test rle::tests::test_packed_nibble_size_matches_encode_len ... ok
+test rle::tests::test_packed_nibble_small_gaps_one_byte_each ... ok
+test rle::tests::test_packed_nibble_vs_rle_all_distinct_gaps ... ok
+test rle::tests::test_rle_all_distinct ... ok
+test rle::tests::test_rle_big_endian_pairs ... ok
+test rle::tests::test_rle_decode_rejects_odd_length ... ok
+test rle::tests::test_rle_encode_decode_round_trip ... ok
+test rle::tests::test_rle_encode_empty ... ok
+test rle::tests::test_rle_max_run_splits ... ok
+test rle::tests::test_rle_single_value ... ok
+test rle::tests::test_rle_size_matches_encode_len ... ok
+test tests_traceability::test_all_modules_have_rule_annotation ... ok
+test ppmd::tests::ppm_text_compresses_with_order ... ok
+test ppmd::tests::ppm_rt_order16_with_escape_bursts ... ok
+test codec::tests::test_vcf_truncated_no_panic ... ok
+test ppmd::tests::ppm_rt_pseudo_random ... ok
+test codec::tests::test_mode_lz_no_regression_on_incompressible ... ok
+test ppmd::tests::apm_round_trips_byte_exact ... ok
+test codec::tests::test_record_cm_detects_width_and_round_trips ... ok
+test codec::tests::test_order2_rans_truncated_blob_errors_no_panic ... ok
+test codec::tests::test_entropy_context2_compresses_text_both_round_trip ... ok
+test codec::tests::test_mode_vcf_round_trip_edge_cases ... ok
+test codec::tests::test_exe_cm_round_trip_and_rejects_corruption ... ok
+test codec::tests::test_record_cm_rejects_bad_framing_and_hash ... ok
+test ppmd::tests::bin_round_trips_byte_exact ... ok
+test codec::tests::test_geomix_high_entropy_and_rescale ... ok
+test codec::tests::test_t4_header_size_measurement ... ok
+test codec::tests::test_mode_vcf_round_trips_and_shrinks ... ok
+test codec::tests::test_entropy_context2_corpus_round_trip_7_files ... ok
+test codec::tests::test_cm_mode_direct_round_trip_and_checksum ... ok
+test codec::tests::test_fh19_scaled_roundtrip_at_higher_bits ... ok
+test codec::tests::test_chunked_bwt_family_round_trips ... ok
+test codec::tests::test_bwt_rans_property_random_inputs ... ok
+test codec::tests::test_bwt_geomix_property_random_inputs ... ok
+test codec::tests::test_bwt_rans_corpus_round_trip_all_files ... ok
+test codec::tests::test_bwt_ctxmix_property_random_inputs ... ok
+test codec::tests::test_order2_rans_property_random_inputs ... ok
+test codec::tests::test_bwt_adaptive_property_random_inputs ... ok
+test cm2::tests::cm2_valid_high_ratio_above_stall_limit_round_trips ... ok
+test codec::tests::test_bwt_adaptive_never_regresses_competition ... ok
+test codec::tests::test_bwt_ctxmix_never_regresses_competition ... ok
+test codec::tests::test_bwt_rans_never_larger_than_bwt_entropy ... ok
+test codec::tests::test_bwt_geomix_never_regresses_competition ... ok
+test codec::tests::test_order2_rans_never_regresses_competition ... ok
+test codec::tests::test_bwt_adaptive_corpus_round_trip_all_files ... ok
+test codec::tests::test_bwt_order2_rans_corpus_round_trip_all_files ... ok
+test codec::tests::test_chunked_container_for_large_input ... ok
+test codec::tests::test_bwt_geomix_corpus_round_trip_all_files ... ok
+test codec::tests::test_bwt_ctxmix_corpus_round_trip_all_files ... ok
+test cm2::tests::cm2_encoder_output_satisfies_expansion_bound ... ok
+test codec::tests::test_med16_default_dispatch_picks_width_512 ... ok
+test ppmd::tests::bounded_round_trips_with_eviction ... ok
+test codec::tests::test_mode_lz_cross_block_long_range_wins_and_round_trips ... ok
+test codec::tests::cm2_gate_admits_inputs_below_the_old_floor ... ok
+test codec::tests::test_bt_match_finder_round_trips_adversarial ... ok
+test codec::tests::test_columnar_not_selected_on_non_tabular ... ok
+test codec::tests::fh10_selected_and_roundtrips_via_default_encode ... ok
+test codec::tests::test_mode_columnar_round_trips_and_shrinks_on_csv ... ok
+test codec::tests::test_columnar_truncated_no_panic ... ok
+test codec::tests::test_columnar_decimal_engages_and_round_trips_on_float_csv ... ok
+test codec::tests::test_vcf_not_selected_on_non_vcf ... ok
+test codec::tests::test_columnar_delta_shrinks_monotonic_csv ... ok
+test codec::tests::geocm_roundtrips_and_fails_closed ... ok
+test codec::tests::test_columnar_round_trip_ragged_and_edge_cases ... ok
+test codec::tests::test_binfloat_not_selected_on_text_or_incompressible ... ok
+test codec::tests::test_mode_binfloat_round_trips_and_shrinks ... ok
+test codec::tests::systemic_gate_legit_nesting_still_decodes ... ok
+test codec::tests::test_binfloat_property_random_float_arrays ... ok
+test codec::tests::test_bcj_cm2_composed_candidate_round_trips_and_engages ... ok
+test codec::tests::test_chunked_large_compressible_round_trips_and_shrinks ... ok
+test codec::tests::test_mode_lz_round_trip_sizes ... ok
+test codec::tests::test_binfloat_truncated_no_panic ... ok
+test codec::tests::test_chunked_round_trip_various_sizes ... ok
+test codec::tests::test_binfloat_round_trip_various_widths_and_tail has been running for over 60 seconds
+test codec::tests::test_columnar_property_random_tables has been running for over 60 seconds
+test codec::tests::test_columnar_property_random_tables ... ok
+test codec::tests::test_binfloat_round_trip_various_widths_and_tail ... ok
+
+test result: ok. 322 passed; 0 failed; 11 ignored; 0 measured; 0 filtered out; finished in 88.43s
+
+     Running unittests src/main.rs (target/release/deps/cubrim-c1385a7f212e55d6)
+
+running 7 tests
+test archive::tests::path_traversal_is_rejected ... ok
+test license::tests::payload_contains_only_allowed_client_fields ... ok
+test self_update::tests::sha256_mismatch_fails_closed_and_removes_temp_file ... ok
+test license::tests::state_file_is_private_on_unix ... ok
+test self_update::tests::replace_current_binary_removes_update_directory ... ok
+test crypto::tests::wrong_password_fails ... ok
+test crypto::tests::roundtrip_encrypt_decrypt ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/cli_archiver.rs (target/release/deps/cli_archiver-6093f80d3756a261)
+
+running 5 tests
+test path_traversal_archive_is_rejected ... ok
+test corrupt_archive_fails_test_command ... ok
+test legacy_x_decompresses_single_file_blob ... ok
+tested: 4 entries OK
+test archive_directory_roundtrip_list_and_test ... ok
+test encrypted_archive_roundtrip_and_wrong_password_failure ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/cubr0027_bench.rs (target/release/deps/cubr0027_bench-454ed58d553280ae)
+
+running 2 tests
+test bench_option_b_summary ... ok
+test bench_cubr0027_aggregate ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.18s
+
+     Running tests/cubr0028_bench.rs (target/release/deps/cubr0028_bench-5619be56da323546)
+
+running 1 test
+test bench_cubr0028_bwt_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.03s
+
+     Running tests/cubr0031_bench.rs (target/release/deps/cubr0031_bench-9b55c78e92599b3a)
+
+running 1 test
+test bench_cubr0031_large_block ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.97s
+
+     Running tests/differential.rs (target/release/deps/differential-cdd95c9543388964)
+
+running 10 tests
+test all_distinct_256 ... ok
+test empty ... ok
+test all_same_100 ... ok
+test hello_world_test ... ok
+test random_1kb ... ok
+test single_byte ... ok
+test text_entropy ... ok
+test text_1kb ... ok
+test sparse_clustered_rlecodes ... ok
+test text_entropy_context ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests/hostile_inputs.rs (target/release/deps/hostile_inputs-eb103fb5bf4fe2c2)
+
+running 6 tests
+test caller_memory_budget_is_enforced_before_reconstruction ... ok
+test caller_output_budget_is_enforced_before_decode ... ok
+test degenerate_radix_is_rejected_by_header_preflight ... ok
+test short_cube_count_is_rejected_before_reconstruction ... ok
+test malformed_t5_huffman_lengths_do_not_panic ... ok
+test malformed_t4_huffman_lengths_do_not_panic ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/scheme_roundtrip.rs (target/release/deps/scheme_roundtrip-a955601342883c5e)
+
+running 7 tests
+test rle_codes_roundtrips_the_web_corpus ... ok
+test bitpack_fixed_roundtrips_the_web_corpus ... ok
+test entropy_context_roundtrips_the_web_corpus ... ok
+test entropy_roundtrips_the_web_corpus ... ok
+test entropy_context2_roundtrips_the_web_corpus ... ok
+test bwt_entropy_roundtrips_the_web_corpus ... ok
+test bwt_geo_mix_roundtrips_the_web_corpus ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 36.47s
+
+   Doc-tests cubrim
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
