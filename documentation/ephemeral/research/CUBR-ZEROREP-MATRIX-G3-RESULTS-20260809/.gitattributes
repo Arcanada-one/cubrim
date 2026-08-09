@@ -1,2 +1,4 @@
 cargo-test-release.log -whitespace
 cargo-test-scheme-roundtrip.log -whitespace
+db-apply-first.txt -whitespace
+db-apply-replay.txt -whitespace
