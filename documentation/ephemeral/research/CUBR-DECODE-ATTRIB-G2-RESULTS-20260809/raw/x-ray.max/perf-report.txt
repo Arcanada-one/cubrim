@@ -1,0 +1,19 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 6K of event 'cycles'
+# Event count (approx.): 20882511156
+#
+# Overhead  Command         Shared Object      Symbol                                                                                                                                                                                                                                                                                                        
+# ........  ..............  .................  ..............................................................................................................................................................................................................................................................................................................
+#
+    84.53%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvNtCs4nLXsUdxWI4_6cubrim5geocm17decode_stream_mix
+    12.65%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs1_NtCs4nLXsUdxWI4_6cubrim5geocmNtB5_5Mixer6update
+     0.86%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvNtCs4nLXsUdxWI4_6cubrim5geocm8mix_ctxs
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

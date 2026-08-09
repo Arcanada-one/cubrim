@@ -1,0 +1,4822 @@
+{
+  "cells": {
+    "dickens/max": {
+      "archive_bytes": 2112521,
+      "archive_sha256": "b39d5043a6b615a261c8904d104f01f3d5fe948b0ef46e001acd2d869b7ddc82",
+      "cache_misses1_per_bit": 47.6749047529906,
+      "cache_misses2_per_bit": 46.12009716558714,
+      "cell": "dickens/max",
+      "cm2_decode_shell_amdahl_ceiling": 1.004621257785815,
+      "cm2_decode_shell_share": 0.46,
+      "cm2_named_machinery_amdahl_ceiling": 13.986013986013985,
+      "cm2_named_machinery_share": 92.85,
+      "cm2_total_named_share": 93.31,
+      "cycle_class": "cycle-agreement",
+      "cycle_relative_delta": 0.00766871,
+      "cycles1": 479452639967,
+      "cycles1_per_bit": 5879.999756277835,
+      "cycles2": 483157839060,
+      "cycles2_per_bit": 5925.440260610652,
+      "cycles_reportable": true,
+      "dtlb_misses1_per_bit": 10.092586742671974,
+      "dtlb_misses2_per_bit": 10.087407870495463,
+      "geocm_replay_amdahl_ceiling": 1.0,
+      "geocm_replay_share": 0.0,
+      "instructions1_per_bit": 8674.956133223566,
+      "instructions2_per_bit": 8674.882160241516,
+      "instrument_class": "instrument-clean",
+      "ipc1": 1.475332736869873,
+      "ipc2": 1.4640063486772066,
+      "named_amdahl_ceilings": {
+        "cm2_ctr_new": 1.001401962747847,
+        "cm2_ctr_upd": 1.4883167137966962,
+        "cm2_decode_shell": 1.004621257785815,
+        "cm2_end_byte": 1.00080064051241,
+        "cm2_match_end": 1.0300782859497322,
+        "cm2_predict_bit": 1.988862370723946,
+        "cm2_start_byte": 1.0079629069650238,
+        "cm2_update_bit": 1.0682619378271552,
+        "geocm_decode": 1.0,
+        "geocm_decode_stream_mix": 1.0,
+        "geocm_mix_ctxs": 1.0,
+        "geocm_mixer_update": 1.0
+      },
+      "named_shares": {
+        "cm2_ctr_new": 0.14,
+        "cm2_ctr_upd": 32.81,
+        "cm2_decode_shell": 0.46,
+        "cm2_end_byte": 0.08,
+        "cm2_match_end": 2.92,
+        "cm2_predict_bit": 49.72,
+        "cm2_start_byte": 0.79,
+        "cm2_update_bit": 6.39,
+        "geocm_decode": 0.0,
+        "geocm_decode_stream_mix": 0.0,
+        "geocm_mix_ctxs": 0.0,
+        "geocm_mixer_update": 0.0
+      },
+      "orig_bytes": 10192446,
+      "page_faults1": 3950937,
+      "page_faults2": 3950938,
+      "plain_wall_s": 142.86,
+      "record_plain_ratio": 1.01918,
+      "record_wall_s": 145.6,
+      "symbol_rounded_sum": 99.87,
+      "symbol_rounding_residual": 0.13,
+      "symbol_rows": 257,
+      "symbols": [
+        {
+          "bucket": "cm2_predict_bit",
+          "dso": "cubrim-3a13f48",
+          "share": 49.72,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel11predict_bit"
+        },
+        {
+          "bucket": "cm2_ctr_upd",
+          "dso": "cubrim-3a13f48",
+          "share": 32.81,
+          "symbol": "_RNvMs0_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_3Ctr3upd"
+        },
+        {
+          "bucket": "cm2_update_bit",
+          "dso": "cubrim-3a13f48",
+          "share": 6.39,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10update_bit"
+        },
+        {
+          "bucket": "cm2_match_end",
+          "dso": "cubrim-3a13f48",
+          "share": 2.92,
+          "symbol": "_RNvMs3_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_5Match3end"
+        },
+        {
+          "bucket": "cm2_start_byte",
+          "dso": "cubrim-3a13f48",
+          "share": 0.79,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10start_byte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.57,
+          "symbol": "clear_page_rep"
+        },
+        {
+          "bucket": "cm2_decode_shell",
+          "dso": "cubrim-3a13f48",
+          "share": 0.46,
+          "symbol": "_RNvNtCs4nLXsUdxWI4_6cubrim3cm210cm2_decode"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.38,
+          "symbol": "asm_exc_page_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.26,
+          "symbol": "__handle_mm_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.24,
+          "symbol": "zap_pte_range"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.21,
+          "symbol": "srso_safe_ret"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.17,
+          "symbol": "__rcu_read_unlock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.14,
+          "symbol": "__mod_memcg_lruvec_state"
+        },
+        {
+          "bucket": "cm2_ctr_new",
+          "dso": "cubrim-3a13f48",
+          "share": 0.14,
+          "symbol": "_RNvMs0_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_3Ctr3new"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.14,
+          "symbol": "__free_one_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.14,
+          "symbol": "do_anonymous_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.13,
+          "symbol": "lru_gen_del_folio.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.13,
+          "symbol": "handle_mm_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.13,
+          "symbol": "do_user_addr_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.13,
+          "symbol": "wp_page_copy"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.12,
+          "symbol": "rmqueue_bulk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.11,
+          "symbol": "handle_pte_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.11,
+          "symbol": "exc_page_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "lock_vma_under_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "_raw_spin_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "mem_cgroup_commit_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "__rcu_read_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "__count_memcg_events"
+        },
+        {
+          "bucket": "cm2_end_byte",
+          "dso": "cubrim-3a13f48",
+          "share": 0.08,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel8end_byte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.08,
+          "symbol": "__lruvec_stat_mod_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.08,
+          "symbol": "lru_gen_add_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "__mod_lruvec_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "lru_add_fn"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "mas_walk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "__pte_offset_map"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "__mem_cgroup_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "perf_adjust_freq_unthr_context"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "blk_cgroup_congested"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "rmqueue"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "cgroup_rstat_updated"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "sync_regs"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "__alloc_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "error_entry"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "get_mem_cgroup_from_mm"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "get_page_from_freelist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "arch_exit_to_user_mode_prepare.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "count_memcg_events.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "__pte_offset_map_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "release_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "free_unref_page_list"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "native_flush_tlb_one_user"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "flush_tlb_mm_range"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "__rmqueue_pcplist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "uncharge_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "folio_add_new_anon_rmap"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "folio_batch_move_lru"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "vma_alloc_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "error_return"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "__folio_throttle_swaprate"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "__mod_node_page_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "native_read_msr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "irqentry_exit_to_user_mode"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "do_wp_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "pte_offset_map_nolock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "pud_val"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "alloc_pages_mpol"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "try_charge_memcg"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "native_write_msr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "access_error"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "ktime_get_update_offsets_now"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "irqentry_exit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "folio_add_lru"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "_raw_spin_unlock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "set_ptes.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__mod_zone_page_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "folio_add_lru_vma"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "kthread_blkcg"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "asm_sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "policy_nodemask"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__next_zones_zonelist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "consume_stock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "up_read"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "timekeeping_advance"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "down_read_trylock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__irqentry_text_end"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "pmd_val"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "update_cfs_group"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "percpu_counter_add_batch"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "free_pcppages_bulk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__raw_spin_lock_irqsave"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "alloc_anon_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "folio_mapping"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "folio_remove_rmap_ptes"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__const_udelay"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "free_unref_page_prepare"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "irqentry_enter"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "mem_cgroup_from_task"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "free_swap_cache"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "ptep_clear_flush"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "get_pfnblock_flags_mask"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "free_unref_page_commit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "should_fail_alloc_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "x86_pmu_disable_all"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "pte_mkwrite"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "post_alloc_hook"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_load_avg"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__mem_cgroup_uncharge_list"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "task_mm_cid_work"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "srso_return_thunk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "get_vma_policy"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "tick_do_update_jiffies64"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "flush_tlb_func"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "pte_pfn"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "read_tsc"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "_raw_spin_trylock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "fpregs_assert_state_consistent"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "vm_normal_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__update_load_avg_cfs_rq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "ktime_get"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "cond_accept_memory"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_curr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "account_user_time"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "amd_pmu_addr_offset"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "memcg_check_events"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "sched_clock_cpu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "folio_lruvec_lock_irqsave"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "tick_sched_do_timer"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "hrtimer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "p4d_offset"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "delay_halt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "irq_work_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "pvclock_gtod_notify"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "folio_prep_large_rmappable"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__update_load_avg_se"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "pfn_pte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "_find_first_bit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "task_tick_fair"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "scheduler_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "amd_clear_divider"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "_find_next_bit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__cond_resched"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "acct_account_cputime"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_vdso_data.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "perf_event_task_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__tlb_remove_page_size"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sugov_update_single_freq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__hrtimer_run_queues"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "arch_scale_freq_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "trace_rss_stat"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "check_cpu_stall"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "notifier_call_chain"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "free_pages_and_swap_cache"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sugov_should_update_freq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "raw_notifier_call_chain"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_curr_se"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__cgroup_account_cputime_field"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_nohz_highres_handler"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__x86_indirect_thunk_r14"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_vsyscall"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "timekeeping_update"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "delay_halt_mwaitx"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "pte_val"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "x86_pmu_disable"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_apic_mem_eoi"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__calc_delta.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_process_times"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "hrtimer_active"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__update_blocked_fair"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "load_balance"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_fast_timekeeper"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "calc_global_load_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_pending"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_sched_clock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "entry_untrain_ret"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irq_enter_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rb_erase"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_sd_lb_stats.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_set_pte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_irq_return_iret"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "calc_global_load"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sched_clock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "avg_vruntime"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_nohz_get_idle_calls_cpu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "ntp_tick_length"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "_raw_spin_lock_irqsave"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__memcg_kmem_charge_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mksaveddirty_shift"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "task_tick_mm_cid"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "delay_halt.part.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_wall_time"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "find_busiest_group"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "cpu_util"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__run_timers"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "free_iova_fast"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__irq_exit_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "clockevents_program_event"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__hrtimer_next_event_base"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sched_core_idle_cpu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "arch_check_zapped_pte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__x86_indirect_thunk_rax"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "invoke_rcu_core"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "task_work_add"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rb_next"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "get_next_freq.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "raw_spin_rq_lock_nested"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sched_clock_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "do_vmi_align_munmap"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "ntp_get_next_leap"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "resched_curr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__nf_conntrack_find_get"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__mem_cgroup_threshold"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "run_posix_cpu_timers"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rebalance_domains"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "pte_alloc_one"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "alloc_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_sched_clock_irq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "nft_do_chain"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__radix_tree_lookup"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "note_gp_changes"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "psi_task_switch"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_pmu_test_overflow_topbit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "dma_map_page_attrs"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_program_event"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "timerqueue_add"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "memset_orig"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sk_reset_timer"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "perf_ctx_disable"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "page_counter_try_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irq_work_run_list"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "memcg_account_kmem"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mas_wr_node_store"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__refill_stock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "refill_stock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "psi_flags_change"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "fq_flush_timeout"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "___pte_free_tlb"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_group_capacity"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "select_task_rq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irq_exit_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "lruvec_stat_mod_folio.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_sg_lb_stats"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "balance_dirty_pages_ratelimited_flags"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_send_call_func_single_ipi"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "ext4_da_write_end"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mm_counter"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "hrtimer_update_next_event"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "psi_task_change"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "fault_in_readable"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "node_dirty_ok"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "node_page_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "next_uptodate_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "unmap_vmas"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rep_movs_alternative"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "srso_safe_ret"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "set_pte_range"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "perf_event_exec"
+        }
+      ],
+      "symbols_reportable": true
+    },
+    "dickens/web": {
+      "archive_bytes": 2300603,
+      "archive_sha256": "a77d540decf56c5db98278d18799a8095d9d87adc037cb40639bb2e3577bc341",
+      "cache_misses1_per_bit": 37.22436436013495,
+      "cache_misses2_per_bit": 36.43902956414976,
+      "cell": "dickens/web",
+      "cm2_decode_shell_amdahl_ceiling": 1.00664384940608,
+      "cm2_decode_shell_share": 0.66,
+      "cm2_named_machinery_amdahl_ceiling": 69.4444444444446,
+      "cm2_named_machinery_share": 98.56,
+      "cm2_total_named_share": 99.22,
+      "cycle_class": "cycle-agreement",
+      "cycle_relative_delta": 0.0062497,
+      "cycles1": 356628416347,
+      "cycles1_per_bit": 4373.685378698597,
+      "cycles2": 354399597366,
+      "cycles2_per_bit": 4346.351177210063,
+      "cycles_reportable": true,
+      "dtlb_misses1_per_bit": 8.081868461701932,
+      "dtlb_misses2_per_bit": 8.080272132420422,
+      "geocm_replay_amdahl_ceiling": 1.0,
+      "geocm_replay_share": 0.0,
+      "instructions1_per_bit": 8058.3300225726,
+      "instructions2_per_bit": 8057.063166069263,
+      "instrument_class": "instrument-clean",
+      "ipc1": 1.8424576358005842,
+      "ipc2": 1.8537533755477895,
+      "named_amdahl_ceilings": {
+        "cm2_ctr_new": 1.0,
+        "cm2_ctr_upd": 1.4792899408284026,
+        "cm2_decode_shell": 1.00664384940608,
+        "cm2_end_byte": 1.00080064051241,
+        "cm2_match_end": 1.0206164523372117,
+        "cm2_predict_bit": 2.189141856392294,
+        "cm2_start_byte": 1.0134792743488394,
+        "cm2_update_bit": 1.0918222513374822,
+        "geocm_decode": 1.0,
+        "geocm_decode_stream_mix": 1.0,
+        "geocm_mix_ctxs": 1.0,
+        "geocm_mixer_update": 1.0
+      },
+      "named_shares": {
+        "cm2_ctr_new": 0.0,
+        "cm2_ctr_upd": 32.4,
+        "cm2_decode_shell": 0.66,
+        "cm2_end_byte": 0.08,
+        "cm2_match_end": 2.02,
+        "cm2_predict_bit": 54.32,
+        "cm2_start_byte": 1.33,
+        "cm2_update_bit": 8.41,
+        "geocm_decode": 0.0,
+        "geocm_decode_stream_mix": 0.0,
+        "geocm_mix_ctxs": 0.0,
+        "geocm_mixer_update": 0.0
+      },
+      "orig_bytes": 10192446,
+      "page_faults1": 43404,
+      "page_faults2": 43406,
+      "plain_wall_s": 105.71,
+      "record_plain_ratio": 1.02687,
+      "record_wall_s": 108.55,
+      "symbol_rounded_sum": 99.75,
+      "symbol_rounding_residual": 0.25,
+      "symbol_rows": 193,
+      "symbols": [
+        {
+          "bucket": "cm2_predict_bit",
+          "dso": "cubrim-3a13f48",
+          "share": 54.32,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel11predict_bit"
+        },
+        {
+          "bucket": "cm2_ctr_upd",
+          "dso": "cubrim-3a13f48",
+          "share": 32.4,
+          "symbol": "_RNvMs0_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_3Ctr3upd"
+        },
+        {
+          "bucket": "cm2_update_bit",
+          "dso": "cubrim-3a13f48",
+          "share": 8.41,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10update_bit"
+        },
+        {
+          "bucket": "cm2_match_end",
+          "dso": "cubrim-3a13f48",
+          "share": 2.02,
+          "symbol": "_RNvMs3_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_5Match3end"
+        },
+        {
+          "bucket": "cm2_start_byte",
+          "dso": "cubrim-3a13f48",
+          "share": 1.33,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10start_byte"
+        },
+        {
+          "bucket": "cm2_decode_shell",
+          "dso": "cubrim-3a13f48",
+          "share": 0.66,
+          "symbol": "_RNvNtCs4nLXsUdxWI4_6cubrim3cm210cm2_decode"
+        },
+        {
+          "bucket": "cm2_end_byte",
+          "dso": "cubrim-3a13f48",
+          "share": 0.08,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel8end_byte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.08,
+          "symbol": "perf_adjust_freq_unthr_context"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "native_read_msr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "asm_sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "__const_udelay"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "__raw_spin_lock_irqsave"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "ktime_get_update_offsets_now"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "read_tsc"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "native_write_msr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "timekeeping_advance"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "srso_safe_ret"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_load_avg"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "task_mm_cid_work"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "sync_regs"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "x86_pmu_disable_all"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_cfs_group"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_curr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "ktime_get"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__update_load_avg_cfs_rq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__update_load_avg_se"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "asm_exc_page_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "sched_clock_cpu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_fast_timekeeper"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "sugov_update_single_freq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "tick_do_update_jiffies64"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "scheduler_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "delay_halt_mwaitx"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__handle_mm_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__rcu_read_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "_raw_spin_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "account_user_time"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "delay_halt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "blk_cgroup_congested"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_vdso_data.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "clear_page_rep"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irqentry_exit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__cgroup_account_cputime_field"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "hrtimer_active"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_pending"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "hrtimer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_vsyscall"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "percpu_counter_add_batch"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "fpregs_assert_state_consistent"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irq_enter_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__calc_delta.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_pmu_addr_offset"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "handle_mm_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__rcu_read_unlock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "do_anonymous_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "notifier_call_chain"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__cgroup_account_cputime"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "zap_pte_range"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_nohz_highres_handler"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sugov_should_update_freq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mas_walk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "lapic_next_event"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_pmu_check_overflow"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "do_user_addr_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__mod_lruvec_state"
+        },
+        {
+          "bucket": "cm2_ctr_new",
+          "dso": "cubrim-3a13f48",
+          "share": 0.0,
+          "symbol": "_RNvMs0_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_3Ctr3new"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__mod_memcg_lruvec_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "x86_pmu_disable"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__x86_indirect_thunk_r12"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "timekeeping_update"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_sched_clock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__count_memcg_events"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__hrtimer_run_queues"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "task_tick_fair"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "pvclock_gtod_notify"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "clockevents_program_event"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irq_work_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_sched_clock_irq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_process_times"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__mem_cgroup_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "fq_flush_timeout"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__rmqueue_pcplist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_sched_handle"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_sched_do_timer"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sched_clock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "perf_event_task_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "arch_scale_freq_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "wp_page_copy"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "folio_batch_move_lru"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "arch_exit_to_user_mode_prepare.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "down_read_trylock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mem_cgroup_commit_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_flush_tlb_one_user"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_brs_disable_all"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "raw_spin_rq_lock_nested"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "effective_cpu_util"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_pmu_test_overflow_topbit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__free_one_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "error_entry"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "cpuacct_account_field"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_apic_mem_eoi"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "delay_halt.part.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "timekeeping_adjust.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "error_return"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "acct_account_cputime"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_sg_lb_stats"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "get_mem_cgroup_from_mm"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_rt_rq_load_avg"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "folio_add_lru"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "free_iova_fast"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "release_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__lruvec_stat_mod_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "psi_task_switch"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rb_next"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "get_next_freq.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "handle_softirqs"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__alloc_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__irqentry_text_end"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "set_ptes.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "policy_nodemask"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irqentry_enter"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "handle_pte_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rmqueue"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "vma_alloc_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mem_cgroup_handle_over_high"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_queued_spin_lock_slowpath"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "cpu_util_cfs_boost"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_nohz_get_idle_calls_cpu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "_raw_spin_lock_irqsave"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "calc_global_load_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "ntp_tick_length"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "_raw_spin_unlock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "get_pfnblock_flags_mask"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "nohz_balancer_kick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_core_si"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "timerqueue_del"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_clear_divider"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "lru_gen_del_folio.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "cpuacct_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sugov_get_util"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "delayed_work_timer_fn"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "psi_group_change"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "ntp_get_next_leap"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "raw_notifier_call_chain"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "fq_ring_free_locked"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "load_balance"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "free_unref_page_prepare"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "iommu_completion_wait.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "page_counter_cancel"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__remove_hrtimer"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "generic_perform_write"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__next_zones_zonelist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "llist_add_batch"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rmqueue_bulk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "pte_offset_map_nolock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__irq_exit_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "nft_match_large_eval"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "drain_stock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mlock_future_ok"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "kick_ilb"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "ext4_da_write_begin"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irq_exit_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__block_commit_write"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "llist_reverse_order"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__filemap_get_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_program_event"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__x86_indirect_thunk_rax"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__es_insert_extent"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__get_user_8"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_core"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "_find_next_bit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "default_send_IPI_single_phys"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "lru_gen_add_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_curr_se"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "get_vma_policy"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "cgroup_rstat_updated"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "_raw_spin_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "lru_add_fn"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rep_movs_alternative"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "alloc_pages_mpol"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "should_fail_alloc_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "lock_vma_under_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "pud_val"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "copy_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__pte_offset_map"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "srso_return_thunk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "folio_add_new_anon_rmap"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "get_page_from_freelist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irqentry_exit_to_user_mode"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "perf_event_exec"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "finish_task_switch.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "srso_safe_ret"
+        }
+      ],
+      "symbols_reportable": true
+    },
+    "x-ray/max": {
+      "archive_bytes": 3637036,
+      "archive_sha256": "4ed8a550b2e05da471d33dd9f044c4e357fee45cfc77bbfcdb3f173a657953d7",
+      "cache_misses1_per_bit": 2.8745812013820706,
+      "cache_misses2_per_bit": 3.020975937075183,
+      "cell": "x-ray/max",
+      "cm2_decode_shell_amdahl_ceiling": 1.0,
+      "cm2_decode_shell_share": 0.0,
+      "cm2_named_machinery_amdahl_ceiling": 1.0,
+      "cm2_named_machinery_share": 0.0,
+      "cm2_total_named_share": 0.0,
+      "cycle_class": "cycle-agreement",
+      "cycle_relative_delta": 0.0118815,
+      "cycles1": 20675613853,
+      "cycles1_per_bit": null,
+      "cycles2": 20429957566,
+      "cycles2_per_bit": null,
+      "cycles_reportable": false,
+      "dtlb_misses1_per_bit": 0.20602605661392645,
+      "dtlb_misses2_per_bit": 0.20709448575919492,
+      "geocm_replay_amdahl_ceiling": 55.55555555555551,
+      "geocm_replay_share": 98.2,
+      "instructions1_per_bit": 725.3685669009847,
+      "instructions2_per_bit": 725.4186909386565,
+      "instrument_class": "instrument-perturbed",
+      "ipc1": 2.3784337889375267,
+      "ipc2": 2.4071991604057352,
+      "named_amdahl_ceilings": {
+        "cm2_ctr_new": 1.0,
+        "cm2_ctr_upd": 1.0,
+        "cm2_decode_shell": 1.0,
+        "cm2_end_byte": 1.0,
+        "cm2_match_end": 1.0,
+        "cm2_predict_bit": 1.0,
+        "cm2_start_byte": 1.0,
+        "cm2_update_bit": 1.0,
+        "geocm_decode": 1.001602564102564,
+        "geocm_decode_stream_mix": 6.464124111182937,
+        "geocm_mix_ctxs": 1.0086746015735324,
+        "geocm_mixer_update": 1.1448196908986836
+      },
+      "named_shares": {
+        "cm2_ctr_new": 0.0,
+        "cm2_ctr_upd": 0.0,
+        "cm2_decode_shell": 0.0,
+        "cm2_end_byte": 0.0,
+        "cm2_match_end": 0.0,
+        "cm2_predict_bit": 0.0,
+        "cm2_start_byte": 0.0,
+        "cm2_update_bit": 0.0,
+        "geocm_decode": 0.16,
+        "geocm_decode_stream_mix": 84.53,
+        "geocm_mix_ctxs": 0.86,
+        "geocm_mixer_update": 12.65
+      },
+      "orig_bytes": 8474240,
+      "page_faults1": 21830,
+      "page_faults2": 21828,
+      "plain_wall_s": 6.2,
+      "record_plain_ratio": 1.20161,
+      "record_wall_s": 7.45,
+      "symbol_rounded_sum": 100.1,
+      "symbol_rounding_residual": -0.1,
+      "symbol_rows": 81,
+      "symbols": [
+        {
+          "bucket": "geocm_decode_stream_mix",
+          "dso": "cubrim-3a13f48",
+          "share": 84.53,
+          "symbol": "_RNvNtCs4nLXsUdxWI4_6cubrim5geocm17decode_stream_mix"
+        },
+        {
+          "bucket": "geocm_mixer_update",
+          "dso": "cubrim-3a13f48",
+          "share": 12.65,
+          "symbol": "_RNvMs1_NtCs4nLXsUdxWI4_6cubrim5geocmNtB5_5Mixer6update"
+        },
+        {
+          "bucket": "geocm_mix_ctxs",
+          "dso": "cubrim-3a13f48",
+          "share": 0.86,
+          "symbol": "_RNvNtCs4nLXsUdxWI4_6cubrim5geocm8mix_ctxs"
+        },
+        {
+          "bucket": "geocm_decode",
+          "dso": "cubrim-3a13f48",
+          "share": 0.16,
+          "symbol": "_RNvNtCs4nLXsUdxWI4_6cubrim5geocm6decode"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.08,
+          "symbol": "asm_exc_page_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.08,
+          "symbol": "clear_page_rep"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "zap_pte_range"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "update_load_avg"
+        },
+        {
+          "bucket": "other_user",
+          "dso": "cubrim-3a13f48",
+          "share": 0.05,
+          "symbol": "_RINvXs0_NtNtNtCs4NRVxsYgnAr_4core4iter8adapters3mapINtB6_3MapINtNtNtBc_5slice4iter4IterjENCNvMs4_NtCs4nLXsUdxWI4_6cubrim5geocmNtB1x_8MixState3new0ENtNtNtBa_6traits8iterator8Iterator4folduNCINvNvB2l_8for_each4callINtNtCscdodAO9FK5_5alloc3vec3VectENCINvMsj_B3r_IB3p_B3o_E14extend_trustedBN_E0E0EB1z_"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "asm_sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "native_read_msr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "task_mm_cid_work"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "handle_mm_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "__handle_mm_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "__mod_lruvec_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "lru_gen_add_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "__mod_memcg_lruvec_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "__const_udelay"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "native_write_msr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "perf_adjust_freq_unthr_context"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "ktime_get"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "free_unref_page_list"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "ktime_get_update_offsets_now"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "do_syscall_64"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "srso_safe_ret"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "cgroup_rstat_updated"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__alloc_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "filemap_get_read_batch"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "policy_nodemask"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "alloc_anon_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__count_memcg_events"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "mem_cgroup_commit_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__handle_mm_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "memcg_check_events"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "irqentry_exit_to_user_mode"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__rcu_read_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "update_wall_time"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "check_cpu_stall"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "delay_halt_mwaitx"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "pvclock_gtod_notify"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "mem_cgroup_from_task"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "amd_pmu_addr_offset"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "folio_lruvec_lock_irqsave"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__x86_indirect_thunk_rax"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "update_cfs_group"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "arch_scale_freq_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "delay_halt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "timekeeping_update"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__mem_cgroup_uncharge_list"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "tick_do_update_jiffies64"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "scheduler_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "arch_exit_to_user_mode_prepare.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "memset_orig"
+        },
+        {
+          "bucket": "other_user",
+          "dso": "cubrim-3a13f48",
+          "share": 0.02,
+          "symbol": "_RNvCsgTSoBSjQq7g_6cubrim4main"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "psi_group_change"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "do_anonymous_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "mas_walk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "sugov_should_update_freq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "balance_dirty_pages_ratelimited"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "folio_account_dirtied"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "rep_movs_alternative"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "kmem_cache_alloc_lru"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "ext4_es_lookup_extent"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "read_tsc"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "do_user_addr_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "folio_mapping"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "pfn_pte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__mem_cgroup_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "count_memcg_events.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "rmqueue_bulk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__mod_node_page_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__folio_throttle_swaprate"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__lruvec_stat_mod_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "lru_add_fn"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "lock_vma_under_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "get_page_from_freelist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__rcu_read_unlock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "folio_add_lru_vma"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "exc_page_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "perf_event_exec"
+        }
+      ],
+      "symbols_reportable": true
+    },
+    "xml/max": {
+      "archive_bytes": 338244,
+      "archive_sha256": "d64f83f33552922d41e1c32f22f14b283844079b1509d43109140e26a1425a37",
+      "cache_misses1_per_bit": 40.00649021192529,
+      "cache_misses2_per_bit": 39.643891246108716,
+      "cell": "xml/max",
+      "cm2_decode_shell_amdahl_ceiling": 1.0058338362502515,
+      "cm2_decode_shell_share": 0.58,
+      "cm2_named_machinery_amdahl_ceiling": 10.706638115631687,
+      "cm2_named_machinery_share": 90.66,
+      "cm2_total_named_share": 91.24,
+      "cycle_class": "cycle-agreement",
+      "cycle_relative_delta": 0.0088797,
+      "cycles1": 193979167768,
+      "cycles1_per_bit": 4536.225599220246,
+      "cycles2": 195717077235,
+      "cycles2_per_bit": 4576.866816027411,
+      "cycles_reportable": true,
+      "dtlb_misses1_per_bit": 9.079704080048192,
+      "dtlb_misses2_per_bit": 8.97309350492397,
+      "geocm_replay_amdahl_ceiling": 1.0,
+      "geocm_replay_share": 0.0,
+      "instructions1_per_bit": 8690.147006681596,
+      "instructions2_per_bit": 8691.048221889218,
+      "instrument_class": "instrument-clean",
+      "ipc1": 1.9157219623678738,
+      "ipc2": 1.8989078273928885,
+      "named_amdahl_ceilings": {
+        "cm2_ctr_new": 1.002104419280489,
+        "cm2_ctr_upd": 1.4168319637291018,
+        "cm2_decode_shell": 1.0058338362502515,
+        "cm2_end_byte": 1.0009008107296566,
+        "cm2_match_end": 1.0185373803218578,
+        "cm2_predict_bit": 2.000400080016003,
+        "cm2_start_byte": 1.006137438374082,
+        "cm2_update_bit": 1.0928961748633879,
+        "geocm_decode": 1.0,
+        "geocm_decode_stream_mix": 1.0,
+        "geocm_mix_ctxs": 1.0,
+        "geocm_mixer_update": 1.0
+      },
+      "named_shares": {
+        "cm2_ctr_new": 0.21,
+        "cm2_ctr_upd": 29.42,
+        "cm2_decode_shell": 0.58,
+        "cm2_end_byte": 0.09,
+        "cm2_match_end": 1.82,
+        "cm2_predict_bit": 50.01,
+        "cm2_start_byte": 0.61,
+        "cm2_update_bit": 8.5,
+        "geocm_decode": 0.0,
+        "geocm_decode_stream_mix": 0.0,
+        "geocm_mix_ctxs": 0.0,
+        "geocm_mixer_update": 0.0
+      },
+      "orig_bytes": 5345280,
+      "page_faults1": 2133177,
+      "page_faults2": 2133180,
+      "plain_wall_s": 58.0,
+      "record_plain_ratio": 1.02603,
+      "record_wall_s": 59.51,
+      "symbol_rounded_sum": 99.9,
+      "symbol_rounding_residual": 0.1,
+      "symbol_rows": 220,
+      "symbols": [
+        {
+          "bucket": "cm2_predict_bit",
+          "dso": "cubrim-3a13f48",
+          "share": 50.01,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel11predict_bit"
+        },
+        {
+          "bucket": "cm2_ctr_upd",
+          "dso": "cubrim-3a13f48",
+          "share": 29.42,
+          "symbol": "_RNvMs0_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_3Ctr3upd"
+        },
+        {
+          "bucket": "cm2_update_bit",
+          "dso": "cubrim-3a13f48",
+          "share": 8.5,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10update_bit"
+        },
+        {
+          "bucket": "cm2_match_end",
+          "dso": "cubrim-3a13f48",
+          "share": 1.82,
+          "symbol": "_RNvMs3_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_5Match3end"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.79,
+          "symbol": "clear_page_rep"
+        },
+        {
+          "bucket": "cm2_start_byte",
+          "dso": "cubrim-3a13f48",
+          "share": 0.61,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10start_byte"
+        },
+        {
+          "bucket": "cm2_decode_shell",
+          "dso": "cubrim-3a13f48",
+          "share": 0.58,
+          "symbol": "_RNvNtCs4nLXsUdxWI4_6cubrim3cm210cm2_decode"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.54,
+          "symbol": "asm_exc_page_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.31,
+          "symbol": "zap_pte_range"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.31,
+          "symbol": "__handle_mm_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.31,
+          "symbol": "srso_safe_ret"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.25,
+          "symbol": "__rcu_read_unlock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.21,
+          "symbol": "__mod_memcg_lruvec_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.21,
+          "symbol": "handle_mm_fault"
+        },
+        {
+          "bucket": "cm2_ctr_new",
+          "dso": "cubrim-3a13f48",
+          "share": 0.21,
+          "symbol": "_RNvMs0_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_3Ctr3new"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.19,
+          "symbol": "rmqueue_bulk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.18,
+          "symbol": "__free_one_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.17,
+          "symbol": "wp_page_copy"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.17,
+          "symbol": "do_anonymous_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.14,
+          "symbol": "handle_pte_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.12,
+          "symbol": "exc_page_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.12,
+          "symbol": "lock_vma_under_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.12,
+          "symbol": "lru_gen_del_folio.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.12,
+          "symbol": "do_user_addr_fault"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.12,
+          "symbol": "__pte_offset_map"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.12,
+          "symbol": "__rcu_read_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.11,
+          "symbol": "__count_memcg_events"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.11,
+          "symbol": "_raw_spin_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.11,
+          "symbol": "mem_cgroup_commit_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.1,
+          "symbol": "mas_walk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.1,
+          "symbol": "__alloc_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "arch_exit_to_user_mode_prepare.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "blk_cgroup_congested"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "lru_add_fn"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "__mem_cgroup_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "__mod_lruvec_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "__lruvec_stat_mod_folio"
+        },
+        {
+          "bucket": "cm2_end_byte",
+          "dso": "cubrim-3a13f48",
+          "share": 0.09,
+          "symbol": "_RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel8end_byte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.09,
+          "symbol": "lru_gen_add_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.08,
+          "symbol": "sync_regs"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.08,
+          "symbol": "get_mem_cgroup_from_mm"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "rmqueue"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "cgroup_rstat_updated"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "error_entry"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "perf_adjust_freq_unthr_context"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "_raw_spin_unlock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.07,
+          "symbol": "__pte_offset_map_lock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "get_page_from_freelist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "count_memcg_events.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.06,
+          "symbol": "release_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "__rmqueue_pcplist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "__mod_node_page_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "do_wp_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "folio_add_new_anon_rmap"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "native_read_msr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "uncharge_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "free_unref_page_list"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "vma_alloc_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.05,
+          "symbol": "folio_batch_move_lru"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "percpu_counter_add_batch"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "native_flush_tlb_one_user"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "__next_zones_zonelist"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "error_return"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "get_pfnblock_flags_mask"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "__const_udelay"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "asm_sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "folio_add_lru_vma"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.04,
+          "symbol": "irqentry_exit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "flush_tlb_mm_range"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "pud_val"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "__mod_zone_page_state"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "access_error"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "down_read_trylock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "ktime_get_update_offsets_now"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "folio_remove_rmap_ptes"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "free_swap_cache"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "try_charge_memcg"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "timekeeping_advance"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "alloc_pages_mpol"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "pte_offset_map_nolock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "__folio_throttle_swaprate"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "consume_stock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "kthread_blkcg"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "get_vma_policy"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "policy_nodemask"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "update_load_avg"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "folio_add_lru"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "irqentry_enter"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "set_ptes.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.03,
+          "symbol": "irqentry_exit_to_user_mode"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "post_alloc_hook"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "flush_tlb_func"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "folio_prep_large_rmappable"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "pmd_val"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "folio_mapping"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "sched_clock_cpu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "free_unref_page_commit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "update_cfs_group"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "ptep_clear_flush"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "free_pcppages_bulk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "fpregs_assert_state_consistent"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "read_tsc"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "pfn_pte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "alloc_anon_folio"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "up_read"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "srso_return_thunk"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "mem_cgroup_from_task"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "__raw_spin_lock_irqsave"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "free_unref_page_prepare"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "pte_mkwrite"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "tick_do_update_jiffies64"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.02,
+          "symbol": "pte_pfn"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "x86_pmu_disable_all"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "_find_first_bit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "ktime_get"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__update_load_avg_se"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_curr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "should_fail_alloc_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "delay_halt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__mem_cgroup_uncharge_list"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "task_mm_cid_work"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__irqentry_text_end"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "_raw_spin_trylock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__update_load_avg_cfs_rq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "vm_normal_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "native_write_msr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "account_user_time"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__tlb_remove_page_size"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_vdso_data.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "trace_rss_stat"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "update_process_times"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "cond_accept_memory"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "_find_next_bit"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "folio_lruvec_lock_irqsave"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "delay_halt_mwaitx"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__cond_resched"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "arch_scale_freq_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "memcg_check_events"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "smp_call_function_many_cond"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__x86_indirect_thunk_r14"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "perf_event_task_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "hrtimer_active"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "p4d_offset"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.01,
+          "symbol": "__irq_exit_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sched_clock_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_segcblist_ready_cbs"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "pvclock_gtod_notify"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "hrtimer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mksaveddirty_shift"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__run_timers"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_sched_clock_irq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "timekeeping_update"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sugov_get_util"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "fq_flush_timeout"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__hrtimer_run_queues"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_pmu_addr_offset"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_clear_divider"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "_raw_spin_unlock_irqrestore"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "notifier_call_chain"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_vsyscall"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irq_enter_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "free_pages_and_swap_cache"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "copy_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_brs_disable_all"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_sched_do_timer"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "task_tick_fair"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rb_erase"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "task_tick_mm_cid"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sched_clock_noinstr"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_fast_timekeeper"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_rq_clock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "native_sched_clock"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "mm_counter"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "calc_global_load_tick"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "hrtimer_run_queues"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "check_cpu_stall"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_curr_se"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irq_exit_rcu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "delay_halt.part.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "on_each_cpu_cond_mask"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "unlink_anon_vmas"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "cpuacct_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "free_iova_fast"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "irqentry_enter_from_user_mode"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "reweight_entity"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "rcu_pending"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "avg_vruntime"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "cpu_util_cfs_boost"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "iommu_completion_wait.isra.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__sysvec_apic_timer_interrupt"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "delayed_work_timer_fn"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__memcg_kmem_charge_page"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "load_balance"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_sd_lb_stats.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "raw_notifier_call_chain"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__bitmap_and"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "pte_val"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "tick_program_event"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "llist_add_batch"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "arch_check_zapped_pte"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__update_blocked_fair"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "handle_softirqs"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__get_user_8"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__x86_indirect_thunk_rax"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "nft_do_chain"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "update_wall_time"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "ext4_da_map_blocks.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "entry_untrain_ret"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "raw_spin_rq_lock_nested"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "balance_dirty_pages"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "obj_cgroup_charge"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "get_next_freq.constprop.0"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "available_idle_cpu"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "acct_account_cputime"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "amd_pmu_check_overflow"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "asm_sysvec_call_function_single"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "sugov_should_update_freq"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "perf_event_exec"
+        },
+        {
+          "bucket": "kernel",
+          "dso": "[kernel.kallsyms]",
+          "share": 0.0,
+          "symbol": "__rseq_handle_notify_resume"
+        }
+      ],
+      "symbols_reportable": true
+    }
+  },
+  "predictions": {
+    "P1": {
+      "reason": "Named CM2 per-bit symbols clear 85%; frozen source bounds inlined range work to the outer cm2_decode shell, below 5%.",
+      "status": "SUPPORTED"
+    },
+    "P2": {
+      "reason": "Mixer::mix/update are inlined into larger predict_bit/update_bit symbols; no preregistered instruction-to-bucket mapping separates their share.",
+      "status": "INDETERMINATE"
+    },
+    "P3": {
+      "reason": "IPC is above 1.0, but the preregistration defines no miss-latency model for implied miss-stall share and LLC events are unsupported.",
+      "status": "INDETERMINATE"
+    },
+    "P4": {
+      "reason": "No CM2 symbol is observed; named geocm replay symbols dominate the x-ray profile.",
+      "status": "SUPPORTED"
+    },
+    "P5": {
+      "observable_major_max_abs_delta_points": 4.600000000000001,
+      "observable_major_order_equal": true,
+      "reason": "The six observable major symbol families retain order and stay within 10 points, but the preregistration defines no exhaustive bucket map or tie rule.",
+      "status": "INDETERMINATE"
+    }
+  },
+  "provenance": {
+    "binary_sha256": "d4b9fc85a242f887fb1a49bd849c35779c48b8fda04480969309f2d0bb0211cb",
+    "code_commit": "3a13f486aea51470e2079ba66abb94d99fd782d9",
+    "completion_marker_sha256": "3ab438a6f25f6c9a829ffd750de321c6ed5a9931d73185290b3051a2c3e90d37",
+    "perf_version": "6.8.12",
+    "pin": "0-15",
+    "raw_manifest_entries": 95,
+    "raw_manifest_sha256": "31be471f5daa3b12681e45b50fbfd5516f607155f9ac446a07ce8e9312e826cc",
+    "runner_sha256": "4ccfae3326a7c8678e31f7bdb4d46450e41dff727e2781fc3b313f6ab4cba9dc"
+  },
+  "terminal": {
+    "cells": 4,
+    "classification": "COMPLETE",
+    "decode_observations": 16,
+    "failure_or_void_events": 0
+  }
+}

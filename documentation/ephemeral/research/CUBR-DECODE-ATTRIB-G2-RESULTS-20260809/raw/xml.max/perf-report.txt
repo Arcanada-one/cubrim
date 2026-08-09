@@ -1,0 +1,27 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 58K of event 'cycles'
+# Event count (approx.): 195060167116
+#
+# Overhead  Command         Shared Object      Symbol                                                           
+# ........  ..............  .................  .................................................................
+#
+    50.01%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel11predict_bit
+    29.42%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs0_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_3Ctr3upd
+     8.50%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10update_bit
+     1.82%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs3_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_5Match3end
+     0.79%  cubrim-3a13f48  [kernel.kallsyms]  [k] clear_page_rep
+     0.61%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10start_byte
+     0.58%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvNtCs4nLXsUdxWI4_6cubrim3cm210cm2_decode
+     0.54%  cubrim-3a13f48  [kernel.kallsyms]  [k] asm_exc_page_fault
+     0.31%  cubrim-3a13f48  [kernel.kallsyms]  [k] zap_pte_range
+     0.31%  cubrim-3a13f48  [kernel.kallsyms]  [k] __handle_mm_fault
+     0.31%  cubrim-3a13f48  [kernel.kallsyms]  [k] srso_safe_ret
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#
