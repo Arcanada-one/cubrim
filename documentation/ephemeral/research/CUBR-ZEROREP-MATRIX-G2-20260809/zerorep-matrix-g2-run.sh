@@ -73,11 +73,34 @@ clean() {
  if ! status=$(git -C "$checkout" status --porcelain); then die "git status failed: $checkout"; fi
  [[ -z $status ]] || die "dirty checkout: $checkout"
 }
+suite_contract_lines() {
+ local dollar='$' double_quote='"' quote="'" command_ref prefix release_tail scheme_tail
+ command_ref="${double_quote}${dollar}CARGO${double_quote}"
+ prefix="( cd ${double_quote}${dollar}ZERO_ROOT/code/cubrim-rs${double_quote} && "
+ release_tail=" test --release ) >\"\$OUT/\${CARGO_PROGRAM}-test-release.log\" 2>&1 || die ${quote}Cargo test --release${quote}"
+ scheme_tail=" test --release --test scheme_roundtrip ) >\"\$OUT/\${CARGO_PROGRAM}-test-scheme-roundtrip.log\" 2>&1 || die ${quote}scheme roundtrip test${quote}"
+ printf '%s\n' "$prefix$command_ref$release_tail" "$prefix$command_ref$scheme_tail"
+}
 source_contract() {
- local source=$1 count
+ local source=$1 count expected line_count
+ local -a suite_lines
  count=$(grep -oF "$CARGO_PROGRAM" "$source" | wc -l) || return 1
  [[ $count == 2 ]] || return 1
- grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" "$source"
+ grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" "$source" || return 1
+ mapfile -t suite_lines < <(suite_contract_lines)
+ [[ ${#suite_lines[@]} == 2 ]] || return 1
+ for expected in "${suite_lines[@]}"; do
+  line_count=$(awk -v expected="$expected" '$0 == expected { count++ } END { print count + 0 }' "$source") || return 1
+  [[ $line_count == 1 ]] || return 1
+ done
+}
+mutate_exact_line() {
+ local source=$1 expected=$2 replacement=$3 output=$4
+ awk -v expected="$expected" -v replacement="$replacement" '
+  $0 == expected { print replacement; count++; next }
+  { print }
+  END { if (count != 1) exit 1 }
+ ' "$source" >"$output"
 }
 verify_exact_manifest() (
  local root=$1 empty_dir=$2 spec expected name extra path actual first_entry
@@ -185,7 +208,19 @@ PY
 self_test() {
  local d; d=$(mktemp -d); trap 'rm -rf "$d"' RETURN
  source_contract "${BASH_SOURCE[0]}" || return 1
- local mutation_index=0 unsafe_form mutation_source
+ local mutation_index=0 unsafe_form mutation_source suite_line replacement dollar='$' double_quote='"' command_ref program_ref
+ local -a suite_lines
+ command_ref="${double_quote}${dollar}CARGO${double_quote}"; program_ref="${double_quote}${dollar}CARGO_PROGRAM${double_quote}"
+ mapfile -t suite_lines < <(suite_contract_lines); [[ ${#suite_lines[@]} == 2 ]] || return 1
+ for suite_line in "${suite_lines[@]}"; do
+  mutation_index=$((mutation_index + 1)); mutation_source="$d/suite-command-mutation-$mutation_index.sh"
+  replacement=${suite_line/"$command_ref"/"$program_ref"}
+  [[ $replacement != "$suite_line" && $replacement == *"$program_ref"* ]] || return 1
+  mutate_exact_line "${BASH_SOURCE[0]}" "$suite_line" "$replacement" "$mutation_source" || return 1
+  [[ $(grep -oF "$CARGO_PROGRAM" "$mutation_source" | wc -l) == 2 ]] || return 1
+  grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" "$mutation_source" || return 1
+  ! source_contract "$mutation_source" || return 1
+ done
  local -a unsafe_forms=(
   "if $CARGO_PROGRAM; then :; fi"
   "! $CARGO_PROGRAM"
