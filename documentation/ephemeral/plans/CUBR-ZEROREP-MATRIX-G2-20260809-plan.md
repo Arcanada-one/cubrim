@@ -10,7 +10,7 @@ fail‑closed runner that uses an absolute `cargo` path, a regression self‑tes
 and distinct generation‑2 artefacts; no product code is changed.
 
 - [x] 1. Preserve generation‑1 artefacts and record the failure
-- [ ] 2. Commit the generation‑2 preregistration amendment and plan before code
+- [x] 2. Commit the generation‑2 preregistration amendment and plan before code
 - [ ] 3. Add the corrected G2 runner and regression test
 - [ ] 4. Complete independent spec and quality reviews
 - [ ] 5. Merge the G2-only PR and fetch the exact resulting `origin/main`
@@ -38,13 +38,15 @@ and distinct generation‑2 artefacts; no product code is changed.
 
 ### 2. Amendment scope (one root‑cause fix)
 
-- The G2 runner (`zerorep-matrix-g2-run.sh`) will contain **exactly** the
-  changes described in `CUBR-ZEROREP-MATRIX-G2-20260809.md` §4:
+  - The G2 runner (`zerorep-matrix-g2-run.sh`) will contain **exactly** the
+  changes described in `CUBR-ZEROREP-MATRIX-G2-20260809.md` §4-§5:
   - Declare `readonly CARGO=/root/.cargo/bin/cargo`.
   - Verify it is executable and reports version `cargo 1.96.1`.
   - Replace every bare `cargo` invocation with `"$CARGO"`.
-  - Extend `--self-test` with an environment‑contract check that passes only when
-    no bare `cargo` remains (outside the definition and comments).
+  - Extend `--self-test` with the exact whole-source occurrence contract; only
+    the two lowercase tokens in `/root/.cargo/bin/cargo` are permitted.
+  - Make checkout cleanliness fail closed when `git status` errors.
+  - Enforce the exact five-file G1 preservation manifest before the Rust suite.
 - All other gates, identities, timings, and DB protocol are strictly and
   exclusively those of the original preregistration and original plan.
 
@@ -68,6 +70,11 @@ identically to the original plan using the new generation‑2 paths and names.
     `documentation/ephemeral/research/CUBR-ZEROREP-MATRIX-G2-20260809/zerorep-matrix-g2-run.sh`.
   - The runner must be executable, pass ShellCheck, and contain the regression
     self‑test described in the amendment.
+  - Mutation tests must reject the reviewer examples `if cargo`, `! cargo`,
+    `( cargo )`, `time cargo`, `command cargo`, and `env X=1 cargo`.
+  - A failing `git status` probe must be rejected, never interpreted as clean.
+  - A missing, changed, or extra G1 manifest entry must be rejected before the
+    Rust suite.
   - Commit message: “Add generation‑2 zero‑rep matrix amendment, plan, and runner”
   - Record the script’s SHA‑256 after commit: `git show HEAD:… | sha256sum`
 

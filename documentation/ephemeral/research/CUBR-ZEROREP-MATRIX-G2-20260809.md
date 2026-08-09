@@ -77,14 +77,35 @@ must contain **only** the following changes relative to the original
    ```
 3. Replace both executable bare `cargo` invocations with `"$CARGO"`, ensuring
    no executable bare `cargo` invocation remains.
-4. Extend `--self-test` with a source-contract check that fails if an
-   executable shell command token resolves bare `cargo`, for example:
+4. Extend `--self-test` with a source-contract check that fails if any new
+   lowercase `cargo` token appears anywhere in the script. The only two
+   permitted occurrences are the `.cargo` directory and `cargo` executable in
+   the exact declaration `readonly CARGO=/root/.cargo/bin/cargo`. Derive the
+   program name from `${CARGO##*/}` so version checks, evidence filenames, and
+   log messages introduce no additional lowercase token. This stricter
+   whole-source invariant rejects every executable form, including `if cargo`,
+   `! cargo`, `( cargo )`, `time cargo`, `command cargo`, and `env X=1 cargo`.
+   The contract must also assert that the exact declaration line is present.
+5. Correct the inherited checkout-cleanliness helper so a failed `git status`
+   is fatal; only a successful command with empty output is accepted as clean.
+6. Before the Rust suite, verify the exact five-file generation-1 manifest in
+   §7 and reject missing, changed, or additional entries.
+
+The source-contract check must be part of `--self-test`, for example:
+
    ```bash
-   grep -nE '(^|&&|[;|])[[:space:]]*cargo([[:space:]]|$)' "${BASH_SOURCE[0]}"
+   CARGO_PROGRAM=${CARGO##*/}
+   [[ $(grep -oF "$CARGO_PROGRAM" "${BASH_SOURCE[0]}" | wc -l) == 2 ]]
+   grep -Fxq "readonly CARGO=/root/.$CARGO_PROGRAM/bin/$CARGO_PROGRAM" \
+     "${BASH_SOURCE[0]}"
    ```  
-   The self-test passes only when that command finds no matches. It must also
-   run successfully with `PATH=/usr/sbin:/usr/bin:/sbin:/bin`, proving the
-   absolute Cargo path is sufficient.
+The self-test must run successfully with
+`PATH=/usr/sbin:/usr/bin:/sbin:/bin`, proving the absolute Cargo path is
+sufficient.
+
+Items 5-6 are review-driven fail-closed admission corrections preregistered
+after the first G2 review and before their implementation. They change no
+scientific variable or measurement behavior.
 
 The original runner file is preserved untouched in the generation‑1  
 checkout and is never overwritten.
