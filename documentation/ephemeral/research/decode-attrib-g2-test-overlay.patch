@@ -1,0 +1,16 @@
+diff --git a/code/cubrim-rs/src/config.rs b/code/cubrim-rs/src/config.rs
+index 2938a79..6bc00dc 100644
+--- a/code/cubrim-rs/src/config.rs
++++ b/code/cubrim-rs/src/config.rs
+@@ -675,0 +676 @@ mod tests {
++            cm2_max_tbits: None,
+diff --git a/code/cubrim-rs/tests/differential.rs b/code/cubrim-rs/tests/differential.rs
+index 1d8a25f..fa93f8b 100644
+--- a/code/cubrim-rs/tests/differential.rs
++++ b/code/cubrim-rs/tests/differential.rs
+@@ -101,0 +102 @@ fn text_entropy() {
++        cm2_max_tbits: None,
+@@ -152,0 +154 @@ fn text_entropy_context() {
++        cm2_max_tbits: None,
+@@ -206,0 +209 @@ fn sparse_clustered_rlecodes() {
++        cm2_max_tbits: None,
