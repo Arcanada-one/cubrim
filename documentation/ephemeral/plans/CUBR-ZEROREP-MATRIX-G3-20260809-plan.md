@@ -77,6 +77,9 @@ product code is changed.
     - Freeze complete marker-bounded SHA-256 blocks for the inherited clean
       helper, every restoration helper body, and the live restore/clean/rehash
       sequence; require unique ordered markers and reject decoy copies.
+    - Freeze the normalized full runner source, excluding exactly one
+      self-digest constant line, so intact-block relocation or surrounding
+      `if false` wrappers cannot preserve the contract.
     - No other logic, admission gates, or paths are changed; the G3 runner
       renames all checkpoint paths to use `g3` identifiers.
   - All other gates, identities, timings, and DB protocol are strictly and

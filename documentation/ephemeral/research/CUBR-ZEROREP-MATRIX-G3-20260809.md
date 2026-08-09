@@ -148,6 +148,14 @@ generation‑2 runner:
    predicate/body line must be covered so dead-code decoys and live-root-only
    exceptions cannot balance the guard.
 
+   Block contents alone do not prove top-level placement. The final source
+   contract must also SHA-256 the entire runner after excluding exactly one
+   `readonly FULL_SOURCE_CONTRACT_SHA256=...` line, require that line to occur
+   once, and compare with the frozen digest. This normalized full-source guard
+   must reject wrapping the intact live block in `if false; then ... fi`, even
+   if a compensating line is removed elsewhere. Block digests remain
+   defense-in-depth.
+
 The original generation‑2 runner remains untouched in the G2 checkout and
 is never overwritten.
 
