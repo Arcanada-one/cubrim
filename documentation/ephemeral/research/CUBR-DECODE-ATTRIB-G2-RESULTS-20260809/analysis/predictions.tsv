@@ -1,0 +1,6 @@
+prediction	status	reason
+P1	SUPPORTED	Named CM2 per-bit symbols clear 85%; frozen source bounds inlined range work to the outer cm2_decode shell, below 5%.
+P2	INDETERMINATE	Mixer::mix/update are inlined into larger predict_bit/update_bit symbols; no preregistered instruction-to-bucket mapping separates their share.
+P3	INDETERMINATE	IPC is above 1.0, but the preregistration defines no miss-latency model for implied miss-stall share and LLC events are unsupported.
+P4	SUPPORTED	No CM2 symbol is observed; named geocm replay symbols dominate the x-ray profile.
+P5	INDETERMINATE	The six observable major symbol families retain order and stay within 10 points, but the preregistration defines no exhaustive bucket map or tie rule.

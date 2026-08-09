@@ -1,0 +1,15 @@
+# started on Sun Aug  9 18:21:29 2026
+
+107760.53	msec	task-clock	107760532609	100.00	1.000	CPUs utilized
+356628416347		cycles	59865331003	55.00	3.309	GHz
+657072748842		instructions	59865492146	55.00	1.84	insn per cycle
+104670483547		branches	59866696232	55.00	971.325	M/sec
+251542996		branch-misses	59867593964	55.00	0.24	of all branches
+15641953147		cache-references	59868411595	55.00	145.155	M/sec
+3035258589		cache-misses	59868818260	55.00	19.40	of all cache refs
+658992063		dTLB-load-misses	59867959399	55.00		
+43404		page-faults	107760532609	100.00	402.782	/sec
+200114244654		L1-dcache-loads	59866594004	55.00	1.857	G/sec
+12462503355		L1-dcache-load-misses	59865766442	55.00	6.23	of all L1-dcache accesses
+<not supported>		LLC-loads	0	100.00		
+<not supported>		LLC-load-misses	0	100.00		

@@ -1,0 +1,24 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 143K of event 'cycles'
+# Event count (approx.): 480310048788
+#
+# Overhead  Command         Shared Object      Symbol                                                           
+# ........  ..............  .................  .................................................................
+#
+    49.72%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel11predict_bit
+    32.81%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs0_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_3Ctr3upd
+     6.39%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10update_bit
+     2.92%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs3_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_5Match3end
+     0.79%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs4_NtCs4nLXsUdxWI4_6cubrim3cm2NtB5_7CmModel10start_byte
+     0.57%  cubrim-3a13f48  [kernel.kallsyms]  [k] clear_page_rep
+     0.46%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvNtCs4nLXsUdxWI4_6cubrim3cm210cm2_decode
+     0.38%  cubrim-3a13f48  [kernel.kallsyms]  [k] asm_exc_page_fault
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

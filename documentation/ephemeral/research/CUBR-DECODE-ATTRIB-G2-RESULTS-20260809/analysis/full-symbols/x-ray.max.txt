@@ -1,0 +1,97 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 6K of event 'cycles'
+# Event count (approx.): 20882511156
+#
+# Overhead  Command         Shared Object      Symbol                                                                                                                                                                                                                                                                                                        
+# ........  ..............  .................  ..............................................................................................................................................................................................................................................................................................................
+#
+    84.53%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvNtCs4nLXsUdxWI4_6cubrim5geocm17decode_stream_mix
+    12.65%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvMs1_NtCs4nLXsUdxWI4_6cubrim5geocmNtB5_5Mixer6update
+     0.86%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvNtCs4nLXsUdxWI4_6cubrim5geocm8mix_ctxs
+     0.16%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvNtCs4nLXsUdxWI4_6cubrim5geocm6decode
+     0.08%  cubrim-3a13f48  [kernel.kallsyms]  [k] asm_exc_page_fault
+     0.08%  cubrim-3a13f48  [kernel.kallsyms]  [k] clear_page_rep
+     0.06%  cubrim-3a13f48  [kernel.kallsyms]  [k] zap_pte_range
+     0.06%  cubrim-3a13f48  [kernel.kallsyms]  [k] update_load_avg
+     0.05%  cubrim-3a13f48  cubrim-3a13f48     [.] _RINvXs0_NtNtNtCs4NRVxsYgnAr_4core4iter8adapters3mapINtB6_3MapINtNtNtBc_5slice4iter4IterjENCNvMs4_NtCs4nLXsUdxWI4_6cubrim5geocmNtB1x_8MixState3new0ENtNtNtBa_6traits8iterator8Iterator4folduNCINvNvB2l_8for_each4callINtNtCscdodAO9FK5_5alloc3vec3VectENCINvMsj_B3r_IB3p_B3o_E14extend_trustedBN_E0E0EB1z_
+     0.05%  cubrim-3a13f48  [kernel.kallsyms]  [k] asm_sysvec_apic_timer_interrupt
+     0.05%  cubrim-3a13f48  [kernel.kallsyms]  [k] native_read_msr
+     0.05%  cubrim-3a13f48  [kernel.kallsyms]  [k] task_mm_cid_work
+     0.05%  cubrim-3a13f48  [kernel.kallsyms]  [k] handle_mm_fault
+     0.04%  cubrim-3a13f48  [kernel.kallsyms]  [k] __handle_mm_fault
+     0.04%  cubrim-3a13f48  [kernel.kallsyms]  [k] __mod_lruvec_state
+     0.04%  cubrim-3a13f48  [kernel.kallsyms]  [k] lru_gen_add_folio
+     0.04%  cubrim-3a13f48  [kernel.kallsyms]  [k] __mod_memcg_lruvec_state
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] __const_udelay
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] native_write_msr
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] perf_adjust_freq_unthr_context
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] ktime_get
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] free_unref_page_list
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] ktime_get_update_offsets_now
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] do_syscall_64
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] srso_safe_ret
+     0.03%  cubrim-3a13f48  [kernel.kallsyms]  [k] cgroup_rstat_updated
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] __alloc_pages
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] filemap_get_read_batch
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] policy_nodemask
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] alloc_anon_folio
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] __count_memcg_events
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] mem_cgroup_commit_charge
+     0.02%  taskset         [kernel.kallsyms]  [k] __handle_mm_fault
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] memcg_check_events
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] irqentry_exit_to_user_mode
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] __rcu_read_lock
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] update_wall_time
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] check_cpu_stall
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] delay_halt_mwaitx
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] pvclock_gtod_notify
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] mem_cgroup_from_task
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] amd_pmu_addr_offset
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] folio_lruvec_lock_irqsave
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] __x86_indirect_thunk_rax
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] update_cfs_group
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] arch_scale_freq_tick
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] delay_halt
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] timekeeping_update
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] __mem_cgroup_uncharge_list
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] tick_do_update_jiffies64
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] scheduler_tick
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] __sysvec_apic_timer_interrupt
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] arch_exit_to_user_mode_prepare.isra.0
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] memset_orig
+     0.02%  cubrim-3a13f48  cubrim-3a13f48     [.] _RNvCsgTSoBSjQq7g_6cubrim4main
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] psi_group_change
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] do_anonymous_page
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] mas_walk
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] sugov_should_update_freq
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] balance_dirty_pages_ratelimited
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] folio_account_dirtied
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] rep_movs_alternative
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] kmem_cache_alloc_lru
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] ext4_es_lookup_extent
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] read_tsc
+     0.02%  cubrim-3a13f48  [kernel.kallsyms]  [k] do_user_addr_fault
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] folio_mapping
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] pfn_pte
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] __mem_cgroup_charge
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] count_memcg_events.constprop.0
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] rmqueue_bulk
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] __mod_node_page_state
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] __folio_throttle_swaprate
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] __lruvec_stat_mod_folio
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] lru_add_fn
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] lock_vma_under_rcu
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] get_page_from_freelist
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] __rcu_read_unlock
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] folio_add_lru_vma
+     0.01%  cubrim-3a13f48  [kernel.kallsyms]  [k] exc_page_fault
+     0.00%  perf-exec       [kernel.kallsyms]  [k] perf_event_exec
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

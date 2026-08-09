@@ -1,0 +1,13 @@
+# started on Sun Aug  9 17:28:00 2026
+
+
+ Performance counter stats for '/usr/bin/taskset -c 0 /usr/bin/true':
+
+           2888390      cycles                                                                
+
+       0.002885574 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002973000 seconds sys
+
+
