@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "record_kind": "NONCANONICAL_PROVENANCE_NOTE",
+  "canonical": false,
+  "card_id": "H-07",
+  "status": "HISTORICAL_PROVENANCE_INCOMPLETE",
+  "measured": false,
+  "implementation_base": {
+    "origin_main_commit": "830a9a31deb00926a97f3fa5bd74f58003573fc0",
+    "source_commit": "5357c3c16634db8b50b28dc94645f24afb24a4c2",
+    "source_commit_is_ancestor": true,
+    "commits_from_source_to_base": 343
+  },
+  "sealed_e1b": {
+    "source_directory": "cubr-master-audit/CUBR-0046/e1b-results/H-07",
+    "path_basis": "audit-workspace-relative",
+    "summary": {
+      "path": "summary.json",
+      "sha256": "dc504af5e98c34d9e84716f458b0e1b6ae0d68c55efb91bc74df0b17fcaa4dd0"
+    },
+    "results": {
+      "path": "results.tsv",
+      "sha256": "e7cc43de872bf6441302ee4f8288a8c6904d6a872d3d6271d5ade2bfe663d853"
+    }
+  },
+  "legacy_database_provenance": {
+    "row_ids": [
+      185,
+      187,
+      190,
+      200,
+      205,
+      219,
+      224,
+      273,
+      325
+    ],
+    "core_rows_sha256": "105c981b58a703cab916f1a3a73f6b44102ece50407038b6e578647ed564db22",
+    "relinking": "NOT_PERFORMED"
+  },
+  "foreign_revision_discrepancy": {
+    "codec_rev": 1,
+    "run_id": "stand-20260703-1500",
+    "environment_label": "dev-ai stand multi-width-MED16",
+    "matches_h07_source_commit": false
+  },
+  "conservative_interpretation": "The sealed files are historical evidence, but the nine legacy rows identify a foreign codec revision rather than H-07 source commit 5357c3c. Without a proven row-to-source link, this package cannot promote H-07 to measured status and makes no GO claim."
+}
