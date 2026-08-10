@@ -1,0 +1,23 @@
+Type=exec
+Restart=no
+RuntimeMaxUSec=4h
+MainPID=0
+Result=exit-code
+NRestarts=0
+ExecMainCode=1
+ExecMainStatus=2
+ExecStart={ path=/root/cubr-new24-full-binary-g4-run.sh ; argv[]=/root/cubr-new24-full-binary-g4-run.sh ; ignore_errors=no ; start_time=[Mon 2026-08-10 04:01:34 CEST] ; stop_time=[Mon 2026-08-10 04:01:38 CEST] ; pid=2120492 ; code=exited ; status=2 }
+ControlGroup=
+KillMode=control-group
+KillSignal=15
+FinalKillSignal=9
+Id=cubr-new24-full-binary-g4.service
+Names=cubr-new24-full-binary-g4.service
+Description=/root/cubr-new24-full-binary-g4-run.sh
+LoadState=loaded
+ActiveState=failed
+SubState=failed
+FragmentPath=/run/systemd/transient/cubr-new24-full-binary-g4.service
+UnitFileState=transient
+Transient=yes
+InvocationID=27cba50809fb4066b8915510b33a2b30

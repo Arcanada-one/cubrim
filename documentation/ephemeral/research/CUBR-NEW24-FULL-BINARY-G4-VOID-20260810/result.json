@@ -1,0 +1,76 @@
+{
+  "schema": "cubr-new24-full-binary-g4-void-result-v1",
+  "verdict": {
+    "profile_status": "VOID",
+    "selection": "NO-SELECT",
+    "failure_class": "HARNESS-ISOLATION-FAILURE",
+    "reason_code": "RUNNER_MOCK_CGROUP_TEST_INHERITED_LIVE_UNIT",
+    "reason": "The mock cgroup self-test inherited the live CUBR_SYSTEMD_UNIT value, but asserted the mock.unit stop sentinel.",
+    "performance_conclusion_admissible": false
+  },
+  "campaign_boundary": {
+    "failure_phase": "admission-runner-contract",
+    "failed_at_utc": "2026-08-10T02:01:38Z",
+    "campaign_cell_count": 0,
+    "performance_sample_count": 0,
+    "performance_sample_artifact_count": 0,
+    "authoritative_completion_marker_present": false,
+    "preflight_event_support_probes_present": true
+  },
+  "systemd": {
+    "unit": "cubr-new24-full-binary-g4.service",
+    "invocation_id": "27cba50809fb4066b8915510b33a2b30",
+    "result": "exit-code",
+    "exec_main_status": 2,
+    "nrestarts": 0,
+    "service_type": "exec",
+    "restart_policy": "no",
+    "runtime_max": "4h",
+    "kill_mode": "control-group"
+  },
+  "identities": {
+    "main_commit": "708cda945a285526610371d812e4f54725eb6baf",
+    "main_tree": "9cdad69314f94e0cc0323b1dd6fb64d34c0f677b",
+    "instrument_commit": "ced543590f7529721f894011829a9d0e8f91385d",
+    "instrument_tree": "bb07cbb1fd40bc61e1ab4001c17a2d52870b8239",
+    "source_commit": "830a9a31deb00926a97f3fa5bd74f58003573fc0",
+    "source_tree": "a2638f1a20c7654e0efde9d09f9a8807ef7523b2",
+    "runner_sha256": "9db371bfab3376785744d0a1399ab79e8f033cb8f29eb920315556a23e821f32",
+    "runner_test_sha256": "1da8ac44536547d70ab769907954d6e4088618865584db0ed53b057fefb7c1b3",
+    "mapper_sha256": "36226ff6caf35983a97fa472b1433e37f18a6ac4b565d1ae016e27cd957ae5e1",
+    "mapper_test_sha256": "97af2daacca00b20d9eb56dee34d56f9a3a9c22ffcdba820bfce171e7a371314"
+  },
+  "remote_evidence": {
+    "host": "dev-ai",
+    "source_root": "/root/cubr-new24-full-binary-g4-20260809.partial",
+    "file_count": 18,
+    "directory_count": 2,
+    "total_file_bytes": 72861,
+    "empty_files": [
+      "preflight/process-conflicts.txt",
+      "preflight/runner-contract-test.txt"
+    ],
+    "remote_directory_mode": "0500",
+    "remote_file_mode": "0444"
+  },
+  "isolation_reproduction": {
+    "environment_absent": {
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    "live_unit_environment_set": {
+      "exit_code": 1,
+      "result": "FAIL"
+    }
+  },
+  "publication_limits": {
+    "scope": "failure identity, immutable evidence, and harness root cause only",
+    "performance_interpretation_performed": false,
+    "prediction_evaluation_performed": false,
+    "database_mutation_performed": false,
+    "api_mutation_performed": false,
+    "site_mutation_performed": false,
+    "backlog_mutation_performed": false,
+    "campaign_rerun_performed": false
+  }
+}

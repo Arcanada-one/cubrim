@@ -1,0 +1,10 @@
+schema=current-profile-g4-isolation-reproduction-v1
+main_commit=708cda945a285526610371d812e4f54725eb6baf
+runner_sha256=9db371bfab3376785744d0a1399ab79e8f033cb8f29eb920315556a23e821f32
+env_absent_command=env -u CUBR_SYSTEMD_UNIT bash current-profile-g4-run.sh --self-test-cgroup
+env_absent_rc=0
+env_absent_output=current_profile_g4_cgroup_test=PASS
+env_set_command=env CUBR_SYSTEMD_UNIT=cubr-new24-full-binary-g4.service bash current-profile-g4-run.sh --self-test-cgroup
+env_set_rc=1
+env_set_output=current_profile_g4_cgroup_test=FAIL
+root_cause=mock cgroup self-test inherited live CUBR_SYSTEMD_UNIT while asserting the sentinel for mock.unit

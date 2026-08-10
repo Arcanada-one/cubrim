@@ -1,0 +1,9 @@
+task-clock	supported
+cycles	supported
+instructions	supported
+branches	supported
+branch-misses	supported
+cache-references	supported
+cache-misses	supported
+dTLB-load-misses	supported
+page-faults	supported

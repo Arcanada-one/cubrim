@@ -1,0 +1,11 @@
+2026-08-10T02:01:35Z	deadline_gate=before-admission remaining=14279
+2026-08-10T02:01:35Z	deadline_gate=admission-tools remaining=14279
+2026-08-10T02:01:35Z	deadline_gate=admission-systemd remaining=14279
+2026-08-10T02:01:35Z	deadline_gate=admission-instrument-provenance remaining=14279
+2026-08-10T02:01:36Z	deadline_gate=admission-source-checkout remaining=14278
+2026-08-10T02:01:36Z	deadline_gate=admission-topology remaining=14278
+2026-08-10T02:01:36Z	deadline_gate=admission-process-snapshot remaining=14278
+2026-08-10T02:01:36Z	deadline_gate=admission-corpus-manifest remaining=14278
+2026-08-10T02:01:36Z	deadline_gate=admission-perf-events remaining=14278
+2026-08-10T02:01:37Z	deadline_gate=admission-runner-contract remaining=14277
+2026-08-10T02:01:38Z	error_rc=2 command=return "$rc"
