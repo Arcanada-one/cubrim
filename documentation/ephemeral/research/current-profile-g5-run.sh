@@ -1826,6 +1826,16 @@ self_test_fake_cargo() {
     printf 'current_profile_g5_fake_cargo=PASS\n'
 }
 
+self_test_cgroup_environment() {
+    local observed_unit
+    observed_unit=${SYSTEMD_UNIT:-missing}
+    if [[ -n ${CUBR_G5_PURE_MOCK_PARENT_CANARY+x} ]]; then
+        printf 'current_profile_g5_cgroup_environment_test=FAIL canary=present unit=%s\n' "$observed_unit"
+        exit 1
+    fi
+    printf 'current_profile_g5_cgroup_environment_test=PASS canary=absent unit=%s\n' "$observed_unit"
+}
+
 self_test_cgroup() {
     local root procs sentinel rc
     root=$(/usr/bin/mktemp -d)
@@ -1913,7 +1923,12 @@ self_test_cgroup_live() {
 }
 
 self_test_cgroup_precommit() {
-    local root partial publishing final late procs sentinel rc expected_stop
+    local root partial publishing final late procs sentinel rc expected_stop validated_unit
+    validated_unit=${SYSTEMD_UNIT:-missing}
+    if [[ $validated_unit != precommit-disconnected.service ]]; then
+        printf 'current_profile_g5_cgroup_precommit_test=FAIL unit=%s reason=unexpected-fixture-unit\n' "$validated_unit"
+        exit 1
+    fi
     root=$(/usr/bin/mktemp -d)
     partial=$root/evidence.partial
     publishing=$root/evidence.publishing
@@ -1958,7 +1973,7 @@ self_test_cgroup_precommit() {
     CGROUP_PROCS=$procs
     CGROUP_BASELINE_PIDS=999998
     CGROUP_STOP_SENTINEL=$sentinel
-    expected_stop="systemctl --no-block stop ${SYSTEMD_UNIT:-mock.unit}"
+    expected_stop='systemctl --no-block stop precommit-disconnected.service'
     set +e
     CUBR_PUBLISH_CGROUP_TEST=disconnected publish_campaign \
         "$partial" "$publishing" "$final" "$late" 1970-01-01T00:00:00Z \
@@ -1969,12 +1984,12 @@ self_test_cgroup_precommit() {
        [[ $(<"$sentinel") != "$expected_stop" ]]; then
         /usr/bin/chmod -R u+w "$root" 2>/dev/null || true
         /usr/bin/rm -rf -- "$root"
-        printf 'current_profile_g5_cgroup_precommit_test=FAIL disconnected-publisher-accepted\n'
+        printf 'current_profile_g5_cgroup_precommit_test=FAIL disconnected-publisher-accepted unit=%s\n' "$validated_unit"
         exit 1
     fi
     /usr/bin/chmod -R u+w "$root" 2>/dev/null || true
     /usr/bin/rm -rf -- "$root"
-    printf 'current_profile_g5_cgroup_precommit_test=PASS unit=precommit-disconnected.service\n'
+    printf 'current_profile_g5_cgroup_precommit_test=PASS unit=%s\n' "$validated_unit"
 }
 
 self_test_publish() {
@@ -2285,6 +2300,7 @@ case ${1:-} in
     --map-worker) build_full_instruction_map_worker ;;
     --self-test) self_test ;;
     --self-test-fake-cargo) self_test_fake_cargo ;;
+    --self-test-cgroup-environment) self_test_cgroup_environment ;;
     --self-test-cgroup) self_test_cgroup ;;
     --self-test-cgroup-precommit) self_test_cgroup_precommit ;;
     --self-test-cgroup-live) self_test_cgroup_live ;;
@@ -2297,5 +2313,5 @@ case ${1:-} in
     --self-test-hard-deadline) self_test_hard_deadline ;;
     --finalize-worker) finalize_worker "$@" ;;
     '') main_run ;;
-    *) printf 'usage: %s [--self-test|--self-test-fake-cargo|--self-test-cgroup|--self-test-cgroup-precommit|--self-test-cgroup-live|--self-test-publish|--self-test-timeout-tree|--self-test-publish-crashes|--self-test-hard-deadline]\n' "$0" >&2; exit 2 ;;
+    *) printf 'usage: %s [--self-test|--self-test-fake-cargo|--self-test-cgroup-environment|--self-test-cgroup|--self-test-cgroup-precommit|--self-test-cgroup-live|--self-test-publish|--self-test-timeout-tree|--self-test-publish-crashes|--self-test-hard-deadline]\n' "$0" >&2; exit 2 ;;
 esac

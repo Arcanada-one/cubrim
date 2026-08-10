@@ -14,11 +14,13 @@ SELF_MUTATION_TESTS=${SELF_MUTATION_TESTS:-1}
 readonly POISONED_PARENT_UNIT=g4-live-authority-must-not-be-used.service
 readonly LIVE_G5_CAMPAIGN_UNIT=cubr-new24-full-binary-g5-20260810.service
 readonly PURE_MOCK_PATH=/usr/bin:/bin
+readonly PURE_MOCK_PARENT_CANARY=parent-environment-must-not-reach-pure-mock
 
 export CUBR_SYSTEMD_UNIT=$POISONED_PARENT_UNIT
 export INVOCATION_ID=g4-live-authority-must-not-be-used
 export CUBR_CGROUP_SYSTEMCTL_USER=1
 export CUBR_CGROUP_LIVE_RESULT=/tmp/g4-live-authority-must-not-be-used.result
+export CUBR_G5_PURE_MOCK_PARENT_CANARY=$PURE_MOCK_PARENT_CANARY
 
 fail() {
     printf 'current_profile_g5_contract=FAIL reason=%s\n' "$1" >&2
@@ -32,12 +34,14 @@ invalid() {
 
 assert_mock_output_isolated() {
     local output=$1 expected_unit=$2
-    [[ $output == *"unit=$expected_unit"* ]] ||
-        invalid "pure mock output missing expected unit: $expected_unit output=$output"
+    [[ $output != *'canary=present'* ]] ||
+        fail 'parent poison canary reached pure mock child'
     [[ $output != *"$POISONED_PARENT_UNIT"* ]] ||
         fail 'poisoned parent unit reached pure mock output'
     [[ $output != *"$LIVE_G5_CAMPAIGN_UNIT"* ]] ||
         fail 'live campaign unit reached pure mock output'
+    [[ $output == *"unit=$expected_unit"* ]] ||
+        invalid "pure mock output missing expected unit: $expected_unit output=$output"
 }
 
 run_pure_mock_cgroup() {
@@ -63,17 +67,6 @@ line_of_last() {
 
 [[ -f $RUNNER && ! -L $RUNNER ]] || invalid "runner not found or unsafe: $RUNNER"
 [[ -f $MAPPER && ! -L $MAPPER ]] || invalid "mapper not found or unsafe: $MAPPER"
-
-pure_mock_helper_line=$(/usr/bin/awk '
-    /^run_pure_mock_cgroup\(\) \{$/ { helper = 1; next }
-    helper && /^}$/ { exit }
-    helper && /\/usr\/bin\/env/ { print; exit }
-' "$SELF")
-if [[ $pure_mock_helper_line == *'CUBR_SYSTEMD_UNIT="${CUBR_SYSTEMD_UNIT}"'* ]]; then
-    fail 'poisoned parent unit reached pure mock output'
-fi
-[[ $pure_mock_helper_line == '    /usr/bin/env -i LC_ALL=C PATH="$PURE_MOCK_PATH" CUBR_SYSTEMD_UNIT="$fixture_unit" /usr/bin/bash "$RUNNER" "$mode"' ]] ||
-    fail 'pure mock helper must start from an empty environment'
 
 runner_literals=(
     '/root/cubr-new24-full-binary-g5-src'
@@ -403,18 +396,55 @@ publish_output=$(/usr/bin/bash "$RUNNER" --self-test-publish 2>&1) ||
 [[ $publish_output == 'current_profile_g5_publish_test=PASS' ]] ||
     invalid "runner durable-publish positive control output mismatch: $publish_output"
 
-cgroup_output=$(run_pure_mock_cgroup mock.unit --self-test-cgroup 2>&1) ||
-    invalid "runner cgroup containment control failed: $cgroup_output"
+pure_mock_environment_output=
+pure_mock_environment_rc=0
+set +e
+pure_mock_environment_output=$(run_pure_mock_cgroup mock.unit \
+    --self-test-cgroup-environment 2>&1)
+pure_mock_environment_rc=$?
+set -e
+assert_mock_output_isolated "$pure_mock_environment_output" mock.unit
+(( pure_mock_environment_rc == 0 )) ||
+    invalid "runner pure-mock environment observation failed: rc=$pure_mock_environment_rc output=$pure_mock_environment_output"
+[[ $pure_mock_environment_output == 'current_profile_g5_cgroup_environment_test=PASS canary=absent unit=mock.unit' ]] ||
+    invalid "runner pure-mock environment observation mismatch: $pure_mock_environment_output"
+
+cgroup_output=
+cgroup_rc=0
+set +e
+cgroup_output=$(run_pure_mock_cgroup mock.unit --self-test-cgroup 2>&1)
+cgroup_rc=$?
+set -e
+assert_mock_output_isolated "$cgroup_output" mock.unit
+(( cgroup_rc == 0 )) ||
+    invalid "runner cgroup containment control failed: rc=$cgroup_rc output=$cgroup_output"
 [[ $cgroup_output == 'current_profile_g5_cgroup_test=PASS unit=mock.unit' ]] ||
     invalid "runner cgroup containment output mismatch: $cgroup_output"
-assert_mock_output_isolated "$cgroup_output" mock.unit
 
+cgroup_precommit_output=
+cgroup_precommit_rc=0
+set +e
 cgroup_precommit_output=$(run_pure_mock_cgroup precommit-disconnected.service \
-    --self-test-cgroup-precommit 2>&1) ||
-    invalid "runner cgroup precommit counterexample failed: $cgroup_precommit_output"
+    --self-test-cgroup-precommit 2>&1)
+cgroup_precommit_rc=$?
+set -e
+assert_mock_output_isolated "$cgroup_precommit_output" precommit-disconnected.service
+(( cgroup_precommit_rc == 0 )) ||
+    invalid "runner cgroup precommit counterexample failed: $cgroup_precommit_output rc=$cgroup_precommit_rc"
 [[ $cgroup_precommit_output == 'current_profile_g5_cgroup_precommit_test=PASS unit=precommit-disconnected.service' ]] ||
     invalid "runner cgroup precommit counterexample output mismatch: $cgroup_precommit_output"
-assert_mock_output_isolated "$cgroup_precommit_output" precommit-disconnected.service
+
+unexpected_precommit_output=
+unexpected_precommit_rc=0
+set +e
+unexpected_precommit_output=$(run_pure_mock_cgroup unexpected-authority.service \
+    --self-test-cgroup-precommit 2>&1)
+unexpected_precommit_rc=$?
+set -e
+(( unexpected_precommit_rc != 0 )) ||
+    fail 'precommit self-test accepted unexpected fixture authority'
+[[ $unexpected_precommit_output == 'current_profile_g5_cgroup_precommit_test=FAIL unit=unexpected-authority.service reason=unexpected-fixture-unit' ]] ||
+    invalid "unexpected precommit authority failed at unrelated assertion: rc=$unexpected_precommit_rc output=$unexpected_precommit_output"
 
 publish_write_output=$(/usr/bin/bash "$RUNNER" --self-test-publish-writes 2>&1) ||
     invalid "runner checked publication write control failed: $publish_write_output"
@@ -548,6 +578,7 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
             INVOCATION_ID=g4-live-authority-must-not-be-used \
             CUBR_CGROUP_SYSTEMCTL_USER=1 \
             CUBR_CGROUP_LIVE_RESULT=/tmp/g4-live-authority-must-not-be-used.result \
+            CUBR_G5_PURE_MOCK_PARENT_CANARY="$PURE_MOCK_PARENT_CANARY" \
             SELF_MUTATION_TESTS=0 RUNNER="$RUNNER" MAPPER="$MAPPER" \
             /usr/bin/bash "$mutant"
         (( CHILD_RC != 0 )) || fail "contract source mutation survived: $label"
@@ -559,7 +590,7 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
 
     expect_contract_source_mutant_red helper_without_empty_environment \
         's#^    /usr/bin/env -i LC_ALL=C PATH=#    /usr/bin/env LC_ALL=C PATH=#' \
-        'pure mock helper must start from an empty environment'
+        'parent poison canary reached pure mock child'
     expect_contract_source_mutant_red helper_uses_parent_unit \
         's#CUBR_SYSTEMD_UNIT="\$fixture_unit" /usr/bin/bash#CUBR_SYSTEMD_UNIT="${CUBR_SYSTEMD_UNIT}" /usr/bin/bash#' \
         'poisoned parent unit reached pure mock output'
