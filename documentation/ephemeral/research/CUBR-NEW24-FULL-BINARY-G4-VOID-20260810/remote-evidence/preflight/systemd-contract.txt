@@ -1,0 +1,3 @@
+Type=exec Restart=no RuntimeMaxSec=4h KillMode=control-group KillSignal=SIGTERM FinalKillSignal=SIGKILL
+ControlGroup=/system.slice/cubr-new24-full-binary-g4.service
+cgroup.procs=/sys/fs/cgroup/system.slice/cubr-new24-full-binary-g4.service/cgroup.procs

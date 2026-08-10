@@ -1,0 +1,5 @@
+status=VOID
+failed_at=2026-08-10T02:01:38Z
+cell=none
+reason=command failed rc=2
+command=return "$rc"

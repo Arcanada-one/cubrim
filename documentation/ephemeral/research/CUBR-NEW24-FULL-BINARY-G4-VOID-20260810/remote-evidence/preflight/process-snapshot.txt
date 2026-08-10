@@ -1,0 +1,1039 @@
+      1       0 systemd         /usr/lib/systemd/systemd --system --deserialize=128
+      2       0 kthreadd        [kthreadd]
+      3       2 pool_workqueue_ [pool_workqueue_release]
+      4       2 kworker/R-rcu_g [kworker/R-rcu_g]
+      5       2 kworker/R-rcu_p [kworker/R-rcu_p]
+      6       2 kworker/R-slub_ [kworker/R-slub_]
+      7       2 kworker/R-netns [kworker/R-netns]
+     10       2 kworker/0:0H-ev [kworker/0:0H-events_highpri]
+     12       2 kworker/R-mm_pe [kworker/R-mm_pe]
+     13       2 rcu_tasks_kthre [rcu_tasks_kthread]
+     14       2 rcu_tasks_rude_ [rcu_tasks_rude_kthread]
+     15       2 rcu_tasks_trace [rcu_tasks_trace_kthread]
+     16       2 ksoftirqd/0     [ksoftirqd/0]
+     17       2 rcu_preempt     [rcu_preempt]
+     18       2 migration/0     [migration/0]
+     19       2 idle_inject/0   [idle_inject/0]
+     20       2 cpuhp/0         [cpuhp/0]
+     21       2 cpuhp/1         [cpuhp/1]
+     22       2 idle_inject/1   [idle_inject/1]
+     23       2 migration/1     [migration/1]
+     24       2 ksoftirqd/1     [ksoftirqd/1]
+     26       2 kworker/1:0H-ev [kworker/1:0H-events_highpri]
+     27       2 cpuhp/2         [cpuhp/2]
+     28       2 idle_inject/2   [idle_inject/2]
+     29       2 migration/2     [migration/2]
+     30       2 ksoftirqd/2     [ksoftirqd/2]
+     32       2 kworker/2:0H-ev [kworker/2:0H-events_highpri]
+     33       2 cpuhp/3         [cpuhp/3]
+     34       2 idle_inject/3   [idle_inject/3]
+     35       2 migration/3     [migration/3]
+     36       2 ksoftirqd/3     [ksoftirqd/3]
+     38       2 kworker/3:0H-ev [kworker/3:0H-events_highpri]
+     39       2 cpuhp/4         [cpuhp/4]
+     40       2 idle_inject/4   [idle_inject/4]
+     41       2 migration/4     [migration/4]
+     42       2 ksoftirqd/4     [ksoftirqd/4]
+     44       2 kworker/4:0H-ev [kworker/4:0H-events_highpri]
+     45       2 cpuhp/5         [cpuhp/5]
+     46       2 idle_inject/5   [idle_inject/5]
+     47       2 migration/5     [migration/5]
+     48       2 ksoftirqd/5     [ksoftirqd/5]
+     50       2 kworker/5:0H-ev [kworker/5:0H-events_highpri]
+     51       2 cpuhp/6         [cpuhp/6]
+     52       2 idle_inject/6   [idle_inject/6]
+     53       2 migration/6     [migration/6]
+     54       2 ksoftirqd/6     [ksoftirqd/6]
+     56       2 kworker/6:0H-ev [kworker/6:0H-events_highpri]
+     57       2 cpuhp/7         [cpuhp/7]
+     58       2 idle_inject/7   [idle_inject/7]
+     59       2 migration/7     [migration/7]
+     60       2 ksoftirqd/7     [ksoftirqd/7]
+     62       2 kworker/7:0H-ev [kworker/7:0H-events_highpri]
+     63       2 cpuhp/8         [cpuhp/8]
+     64       2 idle_inject/8   [idle_inject/8]
+     65       2 migration/8     [migration/8]
+     66       2 ksoftirqd/8     [ksoftirqd/8]
+     68       2 kworker/8:0H-ev [kworker/8:0H-events_highpri]
+     69       2 cpuhp/9         [cpuhp/9]
+     70       2 idle_inject/9   [idle_inject/9]
+     71       2 migration/9     [migration/9]
+     72       2 ksoftirqd/9     [ksoftirqd/9]
+     74       2 kworker/9:0H-ev [kworker/9:0H-events_highpri]
+     75       2 cpuhp/10        [cpuhp/10]
+     76       2 idle_inject/10  [idle_inject/10]
+     77       2 migration/10    [migration/10]
+     78       2 ksoftirqd/10    [ksoftirqd/10]
+     80       2 kworker/10:0H-e [kworker/10:0H-events_highpri]
+     81       2 cpuhp/11        [cpuhp/11]
+     82       2 idle_inject/11  [idle_inject/11]
+     83       2 migration/11    [migration/11]
+     84       2 ksoftirqd/11    [ksoftirqd/11]
+     86       2 kworker/11:0H-e [kworker/11:0H-events_highpri]
+     87       2 cpuhp/12        [cpuhp/12]
+     88       2 idle_inject/12  [idle_inject/12]
+     89       2 migration/12    [migration/12]
+     90       2 ksoftirqd/12    [ksoftirqd/12]
+     92       2 kworker/12:0H-e [kworker/12:0H-events_highpri]
+     93       2 cpuhp/13        [cpuhp/13]
+     94       2 idle_inject/13  [idle_inject/13]
+     95       2 migration/13    [migration/13]
+     96       2 ksoftirqd/13    [ksoftirqd/13]
+     98       2 kworker/13:0H-e [kworker/13:0H-events_highpri]
+     99       2 cpuhp/14        [cpuhp/14]
+    100       2 idle_inject/14  [idle_inject/14]
+    101       2 migration/14    [migration/14]
+    102       2 ksoftirqd/14    [ksoftirqd/14]
+    104       2 kworker/14:0H-e [kworker/14:0H-events_highpri]
+    105       2 cpuhp/15        [cpuhp/15]
+    106       2 idle_inject/15  [idle_inject/15]
+    107       2 migration/15    [migration/15]
+    108       2 ksoftirqd/15    [ksoftirqd/15]
+    110       2 kworker/15:0H-e [kworker/15:0H-events_highpri]
+    111       2 cpuhp/16        [cpuhp/16]
+    112       2 idle_inject/16  [idle_inject/16]
+    113       2 migration/16    [migration/16]
+    114       2 ksoftirqd/16    [ksoftirqd/16]
+    116       2 kworker/16:0H-e [kworker/16:0H-events_highpri]
+    117       2 cpuhp/17        [cpuhp/17]
+    118       2 idle_inject/17  [idle_inject/17]
+    119       2 migration/17    [migration/17]
+    120       2 ksoftirqd/17    [ksoftirqd/17]
+    122       2 kworker/17:0H-e [kworker/17:0H-events_highpri]
+    123       2 cpuhp/18        [cpuhp/18]
+    124       2 idle_inject/18  [idle_inject/18]
+    125       2 migration/18    [migration/18]
+    126       2 ksoftirqd/18    [ksoftirqd/18]
+    128       2 kworker/18:0H-e [kworker/18:0H-events_highpri]
+    129       2 cpuhp/19        [cpuhp/19]
+    130       2 idle_inject/19  [idle_inject/19]
+    131       2 migration/19    [migration/19]
+    132       2 ksoftirqd/19    [ksoftirqd/19]
+    134       2 kworker/19:0H-e [kworker/19:0H-events_highpri]
+    135       2 cpuhp/20        [cpuhp/20]
+    136       2 idle_inject/20  [idle_inject/20]
+    137       2 migration/20    [migration/20]
+    138       2 ksoftirqd/20    [ksoftirqd/20]
+    140       2 kworker/20:0H-e [kworker/20:0H-events_highpri]
+    141       2 cpuhp/21        [cpuhp/21]
+    142       2 idle_inject/21  [idle_inject/21]
+    143       2 migration/21    [migration/21]
+    144       2 ksoftirqd/21    [ksoftirqd/21]
+    146       2 kworker/21:0H-e [kworker/21:0H-events_highpri]
+    147       2 cpuhp/22        [cpuhp/22]
+    148       2 idle_inject/22  [idle_inject/22]
+    149       2 migration/22    [migration/22]
+    150       2 ksoftirqd/22    [ksoftirqd/22]
+    152       2 kworker/22:0H-e [kworker/22:0H-events_highpri]
+    153       2 cpuhp/23        [cpuhp/23]
+    154       2 idle_inject/23  [idle_inject/23]
+    155       2 migration/23    [migration/23]
+    156       2 ksoftirqd/23    [ksoftirqd/23]
+    158       2 kworker/23:0H-e [kworker/23:0H-events_highpri]
+    159       2 cpuhp/24        [cpuhp/24]
+    160       2 idle_inject/24  [idle_inject/24]
+    161       2 migration/24    [migration/24]
+    162       2 ksoftirqd/24    [ksoftirqd/24]
+    164       2 kworker/24:0H-e [kworker/24:0H-events_highpri]
+    165       2 cpuhp/25        [cpuhp/25]
+    166       2 idle_inject/25  [idle_inject/25]
+    167       2 migration/25    [migration/25]
+    168       2 ksoftirqd/25    [ksoftirqd/25]
+    170       2 kworker/25:0H-e [kworker/25:0H-events_highpri]
+    171       2 cpuhp/26        [cpuhp/26]
+    172       2 idle_inject/26  [idle_inject/26]
+    173       2 migration/26    [migration/26]
+    174       2 ksoftirqd/26    [ksoftirqd/26]
+    176       2 kworker/26:0H-e [kworker/26:0H-events_highpri]
+    177       2 cpuhp/27        [cpuhp/27]
+    178       2 idle_inject/27  [idle_inject/27]
+    179       2 migration/27    [migration/27]
+    180       2 ksoftirqd/27    [ksoftirqd/27]
+    182       2 kworker/27:0H-e [kworker/27:0H-events_highpri]
+    183       2 cpuhp/28        [cpuhp/28]
+    184       2 idle_inject/28  [idle_inject/28]
+    185       2 migration/28    [migration/28]
+    186       2 ksoftirqd/28    [ksoftirqd/28]
+    188       2 kworker/28:0H-e [kworker/28:0H-events_highpri]
+    189       2 cpuhp/29        [cpuhp/29]
+    190       2 idle_inject/29  [idle_inject/29]
+    191       2 migration/29    [migration/29]
+    192       2 ksoftirqd/29    [ksoftirqd/29]
+    194       2 kworker/29:0H-e [kworker/29:0H-events_highpri]
+    195       2 cpuhp/30        [cpuhp/30]
+    196       2 idle_inject/30  [idle_inject/30]
+    197       2 migration/30    [migration/30]
+    198       2 ksoftirqd/30    [ksoftirqd/30]
+    200       2 kworker/30:0H-e [kworker/30:0H-events_highpri]
+    201       2 cpuhp/31        [cpuhp/31]
+    202       2 idle_inject/31  [idle_inject/31]
+    203       2 migration/31    [migration/31]
+    204       2 ksoftirqd/31    [ksoftirqd/31]
+    206       2 kworker/31:0H-e [kworker/31:0H-events_highpri]
+    207       2 cpuhp/32        [cpuhp/32]
+    208       2 idle_inject/32  [idle_inject/32]
+    209       2 migration/32    [migration/32]
+    210       2 ksoftirqd/32    [ksoftirqd/32]
+    212       2 kworker/32:0H-k [kworker/32:0H-kblockd]
+    213       2 cpuhp/33        [cpuhp/33]
+    214       2 idle_inject/33  [idle_inject/33]
+    215       2 migration/33    [migration/33]
+    216       2 ksoftirqd/33    [ksoftirqd/33]
+    218       2 kworker/33:0H-e [kworker/33:0H-events_highpri]
+    219       2 cpuhp/34        [cpuhp/34]
+    220       2 idle_inject/34  [idle_inject/34]
+    221       2 migration/34    [migration/34]
+    222       2 ksoftirqd/34    [ksoftirqd/34]
+    224       2 kworker/34:0H-e [kworker/34:0H-events_highpri]
+    225       2 cpuhp/35        [cpuhp/35]
+    226       2 idle_inject/35  [idle_inject/35]
+    227       2 migration/35    [migration/35]
+    228       2 ksoftirqd/35    [ksoftirqd/35]
+    230       2 kworker/35:0H-e [kworker/35:0H-events_highpri]
+    231       2 cpuhp/36        [cpuhp/36]
+    232       2 idle_inject/36  [idle_inject/36]
+    233       2 migration/36    [migration/36]
+    234       2 ksoftirqd/36    [ksoftirqd/36]
+    236       2 kworker/36:0H-e [kworker/36:0H-events_highpri]
+    237       2 cpuhp/37        [cpuhp/37]
+    238       2 idle_inject/37  [idle_inject/37]
+    239       2 migration/37    [migration/37]
+    240       2 ksoftirqd/37    [ksoftirqd/37]
+    242       2 kworker/37:0H-e [kworker/37:0H-events_highpri]
+    243       2 cpuhp/38        [cpuhp/38]
+    244       2 idle_inject/38  [idle_inject/38]
+    245       2 migration/38    [migration/38]
+    246       2 ksoftirqd/38    [ksoftirqd/38]
+    248       2 kworker/38:0H-e [kworker/38:0H-events_highpri]
+    249       2 cpuhp/39        [cpuhp/39]
+    250       2 idle_inject/39  [idle_inject/39]
+    251       2 migration/39    [migration/39]
+    252       2 ksoftirqd/39    [ksoftirqd/39]
+    254       2 kworker/39:0H-e [kworker/39:0H-events_highpri]
+    255       2 cpuhp/40        [cpuhp/40]
+    256       2 idle_inject/40  [idle_inject/40]
+    257       2 migration/40    [migration/40]
+    258       2 ksoftirqd/40    [ksoftirqd/40]
+    260       2 kworker/40:0H-e [kworker/40:0H-events_highpri]
+    261       2 cpuhp/41        [cpuhp/41]
+    262       2 idle_inject/41  [idle_inject/41]
+    263       2 migration/41    [migration/41]
+    264       2 ksoftirqd/41    [ksoftirqd/41]
+    266       2 kworker/41:0H-e [kworker/41:0H-events_highpri]
+    267       2 cpuhp/42        [cpuhp/42]
+    268       2 idle_inject/42  [idle_inject/42]
+    269       2 migration/42    [migration/42]
+    270       2 ksoftirqd/42    [ksoftirqd/42]
+    272       2 kworker/42:0H-e [kworker/42:0H-events_highpri]
+    273       2 cpuhp/43        [cpuhp/43]
+    274       2 idle_inject/43  [idle_inject/43]
+    275       2 migration/43    [migration/43]
+    276       2 ksoftirqd/43    [ksoftirqd/43]
+    278       2 kworker/43:0H-e [kworker/43:0H-events_highpri]
+    279       2 cpuhp/44        [cpuhp/44]
+    280       2 idle_inject/44  [idle_inject/44]
+    281       2 migration/44    [migration/44]
+    282       2 ksoftirqd/44    [ksoftirqd/44]
+    284       2 kworker/44:0H-e [kworker/44:0H-events_highpri]
+    285       2 cpuhp/45        [cpuhp/45]
+    286       2 idle_inject/45  [idle_inject/45]
+    287       2 migration/45    [migration/45]
+    288       2 ksoftirqd/45    [ksoftirqd/45]
+    290       2 kworker/45:0H-e [kworker/45:0H-events_highpri]
+    291       2 cpuhp/46        [cpuhp/46]
+    292       2 idle_inject/46  [idle_inject/46]
+    293       2 migration/46    [migration/46]
+    294       2 ksoftirqd/46    [ksoftirqd/46]
+    296       2 kworker/46:0H-e [kworker/46:0H-events_highpri]
+    297       2 cpuhp/47        [cpuhp/47]
+    298       2 idle_inject/47  [idle_inject/47]
+    299       2 migration/47    [migration/47]
+    300       2 ksoftirqd/47    [ksoftirqd/47]
+    302       2 kworker/47:0H-e [kworker/47:0H-events_highpri]
+    303       2 cpuhp/48        [cpuhp/48]
+    304       2 idle_inject/48  [idle_inject/48]
+    305       2 migration/48    [migration/48]
+    306       2 ksoftirqd/48    [ksoftirqd/48]
+    308       2 kworker/48:0H-e [kworker/48:0H-events_highpri]
+    309       2 cpuhp/49        [cpuhp/49]
+    310       2 idle_inject/49  [idle_inject/49]
+    311       2 migration/49    [migration/49]
+    312       2 ksoftirqd/49    [ksoftirqd/49]
+    314       2 kworker/49:0H-e [kworker/49:0H-events_highpri]
+    315       2 cpuhp/50        [cpuhp/50]
+    316       2 idle_inject/50  [idle_inject/50]
+    317       2 migration/50    [migration/50]
+    318       2 ksoftirqd/50    [ksoftirqd/50]
+    320       2 kworker/50:0H-e [kworker/50:0H-events_highpri]
+    321       2 cpuhp/51        [cpuhp/51]
+    322       2 idle_inject/51  [idle_inject/51]
+    323       2 migration/51    [migration/51]
+    324       2 ksoftirqd/51    [ksoftirqd/51]
+    326       2 kworker/51:0H-e [kworker/51:0H-events_highpri]
+    327       2 cpuhp/52        [cpuhp/52]
+    328       2 idle_inject/52  [idle_inject/52]
+    329       2 migration/52    [migration/52]
+    330       2 ksoftirqd/52    [ksoftirqd/52]
+    332       2 kworker/52:0H-e [kworker/52:0H-events_highpri]
+    333       2 cpuhp/53        [cpuhp/53]
+    334       2 idle_inject/53  [idle_inject/53]
+    335       2 migration/53    [migration/53]
+    336       2 ksoftirqd/53    [ksoftirqd/53]
+    338       2 kworker/53:0H-e [kworker/53:0H-events_highpri]
+    339       2 cpuhp/54        [cpuhp/54]
+    340       2 idle_inject/54  [idle_inject/54]
+    341       2 migration/54    [migration/54]
+    342       2 ksoftirqd/54    [ksoftirqd/54]
+    344       2 kworker/54:0H-e [kworker/54:0H-events_highpri]
+    345       2 cpuhp/55        [cpuhp/55]
+    346       2 idle_inject/55  [idle_inject/55]
+    347       2 migration/55    [migration/55]
+    348       2 ksoftirqd/55    [ksoftirqd/55]
+    350       2 kworker/55:0H-e [kworker/55:0H-events_highpri]
+    351       2 cpuhp/56        [cpuhp/56]
+    352       2 idle_inject/56  [idle_inject/56]
+    353       2 migration/56    [migration/56]
+    354       2 ksoftirqd/56    [ksoftirqd/56]
+    356       2 kworker/56:0H-e [kworker/56:0H-events_highpri]
+    357       2 cpuhp/57        [cpuhp/57]
+    358       2 idle_inject/57  [idle_inject/57]
+    359       2 migration/57    [migration/57]
+    360       2 ksoftirqd/57    [ksoftirqd/57]
+    362       2 kworker/57:0H-e [kworker/57:0H-events_highpri]
+    363       2 cpuhp/58        [cpuhp/58]
+    364       2 idle_inject/58  [idle_inject/58]
+    365       2 migration/58    [migration/58]
+    366       2 ksoftirqd/58    [ksoftirqd/58]
+    368       2 kworker/58:0H-e [kworker/58:0H-events_highpri]
+    369       2 cpuhp/59        [cpuhp/59]
+    370       2 idle_inject/59  [idle_inject/59]
+    371       2 migration/59    [migration/59]
+    372       2 ksoftirqd/59    [ksoftirqd/59]
+    374       2 kworker/59:0H-k [kworker/59:0H-kblockd]
+    375       2 cpuhp/60        [cpuhp/60]
+    376       2 idle_inject/60  [idle_inject/60]
+    377       2 migration/60    [migration/60]
+    378       2 ksoftirqd/60    [ksoftirqd/60]
+    380       2 kworker/60:0H-e [kworker/60:0H-events_highpri]
+    381       2 cpuhp/61        [cpuhp/61]
+    382       2 idle_inject/61  [idle_inject/61]
+    383       2 migration/61    [migration/61]
+    384       2 ksoftirqd/61    [ksoftirqd/61]
+    386       2 kworker/61:0H-e [kworker/61:0H-events_highpri]
+    387       2 cpuhp/62        [cpuhp/62]
+    388       2 idle_inject/62  [idle_inject/62]
+    389       2 migration/62    [migration/62]
+    390       2 ksoftirqd/62    [ksoftirqd/62]
+    392       2 kworker/62:0H-e [kworker/62:0H-events_highpri]
+    393       2 cpuhp/63        [cpuhp/63]
+    394       2 idle_inject/63  [idle_inject/63]
+    395       2 migration/63    [migration/63]
+    396       2 ksoftirqd/63    [ksoftirqd/63]
+    398       2 kworker/63:0H-e [kworker/63:0H-events_highpri]
+    407       2 kdevtmpfs       [kdevtmpfs]
+    408       2 kworker/R-inet_ [kworker/R-inet_]
+    409       2 kauditd         [kauditd]
+    413       2 khungtaskd      [khungtaskd]
+    415       2 oom_reaper      [oom_reaper]
+    417       2 kworker/R-write [kworker/R-write]
+    418       2 kcompactd0      [kcompactd0]
+    419       2 ksmd            [ksmd]
+    420       2 khugepaged      [khugepaged]
+    421       2 kworker/R-kinte [kworker/R-kinte]
+    422       2 kworker/R-kbloc [kworker/R-kbloc]
+    423       2 kworker/R-blkcg [kworker/R-blkcg]
+    424       2 irq/9-acpi      [irq/9-acpi]
+    426       2 kworker/R-tpm_d [kworker/R-tpm_d]
+    427       2 kworker/R-ata_s [kworker/R-ata_s]
+    428       2 kworker/R-md    [kworker/R-md]
+    429       2 kworker/R-md_bi [kworker/R-md_bi]
+    430       2 kworker/R-edac- [kworker/R-edac-]
+    431       2 kworker/R-devfr [kworker/R-devfr]
+    432       2 watchdogd       [watchdogd]
+    433       2 kworker/R-quota [kworker/R-quota]
+    434       2 kworker/1:1H-kb [kworker/1:1H-kblockd]
+    436       2 irq/26-AMD-Vi0- [irq/26-AMD-Vi0-Evt]
+    437       2 irq/27-AMD-Vi0- [irq/27-AMD-Vi0-PPR]
+    438       2 irq/28-AMD-Vi0- [irq/28-AMD-Vi0-GA]
+    439       2 irq/29-AMD-Vi1- [irq/29-AMD-Vi1-Evt]
+    440       2 irq/30-AMD-Vi1- [irq/30-AMD-Vi1-PPR]
+    441       2 irq/31-AMD-Vi1- [irq/31-AMD-Vi1-GA]
+    442       2 irq/32-AMD-Vi2- [irq/32-AMD-Vi2-Evt]
+    443       2 irq/33-AMD-Vi2- [irq/33-AMD-Vi2-PPR]
+    444       2 irq/34-AMD-Vi2- [irq/34-AMD-Vi2-GA]
+    445       2 irq/35-AMD-Vi3- [irq/35-AMD-Vi3-Evt]
+    446       2 irq/36-AMD-Vi3- [irq/36-AMD-Vi3-PPR]
+    447       2 irq/37-AMD-Vi3- [irq/37-AMD-Vi3-GA]
+    448       2 kswapd0         [kswapd0]
+    449       2 ecryptfs-kthrea [ecryptfs-kthread]
+    450       2 kworker/R-kthro [kworker/R-kthro]
+    451       2 irq/44-pciehp   [irq/44-pciehp]
+    452       2 irq/45-pciehp   [irq/45-pciehp]
+    453       2 irq/46-pciehp   [irq/46-pciehp]
+    454       2 irq/47-pciehp   [irq/47-pciehp]
+    455       2 irq/53-pciehp   [irq/53-pciehp]
+    456       2 irq/54-pciehp   [irq/54-pciehp]
+    457       2 irq/60-pciehp   [irq/60-pciehp]
+    458       2 irq/61-pciehp   [irq/61-pciehp]
+    459       2 irq/62-pciehp   [irq/62-pciehp]
+    520       2 kworker/R-acpi_ [kworker/R-acpi_]
+    521       2 kworker/R-mld   [kworker/R-mld]
+    522       2 kworker/R-ipv6_ [kworker/R-ipv6_]
+    530       2 kworker/R-kstrp [kworker/R-kstrp]
+    532       2 kworker/u137:0  [kworker/u137:0]
+    533       2 kworker/u138:0  [kworker/u138:0]
+    534       2 kworker/u139:0  [kworker/u139:0]
+    535       2 kworker/u140:0  [kworker/u140:0]
+    536       2 kworker/u141:0  [kworker/u141:0]
+    537       2 kworker/u142:0  [kworker/u142:0]
+    538       2 kworker/u143:0  [kworker/u143:0]
+    539       2 kworker/u144:0  [kworker/u144:0]
+    540       2 kworker/u145:0  [kworker/u145:0]
+    546       2 kworker/R-crypt [kworker/R-crypt]
+    558       2 kworker/R-charg [kworker/R-charg]
+    583       2 kworker/61:1H-k [kworker/61:1H-kblockd]
+    587       2 kworker/21:1H-k [kworker/21:1H-kblockd]
+    588       2 kworker/9:1H-kb [kworker/9:1H-kblockd]
+    612       2 kworker/43:1H-k [kworker/43:1H-kblockd]
+    613       2 kworker/19:1H-k [kworker/19:1H-kblockd]
+    614       2 kworker/51:1H-k [kworker/51:1H-kblockd]
+    615       2 kworker/49:1H-k [kworker/49:1H-kblockd]
+    616       2 kworker/17:1H-k [kworker/17:1H-kblockd]
+    617       2 kworker/34:1H-k [kworker/34:1H-kblockd]
+    618       2 kworker/59:1H   [kworker/59:1H]
+    619       2 kworker/24:1H-k [kworker/24:1H-kblockd]
+    621       2 kworker/50:1H-k [kworker/50:1H-kblockd]
+    622       2 kworker/20:1H-k [kworker/20:1H-kblockd]
+    623       2 kworker/14:1H-k [kworker/14:1H-kblockd]
+    625       2 kworker/35:1H-k [kworker/35:1H-kblockd]
+    629       2 kworker/62:1H-k [kworker/62:1H-kblockd]
+    631       2 kworker/39:1H-k [kworker/39:1H-kblockd]
+    634       2 kworker/13:1H-k [kworker/13:1H-kblockd]
+    645       2 kworker/16:1H-k [kworker/16:1H-kblockd]
+    646       2 kworker/15:1H-k [kworker/15:1H-kblockd]
+    647       2 kworker/8:1H-kb [kworker/8:1H-kblockd]
+    648       2 kworker/18:1H-k [kworker/18:1H-kblockd]
+    649       2 kworker/0:1H-kb [kworker/0:1H-kblockd]
+    650       2 kworker/4:1H-kb [kworker/4:1H-kblockd]
+    651       2 kworker/5:1H-kb [kworker/5:1H-kblockd]
+    652       2 kworker/26:1H-k [kworker/26:1H-kblockd]
+    653       2 kworker/48:1H-k [kworker/48:1H-kblockd]
+    654       2 kworker/2:1H-kb [kworker/2:1H-kblockd]
+    655       2 kworker/11:1H-k [kworker/11:1H-kblockd]
+    656       2 kworker/10:1H-k [kworker/10:1H-kblockd]
+    657       2 kworker/37:1H-k [kworker/37:1H-kblockd]
+    658       2 kworker/42:1H-k [kworker/42:1H-kblockd]
+    659       2 kworker/41:1H-k [kworker/41:1H-kblockd]
+    660       2 kworker/38:1H-k [kworker/38:1H-kblockd]
+    661       2 kworker/40:1H-k [kworker/40:1H-kblockd]
+    662       2 kworker/63:1H-k [kworker/63:1H-kblockd]
+    663       2 kworker/29:1H-k [kworker/29:1H-kblockd]
+    664       2 kworker/31:1H-k [kworker/31:1H-kblockd]
+    667       2 kworker/R-nvme- [kworker/R-nvme-]
+    668       2 scsi_eh_0       [scsi_eh_0]
+    669       2 kworker/R-nvme- [kworker/R-nvme-]
+    670       2 kworker/R-scsi_ [kworker/R-scsi_]
+    671       2 kworker/R-nvme- [kworker/R-nvme-]
+    672       2 kworker/R-nvme- [kworker/R-nvme-]
+    673       2 scsi_eh_1       [scsi_eh_1]
+    674       2 kworker/R-scsi_ [kworker/R-scsi_]
+    675       2 scsi_eh_2       [scsi_eh_2]
+    676       2 kworker/R-scsi_ [kworker/R-scsi_]
+    677       2 scsi_eh_3       [scsi_eh_3]
+    678       2 kworker/R-scsi_ [kworker/R-scsi_]
+    683       2 scsi_eh_4       [scsi_eh_4]
+    684       2 kworker/R-scsi_ [kworker/R-scsi_]
+    685       2 scsi_eh_5       [scsi_eh_5]
+    686       2 kworker/R-scsi_ [kworker/R-scsi_]
+    687       2 scsi_eh_6       [scsi_eh_6]
+    688       2 kworker/R-scsi_ [kworker/R-scsi_]
+    689       2 scsi_eh_7       [scsi_eh_7]
+    690       2 kworker/R-scsi_ [kworker/R-scsi_]
+    691       2 scsi_eh_8       [scsi_eh_8]
+    692       2 kworker/R-scsi_ [kworker/R-scsi_]
+    693       2 scsi_eh_9       [scsi_eh_9]
+    694       2 kworker/R-scsi_ [kworker/R-scsi_]
+    695       2 scsi_eh_10      [scsi_eh_10]
+    696       2 kworker/R-scsi_ [kworker/R-scsi_]
+    697       2 scsi_eh_11      [scsi_eh_11]
+    698       2 kworker/R-scsi_ [kworker/R-scsi_]
+    707       2 scsi_eh_12      [scsi_eh_12]
+    708       2 kworker/R-scsi_ [kworker/R-scsi_]
+    709       2 scsi_eh_13      [scsi_eh_13]
+    710       2 kworker/R-scsi_ [kworker/R-scsi_]
+    711       2 scsi_eh_14      [scsi_eh_14]
+    712       2 kworker/R-scsi_ [kworker/R-scsi_]
+    713       2 scsi_eh_15      [scsi_eh_15]
+    714       2 kworker/R-scsi_ [kworker/R-scsi_]
+    722       2 kworker/30:1H-k [kworker/30:1H-kblockd]
+    723       2 kworker/3:1H-kb [kworker/3:1H-kblockd]
+    724       2 kworker/33:1H-k [kworker/33:1H-kblockd]
+    725       2 kworker/56:1H-k [kworker/56:1H-kblockd]
+    737       2 kworker/60:1H-k [kworker/60:1H-kblockd]
+    786       2 kworker/55:1H-k [kworker/55:1H-kblockd]
+    796       2 kworker/57:1H-k [kworker/57:1H-kblockd]
+    797       2 kworker/22:1H-k [kworker/22:1H-kblockd]
+    798       2 kworker/47:1H-k [kworker/47:1H-kblockd]
+    799       2 kworker/45:1H-k [kworker/45:1H-kblockd]
+    800       2 kworker/27:1H-k [kworker/27:1H-kblockd]
+    801       2 kworker/44:1H-k [kworker/44:1H-kblockd]
+    815       2 kworker/28:1H-k [kworker/28:1H-kblockd]
+    818       2 kworker/36:1H-k [kworker/36:1H-kblockd]
+    827       2 md2_raid1       [md2_raid1]
+    831       2 kworker/32:1H-k [kworker/32:1H-kblockd]
+    832       2 md0_raid1       [md0_raid1]
+    842       2 md1_raid1       [md1_raid1]
+    850       2 kworker/12:1H-k [kworker/12:1H-kblockd]
+    859       2 kworker/6:1H-kb [kworker/6:1H-kblockd]
+    887       2 kworker/R-raid5 [kworker/R-raid5]
+    927       2 kworker/52:1H-k [kworker/52:1H-kblockd]
+    928       2 kworker/53:1H-k [kworker/53:1H-kblockd]
+    929       2 jbd2/md2-8      [jbd2/md2-8]
+    930       2 kworker/R-ext4- [kworker/R-ext4-]
+    999       2 kworker/7:1H-kb [kworker/7:1H-kblockd]
+   1022       2 kworker/R-kmpat [kworker/R-kmpat]
+   1023       2 kworker/R-kmpat [kworker/R-kmpat]
+   1084       2 kworker/46:1H-k [kworker/46:1H-kblockd]
+   1087       2 kworker/25:1H-k [kworker/25:1H-kblockd]
+   1096       2 kworker/54:1H-k [kworker/54:1H-kblockd]
+   1162       2 kworker/58:1H-k [kworker/58:1H-kblockd]
+   1169       2 kworker/23:1H-k [kworker/23:1H-kblockd]
+   1223       2 kworker/R-ipmi- [kworker/R-ipmi-]
+   1270       2 jbd2/md0-8      [jbd2/md0-8]
+   1271       2 kworker/R-ext4- [kworker/R-ext4-]
+   1279       2 kipmi0          [kipmi0]
+   1505       2 kworker/R-cfg80 [kworker/R-cfg80]
+   1511       1 dbus-daemon     @dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+   1523       1 systemd-logind  /usr/lib/systemd/systemd-logind
+   1558       1 unattended-upgr /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal
+   1667       1 agetty          /sbin/agetty -o -p -- \u --noclear - linux
+   1837       2 kworker/R-tls-s [kworker/R-tls-s]
+  20593       1 dockerd         /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+  22808 4010533 bash            -bash
+  22992       1 systemd         /usr/lib/systemd/systemd --user
+  22993   22992 (sd-pam)        (sd-pam)
+  23023   22992 dbus-daemon     /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+  23041   22808 claude          claude --dangerously-skip-permissions
+  37805       1 systemd         /usr/lib/systemd/systemd --user
+  37806   37805 (sd-pam)        (sd-pam)
+ 113464       1 gitlab-runner   /usr/bin/gitlab-runner run --config /etc/gitlab-runner/config.toml --working-directory /home/aether --service gitlab-runner --user aether
+ 205891       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 9bf690590b8fa04305a60f86f04693f7c644bfc79306eaa78c4439049fbda219 -address /run/containerd/containerd.sock
+ 205906       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 36bba0dfa2e21bfe11315a3fafb2a8fb0e339e662bb761a03e5346fc62a24f14 -address /run/containerd/containerd.sock
+ 206006       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 217355978a0bec6c0aa2b034ca1807d3faf0df07c58affb92a34798ce020a9cf -address /run/containerd/containerd.sock
+ 206007       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id a83aefc680dc5be1cabdd51d40172b6dc6394a94128f50e9bb277a4ec02322e9 -address /run/containerd/containerd.sock
+ 206031       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id a4eefca6a3b75c164b76c7a0559ef8f59a60798559f4bbfd0f73e091a055e806 -address /run/containerd/containerd.sock
+ 206058       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 2f37119d5aaee7c727b928b931cc82b7e8f4924a1d80d574e6a046e43a326202 -address /run/containerd/containerd.sock
+ 206108       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id cbd96c3087201d352cab82b4ca3cf0d1ebcf81903386c539349c9a0944224768 -address /run/containerd/containerd.sock
+ 206149       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id d3755710211b714de61cc70d46b47deb79425fb1db3444e5e796e8f4fbdf1050 -address /run/containerd/containerd.sock
+ 206175       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 7e8bf6d553ca766c285d3788509c5020c2e7925d97adece9a55d5f88e9e4b736 -address /run/containerd/containerd.sock
+ 206183       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 78ca70b8f084edbdd3068ac2b9b63e136d6e19d92c7ec3f40fc9d2787d562b61 -address /run/containerd/containerd.sock
+ 206186       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 9d09af74be75b8db968b147877b7fb02e290e6b2a1b5dab6df70bd5a1e4244b5 -address /run/containerd/containerd.sock
+ 206187       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id c65d7d5b190901c9eaa287b33802e93ffbde42394ad3af61f24fc7fbb55aae81 -address /run/containerd/containerd.sock
+ 206463  205891 redis-server    redis-server *:6379
+ 206520  206006 mysqld          mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-use-native-aio=0
+ 206525  206058 supervisord     /usr/bin/python3 /usr/bin/supervisord
+ 206547  205906 mysqld          mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-use-native-aio=0
+ 206579  206183 supervisord     /usr/bin/python3 /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
+ 206587  206175 mysqld          mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-use-native-aio=0
+ 206589  206186 supervisord     /usr/bin/python3 /usr/bin/supervisord
+ 206611  206031 supervisord     /usr/bin/python3 /usr/bin/supervisord
+ 206618  206007 mysqld          mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-use-native-aio=0
+ 206626  206187 supervisord     /usr/bin/python2 /usr/bin/supervisord
+ 206627  206108 supervisord     /usr/bin/python3 /usr/bin/supervisord
+ 206636  206149 supervisord     /usr/bin/python3 /usr/bin/supervisord
+ 206942   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 26379 -container-ip 172.18.0.92 -container-port 6379 -use-listen-fd
+ 207083   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 33075 -container-ip 172.18.0.65 -container-port 3306 -use-listen-fd
+ 207216   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 33068 -container-ip 172.18.0.98 -container-port 3306 -use-listen-fd
+ 207405   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28056 -container-ip 172.18.0.56 -container-port 80 -use-listen-fd
+ 207629   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 33074 -container-ip 172.18.0.64 -container-port 3306 -use-listen-fd
+ 207648       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id b126c07b07ea2dd9e363dcebf07c9f6e0b7d07033b82f2feed44b632afdbc328 -address /run/containerd/containerd.sock
+ 207725  207648 tail            tail -f /dev/null
+ 208080   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 33073 -container-ip 172.18.0.63 -container-port 3306 -use-listen-fd
+ 208175   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28053 -container-ip 172.18.0.53 -container-port 80 -use-listen-fd
+ 208368   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28059 -container-ip 172.18.0.59 -container-port 80 -use-listen-fd
+ 208407   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28066 -container-ip 172.18.0.66 -container-port 80 -use-listen-fd
+ 208476   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28055 -container-ip 172.18.0.55 -container-port 80 -use-listen-fd
+ 208535   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28054 -container-ip 172.18.0.54 -container-port 80 -use-listen-fd
+ 208572   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28052 -container-ip 172.18.0.52 -container-port 80 -use-listen-fd
+ 208656   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28057 -container-ip 172.18.0.57 -container-port 8000 -use-listen-fd
+ 208874  206579 nginx           nginx: master process nginx -g daemon off;
+ 208875  206579 php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+ 208886  208874 nginx           nginx: worker process
+ 208889  208874 nginx           nginx: worker process
+ 208925  208875 php-fpm         php-fpm: pool www
+ 208926  208875 php-fpm         php-fpm: pool www
+ 208927  208875 php-fpm         php-fpm: pool www
+ 208928  208875 php-fpm         php-fpm: pool www
+ 208999  206525 cron            cron -f
+ 209000  206525 nginx           nginx: master process nginx -g daemon off;
+ 209001  206525 php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+ 209012  209000 nginx           nginx: worker process
+ 209015  209000 nginx           nginx: worker process
+ 209018  209001 php-fpm         php-fpm: pool www
+ 209019  209001 php-fpm         php-fpm: pool www
+ 209020  206611 cron            cron -f
+ 209021  206611 nginx           nginx: master process nginx -g daemon off;
+ 209022  206611 php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+ 209024  209021 nginx           nginx: worker process
+ 209025  209021 nginx           nginx: worker process
+ 209026  206589 cron            cron -f
+ 209027  206589 nginx           nginx: master process nginx -g daemon off;
+ 209028  206589 php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+ 209030  209022 php-fpm         php-fpm: pool www
+ 209031  209022 php-fpm         php-fpm: pool www
+ 209042  209027 nginx           nginx: worker process
+ 209043  209027 nginx           nginx: worker process
+ 209055  206627 cron            cron -f
+ 209056  206627 nginx           nginx: master process nginx -g daemon off;
+ 209057  206627 php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+ 209069  209056 nginx           nginx: worker process
+ 209070  209056 nginx           nginx: worker process
+ 209079  209028 php-fpm         php-fpm: pool www
+ 209080  209028 php-fpm         php-fpm: pool www
+ 209081  206636 cron            cron -f
+ 209082  206636 nginx           nginx: master process nginx -g daemon off;
+ 209083  206636 php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+ 209085  206626 nginx           nginx: master process nginx -g daemon off;
+ 209086  206626 php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+ 209091  209082 nginx           nginx: worker process
+ 209092  209082 nginx           nginx: worker process
+ 209093  209057 php-fpm         php-fpm: pool www
+ 209094  209057 php-fpm         php-fpm: pool www
+ 209097  209085 nginx           nginx: worker process
+ 209098  209085 nginx           nginx: worker process
+ 209113  209083 php-fpm         php-fpm: pool www
+ 209114  209083 php-fpm         php-fpm: pool www
+ 209166  209086 php-fpm         php-fpm: pool www
+ 209167  209086 php-fpm         php-fpm: pool www
+ 216146       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 3440dcaff93c1b19430d92c3e625f16401da585674767f07a988dcdcdfaafd3e -address /run/containerd/containerd.sock
+ 216234  216146 python          python app.py
+ 216327   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28085 -container-ip 172.18.0.93 -container-port 8085 -use-listen-fd
+ 216353  216234 python          /usr/local/bin/python app.py
+ 218513       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 316f281755491917691c1e3f3a1a7774b03b0ae42f591b5c790842fa6196fd1a -address /run/containerd/containerd.sock
+ 218516       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 488de5b4be52a6073112bf74fcffdc6472b1003cadee68f76ccf24de6c97a788 -address /run/containerd/containerd.sock
+ 218561  218513 grafana         grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning
+ 218562  218516 prometheus      /bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --web.console.libraries=/etc/prometheus/console_libraries --web.console.templates=/etc/prometheus/consoles --storage.tsdb.retention.time=30d --web.enable-lifecycle
+ 218747   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 23000 -container-ip 172.18.0.91 -container-port 3000 -use-listen-fd
+ 218775   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 29090 -container-ip 172.18.0.90 -container-port 9090 -use-listen-fd
+ 256622       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id f811c6eab36a4a6aa402f8d04a954510463519f490688205442032ca6c63c01b -address /run/containerd/containerd.sock
+ 256646  256622 node            node /usr/local/bin/pnpm dev
+ 256793   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 3000 -container-ip 172.18.0.61 -container-port 3000 -use-listen-fd
+ 256820   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 3001 -container-ip 172.18.0.61 -container-port 3001 -use-listen-fd
+ 257250  256646 node            node /app/node_modules/.bin/../turbo/bin/turbo run dev
+ 257262  257250 turbo           /app/node_modules/.pnpm/@turbo+linux-64@2.8.19/node_modules/@turbo/linux-64/bin/turbo run dev
+ 257394  257262 node            node /usr/local/bin/pnpm run dev
+ 257395  257262 node            node /usr/local/bin/pnpm run dev
+ 257418  257395 node            node /app/apps/web/node_modules/.bin/../next/dist/bin/next dev -p 3000
+ 257424  257394 node            node /app/apps/api/node_modules/.bin/../@nestjs/cli/bin/nest.js start --watch
+ 257466  257418 next-server (v1 next-server (v16.2.0)
+ 308980       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 14c9315a1e98a34376b4c1ec227415ea252517eea8ebfa3abda899193930850b -address /run/containerd/containerd.sock
+ 309006  308980 coredns         /coredns -conf /Corefile
+ 309145   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 100.118.134.82 -host-port 53 -container-ip 172.18.0.96 -container-port 53 -use-listen-fd
+ 309192   20593 docker-proxy    /usr/bin/docker-proxy -proto udp -host-ip 100.118.134.82 -host-port 53 -container-ip 172.18.0.96 -container-port 53 -use-listen-fd
+ 313331       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 95ec1a49ed21de78bedb0b503b27edfd71bfbdd09d57cb551a0e92df512f3b2f -address /run/containerd/containerd.sock
+ 313356  313331 mysqld          mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-use-native-aio=0 --max_allowed_packet=268435456 --skip-name-resolve --connect_timeout=60 --net_read_timeout=120 --net_write_timeout=120
+ 313495   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 33065 -container-ip 172.18.0.95 -container-port 3306 -use-listen-fd
+ 313816       2 psimon          [psimon]
+ 313920       1 tailscaled      /usr/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641
+ 319434       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 5ef203397c5c433cb45075c1ba200fc80637f1a9d319b4cd75c95bc74fa58753 -address /run/containerd/containerd.sock
+ 319460  319434 docker-entrypoi /usr/bin/dumb-init /bin/sh /usr/local/bin/docker-entrypoint.sh vault server -config=/vault/config/vault.hcl
+ 319492   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28200 -container-ip 172.18.0.2 -container-port 8200 -use-listen-fd
+ 319507  319460 vault           vault server -config=/vault/config/vault.hcl
+ 386800       2 kworker/u128:0- [kworker/u128:0-ext4-rsv-conversion]
+ 496142       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id bc51830c18e424faabb68034aaff2add2df143b4c18b7f24b1e2dc0f9bc622d9 -address /run/containerd/containerd.sock
+ 496167  496142 postgres        postgres -c shared_preload_libraries=age
+ 496325   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 55432 -container-ip 172.19.0.2 -container-port 5432 -use-listen-fd
+ 496360  496167 postgres        postgres: checkpointer 
+ 496361  496167 postgres        postgres: background writer 
+ 496363  496167 postgres        postgres: walwriter 
+ 496364  496167 postgres        postgres: autovacuum launcher 
+ 496365  496167 postgres        postgres: logical replication launcher 
+ 608734       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id f46865aea3d72ff707ef53226b43088abab08d3792d47b26afd73c70fbe95e23 -address /run/containerd/containerd.sock
+ 608756  608734 docker-entrypoi /bin/bash /usr/local/bin/docker-entrypoint.sh
+ 608898   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28060 -container-ip 172.18.0.60 -container-port 8000 -use-listen-fd
+ 608928  608756 python          python -m app.worker
+ 608929  608756 uvicorn         /usr/local/bin/python3.12 /usr/local/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log
+ 668991 3961563 bash            /bin/bash -c source /home/aether/.claude/shell-snapshots/snapshot-bash-1785676114325-s46uyo.sh 2>/dev/null || true && shopt -u extglob 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'SSHC="ssh -i $HOME/.ssh/aeuser.pem -o BatchMode=yes -o IdentitiesOnly=yes" until ! timeout 30 $SSHC aeuser@20.67.234.83 '"'"'pgrep -f "certbot renew" >/dev/null'"'"' 2>/dev/null; do sleep 20; done echo "lock clear; running a single clean dry run" timeout 500 $SSHC aeuser@20.67.234.83 '"'"'sudo certbot renew --dry-run > /tmp/renew2.log 2>&1; echo "exit=$?"; grep -iE "simulating|congratulat|success|not due|fail|error" /tmp/renew2.log | tail -8'"'"'' < /dev/null && pwd -P >| /tmp/claude-3ff5-cwd
+ 732081       1 sshfs           sshfs -o ro,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,IdentityFile=/home/aether/.ssh/paxbt-0172-vika-read,UserKnownHostsFile=/home/aether/.ssh/paxbt-0172-known-hosts,StrictHostKeyChecking=yes vika-pc@100.103.19.90:/C:/Users/vika-pc/PAXBT-0172 /home/aether/paxbt-0172/vika-read
+ 757771 3698013 sshd            sshd: aether [priv]
+ 757942  757771 sshd            sshd: aether@notty
+ 818367       1 bash            /bin/bash -c source /home/aether/.claude/shell-snapshots/snapshot-bash-1785685726068-h5xo4i.sh 2>/dev/null || true && shopt -u extglob 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'cd /home/aether/.worktrees/aio-v2/DEV-1644 && nohup pnpm -C apps/api start:dev > /tmp/claude-1000/-home-aether-code-aether-local-env/ed3d8d4b-8688-46d8-bae7-5558e6191094/scratchpad/api.log 2>&1 & echo "api pid $!"; sleep 5; tail -3 /tmp/claude-1000/-home-aether-code-aether-local-env/ed3d8d4b-8688-46d8-bae7-5558e6191094/scratchpad/api.log' < /dev/null && pwd -P >| /tmp/claude-a80a-cwd
+ 818369  818367 node            node /usr/bin/pnpm -C apps/api start:dev
+ 818506  818369 sh              sh -c nest start --watch
+ 818507  818506 node            node /home/aether/.worktrees/aio-v2/DEV-1644/apps/api/node_modules/.bin/../@nestjs/cli/bin/nest.js start --watch
+ 892963 3961563 bash            /bin/bash -c source /home/aether/.claude/shell-snapshots/snapshot-bash-1785676114325-s46uyo.sh 2>/dev/null || true && shopt -u extglob 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'SSHC="ssh -i $HOME/.ssh/aeuser.pem -o BatchMode=yes -o IdentitiesOnly=yes" until ! timeout 30 $SSHC aeuser@20.67.234.83 '"'"'pgrep -f "certbot renew" >/dev/null'"'"' 2>/dev/null; do sleep 20; done timeout 550 $SSHC aeuser@20.67.234.83 '"'"'sudo certbot renew --dry-run --run-deploy-hooks > /tmp/dr2.log 2>&1; echo "EXIT=$?"; grep -iE "simulating|congratulat|success|error output|fail" /tmp/dr2.log'"'"'' < /dev/null && pwd -P >| /tmp/claude-9f06-cwd
+ 898792       1 snapd           /snap/snapd/current/usr/lib/snapd/snapd
+ 964940       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 399d8af782a707bcd98df3ca16b7098c268eef56f03a5912f46445bc87b6fd53 -address /run/containerd/containerd.sock
+ 964964  964940 sh              sh -c uvicorn kb_retrieval.api:app --host 0.0.0.0 --port ${RETRIEVAL_PORT}
+ 965128   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 58400 -container-ip 172.19.0.4 -container-port 8400 -use-listen-fd
+ 965141  964964 uvicorn         /usr/local/bin/python3.11 /usr/local/bin/uvicorn kb_retrieval.api:app --host 0.0.0.0 --port 8400
+1018481       1 tmux: server    /usr/bin/tmux -L hermes -f /usr/local/libexec/hermes-tmux.conf new-session -d -s hermes-orch-dev-ai /home/aether/.local/bin/claude
+1018482 1018481 claude          /home/aether/.local/bin/claude
+1026987       2 kworker/u128:2- [kworker/u128:2-ext4-rsv-conversion]
+1274603       2 kworker/u133:0- [kworker/u133:0-events_power_efficient]
+1280197       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 27f9ef35c280b3e3a8a6e8d618fc0eb9ef2c5ed926bdd46892c447ec68780994 -address /run/containerd/containerd.sock
+1280228 1280197 supervisord     /usr/bin/python3 /usr/bin/supervisord
+1280469 1280228 cron            cron -f
+1280470 1280228 nginx           nginx: master process nginx -g daemon off;
+1280475 1280470 nginx           nginx: worker process
+1280476 1280470 nginx           nginx: worker process
+1280477 1280470 nginx           nginx: worker process
+1280478 1280470 nginx           nginx: worker process
+1280479 1280470 nginx           nginx: worker process
+1280480 1280470 nginx           nginx: worker process
+1280481 1280470 nginx           nginx: worker process
+1280482 1280470 nginx           nginx: worker process
+1280483 1280470 nginx           nginx: worker process
+1280484 1280470 nginx           nginx: worker process
+1280485 1280470 nginx           nginx: worker process
+1280486 1280470 nginx           nginx: worker process
+1280487 1280470 nginx           nginx: worker process
+1280488 1280470 nginx           nginx: worker process
+1280489 1280470 nginx           nginx: worker process
+1280490 1280470 nginx           nginx: worker process
+1280491 1280470 nginx           nginx: worker process
+1280493 1280470 nginx           nginx: worker process
+1280494 1280470 nginx           nginx: worker process
+1280495 1280470 nginx           nginx: worker process
+1280496 1280470 nginx           nginx: worker process
+1280497 1280470 nginx           nginx: worker process
+1280498 1280470 nginx           nginx: worker process
+1280499 1280470 nginx           nginx: worker process
+1280500 1280470 nginx           nginx: worker process
+1280501 1280470 nginx           nginx: worker process
+1280502 1280470 nginx           nginx: worker process
+1280503 1280470 nginx           nginx: worker process
+1280504 1280470 nginx           nginx: worker process
+1280505 1280470 nginx           nginx: worker process
+1280506 1280470 nginx           nginx: worker process
+1280507 1280470 nginx           nginx: worker process
+1280508 1280470 nginx           nginx: worker process
+1280509 1280470 nginx           nginx: worker process
+1280510 1280470 nginx           nginx: worker process
+1280512 1280470 nginx           nginx: worker process
+1280513 1280470 nginx           nginx: worker process
+1280514 1280470 nginx           nginx: worker process
+1280515 1280470 nginx           nginx: worker process
+1280516 1280470 nginx           nginx: worker process
+1280517 1280470 nginx           nginx: worker process
+1280518 1280470 nginx           nginx: worker process
+1280519 1280470 nginx           nginx: worker process
+1280520 1280470 nginx           nginx: worker process
+1280521 1280470 nginx           nginx: worker process
+1280522 1280470 nginx           nginx: worker process
+1280523 1280470 nginx           nginx: worker process
+1280525 1280470 nginx           nginx: worker process
+1280526 1280470 nginx           nginx: worker process
+1280527 1280470 nginx           nginx: worker process
+1280528 1280470 nginx           nginx: worker process
+1280529 1280470 nginx           nginx: worker process
+1280530 1280470 nginx           nginx: worker process
+1280531 1280470 nginx           nginx: worker process
+1280532 1280470 nginx           nginx: worker process
+1280533 1280470 nginx           nginx: worker process
+1280534 1280470 nginx           nginx: worker process
+1280535 1280470 nginx           nginx: worker process
+1280536 1280470 nginx           nginx: worker process
+1280537 1280470 nginx           nginx: worker process
+1280538 1280470 nginx           nginx: worker process
+1280540 1280470 nginx           nginx: worker process
+1280541 1280470 nginx           nginx: worker process
+1280542 1280470 nginx           nginx: worker process
+1527195 4010533 bash            -bash
+1528113 1527195 claude          claude
+1688406       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id b9c9a3284b8549ea64a2d6e20024d73ef794d4917f5a7feef730e2fd8bf65994 -address /run/containerd/containerd.sock
+1688430 1688406 node            node dist/main.js
+1709921       2 kworker/u135:0- [kworker/u135:0-events_unbound]
+1739355       2 kworker/u135:1- [kworker/u135:1-events_unbound]
+1769001       2 kworker/u132:2- [kworker/u132:2-flush-9:2]
+1786434       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id d44419f37c1bcd050593515535fa56b9969b02a0af2e1239d40d82aae5e0bace -address /run/containerd/containerd.sock
+1786457 1786434 node            node apps/worker/dist/main.js
+1870824       2 kworker/u136:3- [kworker/u136:3-flush-9:2]
+1878615  257424 node            node --enable-source-maps /app/apps/api/dist/main
+1904152       2 kworker/u132:1- [kworker/u132:1-flush-9:2]
+1904954       2 kworker/u135:2- [kworker/u135:2-md_bitmap]
+1932455       2 kworker/u136:2- [kworker/u136:2-events_unbound]
+1950271       2 kworker/u133:1- [kworker/u133:1-flush-9:2]
+1960735       2 kworker/u132:0- [kworker/u132:0-flush-9:2]
+1961499       2 kworker/u129:3- [kworker/u129:3-events_power_efficient]
+1964266       2 kworker/42:2-mm [kworker/42:2-mm_percpu_wq]
+1975976       2 kworker/12:2-rc [kworker/12:2-rcu_par_gp]
+1982228       2 kworker/20:1-ev [kworker/20:1-events]
+1984552       2 kworker/45:2-mm [kworker/45:2-mm_percpu_wq]
+1996780       2 kworker/39:2-ev [kworker/39:2-events]
+2012171       2 kworker/30:1-ev [kworker/30:1-events]
+2014917       2 kworker/u130:2- [kworker/u130:2-events_unbound]
+2020441       2 kworker/47:1-ev [kworker/47:1-events]
+2025095       2 kworker/37:0-mm [kworker/37:0-mm_percpu_wq]
+2029980       2 kworker/u130:1- [kworker/u130:1-flush-9:2]
+2037268       2 kworker/40:0-cg [kworker/40:0-cgroup_release]
+2037553       2 kworker/43:2-rc [kworker/43:2-rcu_par_gp]
+2037935       2 kworker/u134:3- [kworker/u134:3-flush-9:2]
+2039508       2 kworker/63:3-rc [kworker/63:3-rcu_par_gp]
+2039842       2 kworker/u130:0- [kworker/u130:0-flush-9:2]
+2041783       2 kworker/28:2-ev [kworker/28:2-events]
+2043847       2 kworker/23:1-mm [kworker/23:1-mm_percpu_wq]
+2044146       2 kworker/11:2-mm [kworker/11:2-mm_percpu_wq]
+2044626       2 kworker/35:1-rc [kworker/35:1-rcu_par_gp]
+2055013       2 kworker/18:1-rc [kworker/18:1-rcu_par_gp]
+2056055       2 kworker/27:0-mm [kworker/27:0-mm_percpu_wq]
+2059001       2 kworker/8:1-eve [kworker/8:1-events]
+2059202       2 kworker/13:1-rc [kworker/13:1-rcu_par_gp]
+2060415       2 kworker/0:0-eve [kworker/0:0-events]
+2060551       2 kworker/60:1-ev [kworker/60:1-events]
+2061059       2 kworker/33:0-rc [kworker/33:0-rcu_par_gp]
+2061956       2 kworker/u131:1- [kworker/u131:1-flush-9:2]
+2062623       2 kworker/u134:1- [kworker/u134:1-flush-9:2]
+2065559       2 kworker/5:1-mm_ [kworker/5:1-mm_percpu_wq]
+2068118       2 kworker/u131:0- [kworker/u131:0-flush-9:2]
+2072145       2 kworker/1:2-eve [kworker/1:2-events]
+2072765       2 kworker/61:2-ev [kworker/61:2-events]
+2073082       2 kworker/51:1-ev [kworker/51:1-events]
+2073851       2 kworker/62:2-rc [kworker/62:2-rcu_par_gp]
+2074506       2 kworker/41:0-mm [kworker/41:0-mm_percpu_wq]
+2074793       2 kworker/u133:3- [kworker/u133:3-events_unbound]
+2074958       2 kworker/49:0-ev [kworker/49:0-events]
+2075667       2 kworker/34:2-ev [kworker/34:2-events]
+2076278       2 kworker/57:0-rc [kworker/57:0-rcu_par_gp]
+2077235       2 kworker/7:0-rcu [kworker/7:0-rcu_par_gp]
+2077340       2 kworker/2:2-rcu [kworker/2:2-rcu_gp]
+2077389       2 kworker/26:1-rc [kworker/26:1-rcu_par_gp]
+2077918       2 kworker/44:1-mm [kworker/44:1-mm_percpu_wq]
+2079598       2 kworker/6:1-eve [kworker/6:1-events]
+2080456       2 kworker/9:0-mm_ [kworker/9:0-mm_percpu_wq]
+2080933       2 kworker/54:1-rc [kworker/54:1-rcu_par_gp]
+2081984       2 kworker/59:0-mm [kworker/59:0-mm_percpu_wq]
+2082789       2 kworker/3:2-eve [kworker/3:2-events]
+2084015       2 kworker/56:2-ev [kworker/56:2-events]
+2085118       2 kworker/32:2-rc [kworker/32:2-rcu_par_gp]
+2085685       2 kworker/50:0-mm [kworker/50:0-mm_percpu_wq]
+2086471       2 kworker/u129:1- [kworker/u129:1-events_power_efficient]
+2086600       2 kworker/31:0-rc [kworker/31:0-rcu_par_gp]
+2086742       2 kworker/36:0-ev [kworker/36:0-events]
+2086806       2 kworker/17:2-ev [kworker/17:2-events]
+2086894       2 kworker/55:0-ev [kworker/55:0-events]
+2087535       2 kworker/29:1-ev [kworker/29:1-events]
+2088965       2 kworker/16:0-ev [kworker/16:0-events]
+2089009       2 kworker/15:0-rc [kworker/15:0-rcu_par_gp]
+2090997       2 kworker/52:0-mm [kworker/52:0-mm_percpu_wq]
+2091038       2 kworker/38:0-ev [kworker/38:0-events]
+2091183       2 kworker/25:1-ev [kworker/25:1-events]
+2091901       2 kworker/22:1-cg [kworker/22:1-cgroup_release]
+2092249       2 kworker/u136:1- [kworker/u136:1-writeback]
+2092470       2 kworker/63:1-ev [kworker/63:1-events]
+2093222       2 kworker/58:1-mm [kworker/58:1-mm_percpu_wq]
+2093474       2 kworker/48:2-rc [kworker/48:2-rcu_gp]
+2094473       2 kworker/19:2-rc [kworker/19:2-rcu_par_gp]
+2095084       2 kworker/24:1-ev [kworker/24:1-events]
+2095192       2 kworker/10:2-ev [kworker/10:2-events]
+2095519       2 kworker/12:0-ev [kworker/12:0-events]
+2095915       2 kworker/u131:4- [kworker/u131:4-events_power_efficient]
+2097403       2 kworker/27:2-rc [kworker/27:2-rcu_par_gp]
+2097983       2 kworker/29:2-rc [kworker/29:2-rcu_par_gp]
+2098383       2 kworker/53:0-ev [kworker/53:0-events]
+2098523       2 kworker/63:0    [kworker/63:0]
+2099494       2 kworker/57:1-mm [kworker/57:1-mm_percpu_wq]
+2099653       2 kworker/26:0-mm [kworker/26:0-mm_percpu_wq]
+2099784       2 kworker/7:2-mm_ [kworker/7:2-mm_percpu_wq]
+2100186       2 kworker/14:2-mm [kworker/14:2-mm_percpu_wq]
+2100951       2 kworker/15:2-ev [kworker/15:2-events]
+2101010       2 kworker/51:2-rc [kworker/51:2-rcu_par_gp]
+2101390       2 kworker/u129:2- [kworker/u129:2-flush-9:2]
+2101655       2 kworker/40:2-rc [kworker/40:2-rcu_par_gp]
+2101768       2 kworker/62:1-ev [kworker/62:1-events]
+2101796       2 kworker/18:0-ev [kworker/18:0-events]
+2101925       2 kworker/21:0-ev [kworker/21:0-events]
+2102050       2 kworker/32:0-rc [kworker/32:0-rcu_par_gp]
+2102213       2 kworker/46:1-ev [kworker/46:1-events]
+2102450       2 kworker/2:0-eve [kworker/2:0-events]
+2102727       2 kworker/4:2-rcu [kworker/4:2-rcu_par_gp]
+2103082       2 kworker/39:0-rc [kworker/39:0-rcu_par_gp]
+2103130       2 kworker/8:3-rcu [kworker/8:3-rcu_par_gp]
+2103179       2 kworker/33:1-mm [kworker/33:1-mm_percpu_wq]
+2103529       2 kworker/28:1-rc [kworker/28:1-rcu_par_gp]
+2103562       2 kworker/53:2-rc [kworker/53:2-rcu_par_gp]
+2103658       2 kworker/6:0-rcu [kworker/6:0-rcu_par_gp]
+2103804       2 kworker/42:0-rc [kworker/42:0-rcu_par_gp]
+2104026       2 kworker/30:0-rc [kworker/30:0-rcu_par_gp]
+2104207       2 kworker/31:1-rc [kworker/31:1-rcu_par_gp]
+2104291       2 kworker/58:2-rc [kworker/58:2-rcu_par_gp]
+2104451       2 kworker/u134:0- [kworker/u134:0-events_unbound]
+2104577       2 kworker/u131:3- [kworker/u131:3-flush-9:2]
+2104598       2 kworker/48:1-ev [kworker/48:1-events]
+2104657       2 kworker/22:0-rc [kworker/22:0-rcu_par_gp]
+2104742       2 kworker/17:0-rc [kworker/17:0-rcu_par_gp]
+2104821       2 kworker/38:2-rc [kworker/38:2-rcu_par_gp]
+2104923       2 kworker/50:1-ev [kworker/50:1-events]
+2104992       2 kworker/34:1-rc [kworker/34:1-rcu_par_gp]
+2105004       2 kworker/35:2-cg [kworker/35:2-cgroup_free]
+2105014       2 kworker/47:2-rc [kworker/47:2-rcu_par_gp]
+2105228       2 kworker/0:1-rcu [kworker/0:1-rcu_par_gp]
+2105251       2 kworker/9:1-rcu [kworker/9:1-rcu_par_gp]
+2105347       2 kworker/57:2    [kworker/57:2]
+2105519       2 kworker/36:1-rc [kworker/36:1-rcu_par_gp]
+2105935       2 kworker/54:0-mm [kworker/54:0-mm_percpu_wq]
+2105947       2 kworker/14:1-rc [kworker/14:1-rcu_par_gp]
+2106172       2 kworker/16:1-rc [kworker/16:1-rcu_par_gp]
+2106261       2 kworker/15:1-mm [kworker/15:1-mm_percpu_wq]
+2106300       2 kworker/37:1-rc [kworker/37:1-rcu_par_gp]
+2106516       2 kworker/59:2-rc [kworker/59:2-rcu_par_gp]
+2106527       2 kworker/60:0-rc [kworker/60:0-rcu_par_gp]
+2106556       2 kworker/45:1-rc [kworker/45:1-rcu_par_gp]
+2106637       2 kworker/24:2-rc [kworker/24:2-rcu_par_gp]
+2106760       2 kworker/20:2-rc [kworker/20:2-rcu_par_gp]
+2106771       2 kworker/13:2-mm [kworker/13:2-mm_percpu_wq]
+2106926       2 kworker/55:1-rc [kworker/55:1-rcu_par_gp]
+2107015       2 kworker/44:2-rc [kworker/44:2-rcu_par_gp]
+2107047       2 kworker/23:2-rc [kworker/23:2-rcu_par_gp]
+2107108       2 kworker/43:1-ev [kworker/43:1-events]
+2107158       2 kworker/3:1-rcu [kworker/3:1-rcu_par_gp]
+2107391       2 kworker/46:2-rc [kworker/46:2-rcu_par_gp]
+2107411       2 kworker/19:0-rc [kworker/19:0-rcu_par_gp]
+2107526       2 kworker/11:1-rc [kworker/11:1-rcu_par_gp]
+2107606       2 kworker/56:1-rc [kworker/56:1-rcu_par_gp]
+2107608       2 kworker/61:0-rc [kworker/61:0-rcu_par_gp]
+2107900       2 kworker/10:0-rc [kworker/10:0-rcu_par_gp]
+2108014       2 kworker/21:1-rc [kworker/21:1-rcu_par_gp]
+2108103       2 kworker/4:0-eve [kworker/4:0-events]
+2108141       2 kworker/41:2-rc [kworker/41:2-rcu_par_gp]
+2108224       2 kworker/25:2-rc [kworker/25:2-rcu_par_gp]
+2108410       2 kworker/62:0-ev [kworker/62:0-events]
+2108655       2 kworker/52:1-rc [kworker/52:1-rcu_par_gp]
+2108901       2 kworker/1:1-rcu [kworker/1:1-rcu_par_gp]
+2108913       2 kworker/2:1-eve [kworker/2:1-events]
+2109045       2 kworker/5:0-rcu [kworker/5:0-rcu_par_gp]
+2109129       2 kworker/49:1-rc [kworker/49:1-rcu_par_gp]
+2109540       2 kworker/53:1-cg [kworker/53:1-cgroup_free]
+2109611       2 kworker/40:1-ev [kworker/40:1-events]
+2109630       2 kworker/29:0    [kworker/29:0]
+2109641       2 kworker/30:2-rc [kworker/30:2-rcu_par_gp]
+2109759       2 kworker/31:2-mm [kworker/31:2-mm_percpu_wq]
+2109879       2 kworker/8:0-cgr [kworker/8:0-cgroup_release]
+2109890       2 kworker/39:1-rc [kworker/39:1-rcu_par_gp]
+2110099       2 kworker/28:0-rc [kworker/28:0-rcu_par_gp]
+2110158       2 kworker/48:0-ev [kworker/48:0-events]
+2110271       2 kworker/47:0-cg [kworker/47:0-cgroup_free]
+2110302       2 kworker/58:0-rc [kworker/58:0-rcu_par_gp]
+2110312       2 kworker/17:1-rc [kworker/17:1-rcu_par_gp]
+2110422       2 kworker/50:2-rc [kworker/50:2-rcu_par_gp]
+2110676       2 kworker/u132:3- [kworker/u132:3-flush-9:2]
+2110684       2 kworker/35:0-mm [kworker/35:0-mm_percpu_wq]
+2110859       2 kworker/34:0-rc [kworker/34:0-rcu_par_gp]
+2110879       2 kworker/42:1-rc [kworker/42:1-rcu_par_gp]
+2111269       2 kworker/38:1-rc [kworker/38:1-rcu_par_gp]
+2111308       2 kworker/9:2-rcu [kworker/9:2-rcu_par_gp]
+2111394       2 kworker/16:2-rc [kworker/16:2-rcu_par_gp]
+2111563       2 kworker/u129:0- [kworker/u129:0-flush-9:2]
+2111652       2 kworker/0:2-cgr [kworker/0:2-cgroup_free]
+2111684       2 kworker/54:2    [kworker/54:2]
+2111711       2 kworker/15:3    [kworker/15:3]
+2111759       2 kworker/37:2-rc [kworker/37:2-rcu_par_gp]
+2111872       2 kworker/51:0-rc [kworker/51:0-rcu_par_gp]
+2111922       2 kworker/59:1-rc [kworker/59:1-rcu_par_gp]
+2111965       2 kworker/45:0-rc [kworker/45:0-rcu_par_gp]
+2112006       2 kworker/14:0-rc [kworker/14:0-rcu_par_gp]
+2112015       2 kworker/26:2-rc [kworker/26:2-rcu_par_gp]
+2112034       2 kworker/24:0-ev [kworker/24:0-events]
+2112073       2 kworker/50:3-ev [kworker/50:3-events]
+2112079       2 kworker/2:3-cgr [kworker/2:3-cgroup_release]
+2112156       2 kworker/60:2-rc [kworker/60:2-rcu_par_gp]
+2112387       2 kworker/40:3-mm [kworker/40:3-mm_percpu_wq]
+2112554       2 kworker/23:0-rc [kworker/23:0-rcu_par_gp]
+2112576       2 kworker/13:0-rc [kworker/13:0-rcu_par_gp]
+2112658       2 kworker/22:2-ev [kworker/22:2-events]
+2112756       2 kworker/20:0-rc [kworker/20:0-rcu_par_gp]
+2112995       2 kworker/3:0-rcu [kworker/3:0-rcu_par_gp]
+2113016       2 kworker/62:3    [kworker/62:3]
+2113121       2 kworker/43:0-cg [kworker/43:0-cgroup_free]
+2113133       2 kworker/44:0-rc [kworker/44:0-rcu_par_gp]
+2113165       2 kworker/32:1-ev [kworker/32:1-events]
+2113187       2 kworker/7:1-rcu [kworker/7:1-rcu_par_gp]
+2113230       2 kworker/11:0-rc [kworker/11:0-rcu_par_gp]
+2113352       2 kworker/48:3    [kworker/48:3]
+2113534       2 kworker/19:1-mm [kworker/19:1-mm_percpu_wq]
+2113648       2 kworker/35:3-rc [kworker/35:3-rcu_par_gp]
+2113667       2 kworker/36:2-rc [kworker/36:2-rcu_par_gp]
+2113774       2 kworker/61:1-rc [kworker/61:1-rcu_par_gp]
+2113892       2 kworker/10:1-rc [kworker/10:1-rcu_par_gp]
+2113903       2 kworker/56:0-rc [kworker/56:0-rcu_par_gp]
+2114174       2 kworker/u129:4- [kworker/u129:4-events_power_efficient]
+2114263       2 kworker/25:0-rc [kworker/25:0-rcu_par_gp]
+2114284       2 kworker/12:1-rc [kworker/12:1-rcu_par_gp]
+2114347       2 kworker/u131:2- [kworker/u131:2-flush-9:2]
+2115154       2 kworker/33:2    [kworker/33:2]
+2115193       2 kworker/21:2    [kworker/21:2]
+2115217       2 kworker/27:1    [kworker/27:1]
+2115219 3190343 sleep           sleep 60
+2115794       2 kworker/46:0-ev [kworker/46:0-events]
+2117998       2 kworker/1:0     [kworker/1:0]
+2118591       2 kworker/18:2-rc [kworker/18:2-rcu_par_gp]
+2119295       2 kworker/4:1     [kworker/4:1]
+2120183 4114733 sleep           sleep 20
+2120191       2 kworker/46:3    [kworker/46:3]
+2120220  668991 sleep           sleep 20
+2120221  892963 sleep           sleep 20
+2120320       2 kworker/41:1-rc [kworker/41:1-rcu_par_gp]
+2120401       1 systemd         /usr/lib/systemd/systemd --user
+2120402 2120401 (sd-pam)        (sd-pam)
+2120426       2 psimon          [psimon]
+2120492       1 bash            bash /root/cubr-new24-full-binary-g4-run.sh
+2120720 2120492 ps              /usr/bin/ps -eo pid=,ppid=,comm=,args=
+2370805       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id b80d99f38ba3af130c2d46058666b9462087e84d4b4c6871a1d2830ae2ed14c7 -address /run/containerd/containerd.sock
+2370829 2370805 node            node dist/main.js
+2370994   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 58600 -container-ip 172.19.0.6 -container-port 4000 -use-listen-fd
+2563679       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id ae7d253ff1e2b618b7c56ca796a8565b34f91243bf3bd11d6b00bdf9b07617cf -address /run/containerd/containerd.sock
+2563702 2563679 uvicorn         /usr/local/bin/python3.11 /usr/local/bin/uvicorn kb_agent.api:app --host 0.0.0.0 --port 8500
+2563734   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 58500 -container-ip 172.19.0.5 -container-port 8500 -use-listen-fd
+2883135       1 atd             /usr/sbin/atd -f
+2883140       1 cron            /usr/sbin/cron -f -P
+2883150       1 mdadm           /sbin/mdadm --monitor --scan
+2883154       1 containerd      /usr/bin/containerd
+2883162       1 uuidd           /usr/sbin/uuidd --socket-activation
+2883176       1 polkitd         /usr/lib/polkit-1/polkitd --no-debug
+2883182       1 multipathd      /sbin/multipathd -d -s
+2883201       1 rsyslogd        /usr/sbin/rsyslogd -n -iNONE
+2883575       1 hermes          /home/hermes/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway run --replace
+3188222       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id d9e140e1ad803998eb919b934ffbfb3db30849fcff957168016786349be7b159 -address /run/containerd/containerd.sock
+3188246 3188222 python3         python3 main.py
+3188390   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28058 -container-ip 172.18.0.58 -container-port 9922 -use-listen-fd
+3190112       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 67fb9b2c07dec5b7462a65d3b0dfa3bb668d028a3e2cc0ee230f58edb4db6744 -address /run/containerd/containerd.sock
+3190137 3190112 supervisord     /usr/bin/python3 /usr/bin/supervisord
+3190271   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28051 -container-ip 172.18.0.51 -container-port 80 -use-listen-fd
+3190342 3190137 cron            cron -f
+3190343 3190137 bash            /bin/bash -c while true; do php /var/www/aio/yii google-campaign-schedule/process; sleep 60; done
+3190344 3190137 nginx           nginx: master process nginx -g daemon off;
+3190345 3190137 php-fpm         php-fpm: master process (/usr/local/etc/php-fpm.conf)
+3190348 3190344 nginx           nginx: worker process
+3190349 3190344 nginx           nginx: worker process
+3190350 3190345 php-fpm         php-fpm: pool www
+3190351 3190345 php-fpm         php-fpm: pool www
+3698013       1 sshd            sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+3698017       1 systemd-journal /usr/lib/systemd/systemd-journald
+3698018       1 systemd-resolve /usr/lib/systemd/systemd-resolved
+3698019       1 systemd-timesyn /usr/lib/systemd/systemd-timesyncd
+3698023       1 systemd-udevd   /usr/lib/systemd/systemd-udevd
+3698027       2 psimon          [psimon]
+3698028       1 systemd-network /usr/lib/systemd/systemd-networkd
+3698030       1 python          /home/aether/code/aether/local-env/.venv-code-review/bin/python -m code_review.review_server.server
+3698031       1 python          /home/aether/code/aether/local-env/.venv-code-review/bin/python -m code_review.slack_bot.bot
+3698035       1 fail2ban-server /usr/bin/python3 /usr/bin/fail2ban-server -xf start
+3698074       1 python          /home/aether/code/aether/local-env/.venv-code-review/bin/python -m code_review.telegram_bot.bot
+3825297 4010533 bash            -bash
+3825661 3825297 node            node /home/aether/.npm-global/bin/codex
+3825669 3825661 codex           /home/aether/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex
+3919372       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 88fd35ddc48e91bdbe3a0c9ec606a453fea15fc5d2276c7e206d4c8c732568d1 -address /run/containerd/containerd.sock
+3919399 3919372 traefik         traefik traefik --api.insecure=true --api.dashboard=true --providers.file.directory=/etc/traefik/dynamic --providers.file.watch=true --entrypoints.web.address=:80 --entrypoints.websecure.address=:443 --entrypoints.web-public.address=:8081 --entrypoints.websecure-public.address=:8443 --entrypoints.metrics.address=:8082 --metrics.prometheus=true --metrics.prometheus.entrypoint=metrics --metrics.prometheus.addrouterslabels=true --metrics.prometheus.addserviceslabels=true --log.level=INFO --accesslog=true --accesslog.filepath=/var/log/traefik/access.log --accesslog.bufferingsize=100
+3919526   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 100.118.134.82 -host-port 80 -container-ip 172.18.0.80 -container-port 80 -use-listen-fd
+3919567   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 100.118.134.82 -host-port 443 -container-ip 172.18.0.80 -container-port 443 -use-listen-fd
+3919582   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28080 -container-ip 172.18.0.80 -container-port 8080 -use-listen-fd
+3919597   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 162.55.81.5 -host-port 80 -container-ip 172.18.0.80 -container-port 8081 -use-listen-fd
+3919614   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 28082 -container-ip 172.18.0.80 -container-port 8082 -use-listen-fd
+3919627   20593 docker-proxy    /usr/bin/docker-proxy -proto tcp -host-ip 162.55.81.5 -host-port 443 -container-ip 172.18.0.80 -container-port 8443 -use-listen-fd
+3945384       1 ssh             ssh -x -a -oClearAllForwardings=yes -oServerAliveInterval=15 -oServerAliveCountMax=3 -oIdentityFile=/home/aether/.ssh/paxbt-0172-vika-read -oUserKnownHostsFile=/home/aether/.ssh/paxbt-0172-known-hosts -oStrictHostKeyChecking=yes -2 vika-pc@100.103.19.90 -s sftp
+3961312 4010533 bash            -bash
+3961563 3961312 claude          claude --dangerously-skip-permissions
+4002665       1 containerd-shim /usr/bin/containerd-shim-runc-v2 -namespace moby -id 98b7dabdddb4713a520a4d9f177441e9cfe8371a40e867a0f0fec197ae78bd15 -address /run/containerd/containerd.sock
+4002728 4002665 sh              sh -c uvicorn app:app --host 0.0.0.0 --port ${EMBED_PORT}
+4002994 4002728 uvicorn         /usr/local/bin/python3.11 /usr/local/bin/uvicorn app:app --host 0.0.0.0 --port 8300
+4010533       1 tmux: server    tmux new-session -d -s dr-DEV-1588
+4114733 3961563 bash            /bin/bash -c source /home/aether/.claude/shell-snapshots/snapshot-bash-1785676114325-s46uyo.sh 2>/dev/null || true && shopt -u extglob 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; \builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'until grep -q '"'"'"status"'"'"' /tmp/claude-1000/-home-aether-code-aether-local-env/6b17945b-c03b-440f-bccd-7d75ae9a7aaa/tasks/bcksi48ko.output 2>/dev/null; do sleep 20; done; echo "puller finished"' < /dev/null && pwd -P >| /tmp/claude-3a56-cwd
