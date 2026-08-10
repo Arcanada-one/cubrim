@@ -12,10 +12,13 @@
 
 ## Frozen starting point and file map
 
-The implementation starts only after a fresh fetch proves
-`origin/main=367b6c74143ce9d6d987d9e75f47cd8f70813ce7`. This is the
-unrelated H33-only fast-forward from the prior reviewed base; at that commit
-the G5 and G4 frozen blobs below are unchanged:
+`367b6c74143ce9d6d987d9e75f47cd8f70813ce7` is the minimum reviewed
+ancestry anchor, not a forever-current execution SHA. The implementation starts
+only after a fresh fetch proves `HEAD == origin/main == ls-remote main`, proves
+that anchor is an ancestor, and reauthenticates every frozen G5/G4 blob below.
+This prevents the plan's own protected merge, or later unrelated documentation
+merges, from making Step 1 impossible while still failing closed on content
+drift:
 
 - the G5 preregistration is Git blob `5a0eb4c18b2cd407d0135e0ca2130b3b27d84b6f`, SHA-256 `ceed266d524721fa0bef6b496566f36a9ed04bd4ca9838b92e4250d5e65843e4`;
 - the G4 terminal report is Git blob `8536837a103f7f8bd9b07955aeb85e53228e7dd7`, SHA-256 `e1fdbbed99279add28880875f5f8c37ffb061f6e7afd1564d8d15294a92900e1`;
@@ -72,17 +75,34 @@ Run:
 
 ```bash
 git fetch origin main
-test "$(git rev-parse origin/main)" = 367b6c74143ce9d6d987d9e75f47cd8f70813ce7
-test "$(git rev-parse HEAD)" = 367b6c74143ce9d6d987d9e75f47cd8f70813ce7
+remote_main=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+test -n "$remote_main"
+test "$(git rev-parse origin/main)" = "$remote_main"
+test "$(git rev-parse HEAD)" = "$remote_main"
+git merge-base --is-ancestor 367b6c74143ce9d6d987d9e75f47cd8f70813ce7 "$remote_main"
 test "$(git rev-parse origin/main:documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G5-20260810.md)" = \
   5a0eb4c18b2cd407d0135e0ca2130b3b27d84b6f
+while IFS=' ' read -r expected path; do
+  test "$(git rev-parse "origin/main:$path")" = "$expected"
+done <<'EOF'
+f3164d39d10febc8d8fc14c217232e6a083ffc5f documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G4-20260809.md
+8536837a103f7f8bd9b07955aeb85e53228e7dd7 documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G4-VOID-RESULTS-20260810.md
+4b1fabfef622c2652d0e33360a860238321fbb77 documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G4-VOID-20260810/systemd-journal.jsonl
+9d6f51f3f2f1480b047c94b5ea74196aba706012 documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G4-VOID-20260810/remote-tree-manifest.tsv
+63fcf9b26d4ff54e6857e66a3b4b87cd425503ab documentation/ephemeral/research/current-profile-g4-run.sh
+0e057269d64fe4ecca8099928c44d7fe9905c480 documentation/ephemeral/research/current-profile-g4-run-test.sh
+b0ee509b1909c4f77dcd11490626f9d1d06773b6 documentation/ephemeral/research/current_profile_g4_map.py
+b6e546413ebd56d423abd6b24744476c0f6e2f6f documentation/ephemeral/research/test_current_profile_g4_map.py
+EOF
+test -n "$(git rev-parse origin/main:datarim/plans/NEW-24-current-profile-g5-plan.md)"
+test "$(git branch --show-current)" = codex/cubr-new24-g5-instrument
 test -z "$(git status --porcelain)"
-git switch -c codex/cubr-new24-g5-instrument
 ```
 
-Expected: all four assertions exit 0, including the unchanged G5 preregistration
-blob, and the final command creates the instrument branch directly from the
-exact base.
+Expected: all assertions exit 0, including remote equality, reviewed ancestry,
+the unchanged G5 preregistration blob, the landed plan, and a clean instrument
+branch that the controller already created directly from that exact remote
+main.
 
 - [ ] **Step 2: Create only the G5 test assets from reviewed G4 bytes**
 
@@ -3120,7 +3140,9 @@ gates on main before candidate construction.
 `PATH VALIDATION` at plan authoring checked 9 tracked repository references:
 the G5 preregistration, G4 preregistration, G4 terminal report, G4 void package,
 four G4 instrument assets, and the existing Datarim plan directory are present
-at `367b6c74143ce9d6d987d9e75f47cd8f70813ce7`. The four G5 instrument files,
+at the reviewed ancestry anchor
+`367b6c74143ce9d6d987d9e75f47cd8f70813ce7` and are reauthenticated on fresh
+main before edits. The four G5 instrument files,
 the protected launch-identity file, and nine terminal-result surfaces are
 explicitly created by this plan. Runtime
 paths under `/root/cubr-new24-full-binary-g5-*`, `/root/phaseC`,
