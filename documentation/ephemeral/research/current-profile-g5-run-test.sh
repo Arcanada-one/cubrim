@@ -49,6 +49,36 @@ run_pure_mock_cgroup() {
     /usr/bin/env -i LC_ALL=C PATH="$PURE_MOCK_PATH" CUBR_SYSTEMD_UNIT="$fixture_unit" /usr/bin/bash "$RUNNER" "$mode"
 }
 
+run_user_systemd_fixture() {
+    local host_home=$1 host_xdg=$2 host_dbus=$3 capture_dir=$4
+    [[ -n $host_home ]] || fail 'live fixture host variable is empty: HOME'
+    [[ -n $host_xdg ]] || fail 'live fixture host variable is empty: XDG_RUNTIME_DIR'
+    [[ -n $host_dbus ]] || fail 'live fixture host variable is empty: DBUS_SESSION_BUS_ADDRESS'
+    [[ -d $capture_dir && ! -L $capture_dir ]] || fail 'live fixture capture directory is unsafe'
+    /usr/bin/env -i \
+        LC_ALL=C \
+        PATH=/usr/bin:/bin \
+        HOME="$host_home" \
+        XDG_RUNTIME_DIR="$host_xdg" \
+        DBUS_SESSION_BUS_ADDRESS="$host_dbus" \
+        /usr/bin/bash "$RUNNER" --self-test-cgroup-live "$capture_dir"
+}
+
+verify_admitted_campaign_identity() {
+    [[ ${CUBR_ENFORCE_CAMPAIGN_REREAD:-0} == 1 ]] || return 0
+    local props
+    props=$(/usr/bin/systemctl show "$CUBR_ADMITTED_SYSTEMD_UNIT" \
+        -p InvocationID -p MainPID -p NRestarts -p ControlGroup)
+    /usr/bin/grep -qx "InvocationID=$CUBR_ADMITTED_INVOCATION_ID" <<<"$props" ||
+        fail 'admitted campaign InvocationID changed after self-test'
+    /usr/bin/grep -qx "MainPID=$CUBR_ADMITTED_MAIN_PID" <<<"$props" ||
+        fail 'admitted campaign MainPID changed after self-test'
+    /usr/bin/grep -qx 'NRestarts=0' <<<"$props" ||
+        fail 'admitted campaign restart count changed after self-test'
+    /usr/bin/grep -qx "ControlGroup=$CUBR_ADMITTED_CONTROL_GROUP" <<<"$props" ||
+        fail 'admitted campaign ControlGroup changed after self-test'
+}
+
 require_runner_fixed() {
     /usr/bin/grep -qF -- "$1" "$RUNNER" || fail "runner missing literal: $1"
 }
@@ -67,6 +97,37 @@ line_of_last() {
 
 [[ -f $RUNNER && ! -L $RUNNER ]] || invalid "runner not found or unsafe: $RUNNER"
 [[ -f $MAPPER && ! -L $MAPPER ]] || invalid "mapper not found or unsafe: $MAPPER"
+
+live_fixture_helper=$(/usr/bin/awk '
+    /^run_user_systemd_fixture\(\) \{/ {inside=1}
+    inside {print}
+    inside && /^}/ {exit}
+' "$SELF")
+[[ $live_fixture_helper != *'INVOCATION_ID'* ]] ||
+    fail 'outer live-fixture allowlist admitted INVOCATION_ID'
+[[ $live_fixture_helper != *'CUBR_SYSTEMD_UNIT'* &&
+   $live_fixture_helper != *'CUBR_CGROUP_SYSTEMCTL_USER'* &&
+   $live_fixture_helper != *'CUBR_CGROUP_LIVE_RESULT'* ]] ||
+    fail 'outer live-fixture allowlist admitted fixture authority'
+
+fresh_fixture_count=$({ /usr/bin/grep -F 'current-profile-g5-cgroup-selftest-' "$RUNNER" || true; } |
+    /usr/bin/wc -l)
+[[ $fresh_fixture_count == 1 ]] || fail 'live fixture fresh unit literal count is not exactly one'
+live_fixture_vector=$(/usr/bin/awk '
+    /^[[:space:]]*systemd_args=\($/ {inside=1}
+    inside {print}
+    inside && /^[[:space:]]*\)$/ {exit}
+' "$RUNNER")
+[[ $live_fixture_vector != *"$LIVE_G5_CAMPAIGN_UNIT"* ]] ||
+    fail 'live fixture argument vector contains campaign unit'
+/usr/bin/grep -qF \
+    'p=os.fork(); os._exit(0) if p else None; os.setsid(); p=os.fork()' "$RUNNER" ||
+    fail 'live fixture double-fork payload missing'
+
+reread_call=verify_admitted_campaign_identity
+reread_count=$({ /usr/bin/grep -E "^[[:space:]]*$reread_call$" "$SELF" || true; } |
+    /usr/bin/wc -l)
+[[ $reread_count == 14 ]] || fail 'campaign identity reread missing after self-test'
 
 runner_literals=(
     '/root/cubr-new24-full-binary-g5-src'
@@ -380,6 +441,7 @@ set -e
 if ! { (( self_test_rc == 0 )) && [[ $self_test_output == 'current_profile_g5_self_test=PASS' ]]; }; then
     invalid "runner self-test positive control failed: rc=$self_test_rc output=$self_test_output"
 fi
+    verify_admitted_campaign_identity
 
 fake_cargo_output=
 fake_cargo_rc=0
@@ -390,11 +452,13 @@ set -e
 if ! { (( fake_cargo_rc == 0 )) && [[ $fake_cargo_output == 'current_profile_g5_fake_cargo=PASS' ]]; }; then
     invalid "runner fake-cargo control failed: rc=$fake_cargo_rc output=$fake_cargo_output"
 fi
+    verify_admitted_campaign_identity
 
 publish_output=$(/usr/bin/bash "$RUNNER" --self-test-publish 2>&1) ||
     invalid "runner durable-publish positive control failed: $publish_output"
 [[ $publish_output == 'current_profile_g5_publish_test=PASS' ]] ||
     invalid "runner durable-publish positive control output mismatch: $publish_output"
+    verify_admitted_campaign_identity
 
 pure_mock_environment_output=
 pure_mock_environment_rc=0
@@ -408,6 +472,7 @@ assert_mock_output_isolated "$pure_mock_environment_output" mock.unit
     invalid "runner pure-mock environment observation failed: rc=$pure_mock_environment_rc output=$pure_mock_environment_output"
 [[ $pure_mock_environment_output == 'current_profile_g5_cgroup_environment_test=PASS canary=absent unit=mock.unit' ]] ||
     invalid "runner pure-mock environment observation mismatch: $pure_mock_environment_output"
+    verify_admitted_campaign_identity
 
 cgroup_output=
 cgroup_rc=0
@@ -420,6 +485,7 @@ assert_mock_output_isolated "$cgroup_output" mock.unit
     invalid "runner cgroup containment control failed: rc=$cgroup_rc output=$cgroup_output"
 [[ $cgroup_output == 'current_profile_g5_cgroup_test=PASS unit=mock.unit' ]] ||
     invalid "runner cgroup containment output mismatch: $cgroup_output"
+    verify_admitted_campaign_identity
 
 cgroup_precommit_output=
 cgroup_precommit_rc=0
@@ -433,6 +499,7 @@ assert_mock_output_isolated "$cgroup_precommit_output" precommit-disconnected.se
     invalid "runner cgroup precommit counterexample failed: $cgroup_precommit_output rc=$cgroup_precommit_rc"
 [[ $cgroup_precommit_output == 'current_profile_g5_cgroup_precommit_test=PASS unit=precommit-disconnected.service' ]] ||
     invalid "runner cgroup precommit counterexample output mismatch: $cgroup_precommit_output"
+    verify_admitted_campaign_identity
 
 unexpected_precommit_output=
 unexpected_precommit_rc=0
@@ -445,38 +512,58 @@ set -e
     fail 'precommit self-test accepted unexpected fixture authority'
 [[ $unexpected_precommit_output == 'current_profile_g5_cgroup_precommit_test=FAIL unit=unexpected-authority.service reason=unexpected-fixture-unit' ]] ||
     invalid "unexpected precommit authority failed at unrelated assertion: rc=$unexpected_precommit_rc output=$unexpected_precommit_output"
+    verify_admitted_campaign_identity
 
 publish_write_output=$(/usr/bin/bash "$RUNNER" --self-test-publish-writes 2>&1) ||
     invalid "runner checked publication write control failed: $publish_write_output"
 [[ $publish_write_output == 'current_profile_g5_publish_write_test=PASS' ]] ||
     invalid "runner checked publication write output mismatch: $publish_write_output"
+    verify_admitted_campaign_identity
 
 publish_tamper_output=$(/usr/bin/bash "$RUNNER" --self-test-publish-tamper 2>&1) ||
     invalid "runner publication tamper control failed: $publish_tamper_output"
 [[ $publish_tamper_output == 'current_profile_g5_publish_tamper_test=PASS' ]] ||
     invalid "runner publication tamper output mismatch: $publish_tamper_output"
+    verify_admitted_campaign_identity
 
 hard_deadline_output=$(/usr/bin/bash "$RUNNER" --self-test-hard-deadline 2>&1) ||
     invalid "runner hard-deadline positive control failed: $hard_deadline_output"
 [[ $hard_deadline_output == 'current_profile_g5_hard_deadline_test=PASS' ]] ||
     invalid "runner hard-deadline positive control output mismatch: $hard_deadline_output"
+    verify_admitted_campaign_identity
+
+case ${CUBR_REMOTE_LIVE_FIXTURE:-0} in
+    0)
+        (( $# == 0 )) || invalid 'unexpected live fixture capture argument'
+        ;;
+    1)
+        (( $# == 1 )) || invalid 'live fixture capture argument missing'
+        live_output=$(run_user_systemd_fixture \
+            "${HOME:-}" "${XDG_RUNTIME_DIR:-}" "${DBUS_SESSION_BUS_ADDRESS:-}" "$1") ||
+            invalid "runner live cgroup containment control failed: $live_output"
+        [[ $live_output =~ ^current_profile_g5_cgroup_live_test=PASS\ result_sha256=([0-9a-f]{64})\ test_output_sha256=([0-9a-f]{64})$ ]] ||
+            invalid "runner live cgroup containment output mismatch: $live_output"
+        [[ $(sha256sum "$1/cgroup-live.tsv" | awk '{print $1}') == "${BASH_REMATCH[1]}" ]] ||
+            invalid 'live fixture result hash mismatch'
+        [[ $(sha256sum "$1/systemd-run.output.txt" | awk '{print $1}') == "${BASH_REMATCH[2]}" ]] ||
+            invalid 'live fixture test-output hash mismatch'
+        verify_admitted_campaign_identity
+        ;;
+    *) invalid 'CUBR_REMOTE_LIVE_FIXTURE must be 0 or 1' ;;
+esac
 
 if [[ $SELF_MUTATION_TESTS == 1 ]]; then
-    cgroup_live_output=$(/usr/bin/bash "$RUNNER" --self-test-cgroup-live 2>&1) ||
-        invalid "runner live cgroup containment control failed: $cgroup_live_output"
-    [[ $cgroup_live_output == 'current_profile_g5_cgroup_live_test=PASS' ||
-       $cgroup_live_output == 'current_profile_g5_cgroup_live_test=SKIP reason=user-systemd-unavailable' ]] ||
-        invalid "runner live cgroup containment output mismatch: $cgroup_live_output"
-
     timeout_tree_output=$(/usr/bin/bash "$RUNNER" --self-test-timeout-tree 2>&1) ||
         invalid "runner timeout-tree positive control failed: $timeout_tree_output"
     [[ $timeout_tree_output == *'current_profile_g5_timeout_tree_test=PASS' ]] ||
         invalid "runner timeout-tree positive control output mismatch: $timeout_tree_output"
+    verify_admitted_campaign_identity
 
     publish_crash_output=$(/usr/bin/bash "$RUNNER" --self-test-publish-crashes 2>&1) ||
         invalid "runner publish-crash controls failed: $publish_crash_output"
     [[ $publish_crash_output == 'current_profile_g5_publish_crash_test=PASS' ]] ||
         invalid "runner publish-crash control output mismatch: $publish_crash_output"
+    verify_admitted_campaign_identity
 fi
 
 trap_line=$(line_of_last '^[[:space:]]{4}trap on_exit EXIT$')
@@ -549,6 +636,7 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         (( CHILD_RC != 0 )) || fail "runner self-test mutation survived: $label"
         [[ $CHILD_OUTPUT == "current_profile_g5_self_test=FAIL reason=$expected_reason" ]] ||
             invalid "runner self-test mutation failed at unrelated assertion: $label rc=$CHILD_RC output=$CHILD_OUTPUT"
+        verify_admitted_campaign_identity
     }
 
     expect_runtime_mutant_red() {
@@ -594,6 +682,19 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     expect_contract_source_mutant_red helper_uses_parent_unit \
         's#CUBR_SYSTEMD_UNIT="\$fixture_unit" /usr/bin/bash#CUBR_SYSTEMD_UNIT="${CUBR_SYSTEMD_UNIT}" /usr/bin/bash#' \
         'poisoned parent unit reached pure mock output'
+
+    expect_contract_source_mutant_red post_self_test_reread_removed \
+        's/    verify_admitted_campaign_identity/    : # mutation removed campaign identity reread/' \
+        'campaign identity reread missing after self-test'
+    expect_runner_mutant_red fixture_uses_campaign_unit \
+        's/--unit="\$fixture_unit"/--unit=cubr-new24-full-binary-g5-20260810.service/' \
+        'live fixture argument vector contains campaign unit'
+    expect_runner_mutant_red double_fork_removed \
+        's/p=os.fork(); os._exit(0) if p else None; os.setsid(); p=os.fork()/p=os.fork(); os._exit(0) if p else None; os.setsid(); p=0/' \
+        'live fixture double-fork payload missing'
+    expect_contract_source_mutant_red inherited_invocation_passed \
+        's#DBUS_SESSION_BUS_ADDRESS="\$host_dbus"#DBUS_SESSION_BUS_ADDRESS="$host_dbus" INVOCATION_ID="${INVOCATION_ID:-}"#' \
+        'outer live-fixture allowlist admitted INVOCATION_ID'
 
     expect_runner_mutant_red source_base \
         's/830a9a31deb00926a97f3fa5bd74f58003573fc0/deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/' \

@@ -489,8 +489,17 @@ admission() {
     require_deadline admission-perf-events
     discover_perf_events
     require_deadline admission-runner-contract
-    run_bounded 900 /usr/bin/env RUNNER="${BASH_SOURCE[0]}" MAPPER="$MAPPER_SOURCE" SELF_MUTATION_TESTS=1 \
-        /usr/bin/bash "$RUNNER_TEST_SOURCE" >"$dir/runner-contract-test.txt"
+    /usr/bin/mkdir -m 0700 -- "$PREFLIGHT_DIR/live-fixture"
+    run_bounded 900 /usr/bin/env \
+        RUNNER="${BASH_SOURCE[0]}" MAPPER="$MAPPER_SOURCE" SELF_MUTATION_TESTS=1 \
+        CUBR_REMOTE_LIVE_FIXTURE=1 CUBR_ENFORCE_CAMPAIGN_REREAD=1 \
+        CUBR_ADMITTED_SYSTEMD_UNIT="$SYSTEMD_UNIT" \
+        CUBR_ADMITTED_INVOCATION_ID="$INVOCATION_ID" \
+        CUBR_ADMITTED_MAIN_PID="$$" \
+        CUBR_ADMITTED_CONTROL_GROUP="$CONTROL_GROUP" \
+        /usr/bin/bash "$RUNNER_TEST_SOURCE" "$PREFLIGHT_DIR/live-fixture" \
+        >"$PREFLIGHT_DIR/runner-contract-test.txt"
+    /usr/bin/chmod 0444 -- "$PREFLIGHT_DIR/runner-contract-test.txt"
     run_bounded 30 /usr/bin/python3 "$MAPPER_SOURCE" --help >"$dir/mapper-help.txt"
     {
         printf 'source_commit=%s\n' "$CODE_COMMIT"
@@ -1891,35 +1900,53 @@ self_test_cgroup_live_worker() {
 }
 
 self_test_cgroup_live() {
-    local root result unit rc output runner_path
-    if ! /usr/bin/systemctl --user show-environment >/dev/null 2>&1; then
-        printf 'current_profile_g5_cgroup_live_test=SKIP reason=user-systemd-unavailable\n'
-        return 0
-    fi
+    local export_dir=${1:-} root fixture_result fixture_unit runner_path systemd_output rc result_sha output_sha
+    local -a systemd_args
+    [[ -d $export_dir && ! -L $export_dir ]] || die 'live fixture export directory is unsafe'
     root=$(/usr/bin/mktemp -d)
-    result=$root/cgroup-live.tsv
-    unit=current-profile-g5-cgroup-selftest-$$.service
+    fixture_result=$root/cgroup-live.tsv
+    fixture_unit=current-profile-g5-cgroup-selftest-$$.service
     runner_path=$(/usr/bin/readlink -f -- "${BASH_SOURCE[0]}")
+    systemd_output=$root/systemd-run.output.txt
+    systemd_args=(
+        /usr/bin/systemd-run --user --wait --collect
+        --unit="$fixture_unit" --service-type=exec
+        --property=Restart=no --property=KillMode=control-group
+        --setenv=CUBR_SYSTEMD_UNIT="$fixture_unit"
+        --setenv=CUBR_CGROUP_SYSTEMCTL_USER=1
+        --setenv=CUBR_CGROUP_LIVE_RESULT="$fixture_result"
+        /usr/bin/bash "$runner_path" --self-test-cgroup-live-worker
+    )
+    printf '%q ' "${systemd_args[@]}" >"$root/systemd-run.argv"
+    printf '\n' >>"$root/systemd-run.argv"
+    /usr/bin/grep -qF -- "--unit=$fixture_unit" "$root/systemd-run.argv" ||
+        die 'live fixture argument vector is missing fresh unit authority'
+    /usr/bin/grep -qF -- "--setenv=CUBR_CGROUP_LIVE_RESULT=$fixture_result" "$root/systemd-run.argv" ||
+        die 'live fixture argument vector is missing fixture result authority'
+    ! /usr/bin/grep -qF 'g4-live-authority-must-not-be-used.service' "$root/systemd-run.argv" ||
+        die 'live fixture argument vector contains poisoned parent unit'
+    ! /usr/bin/grep -qF 'cubr-new24-full-binary-g5-20260810.service' "$root/systemd-run.argv" ||
+        die 'live fixture argument vector contains campaign unit'
+    ! /usr/bin/grep -Eq 'CUBR_ADMITTED_|INVOCATION_ID' "$root/systemd-run.argv" ||
+        die 'live fixture argument vector contains admitted campaign authority'
     set +e
-    output=$(/usr/bin/systemd-run --user --wait --pipe --collect --unit "$unit" \
-        -p Type=exec -p Restart=no -p RuntimeMaxSec=30s -p TimeoutStopSec=1s \
-        -p KillMode=control-group -p KillSignal=SIGTERM -p FinalKillSignal=SIGKILL \
-        --setenv="CUBR_SYSTEMD_UNIT=$unit" --setenv=CUBR_CGROUP_SYSTEMCTL_USER=1 \
-        --setenv="CUBR_CGROUP_LIVE_RESULT=$result" \
-        /usr/bin/bash "$runner_path" --self-test-cgroup-live-worker 2>&1)
+    "${systemd_args[@]}" >"$systemd_output" 2>&1
     rc=$?
     set -e
-    if (( rc == 0 )) || [[ ! -f $result ]] ||
-       ! /usr/bin/grep -qF 'cgroup_new_pid=' "$result" ||
-       ! /usr/bin/grep -qF "unit_stop_request=$unit scope=user" "$result" ||
-       /usr/bin/grep -qF 'live_cgroup_guard_unexpected_return=' "$result" ||
-       /usr/bin/systemctl --user is-active --quiet "$unit"; then
-        printf 'current_profile_g5_cgroup_live_test=FAIL rc=%s output=%s\n' "$rc" "$output"
-        /usr/bin/rm -rf -- "$root"
-        exit 1
-    fi
+    (( rc != 0 )) || die 'live fixture unexpectedly returned success'
+    [[ -f $fixture_result && ! -L $fixture_result ]] || die 'live fixture result is missing or unsafe'
+    /usr/bin/grep -qF 'cgroup_new_pid=' "$fixture_result" || die 'live fixture did not retain a new cgroup PID'
+    /usr/bin/grep -qF "unit_stop_request=$fixture_unit scope=user" "$fixture_result" ||
+        die 'live fixture did not request the exact fixture unit stop'
+    ! /usr/bin/grep -qF 'live_cgroup_guard_unexpected_return=' "$fixture_result" ||
+        die 'live cgroup guard unexpectedly returned'
+    /usr/bin/install -m 0444 -- "$fixture_result" "$export_dir/cgroup-live.tsv"
+    /usr/bin/install -m 0444 -- "$systemd_output" "$export_dir/systemd-run.output.txt"
+    result_sha=$(sha "$export_dir/cgroup-live.tsv")
+    output_sha=$(sha "$export_dir/systemd-run.output.txt")
     /usr/bin/rm -rf -- "$root"
-    printf 'current_profile_g5_cgroup_live_test=PASS\n'
+    printf 'current_profile_g5_cgroup_live_test=PASS result_sha256=%s test_output_sha256=%s\n' \
+        "$result_sha" "$output_sha"
 }
 
 self_test_cgroup_precommit() {
