@@ -1849,7 +1849,7 @@ self_test_cgroup() {
         exit 1
     fi
     /usr/bin/rm -rf -- "$root"
-    printf 'current_profile_g5_cgroup_test=PASS\n'
+    printf 'current_profile_g5_cgroup_test=PASS unit=mock.unit\n'
 }
 
 self_test_cgroup_live_worker() {
@@ -1974,7 +1974,7 @@ self_test_cgroup_precommit() {
     fi
     /usr/bin/chmod -R u+w "$root" 2>/dev/null || true
     /usr/bin/rm -rf -- "$root"
-    printf 'current_profile_g5_cgroup_precommit_test=PASS\n'
+    printf 'current_profile_g5_cgroup_precommit_test=PASS unit=precommit-disconnected.service\n'
 }
 
 self_test_publish() {

@@ -11,6 +11,14 @@ readonly SELF=$TEST_DIR/current-profile-g5-run-test.sh
 RUNNER=${RUNNER:-$TEST_DIR/current-profile-g5-run.sh}
 MAPPER=${MAPPER:-$TEST_DIR/current_profile_g5_map.py}
 SELF_MUTATION_TESTS=${SELF_MUTATION_TESTS:-1}
+readonly POISONED_PARENT_UNIT=g4-live-authority-must-not-be-used.service
+readonly LIVE_G5_CAMPAIGN_UNIT=cubr-new24-full-binary-g5-20260810.service
+readonly PURE_MOCK_PATH=/usr/bin:/bin
+
+export CUBR_SYSTEMD_UNIT=$POISONED_PARENT_UNIT
+export INVOCATION_ID=g4-live-authority-must-not-be-used
+export CUBR_CGROUP_SYSTEMCTL_USER=1
+export CUBR_CGROUP_LIVE_RESULT=/tmp/g4-live-authority-must-not-be-used.result
 
 fail() {
     printf 'current_profile_g5_contract=FAIL reason=%s\n' "$1" >&2
@@ -20,6 +28,21 @@ fail() {
 invalid() {
     printf 'current_profile_g5_contract=HARNESS_INVALID reason=%s\n' "$1" >&2
     exit 2
+}
+
+assert_mock_output_isolated() {
+    local output=$1 expected_unit=$2
+    [[ $output == *"unit=$expected_unit"* ]] ||
+        invalid "pure mock output missing expected unit: $expected_unit output=$output"
+    [[ $output != *"$POISONED_PARENT_UNIT"* ]] ||
+        fail 'poisoned parent unit reached pure mock output'
+    [[ $output != *"$LIVE_G5_CAMPAIGN_UNIT"* ]] ||
+        fail 'live campaign unit reached pure mock output'
+}
+
+run_pure_mock_cgroup() {
+    local fixture_unit=$1 mode=$2
+    /usr/bin/env -i LC_ALL=C PATH="$PURE_MOCK_PATH" CUBR_SYSTEMD_UNIT="$fixture_unit" /usr/bin/bash "$RUNNER" "$mode"
 }
 
 require_runner_fixed() {
@@ -40,6 +63,17 @@ line_of_last() {
 
 [[ -f $RUNNER && ! -L $RUNNER ]] || invalid "runner not found or unsafe: $RUNNER"
 [[ -f $MAPPER && ! -L $MAPPER ]] || invalid "mapper not found or unsafe: $MAPPER"
+
+pure_mock_helper_line=$(/usr/bin/awk '
+    /^run_pure_mock_cgroup\(\) \{$/ { helper = 1; next }
+    helper && /^}$/ { exit }
+    helper && /\/usr\/bin\/env/ { print; exit }
+' "$SELF")
+if [[ $pure_mock_helper_line == *'CUBR_SYSTEMD_UNIT="${CUBR_SYSTEMD_UNIT}"'* ]]; then
+    fail 'poisoned parent unit reached pure mock output'
+fi
+[[ $pure_mock_helper_line == '    /usr/bin/env -i LC_ALL=C PATH="$PURE_MOCK_PATH" CUBR_SYSTEMD_UNIT="$fixture_unit" /usr/bin/bash "$RUNNER" "$mode"' ]] ||
+    fail 'pure mock helper must start from an empty environment'
 
 runner_literals=(
     '/root/cubr-new24-full-binary-g5-src'
@@ -369,16 +403,18 @@ publish_output=$(/usr/bin/bash "$RUNNER" --self-test-publish 2>&1) ||
 [[ $publish_output == 'current_profile_g5_publish_test=PASS' ]] ||
     invalid "runner durable-publish positive control output mismatch: $publish_output"
 
-cgroup_output=$(/usr/bin/bash "$RUNNER" --self-test-cgroup 2>&1) ||
+cgroup_output=$(run_pure_mock_cgroup mock.unit --self-test-cgroup 2>&1) ||
     invalid "runner cgroup containment control failed: $cgroup_output"
-[[ $cgroup_output == 'current_profile_g5_cgroup_test=PASS' ]] ||
+[[ $cgroup_output == 'current_profile_g5_cgroup_test=PASS unit=mock.unit' ]] ||
     invalid "runner cgroup containment output mismatch: $cgroup_output"
+assert_mock_output_isolated "$cgroup_output" mock.unit
 
-cgroup_precommit_output=$(/usr/bin/env CUBR_SYSTEMD_UNIT=precommit-disconnected.service \
-    /usr/bin/bash "$RUNNER" --self-test-cgroup-precommit 2>&1) ||
+cgroup_precommit_output=$(run_pure_mock_cgroup precommit-disconnected.service \
+    --self-test-cgroup-precommit 2>&1) ||
     invalid "runner cgroup precommit counterexample failed: $cgroup_precommit_output"
-[[ $cgroup_precommit_output == 'current_profile_g5_cgroup_precommit_test=PASS' ]] ||
+[[ $cgroup_precommit_output == 'current_profile_g5_cgroup_precommit_test=PASS unit=precommit-disconnected.service' ]] ||
     invalid "runner cgroup precommit counterexample output mismatch: $cgroup_precommit_output"
+assert_mock_output_isolated "$cgroup_precommit_output" precommit-disconnected.service
 
 publish_write_output=$(/usr/bin/bash "$RUNNER" --self-test-publish-writes 2>&1) ||
     invalid "runner checked publication write control failed: $publish_write_output"
@@ -498,6 +534,35 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         /usr/bin/grep -qF "$expected_fragment" <<<"$CHILD_OUTPUT" ||
             invalid "runtime mutation failed at unrelated control: $label rc=$CHILD_RC output=$CHILD_OUTPUT"
     }
+
+    expect_contract_source_mutant_red() {
+        local label=$1 expression=$2 expected_fragment=$3 mutant_dir mutant
+        mutant_dir=$mutation_root/contract-$label
+        mutant=$mutant_dir/current-profile-g5-run-test.sh
+        /usr/bin/mkdir -p -- "$mutant_dir"
+        /usr/bin/cp -- "$SELF" "$mutant"
+        /usr/bin/sed -i "$expression" "$mutant"
+        ! /usr/bin/cmp -s -- "$SELF" "$mutant" || fail "contract source mutation did not change test: $label"
+        capture_child /usr/bin/env \
+            CUBR_SYSTEMD_UNIT="$POISONED_PARENT_UNIT" \
+            INVOCATION_ID=g4-live-authority-must-not-be-used \
+            CUBR_CGROUP_SYSTEMCTL_USER=1 \
+            CUBR_CGROUP_LIVE_RESULT=/tmp/g4-live-authority-must-not-be-used.result \
+            SELF_MUTATION_TESTS=0 RUNNER="$RUNNER" MAPPER="$MAPPER" \
+            /usr/bin/bash "$mutant"
+        (( CHILD_RC != 0 )) || fail "contract source mutation survived: $label"
+        ! /usr/bin/grep -qF 'current_profile_g5_contract=PASS' <<<"$CHILD_OUTPUT" ||
+            invalid "contract source mutation emitted PASS: $label"
+        /usr/bin/grep -qF -- "$expected_fragment" <<<"$CHILD_OUTPUT" ||
+            invalid "contract source mutation failed at unrelated assertion: $label rc=$CHILD_RC output=$CHILD_OUTPUT"
+    }
+
+    expect_contract_source_mutant_red helper_without_empty_environment \
+        's#^    /usr/bin/env -i LC_ALL=C PATH=#    /usr/bin/env LC_ALL=C PATH=#' \
+        'pure mock helper must start from an empty environment'
+    expect_contract_source_mutant_red helper_uses_parent_unit \
+        's#CUBR_SYSTEMD_UNIT="\$fixture_unit" /usr/bin/bash#CUBR_SYSTEMD_UNIT="${CUBR_SYSTEMD_UNIT}" /usr/bin/bash#' \
+        'poisoned parent unit reached pure mock output'
 
     expect_runner_mutant_red source_base \
         's/830a9a31deb00926a97f3fa5bd74f58003573fc0/deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/' \
