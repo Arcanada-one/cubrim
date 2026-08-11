@@ -1,0 +1,7 @@
+[NOT REACHED: no systemd transient unit was submitted under G6. The exact-once
+prebuild (Task 5) terminated NO-ATTEMPT before Task 6, so neither
+cubr-new24-full-binary-g6-admission-20260811.service nor
+cubr-new24-full-binary-g6-20260811.service was ever created. Both units were
+observed LoadState=not-found immediately before and immediately after the
+prebuild invocation. No InvocationID, MainPID, cgroup, or terminal state
+exists to record.]
