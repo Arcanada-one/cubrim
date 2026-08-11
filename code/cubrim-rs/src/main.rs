@@ -7,12 +7,10 @@ mod license;
 mod self_update;
 
 use std::process;
-use std::time::Instant;
 
-use archive::{add_archive, extract_or_decompress, list_archive, test_archive};
-use clap::Parser;
+use archive::{add_archive, delete_archive_members, extract_archive, extract_archive_flat, list_archive, test_archive};
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands};
-use cubrim::{decode, encode_with_config};
 
 fn main() {
     let cli = Cli::parse();
@@ -48,64 +46,19 @@ fn run(cli: Cli) -> Result<(), AppError> {
     }
 
     match cli.command {
-        Some(Commands::Compress(args)) => {
-            let started = Instant::now();
-            let data = std::fs::read(&args.input);
-            match data {
-                Ok(data) => {
-                    let config = args.encode_config();
-                    let blob = encode_with_config(&data, &config);
-                    std::fs::write(&args.output, &blob)
-                        .map(|_| {
-                            if !args.quiet {
-                                let ratio = if data.is_empty() {
-                                    0.0
-                                } else {
-                                    blob.len() as f64 / data.len() as f64
-                                };
-                                eprintln!(
-                                    "compressed: {} bytes -> {} bytes ratio={:.6} time_ms={}",
-                                    data.len(),
-                                    blob.len(),
-                                    ratio,
-                                    started.elapsed().as_millis()
-                                );
-                            }
-                        })
-                        .map_err(AppError::from)
-                }
-                Err(err) => Err(AppError::from(err)),
-            }
-        }
-        Some(Commands::Decompress(args)) => {
-            let started = Instant::now();
-            let blob = std::fs::read(&args.input);
-            match blob {
-                Ok(blob) => match decode(&blob) {
-                    Ok(data) => std::fs::write(&args.output, &data)
-                        .map(|_| {
-                            if !args.quiet {
-                                eprintln!(
-                                    "decompressed: {} bytes -> {} bytes time_ms={}",
-                                    blob.len(),
-                                    data.len(),
-                                    started.elapsed().as_millis()
-                                );
-                            }
-                        })
-                        .map_err(AppError::from),
-                    Err(err) => Err(AppError::integrity(err.to_string())),
-                },
-                Err(err) => Err(AppError::from(err)),
-            }
-        }
         Some(Commands::Add(args)) => add_archive(args),
-        Some(Commands::Extract(args)) => extract_or_decompress(args),
+        Some(Commands::Extract(args)) => extract_archive(args),
+        Some(Commands::ExtractFlat(args)) => extract_archive_flat(args),
         Some(Commands::List(args)) => list_archive(args),
         Some(Commands::Test(args)) => test_archive(args),
-        None => Err(AppError::usage(
-            "no command supplied; run `cubrim --help` for usage",
-        )),
+        Some(Commands::Delete(args)) => delete_archive_members(args),
+        None => {
+            println!("cubrim {}", env!("CARGO_PKG_VERSION"));
+            let mut cmd = Cli::command();
+            cmd.print_help().map_err(AppError::from)?;
+            println!();
+            Ok(())
+        }
     }
 }
 
