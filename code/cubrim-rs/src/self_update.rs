@@ -72,6 +72,7 @@ fn parse_version(raw: &str) -> Result<Version, AppError> {
 }
 
 fn download_to_temp(platform: &ReleasePlatform) -> Result<PathBuf, AppError> {
+    validate_download_url(&platform.url)?;
     let dir = std::env::temp_dir().join(format!("cubrim-update-{}", std::process::id()));
     fs::create_dir_all(&dir).map_err(AppError::from)?;
     let path = dir.join("cubrim.new");
@@ -84,6 +85,44 @@ fn download_to_temp(platform: &ReleasePlatform) -> Result<PathBuf, AppError> {
     io::copy(&mut response, &mut out).map_err(AppError::from)?;
     Ok(path)
 }
+
+/// Reject release URLs a legitimate manifest should never contain.
+///
+/// This is defence in depth, not a trust anchor. The expected SHA-256 is
+/// supplied by the same `/api/release-check` response that supplies the URL,
+/// so a forged or compromised manifest can still name an attacker host and a
+/// matching hash. Only a signature over the release, verified against a key
+/// this binary already trusts, closes that; see
+/// `documentation/ephemeral/research/CUBR-SELFUPDATE-TRUST-20260811.md`.
+///
+/// What this *does* close needs no knowledge of the release host:
+/// a plaintext download, and credentials smuggled into the authority.
+fn validate_download_url(raw: &str) -> Result<(), AppError> {
+    const SCHEME: &str = "https://";
+    let head = raw
+        .get(..SCHEME.len())
+        .ok_or_else(|| AppError::integrity(URL_NOT_HTTPS))?;
+    if !head.eq_ignore_ascii_case(SCHEME) {
+        return Err(AppError::integrity(URL_NOT_HTTPS));
+    }
+    let authority = raw[SCHEME.len()..]
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    if authority.is_empty() {
+        return Err(AppError::integrity(
+            "release URL has no host; refusing to download an update",
+        ));
+    }
+    if authority.contains('@') {
+        return Err(AppError::integrity(
+            "release URL embeds credentials; refusing to download an update",
+        ));
+    }
+    Ok(())
+}
+
+const URL_NOT_HTTPS: &str = "release URL is not https; refusing to download an update";
 
 fn verify_sha256(path: &Path, expected_hex: &str) -> Result<(), AppError> {
     let bytes = fs::read(path).map_err(AppError::from)?;
@@ -135,6 +174,54 @@ fn confirm(prompt: &str) -> Result<bool, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn https_release_url_is_accepted() {
+        validate_download_url("https://example.invalid/cubrim-linux-x86_64").unwrap();
+        validate_download_url("HTTPS://EXAMPLE.INVALID/a").unwrap();
+    }
+
+    #[test]
+    fn plaintext_release_url_is_refused() {
+        let err = validate_download_url("http://example.invalid/cubrim").unwrap_err();
+        assert_eq!(err.exit_code, 2);
+        let err = validate_download_url("ftp://example.invalid/cubrim").unwrap_err();
+        assert_eq!(err.exit_code, 2);
+    }
+
+    #[test]
+    fn credentials_in_release_url_are_refused() {
+        let err = validate_download_url("https://user:pass@evil.invalid/cubrim").unwrap_err();
+        assert_eq!(err.exit_code, 2);
+    }
+
+    #[test]
+    fn hostless_or_truncated_release_url_is_refused() {
+        assert!(validate_download_url("https://").is_err());
+        assert!(validate_download_url("https://?q=1").is_err());
+        assert!(validate_download_url("http").is_err());
+        assert!(validate_download_url("").is_err());
+    }
+
+    #[test]
+    fn download_to_temp_rejects_a_bad_url_before_touching_network_or_disk() {
+        let platform = ReleasePlatform {
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+            url: "http://evil.invalid/cubrim".to_string(),
+            sha256: "00".repeat(32),
+        };
+        let dir = std::env::temp_dir().join(format!("cubrim-update-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let err = download_to_temp(&platform).unwrap_err();
+
+        assert_eq!(err.exit_code, 2);
+        assert!(
+            !dir.exists(),
+            "a rejected URL must not create the update directory"
+        );
+    }
 
     #[test]
     fn sha256_mismatch_fails_closed_and_removes_temp_file() {
