@@ -7,7 +7,8 @@ export LC_ALL=C
 
 TEST_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 readonly TEST_DIR
-readonly SELF=$TEST_DIR/current-profile-g5-run-test.sh
+SELF=$(/usr/bin/readlink -f -- "${BASH_SOURCE[0]}")
+readonly SELF
 RUNNER=${RUNNER:-$TEST_DIR/current-profile-g5-run.sh}
 MAPPER=${MAPPER:-$TEST_DIR/current_profile_g5_map.py}
 SELF_MUTATION_TESTS=${SELF_MUTATION_TESTS:-1}
@@ -97,6 +98,9 @@ line_of_last() {
 
 [[ -f $RUNNER && ! -L $RUNNER ]] || invalid "runner not found or unsafe: $RUNNER"
 [[ -f $MAPPER && ! -L $MAPPER ]] || invalid "mapper not found or unsafe: $MAPPER"
+canonical_self=$(/usr/bin/readlink -f -- "${BASH_SOURCE[0]}")
+[[ $SELF == "$canonical_self" ]] || fail 'contract SELF is not canonicalized from BASH_SOURCE'
+[[ -f $SELF && ! -L $SELF ]] || invalid "contract self not found or unsafe: $SELF"
 
 live_fixture_helper=$(/usr/bin/awk '
     /^run_user_systemd_fixture\(\) \{/ {inside=1}
@@ -136,6 +140,7 @@ require_campaign_reread_after() {
     anchor_line=$(/usr/bin/grep -nF -- "$anchor" "$SELF" | /usr/bin/cut -d: -f1)
     next_statement=$(/usr/bin/awk -v start="$anchor_line" '
         NR <= start || /^[[:space:]]*$/ {next}
+        /^[[:space:]]*#/ {next}
         /^[[:space:]]*fi[[:space:]]*$/ {next}
         {print; exit}
     ' "$SELF")
@@ -644,6 +649,31 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         invalid "positive control failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
     fi
 
+    renamed_contract_dir=$mutation_root/deployed-basename
+    renamed_contract=$renamed_contract_dir/cubr-new24-full-binary-g5-run-test.sh
+    /usr/bin/mkdir -- "$renamed_contract_dir"
+    /usr/bin/cp -- "$SELF" "$renamed_contract"
+    capture_child /usr/bin/env CUBR_REMOTE_LIVE_FIXTURE=0 SELF_MUTATION_TESTS=0 \
+        RUNNER="$RUNNER" MAPPER="$MAPPER" /usr/bin/bash "$renamed_contract"
+    if ! { (( CHILD_RC == 0 )) && [[ $CHILD_OUTPUT == 'current_profile_g5_contract=PASS' ]]; }; then
+        invalid "renamed deployed-basename control failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
+    fi
+
+    comment_variant_dir=$mutation_root/comment-only-adjacency
+    comment_variant=$comment_variant_dir/current-profile-g5-run-test.sh
+    /usr/bin/mkdir -- "$comment_variant_dir"
+    /usr/bin/cp -- "$SELF" "$comment_variant"
+    /usr/bin/sed -i \
+        '0,/^    verify_admitted_campaign_identity$/s//    # harmless comment-only adjacency separator\n    verify_admitted_campaign_identity/' \
+        "$comment_variant"
+    ! /usr/bin/cmp -s -- "$SELF" "$comment_variant" ||
+        fail 'comment-only adjacency control did not change contract source'
+    capture_child /usr/bin/env CUBR_REMOTE_LIVE_FIXTURE=0 SELF_MUTATION_TESTS=0 \
+        RUNNER="$RUNNER" MAPPER="$MAPPER" /usr/bin/bash "$comment_variant"
+    if ! { (( CHILD_RC == 0 )) && [[ $CHILD_OUTPUT == 'current_profile_g5_contract=PASS' ]]; }; then
+        invalid "comment-only adjacency control failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
+    fi
+
     capture_child /usr/bin/env SELF_MUTATION_TESTS=0 RUNNER="$mutation_root/missing.sh" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
     if ! { (( CHILD_RC == 2 )) && [[ $CHILD_OUTPUT == current_profile_g5_contract=HARNESS_INVALID\ reason=runner\ not\ found\ or\ unsafe:* ]]; }; then
         invalid "setup-negative control failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
@@ -691,9 +721,10 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     }
 
     expect_contract_source_mutant_red() {
-        local label=$1 expression=$2 expected_fragment=$3 mutant_dir mutant
+        local label=$1 expression=$2 expected_fragment=$3
+        local basename=${4:-current-profile-g5-run-test.sh} mutant_dir mutant
         mutant_dir=$mutation_root/contract-$label
-        mutant=$mutant_dir/current-profile-g5-run-test.sh
+        mutant=$mutant_dir/$basename
         /usr/bin/mkdir -p -- "$mutant_dir"
         /usr/bin/cp -- "$SELF" "$mutant"
         /usr/bin/sed -i "$expression" "$mutant"
@@ -719,6 +750,10 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     expect_contract_source_mutant_red helper_uses_parent_unit \
         's#CUBR_SYSTEMD_UNIT="\$fixture_unit" /usr/bin/bash#CUBR_SYSTEMD_UNIT="${CUBR_SYSTEMD_UNIT}" /usr/bin/bash#' \
         'poisoned parent unit reached pure mock output'
+    expect_contract_source_mutant_red self_hardcodes_original_basename \
+        's#^SELF=.*#SELF=$TEST_DIR/current-profile-g5-run-test.sh#' \
+        'contract SELF is not canonicalized from BASH_SOURCE' \
+        'cubr-new24-full-binary-g5-run-test.sh'
 
     expect_contract_source_mutant_red post_self_test_reread_removed \
         's/    verify_admitted_campaign_identity/    : # mutation removed campaign identity reread/' \
