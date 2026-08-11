@@ -141,3 +141,125 @@ fn set_error(message: &str) {
         slot.push_str(message);
     });
 }
+
+// ---------------------------------------------------------------------------
+// Streaming ABI
+// ---------------------------------------------------------------------------
+//
+// One stream at a time, matching the single-output model above. A page that
+// wants concurrent streams instantiates the module twice — cheaper than
+// handle-table bookkeeping across the ABI for a 50 KB decoder.
+//
+//   `cbr_stream_open(max_out)`         start a stream
+//   `cbr_stream_push(ptr, len)`        feed bytes; 1 = ok, 0 = failed
+//   `cbr_stream_fresh_ptr/len()`       bytes the last push decoded
+//   `cbr_stream_finish()`              verify length + checksum; 1 = ok
+//   `cbr_stream_close()`               release
+
+use crate::StreamDecoder;
+
+thread_local! {
+    static STREAM: RefCell<Option<StreamDecoder>> = const { RefCell::new(None) };
+    static FRESH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Begin a streaming decode. `max_out` of 0 means the module default.
+#[no_mangle]
+pub extern "C" fn cbr_stream_open(max_out: usize) {
+    let limits = DecodeLimits {
+        max_output_size: if max_out == 0 {
+            DecodeLimits::DEFAULT_MAX_OUTPUT
+        } else {
+            max_out
+        },
+    };
+    STREAM.with(|slot| *slot.borrow_mut() = Some(StreamDecoder::new(limits)));
+    FRESH.with(|slot| slot.borrow_mut().clear());
+    LAST_ERROR.with(|slot| slot.borrow_mut().clear());
+}
+
+/// Feed the next chunk. Returns 1 on success — the bytes it decoded are then
+/// at [`cbr_stream_fresh_ptr`] for [`cbr_stream_fresh_len`] bytes — or 0, with
+/// the reason at [`cbr_last_error_ptr`].
+///
+/// # Safety
+/// `ptr[..len]` must be readable for the duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn cbr_stream_push(ptr: *const u8, len: usize) -> u32 {
+    if ptr.is_null() && len != 0 {
+        set_error("null chunk pointer");
+        return 0;
+    }
+    // SAFETY: the caller guarantees ptr[..len] is readable.
+    let chunk = if len == 0 {
+        &[][..]
+    } else {
+        unsafe { core::slice::from_raw_parts(ptr, len) }
+    };
+    STREAM.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(stream) = slot.as_mut() else {
+            set_error("no stream open");
+            return 0;
+        };
+        match stream.push(chunk) {
+            Ok(fresh) => {
+                FRESH.with(|out| {
+                    let mut out = out.borrow_mut();
+                    out.clear();
+                    out.extend_from_slice(fresh);
+                });
+                1
+            }
+            Err(err) => {
+                set_error(&err.0);
+                0
+            }
+        }
+    })
+}
+
+/// Pointer to the bytes the last [`cbr_stream_push`] decoded.
+#[no_mangle]
+pub extern "C" fn cbr_stream_fresh_ptr() -> *const u8 {
+    FRESH.with(|slot| slot.borrow().as_ptr())
+}
+
+/// Length of the bytes the last [`cbr_stream_push`] decoded.
+#[no_mangle]
+pub extern "C" fn cbr_stream_fresh_len() -> usize {
+    FRESH.with(|slot| slot.borrow().len())
+}
+
+/// Finish the stream: verifies the declared length and the checksum. On success
+/// the whole output is at [`cbr_out_ptr`] / [`cbr_out_len`].
+#[no_mangle]
+pub extern "C" fn cbr_stream_finish() -> u32 {
+    STREAM.with(|slot| {
+        let Some(stream) = slot.borrow_mut().take() else {
+            set_error("no stream open");
+            return 0;
+        };
+        match stream.finish() {
+            Ok(all) => {
+                OUTPUT.with(|out| *out.borrow_mut() = all);
+                1
+            }
+            Err(err) => {
+                set_error(&err.0);
+                0
+            }
+        }
+    })
+}
+
+/// Release an open stream without finishing it.
+#[no_mangle]
+pub extern "C" fn cbr_stream_close() {
+    STREAM.with(|slot| *slot.borrow_mut() = None);
+    FRESH.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        slot.clear();
+        slot.shrink_to_fit();
+    });
+}
