@@ -1205,6 +1205,24 @@ ceiling above the floor is unmeasured and, by this method, unmeasurable.
 Every figure above is per-file. No corpus aggregate is computed anywhere, and no corpus-wide average
 speedup is stated. Records: `CUBR-NCI-MATCHCAP-*`, `CUBR-SPEEDFLOOR-*`, `CUBR-XRAY-ATTRIB-*`.
 
+### Amendment — the rank language above is cross-meta, not same-host
+
+Measured after F21 was written (`CUBR-SAMEHOST-FIELD-RESULTS-20260811.md`): the ppmd and bzip2
+markers this finding quotes were never measured on this host, and **they do not transfer**. Same-host
+on x-ray, interleaved and gated: ppmd **1.84 MiB/s** against the cross-meta 25.69 (**14× lower**), and
+bzip2 **8.73** against 52.71 (**6× lower**).
+
+Two compounding causes: `d_max` is a *maximum over files*, so ppmd's 25.69 is its best file while
+x-ray is near its worst; and the host-load penalty already characterised here. cubrim's own
+discrepancy is only 2.0× precisely because its `d_max` sits on x-ray — the same leaderboard column
+means "this file" for cubrim and "some other file" for ppmd.
+
+The conclusions above are unchanged and in fact conservative: the geocm floor clears same-host ppmd
+by **15.3×** rather than the cross-meta 1.09×. But **every "ninth place" / "eighth place" phrase in
+F21 must be read as "against the cross-meta leaderboard"**, never as a same-host claim. Stated
+same-host, a perfected geocm rail at the 28.1 MiB/s floor ranks **5th of the 8 tools measured on
+x-ray** — behind lz4/zstd/gzip/brotli, ahead of xz/bzip2/current cubrim.
+
 ## Status of the pre-registered measurements
 
 | ID | question | state |
