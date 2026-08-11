@@ -1,0 +1,20 @@
+mr slice [2097152:4194304] detect_width -> None
+mr: detector declined on slice; using swept width 512
+PROBE mr/med16-res armA-weakbase continuous base    : 514,230 B  (11s)
+PROBE mr/med16-res armA-weakbase continuous base+SSE: 467,391 B  (126s)
+PROBE mr/med16-res armA-weakbase continuous SSE delta: +9.109%
+PROBE mr/med16-res armA-weakbase 64KB-reset base    : 561,677 B  (28s)
+PROBE mr/med16-res armA-weakbase 64KB-reset base+SSE: 480,691 B  (82s)
+PROBE mr/med16-res armA-weakbase 64KB-reset SSE delta: +14.418%
+PROBE mr/med16-res armB-strongbase continuous base    : 480,392 B  (7s)
+PROBE mr/med16-res armB-strongbase continuous base+SSE: 459,360 B  (45s)
+PROBE mr/med16-res armB-strongbase continuous SSE delta: +4.378%
+PROBE mr/med16-res armB-strongbase 64KB-reset base    : 529,240 B  (5s)
+PROBE mr/med16-res armB-strongbase 64KB-reset base+SSE: 472,967 B  (40s)
+PROBE mr/med16-res armB-strongbase 64KB-reset SSE delta: +10.633%
+PROBE sao/records continuous base    : 1,347,942 B  (13s)
+PROBE sao/records continuous base+SSE: 1,372,147 B  (44s)
+PROBE sao/records continuous SSE delta: -1.796%
+PROBE sao/records 64KB-reset base    : 1,552,592 B  (10s)
+PROBE sao/records 64KB-reset base+SSE: 1,550,640 B  (43s)
+PROBE sao/records 64KB-reset SSE delta: +0.126%
