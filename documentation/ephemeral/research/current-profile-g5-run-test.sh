@@ -102,6 +102,24 @@ canonical_self=$(/usr/bin/readlink -f -- "${BASH_SOURCE[0]}")
 [[ $SELF == "$canonical_self" ]] || fail 'contract SELF is not canonicalized from BASH_SOURCE'
 [[ -f $SELF && ! -L $SELF ]] || invalid "contract self not found or unsafe: $SELF"
 
+remote_live_gate_name=CUBR_REMOTE_LIVE_FIXTURE
+nested_contract_selector=SELF_MUTATION_TESTS
+nested_gate0_assignment="${remote_live_gate_name}=0"
+outer_gate1_assignment="${remote_live_gate_name}=1"
+nested_contract_lines=$({ /usr/bin/grep -F "${nested_contract_selector}=0" "$SELF" || true; })
+nested_contract_count=$(/usr/bin/wc -l <<<"$nested_contract_lines")
+[[ $nested_contract_count == 7 ]] || fail 'nested self-contract gate0 scope count mismatch'
+while IFS= read -r nested_contract_line; do
+    [[ $nested_contract_line == *"$nested_gate0_assignment"* ]] ||
+        fail 'nested self-contract inherited remote live gate'
+done <<<"$nested_contract_lines"
+nested_gate0_count=$({ /usr/bin/grep -F "$nested_gate0_assignment" "$SELF" || true; } |
+    /usr/bin/wc -l)
+[[ $nested_gate0_count == 7 ]] || fail 'nested self-contract gate0 scope count mismatch'
+outer_gate1_count=$({ /usr/bin/grep -F "$outer_gate1_assignment" "$SELF" || true; } |
+    /usr/bin/wc -l)
+[[ $outer_gate1_count == 1 ]] || fail 'outer inherited-live simulation count mismatch'
+
 live_fixture_helper=$(/usr/bin/awk '
     /^run_user_systemd_fixture\(\) \{/ {inside=1}
     inside {print}
@@ -644,7 +662,9 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         set -e
     }
 
-    capture_child /usr/bin/env SELF_MUTATION_TESTS=0 RUNNER="$RUNNER" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
+    CUBR_REMOTE_LIVE_FIXTURE=1 capture_child /usr/bin/env \
+        CUBR_REMOTE_LIVE_FIXTURE=0 SELF_MUTATION_TESTS=0 \
+        RUNNER="$RUNNER" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
     if ! { (( CHILD_RC == 0 )) && [[ $CHILD_OUTPUT == 'current_profile_g5_contract=PASS' ]]; }; then
         invalid "positive control failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
     fi
@@ -674,7 +694,8 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         invalid "comment-only adjacency control failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
     fi
 
-    capture_child /usr/bin/env SELF_MUTATION_TESTS=0 RUNNER="$mutation_root/missing.sh" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
+    capture_child /usr/bin/env CUBR_REMOTE_LIVE_FIXTURE=0 SELF_MUTATION_TESTS=0 \
+        RUNNER="$mutation_root/missing.sh" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
     if ! { (( CHILD_RC == 2 )) && [[ $CHILD_OUTPUT == current_profile_g5_contract=HARNESS_INVALID\ reason=runner\ not\ found\ or\ unsafe:* ]]; }; then
         invalid "setup-negative control failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
     fi
@@ -685,7 +706,8 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         /usr/bin/cp -- "$RUNNER" "$mutant"
         /usr/bin/sed -i "$expression" "$mutant"
         ! /usr/bin/cmp -s -- "$RUNNER" "$mutant" || fail "mutation did not change runner: $label"
-        capture_child /usr/bin/env SELF_MUTATION_TESTS=0 RUNNER="$mutant" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
+        capture_child /usr/bin/env CUBR_REMOTE_LIVE_FIXTURE=0 SELF_MUTATION_TESTS=0 \
+            RUNNER="$mutant" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
         (( CHILD_RC != 0 )) || fail "mutation survived: $label"
         ! /usr/bin/grep -qF 'current_profile_g5_contract=PASS' <<<"$CHILD_OUTPUT" ||
             invalid "mutation emitted PASS: $label"
@@ -712,7 +734,8 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         /usr/bin/cp -- "$RUNNER" "$mutant"
         /usr/bin/sed -i "$expression" "$mutant"
         ! /usr/bin/cmp -s -- "$RUNNER" "$mutant" || fail "mutation did not change runner: $label"
-        capture_child /usr/bin/env SELF_MUTATION_TESTS=0 RUNNER="$mutant" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
+        capture_child /usr/bin/env CUBR_REMOTE_LIVE_FIXTURE=0 SELF_MUTATION_TESTS=0 \
+            RUNNER="$mutant" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
         (( CHILD_RC != 0 )) || fail "runtime mutation survived: $label"
         ! /usr/bin/grep -qF 'current_profile_g5_contract=PASS' <<<"$CHILD_OUTPUT" ||
             invalid "runtime mutation emitted PASS: $label"
@@ -735,7 +758,7 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
             CUBR_CGROUP_SYSTEMCTL_USER=1 \
             CUBR_CGROUP_LIVE_RESULT=/tmp/g4-live-authority-must-not-be-used.result \
             CUBR_G5_PURE_MOCK_PARENT_CANARY="$PURE_MOCK_PARENT_CANARY" \
-            SELF_MUTATION_TESTS=0 RUNNER="$RUNNER" MAPPER="$MAPPER" \
+            CUBR_REMOTE_LIVE_FIXTURE=0 SELF_MUTATION_TESTS=0 RUNNER="$RUNNER" MAPPER="$MAPPER" \
             /usr/bin/bash "$mutant"
         (( CHILD_RC != 0 )) || fail "contract source mutation survived: $label"
         ! /usr/bin/grep -qF 'current_profile_g5_contract=PASS' <<<"$CHILD_OUTPUT" ||
@@ -754,6 +777,9 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         's#^SELF=.*#SELF=$TEST_DIR/current-profile-g5-run-test.sh#' \
         'contract SELF is not canonicalized from BASH_SOURCE' \
         'cubr-new24-full-binary-g5-run-test.sh'
+    expect_contract_source_mutant_red nested_contract_inherits_remote_live_gate \
+        '0,/CUBR_REMOTE_LIVE_FIXTURE[=]0 \(SELF_MUTATION_TESTS[=]0\)/s//\1/' \
+        'nested self-contract inherited remote live gate'
 
     expect_contract_source_mutant_red post_self_test_reread_removed \
         's/    verify_admitted_campaign_identity/    : # mutation removed campaign identity reread/' \
