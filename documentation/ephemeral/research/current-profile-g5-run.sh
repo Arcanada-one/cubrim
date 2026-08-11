@@ -142,39 +142,98 @@ print(str(value).lower() if isinstance(value, bool) else value)
 PY
 }
 
-write_new_checked() {
-    /usr/bin/python3 - "$1" "$2" <<'PY'
-import hashlib, os, secrets, sys
+checked_write_new() {
+    /usr/bin/python3 - "$1" "${2:--}" <<'PY'
+import os, secrets, stat, sys
 from pathlib import Path
-target, source = map(Path, sys.argv[1:])
-payload = source.read_bytes()
-parent = target.parent
-tmp = parent / ("." + target.name + "." + secrets.token_hex(16) + ".tmp")
-fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+
+target, source_name = Path(sys.argv[1]), sys.argv[2]
+limit = 90_000_000
+
+def read_all(fd, label):
+    chunks, total = [], 0
+    while True:
+        try:
+            chunk = os.read(fd, min(1024 * 1024, limit + 1 - total))
+        except InterruptedError:
+            continue
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > limit:
+            raise SystemExit(f"{label} exceeds size bound")
+
+if source_name == "@stdin-fd3":
+    stdin_fd = os.dup(3)
+    try:
+        payload = read_all(stdin_fd, "evidence payload")
+    finally:
+        os.close(stdin_fd)
+    if len(payload) > limit:
+        raise SystemExit("evidence payload exceeds size bound")
+else:
+    source_fd = os.open(source_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        source_stat = os.fstat(source_fd)
+        if not stat.S_ISREG(source_stat.st_mode) or source_stat.st_nlink != 1:
+            raise SystemExit("unsafe evidence source")
+        if source_stat.st_size > limit:
+            raise SystemExit("evidence source exceeds size bound")
+        payload = read_all(source_fd, "evidence source")
+    finally:
+        os.close(source_fd)
+
+parent_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+temporary = "." + target.name + "." + secrets.token_hex(16)
+temporary_exists = False
 try:
-    view = memoryview(payload)
-    while view:
-        written = os.write(fd, view)
-        if written <= 0:
-            raise OSError("zero-progress identity write")
-        view = view[written:]
-    os.fsync(fd)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                 0o600, dir_fd=parent_fd)
+    temporary_exists = True
+    try:
+        view = memoryview(payload)
+        while view:
+            try:
+                written = os.write(fd, view)
+            except InterruptedError:
+                continue
+            if written <= 0:
+                raise OSError("zero-progress identity write")
+            view = view[written:]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.link(temporary, target.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd,
+            follow_symlinks=False)
+    os.unlink(temporary, dir_fd=parent_fd)
+    temporary_exists = False
+    os.fsync(parent_fd)
+    readback_fd = os.open(target.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                          dir_fd=parent_fd)
+    try:
+        target_stat = os.fstat(readback_fd)
+        if not stat.S_ISREG(target_stat.st_mode) or target_stat.st_nlink != 1:
+            raise SystemExit("unsafe evidence target")
+        if read_all(readback_fd, "evidence readback") != payload:
+            raise SystemExit("identity readback mismatch")
+        os.fchmod(readback_fd, 0o444)
+        os.fsync(readback_fd)
+    finally:
+        os.close(readback_fd)
+    os.fsync(parent_fd)
 finally:
-    os.close(fd)
-try:
-    os.link(tmp, target, follow_symlinks=False)
-finally:
-    os.unlink(tmp)
-dirfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-try:
-    os.fsync(dirfd)
-finally:
-    os.close(dirfd)
-if target.read_bytes() != payload:
-    raise SystemExit("identity readback mismatch")
-os.chmod(target, 0o444, follow_symlinks=False)
+    if temporary_exists:
+        try:
+            os.unlink(temporary, dir_fd=parent_fd)
+        except FileNotFoundError:
+            pass
+    os.close(parent_fd)
 PY
 }
+
+write_new_checked() { checked_write_new "$1" "$2"; }
+write_new_stdin() { checked_write_new "$1" @stdin-fd3 3<&0; }
 monotonic_ns() {
     /usr/bin/python3 - <<'PY'
 import time
@@ -586,7 +645,8 @@ admission() {
     /usr/bin/install -m 0444 -- "$MAPPER_SOURCE" "$dir/mapper-test-runtime/current_profile_g5_map.py"
     /usr/bin/install -m 0444 -- "$MAPPER_TEST_SOURCE" "$dir/mapper-test-runtime/test_current_profile_g5_map.py"
     require_deadline admission-mapper-tests
-    (cd "$dir/mapper-test-runtime" && run_bounded 300 /usr/bin/python3 test_current_profile_g5_map.py) >"$dir/mapper-unit-test.txt"
+    (cd "$dir/mapper-test-runtime" && run_bounded 300 /usr/bin/env \
+        PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 test_current_profile_g5_map.py) >"$dir/mapper-unit-test.txt"
     require_deadline admission-complete
 }
 
@@ -1796,8 +1856,8 @@ self_test_mode_roots() {
     }
     refuse_existing_output
     /usr/bin/mkdir -m 0700 -- "$PARTIAL"
-    /usr/bin/printf 'mode=admission\nperformance_sample=NO\n' >"$PARTIAL/MODE-ROOT.PASS"
-    /usr/bin/chmod 0444 -- "$PARTIAL/MODE-ROOT.PASS"
+    /usr/bin/printf 'mode=admission\nperformance_sample=NO\n' |
+        write_new_stdin "$PARTIAL/MODE-ROOT.PASS"
     /usr/bin/chmod 0555 -- "$PARTIAL"
     /usr/bin/mv -T --no-clobber -- "$PARTIAL" "$OUT"
     printf 'current_profile_g5_mode_root_test=PASS\n'
@@ -1805,16 +1865,49 @@ self_test_mode_roots() {
 
 verify_launch_identity_files() {
     /usr/bin/python3 - "$1" "$2" <<'PY'
-from pathlib import Path
-import re, sys
-prereg, identity = map(Path, sys.argv[1:])
+import os, re, stat, sys
+
+def read_regular_text(path, byte_limit, row_limit, label):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        raise SystemExit(f"unsafe {label}: {error.strerror}") from error
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise SystemExit(f"unsafe {label}: not a single-link regular file")
+        if info.st_size > byte_limit:
+            raise SystemExit("launch identity input exceeds size bound")
+        chunks, total = [], 0
+        while True:
+            try:
+                chunk = os.read(fd, min(65536, byte_limit + 1 - total))
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > byte_limit:
+                raise SystemExit("launch identity input exceeds size bound")
+    finally:
+        os.close(fd)
+    try:
+        text = b"".join(chunks).decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise SystemExit("launch identity input is not exact UTF-8") from error
+    if len(text.splitlines()) > row_limit:
+        raise SystemExit("launch identity input exceeds row bound")
+    return text
+
+prereg, identity = sys.argv[1:]
 begin = "<!-- g5-protected-launch-identities-v1-begin -->\n"
 end = "<!-- g5-protected-launch-identities-v1-end -->"
-text = prereg.read_text(encoding="utf-8")
+text = read_regular_text(prereg, 1_048_576, 16_384, "launch preregistration")
 if text.count(begin) != 1 or text.count(end) != 1:
     raise SystemExit("launch identity markers must occur exactly once")
 block = text.split(begin, 1)[1].split(end, 1)[0]
-canonical = identity.read_text(encoding="utf-8")
+canonical = read_regular_text(identity, 65_536, 59, "launch identity file")
 if block != canonical:
     raise SystemExit("preregistration block and identity file differ")
 keys = (
@@ -1882,89 +1975,287 @@ persist_authenticated_admission_identity() {
     [[ $expected_sha =~ ^[0-9a-f]{64}$ && $expected_bytes =~ ^(0|[1-9][0-9]*)$ ]] ||
         die 'invalid sealed admission identity expectation'
     [[ -f $source && ! -L $source ]] || die 'unsafe sealed admission identity source'
-    [[ $(sha "$source") == "$expected_sha" ]] || die 'sealed admission identity SHA mismatch'
-    [[ $(/usr/bin/stat -c %s -- "$source") == "$expected_bytes" ]] ||
+    [[ $(run_bounded 30 /usr/bin/sha256sum -- "$source" | /usr/bin/awk '{print $1}') == "$expected_sha" ]] ||
+        die 'sealed admission identity SHA mismatch'
+    [[ $(run_bounded 30 /usr/bin/stat -c %s -- "$source") == "$expected_bytes" ]] ||
         die 'sealed admission identity byte mismatch'
-    /usr/bin/install -m 0444 -- "$source" "$target"
-    [[ $(sha "$target") == "$expected_sha" ]] || die 'persisted admission identity SHA mismatch'
-    [[ $(/usr/bin/stat -c %s -- "$target") == "$expected_bytes" ]] ||
+    write_new_checked "$target" "$source"
+    [[ $(run_bounded 30 /usr/bin/sha256sum -- "$target" | /usr/bin/awk '{print $1}') == "$expected_sha" ]] ||
+        die 'persisted admission identity SHA mismatch'
+    [[ $(run_bounded 30 /usr/bin/stat -c %s -- "$target") == "$expected_bytes" ]] ||
         die 'persisted admission identity byte mismatch'
 }
 
 launch_identity_value() {
-    /usr/bin/awk -F= -v wanted="$1" '$1 == wanted { print substr($0, index($0, "=") + 1) }' \
-        "$CUBR_LAUNCH_IDENTITIES"
+    /usr/bin/python3 - "$1" "$2" <<'PY'
+import os, stat, sys
+path, wanted = sys.argv[1:]
+fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+try:
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 65_536:
+        raise SystemExit("unsafe launch identity value source")
+    chunks, total = [], 0
+    while True:
+        try:
+            chunk = os.read(fd, min(65536, 65_537 - total))
+        except InterruptedError:
+            continue
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > 65_536:
+            raise SystemExit("launch identity value source exceeds size bound")
+    payload = b"".join(chunks)
+finally:
+    os.close(fd)
+try:
+    lines = payload.decode("utf-8", errors="strict").splitlines()
+except UnicodeDecodeError as error:
+    raise SystemExit("launch identity value source is not exact UTF-8") from error
+values = [line.partition("=")[2] for line in lines if line.partition("=")[0] == wanted]
+if len(values) != 1 or not values[0]:
+    raise SystemExit(f"launch identity value cardinality mismatch: {wanted}")
+print(values[0])
+PY
 }
 
 authenticate_campaign_launch_inputs() {
     local parser_output actual_prereg_blob actual_identities_blob
     [[ $CUBR_LAUNCH_MAIN =~ ^[0-9a-f]{40}$ && $CUBR_EXPECTED_PREREG_BLOB =~ ^[0-9a-f]{40}$ &&
        $CUBR_EXPECTED_IDENTITIES_BLOB =~ ^[0-9a-f]{40}$ ]] || die 'invalid launch Git identity'
-    /usr/bin/git -C "$INSTRUMENT_REPO" merge-base --is-ancestor \
+    run_bounded 30 /usr/bin/git -C "$INSTRUMENT_REPO" merge-base --is-ancestor \
         "$INSTRUMENT_COMMIT" "$CUBR_LAUNCH_MAIN" || die 'instrument is not ancestor of launch main'
-    actual_prereg_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
+    actual_prereg_blob=$(run_bounded 30 /usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
         "$CUBR_LAUNCH_MAIN:documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G5-20260810.md")
-    actual_identities_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
+    actual_identities_blob=$(run_bounded 30 /usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
         "$CUBR_LAUNCH_MAIN:documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G5-LAUNCH-IDENTITIES-20260810.env")
     [[ $actual_prereg_blob == "$CUBR_EXPECTED_PREREG_BLOB" ]] ||
         die 'launch-main preregistration blob mismatch'
     [[ $actual_identities_blob == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]] ||
         die 'launch-main identity blob mismatch'
-    parser_output=$(verify_launch_identity_files "$CUBR_LAUNCH_PREREG" "$CUBR_LAUNCH_IDENTITIES")
+    parser_output=$(run_bounded 30 /usr/bin/bash "${BASH_SOURCE[0]}" \
+        --verify-launch-identity-files "$CUBR_LAUNCH_PREREG" "$CUBR_LAUNCH_IDENTITIES")
     [[ $parser_output == 'current_profile_g5_launch_identity_parser=PASS schema=g5-protected-launch-identities-v1 keys=59' ]] ||
         die 'protected launch identity parser output mismatch'
-    [[ $(/usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_PREREG") == "$CUBR_EXPECTED_PREREG_BLOB" ]] ||
+    [[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_PREREG") == "$CUBR_EXPECTED_PREREG_BLOB" ]] ||
         die 'launch preregistration blob mismatch'
-    [[ $(/usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_IDENTITIES") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]] ||
+    [[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_IDENTITIES") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]] ||
         die 'launch identity blob mismatch'
-    [[ $(launch_identity_value instrument_resulting_main) == "$INSTRUMENT_COMMIT" ]] ||
+    [[ $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value \
+        "$CUBR_LAUNCH_IDENTITIES" instrument_resulting_main) == "$INSTRUMENT_COMMIT" ]] ||
         die 'launch instrument commit mismatch'
-    [[ $(launch_identity_value runner_sha256) == "$EXPECTED_RUNNER_SHA" &&
-       $(launch_identity_value runner_test_sha256) == "$EXPECTED_TEST_SHA" &&
-       $(launch_identity_value mapper_sha256) == "$EXPECTED_MAPPER_SHA" &&
-       $(launch_identity_value mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
+    [[ $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" runner_sha256) == "$EXPECTED_RUNNER_SHA" &&
+       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" runner_test_sha256) == "$EXPECTED_TEST_SHA" &&
+       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" mapper_sha256) == "$EXPECTED_MAPPER_SHA" &&
+       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
         die 'launch runtime asset identity mismatch'
-    [[ $(sha "${BASH_SOURCE[0]}") == "$EXPECTED_RUNNER_SHA" &&
-       $(sha "$RUNNER_TEST_SOURCE") == "$EXPECTED_TEST_SHA" &&
-       $(sha "$MAPPER_SOURCE") == "$EXPECTED_MAPPER_SHA" &&
-       $(sha "$MAPPER_TEST_SOURCE") == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
+    [[ $(run_bounded 30 /usr/bin/sha256sum -- "${BASH_SOURCE[0]}" | /usr/bin/awk '{print $1}') == "$EXPECTED_RUNNER_SHA" &&
+       $(run_bounded 30 /usr/bin/sha256sum -- "$RUNNER_TEST_SOURCE" | /usr/bin/awk '{print $1}') == "$EXPECTED_TEST_SHA" &&
+       $(run_bounded 30 /usr/bin/sha256sum -- "$MAPPER_SOURCE" | /usr/bin/awk '{print $1}') == "$EXPECTED_MAPPER_SHA" &&
+       $(run_bounded 30 /usr/bin/sha256sum -- "$MAPPER_TEST_SOURCE" | /usr/bin/awk '{print $1}') == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
         die 'installed runtime asset identity mismatch'
-    [[ $(launch_identity_value admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256" &&
-       $(launch_identity_value admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES" ]] ||
+    [[ $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256" &&
+       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES" ]] ||
         die 'launch admission identity expectation mismatch'
-    printf '%s\n' "$parser_output" >"$PREFLIGHT_DIR/launch-identity-parser.txt"
-    /usr/bin/chmod 0444 -- "$PREFLIGHT_DIR/launch-identity-parser.txt"
+    printf '%s\n' "$parser_output" | write_new_stdin "$PREFLIGHT_DIR/launch-identity-parser.txt"
     persist_authenticated_admission_identity
 }
 
 capture_g5_identity_inputs() {
-/root/.cargo/bin/rustc -vV >"$PREFLIGHT_DIR/rustc-version.txt"
-/root/.cargo/bin/cargo -V >"$PREFLIGHT_DIR/cargo-version.txt"
+/root/.cargo/bin/rustc -vV | write_new_stdin "$PREFLIGHT_DIR/rustc-version.txt"
+/root/.cargo/bin/cargo -V | write_new_stdin "$PREFLIGHT_DIR/cargo-version.txt"
 /usr/bin/find "$CODE_DIR/code/cubrim-rs" -xdev -type f \
   \( -name Cargo.toml -o -name Cargo.lock -o -name build.rs -o -name '*.rs' \) \
   -print0 | LC_ALL=C /usr/bin/sort -z | /usr/bin/xargs -0 /usr/bin/sha256sum \
-  >"$PREFLIGHT_DIR/cargo-inputs-manifest.tsv"
-/usr/bin/chmod 0444 "$PREFLIGHT_DIR/rustc-version.txt" \
-  "$PREFLIGHT_DIR/cargo-version.txt" "$PREFLIGHT_DIR/cargo-inputs-manifest.tsv"
+  | write_new_stdin "$PREFLIGHT_DIR/cargo-inputs-manifest.tsv"
 /usr/bin/python3 - "$PREFLIGHT_DIR/rustc-version.txt" \
-  "$PREFLIGHT_DIR/cargo-version.txt" "$PREFLIGHT_DIR/map-toolchain.json" <<'PY'
+  "$PREFLIGHT_DIR/cargo-version.txt" <<'PY' | write_new_stdin "$PREFLIGHT_DIR/map-toolchain.json"
 import json, pathlib, sys
-rustc, cargo, target = map(pathlib.Path, sys.argv[1:])
+rustc, cargo = map(pathlib.Path, sys.argv[1:])
 value = {"cargo": cargo.read_text().strip(), "release_debug": "1",
          "rustc": rustc.read_text().strip(), "taskset": "0-15", "threads": 4}
-target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+print(json.dumps(value, sort_keys=True, separators=(",", ":")))
 PY
-/usr/bin/chmod 0444 "$PREFLIGHT_DIR/map-toolchain.json"
-contract_tmp=$PREFLIGHT_DIR/sanitized-environment-contract.txt.source
 {
   printf 'schema=g5-sanitized-environment-contract-v1\n'
   printf 'pure_mock=LC_ALL,PATH,CUBR_SYSTEMD_UNIT\n'
   printf 'outer_user_systemd=LC_ALL,PATH,HOME,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS\n'
   printf 'service_outer=HOME,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,CUBR_THREADS,RAYON_NUM_THREADS,OMP_NUM_THREADS,MKL_NUM_THREADS\n'
   printf 'child_boundary=env-i\n'
-} >"$contract_tmp"
-write_new_checked "$PREFLIGHT_DIR/sanitized-environment-contract.txt" "$contract_tmp"
-/usr/bin/rm -- "$contract_tmp"
+} | write_new_stdin "$PREFLIGHT_DIR/sanitized-environment-contract.txt"
+}
+
+admission_tree_schema() {
+    /usr/bin/python3 - "$1" "$2" <<'PY'
+import hashlib, json, os, re, stat, sys
+from pathlib import Path, PurePosixPath
+
+root, mode = Path(sys.argv[1]), sys.argv[2]
+if mode not in {"emit", "verify"}:
+    raise SystemExit("unknown admission tree schema mode")
+if not root.is_dir() or root.is_symlink():
+    raise SystemExit("unsafe admission tree root")
+
+limit = 90_000_000
+def read_regular(path, maximum=limit):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise SystemExit(f"unsafe admission file: {path.relative_to(root)}")
+        if info.st_size > maximum:
+            raise SystemExit(f"admission file exceeds size bound: {path.relative_to(root)}")
+        chunks, total = [], 0
+        while True:
+            try:
+                chunk = os.read(fd, min(1024 * 1024, maximum + 1 - total))
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > maximum:
+                raise SystemExit(f"admission file exceeds size bound: {path.relative_to(root)}")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+manifest_path = root / "map/map-parts-manifest.json"
+try:
+    map_manifest = json.loads(read_regular(manifest_path, 1_048_576).decode("utf-8", errors="strict"))
+except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    raise SystemExit("invalid admission map manifest") from error
+parts = map_manifest.get("parts")
+if (not isinstance(parts, list) or not parts or map_manifest.get("part_count") != len(parts)):
+    raise SystemExit("invalid admission map part schema")
+part_names = []
+for index, part in enumerate(parts):
+    name = part.get("path") if isinstance(part, dict) else None
+    if (not isinstance(name, str) or
+            not re.fullmatch(r"g5-full-instruction-map\.part-[0-9]{5}\.tsv\.gz", name) or
+            PurePosixPath(name).name != name or part.get("part_index") != index or
+            name in part_names):
+        raise SystemExit("invalid admission map part path")
+    part_names.append(name)
+
+expected_dirs = {
+    "binary", "map", "preflight", "preflight/live-fixture",
+    "preflight/mapper-test-runtime", "suites",
+}
+expected_files = {
+    "address-smoke-feasibility.json", "address-smoke.binary-snapshot-after.tsv",
+    "address-smoke.binary-snapshot-before.tsv", "address-smoke.out",
+    "binary/admitted-snapshot.tsv", "binary/cubrim",
+    "feasibility-1.cubr", "feasibility-2.cubr", "feasibility-decoded.bin",
+    "feasibility-zero.bin",
+    "map/elf-summary.json", "map/full-map-admission.txt", "map/full-map-resource.txt",
+    "map/instruction-addresses.txt.gz", "map/map-admission-seal.json",
+    "map/map-parts-manifest.json", "map/map-summary.json.gz",
+    "map/map-worker.stderr.txt", "map/map-worker.stdout.txt", "map/objdump.txt.gz",
+    "map/prefix-coverage-audit.tsv", "map/prefix-table.tsv",
+    "map/raw-stream-evidence.tsv", "map/readelf-programs.txt", "map/readelf-sections.txt",
+    "map/resolver-a.txt.gz", "map/resolver-b.txt.gz", "map/sections.tsv", "map/segments.tsv",
+    "preflight/cargo-inputs-manifest.tsv", "preflight/cargo-version.txt",
+    "preflight/cell-inputs.tsv", "preflight/identities.txt",
+    "preflight/instrument-mapper-test.py", "preflight/instrument-mapper.py",
+    "preflight/instrument-runner-test.sh", "preflight/instrument-runner.sh",
+    "preflight/journal.tsv", "preflight/live-fixture/cgroup-live.tsv",
+    "preflight/live-fixture/systemd-run.output.txt", "preflight/map-toolchain.json",
+    "preflight/mapper-help.txt", "preflight/mapper-test-runtime/current_profile_g5_map.py",
+    "preflight/mapper-test-runtime/test_current_profile_g5_map.py",
+    "preflight/mapper-unit-test.txt", "preflight/perf-events.tsv",
+    "preflight/process-conflicts.txt", "preflight/process-snapshot.txt",
+    "preflight/runner-contract-test.txt", "preflight/rustc-version.txt",
+    "preflight/sanitized-environment-contract.txt", "preflight/systemd-cgroup-baseline.pids",
+    "preflight/systemd-contract.txt", "suites/binary-notes.txt",
+    "suites/cargo-test-release.log", "suites/generated-Cargo.lock",
+    "suites/scheme-roundtrip.log",
+}
+expected_files.update(f"map/{name}" for name in part_names)
+events = ("task-clock", "cycles", "instructions", "branches", "branch-misses",
+          "cache-references", "cache-misses", "dTLB-load-misses", "page-faults")
+expected_files.update(f"preflight/perf-{event}.csv" for event in events)
+tree_manifest = "preflight/admission-tree-manifest.tsv"
+if mode == "verify":
+    expected_files.add(tree_manifest)
+
+actual_dirs, actual_files = set(), set()
+for base, dirs, files in os.walk(root, topdown=True, followlinks=False):
+    base_path = Path(base)
+    for name in dirs:
+        path = base_path / name
+        info = path.lstat()
+        relative = path.relative_to(root).as_posix()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise SystemExit(f"unsafe admission node: {relative}")
+        actual_dirs.add(relative)
+    for name in files:
+        path = base_path / name
+        info = path.lstat()
+        relative = path.relative_to(root).as_posix()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise SystemExit(f"unsafe admission node: {relative}")
+        actual_files.add(relative)
+if actual_dirs != expected_dirs:
+    extra, missing = sorted(actual_dirs - expected_dirs), sorted(expected_dirs - actual_dirs)
+    raise SystemExit(f"admission directory schema mismatch extra={extra} missing={missing}")
+if actual_files != expected_files:
+    extra, missing = sorted(actual_files - expected_files), sorted(expected_files - actual_files)
+    raise SystemExit(f"admission file schema mismatch extra={extra} missing={missing}")
+
+forbidden = re.compile(
+    rb"(?:^|[\t ,{])(performance_sample|campaign_sample_rows|campaign_cells|selection|cell)="
+    rb"(?:YES|[1-9][0-9]*|VALID|SUPPORTED)", re.MULTILINE)
+for relative in (
+        "preflight/journal.tsv", "preflight/identities.txt", "preflight/runner-contract-test.txt",
+        "preflight/cell-inputs.tsv", "map/full-map-admission.txt", "map/raw-stream-evidence.tsv"):
+    if forbidden.search(read_regular(root / relative, 8_388_608)):
+        raise SystemExit(f"admission contains performance-like content: {relative}")
+
+try:
+    address = json.loads(read_regular(root / "address-smoke-feasibility.json", 1_048_576)
+                         .decode("utf-8", errors="strict"))
+except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    raise SystemExit("invalid address-smoke admission schema") from error
+address_keys = {
+    "schema", "purpose", "performance_interpretation", "binary_identity", "binary_snapshot",
+    "binary_sample_count", "binary_unresolved_sample_count", "binary_resolution_gate_pass",
+    "lost_record_count", "conservation", "symbol_consulted",
+}
+if (not isinstance(address, dict) or set(address) != address_keys or
+        address.get("schema") != "cubr-new24-g5-address-smoke-v1" or
+        address.get("purpose") != "mechanical-address-join-feasibility-only" or
+        address.get("performance_interpretation") != "FORBIDDEN"):
+    raise SystemExit("invalid address-smoke admission schema")
+
+cell_rows = read_regular(root / "preflight/cell-inputs.tsv", 65_536).decode("utf-8", errors="strict").splitlines()
+if len(cell_rows) != 3 or any(len(row.split("\t")) != 4 for row in cell_rows):
+    raise SystemExit("invalid admission corpus-row schema")
+perf_rows = read_regular(root / "preflight/perf-events.tsv", 65_536).decode("utf-8", errors="strict").splitlines()
+parsed_events = [row.split("\t") for row in perf_rows]
+if (len(parsed_events) != len(events) or {row[0] for row in parsed_events if len(row) == 2} != set(events) or
+        any(len(row) != 2 or row[1] not in {"supported", "unsupported"} for row in parsed_events)):
+    raise SystemExit("invalid admission perf-capability schema")
+
+rows = []
+for relative in sorted(expected_files - {tree_manifest}):
+    payload = read_regular(root / relative)
+    rows.append(f"{hashlib.sha256(payload).hexdigest()}\t{len(payload)}\t{relative}\n")
+expected_manifest = "".join(rows).encode()
+if mode == "emit":
+    sys.stdout.buffer.write(expected_manifest)
+else:
+    if read_regular(root / tree_manifest, 1_048_576) != expected_manifest:
+        raise SystemExit("admission tree manifest mismatch")
+PY
+}
+
+write_admission_tree_manifest() {
+    local root=$1
+    admission_tree_schema "$root" emit | write_new_stdin "$root/preflight/admission-tree-manifest.tsv"
 }
 
 assert_admission_has_no_performance() {
@@ -1998,15 +2289,15 @@ assert_admission_has_no_performance() {
     [[ $prec_count == 0 ]] || die 'admission contains prec artifact'
     [[ $cell_dir_count == 0 ]] || die 'admission contains campaign cell directory'
     [[ $cell_journal_count == 0 ]] || die 'admission journal contains cell row'
+    admission_tree_schema "$root" verify || die 'admission tree schema or manifest mismatch'
 }
 
 write_g5_admission_identity_set() {
-    local root=$1 target tmp
+    local root=$1 target=${2:-$1/sealed-identity-set.env}
     local instrument_tree source_tree cubrim_rs_tree runner_blob runner_test_blob
     local mapper_blob mapper_test_blob rustc_version cargo_version release_flags
     local binary_size binary_device binary_inode map_stream_sha map_manifest_sha
     local map_summary_sha map_row_count map_part_count map_seal_sha
-    target=$root/sealed-identity-set.env
     instrument_tree=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse 'HEAD^{tree}')
     source_tree=$(/usr/bin/git -C "$CODE_DIR" rev-parse 'HEAD^{tree}')
     cubrim_rs_tree=$(/usr/bin/git -C "$CODE_DIR" rev-parse HEAD:code/cubrim-rs)
@@ -2030,7 +2321,6 @@ write_g5_admission_identity_set() {
     map_row_count=$(json_value "$root/map/map-parts-manifest.json" row_count)
     map_part_count=$(json_value "$root/map/map-parts-manifest.json" part_count)
     map_seal_sha=$(sha "$root/map/map-admission-seal.json")
-    tmp=$target.tmp
     {
         printf 'schema=g5-admission-identity-set-v1\n'
         printf 'instrument_resulting_main=%s\n' "$INSTRUMENT_COMMIT"
@@ -2065,10 +2355,102 @@ write_g5_admission_identity_set() {
             "$(sha "$PREFLIGHT_DIR/live-fixture/systemd-run.output.txt")" \
             "$(/usr/bin/stat -c %s -- "$PREFLIGHT_DIR/live-fixture/systemd-run.output.txt")"
         printf 'performance_sample=NO\ncampaign_cells=0\nretained_perf_data=0\ncampaign_sample_rows=0\nselection=NO-SELECT\n'
-    } >"$tmp"
-    [[ $(/usr/bin/wc -l <"$tmp") == 46 ]] || die 'admission identity key count mismatch'
-    write_new_checked "$target" "$tmp"
-    /usr/bin/rm -- "$tmp"
+    } | write_new_stdin "$target"
+    [[ $(/usr/bin/wc -l <"$target") == 46 ]] || die 'admission identity key count mismatch'
+}
+
+compare_g5_stable_identities() {
+    /usr/bin/python3 - "$1" "$2" <<'PY'
+import os, re, stat, sys
+
+keys = (
+    "schema instrument_resulting_main instrument_tree runner_blob runner_sha256 "
+    "runner_test_blob runner_test_sha256 mapper_blob mapper_sha256 mapper_test_blob "
+    "mapper_test_sha256 source_commit source_tree cubrim_rs_tree cargo_inputs_manifest_sha256 "
+    "generated_cargo_lock_sha256 rustc_commit rustc_version cargo_version release_flags "
+    "binary_sha256 binary_build_id binary_size binary_device binary_inode mapping_schema_sha256 "
+    "corpus_manifest_sha256 corpus_rows_sha256 map_stream_sha256 map_manifest_sha256 "
+    "map_summary_sha256 map_row_count map_part_count map_seal_sha256 "
+    "sanitized_allowlist_contract_sha256 runner_contract_test_sha256 runner_contract_test_bytes "
+    "live_fixture_result_sha256 live_fixture_result_bytes live_fixture_test_output_sha256 "
+    "live_fixture_test_output_bytes performance_sample campaign_cells retained_perf_data "
+    "campaign_sample_rows selection"
+).split()
+excluded = {
+    # Re-copying the same authenticated binary changes filesystem placement only.
+    "binary_device", "binary_inode",
+    # The systemd fixture binds a fresh invocation/PID/cgroup and is intentionally run-volatile.
+    "live_fixture_result_sha256", "live_fixture_result_bytes",
+    "live_fixture_test_output_sha256", "live_fixture_test_output_bytes",
+}
+stable = [key for key in keys if key not in excluded]
+
+def parse(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        raise SystemExit(f"unsafe stable identity file: {error.strerror}") from error
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 65_536:
+            raise SystemExit("unsafe stable identity file")
+        chunks, total = [], 0
+        while True:
+            try:
+                chunk = os.read(fd, min(65536, 65_537 - total))
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > 65_536:
+                raise SystemExit("stable identity file exceeds size bound")
+    finally:
+        os.close(fd)
+    try:
+        lines = b"".join(chunks).decode("utf-8", errors="strict").splitlines()
+    except UnicodeDecodeError as error:
+        raise SystemExit("stable identity file is not exact UTF-8") from error
+    if len(lines) != len(keys):
+        raise SystemExit(f"stable identity key count mismatch: {len(lines)}")
+    parsed = {}
+    for expected, line in zip(keys, lines):
+        key, separator, value = line.partition("=")
+        if not separator or key != expected or key in parsed or not value:
+            raise SystemExit(f"invalid or reordered stable identity: {line!r}")
+        if any(ord(char) < 0x20 or ord(char) > 0x7e for char in value):
+            raise SystemExit(f"control or non-ASCII stable identity: {key}")
+        parsed[key] = value
+    hex40 = {key for key in keys if key.endswith(("_blob", "_tree", "_commit", "_main"))}
+    hex40.add("binary_build_id")
+    hex64 = {key for key in keys if key.endswith("_sha256")}
+    integers = {key for key in keys if key.endswith(("_bytes", "_count", "_size", "_device", "_inode"))}
+    for key in hex40:
+        if not re.fullmatch(r"[0-9a-f]{40}", parsed[key]):
+            raise SystemExit(f"invalid Git stable identity: {key}")
+    for key in hex64:
+        if not re.fullmatch(r"[0-9a-f]{64}", parsed[key]):
+            raise SystemExit(f"invalid SHA-256 stable identity: {key}")
+    for key in integers:
+        if not re.fullmatch(r"0|[1-9][0-9]*", parsed[key]):
+            raise SystemExit(f"invalid integer stable identity: {key}")
+    fixed = {
+        "schema": "g5-admission-identity-set-v1", "performance_sample": "NO",
+        "campaign_cells": "0", "retained_perf_data": "0", "campaign_sample_rows": "0",
+        "selection": "NO-SELECT",
+    }
+    for key, expected in fixed.items():
+        if parsed[key] != expected:
+            raise SystemExit(f"fixed stable identity mismatch: {key}")
+    return parsed
+
+admitted, current = map(parse, sys.argv[1:])
+for key in stable:
+    if admitted[key] != current[key]:
+        raise SystemExit(f"stable admission identity mismatch: {key}")
+print(f"current_profile_g5_stable_identity_compare=PASS compared={len(stable)} excluded={len(excluded)}")
+PY
 }
 
 self_test_admission_no_performance() {
@@ -2080,6 +2462,43 @@ self_test_admission_no_performance() {
     [[ -f $JOURNAL && ! -L $JOURNAL ]] || die 'unsafe admission fixture journal'
     assert_admission_has_no_performance "$fixture_root"
     printf 'current_profile_g5_admission_no_performance_test=PASS\n'
+}
+
+self_test_write_admission_manifest() {
+    local fixture_root=$1
+    [[ $fixture_root == /tmp/* && -d $fixture_root && ! -L $fixture_root ]] ||
+        die 'unsafe admission manifest fixture root'
+    [[ ! -e $fixture_root/preflight/admission-tree-manifest.tsv &&
+       ! -L $fixture_root/preflight/admission-tree-manifest.tsv ]] ||
+        die 'admission fixture manifest already exists'
+    write_admission_tree_manifest "$fixture_root"
+    printf 'current_profile_g5_admission_manifest_test=PASS\n'
+}
+
+self_test_exclusive_writes() {
+    local root target copied target_content replacement_rc symlink_rc
+    root=$(/usr/bin/mktemp -d)
+    target=$root/evidence.txt
+    printf 'original\n' | write_new_stdin "$target"
+    printf 'source\n' >"$root/source.txt"
+    write_new_checked "$root/copied.txt" "$root/source.txt"
+    set +e
+    printf 'replacement\n' | write_new_stdin "$target" >/dev/null 2>&1
+    replacement_rc=$?
+    /usr/bin/ln -s -- "$target" "$root/symlink-target"
+    printf 'symlink-replacement\n' | write_new_stdin "$root/symlink-target" >/dev/null 2>&1
+    symlink_rc=$?
+    set -e
+    copied=$(/usr/bin/cat -- "$root/copied.txt")
+    target_content=$(/usr/bin/cat -- "$target")
+    if (( replacement_rc == 0 || symlink_rc == 0 )) ||
+       [[ $target_content != original || $copied != source ]]; then
+        printf 'current_profile_g5_exclusive_write_test=FAIL\n'
+        exit 1
+    fi
+    /usr/bin/chmod -R u+w -- "$root"
+    /usr/bin/rm -rf -- "$root"
+    printf 'current_profile_g5_exclusive_write_test=PASS\n'
 }
 
 admission_feasibility_run() {
@@ -2108,6 +2527,7 @@ admission_feasibility_run() {
             die "address-smoke artifact missing or unsafe: $artifact"
         /usr/bin/rm -- "$PARTIAL/$artifact"
     done
+    write_admission_tree_manifest "$PARTIAL"
     assert_admission_has_no_performance "$PARTIAL"
     write_g5_admission_identity_set "$PARTIAL"
     /usr/bin/grep -qx 'performance_sample=NO' "$PARTIAL/sealed-identity-set.env" ||
@@ -2647,6 +3067,10 @@ main_run() {
     capture_g5_identity_inputs
     require_deadline before-full-map
     build_full_instruction_map
+    require_deadline before-stable-identity-comparison
+    write_g5_admission_identity_set "$PARTIAL" "$PREFLIGHT_DIR/campaign-stable-identity-set.env"
+    compare_g5_stable_identities "$PREFLIGHT_DIR/admission-sealed-identity-set.env" \
+        "$PREFLIGHT_DIR/campaign-stable-identity-set.env"
     require_deadline before-feasibility-fixture
     verify_feasibility_fixture "$PARTIAL"
     require_deadline before-address-smoke
@@ -2670,7 +3094,11 @@ case ${1:-} in
     --self-test) self_test ;;
     --self-test-mode-roots) self_test_mode_roots ;;
     --self-test-admission-no-performance) self_test_admission_no_performance "$2" ;;
+    --self-test-write-admission-manifest) self_test_write_admission_manifest "$2" ;;
     --verify-launch-identity-files) verify_launch_identity_files "$2" "$3" ;;
+    --launch-identity-value) launch_identity_value "$2" "$3" ;;
+    --compare-g5-stable-identities) compare_g5_stable_identities "$2" "$3" ;;
+    --self-test-exclusive-writes) self_test_exclusive_writes ;;
     --self-test-fake-cargo) self_test_fake_cargo ;;
     --self-test-cgroup-environment) self_test_cgroup_environment ;;
     --self-test-cgroup) self_test_cgroup ;;

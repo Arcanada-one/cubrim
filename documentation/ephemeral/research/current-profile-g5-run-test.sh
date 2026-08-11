@@ -341,10 +341,15 @@ runner_literals=(
     'publication_marker_bytes'
     'map_seal_sha256='
     'schema=g5-admission-identity-set-v1'
-    '[[ $(/usr/bin/wc -l <"$tmp") == 46 ]]'
+    '[[ $(/usr/bin/wc -l <"$target") == 46 ]]'
     'performance_sample=NO\ncampaign_cells=0\nretained_perf_data=0\ncampaign_sample_rows=0\nselection=NO-SELECT'
     'current_profile_g5_launch_identity_parser=PASS schema=g5-protected-launch-identities-v1 keys=59'
     'current_profile_g5_admission_no_performance_test=PASS'
+    'os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK'
+    'launch identity input exceeds size bound'
+    'admission-tree-manifest.tsv'
+    'current_profile_g5_stable_identity_compare=PASS'
+    'write_new_stdin()'
     'admission retained perf.data'
     'admission retained address-smoke raw artifact'
     'admission contains max/min attribution summary'
@@ -383,37 +388,37 @@ for literal in "${runner_literals[@]}"; do
     require_runner_fixed "$literal"
 done
 
-require_runner_named '$(launch_identity_value runner_sha256) == "$EXPECTED_RUNNER_SHA"' \
+require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" runner_sha256) == "$EXPECTED_RUNNER_SHA"' \
     'campaign launch must compare runner SHA'
-require_runner_named '$(launch_identity_value runner_test_sha256) == "$EXPECTED_TEST_SHA"' \
+require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" runner_test_sha256) == "$EXPECTED_TEST_SHA"' \
     'campaign launch must compare runner test SHA'
-require_runner_named '$(launch_identity_value mapper_sha256) == "$EXPECTED_MAPPER_SHA"' \
+require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" mapper_sha256) == "$EXPECTED_MAPPER_SHA"' \
     'campaign launch must compare mapper SHA'
-require_runner_named '$(launch_identity_value mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA"' \
+require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA"' \
     'campaign launch must compare mapper test SHA'
-require_runner_named '$(sha "${BASH_SOURCE[0]}") == "$EXPECTED_RUNNER_SHA"' \
+require_runner_named 'sha256sum -- "${BASH_SOURCE[0]}"' \
     'campaign launch must authenticate installed runner SHA'
-require_runner_named '$(sha "$RUNNER_TEST_SOURCE") == "$EXPECTED_TEST_SHA"' \
+require_runner_named 'sha256sum -- "$RUNNER_TEST_SOURCE"' \
     'campaign launch must authenticate installed runner test SHA'
-require_runner_named '$(sha "$MAPPER_SOURCE") == "$EXPECTED_MAPPER_SHA"' \
+require_runner_named 'sha256sum -- "$MAPPER_SOURCE"' \
     'campaign launch must authenticate installed mapper SHA'
-require_runner_named '$(sha "$MAPPER_TEST_SOURCE") == "$EXPECTED_MAPPER_TEST_SHA"' \
+require_runner_named 'sha256sum -- "$MAPPER_TEST_SOURCE"' \
     'campaign launch must authenticate installed mapper test SHA'
-require_runner_named '$(launch_identity_value admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256"' \
+require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256"' \
     'campaign launch must compare admission identity SHA'
-require_runner_named '$(launch_identity_value admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES"' \
+require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES"' \
     'campaign launch must compare admission identity bytes'
 require_runner_named '[[ $actual_prereg_blob == "$CUBR_EXPECTED_PREREG_BLOB" ]]' \
     'campaign launch must compare expected preregistration blob'
 require_runner_named '[[ $actual_identities_blob == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]]' \
     'campaign launch must compare expected identity blob'
-require_runner_named '[[ $(/usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_PREREG") == "$CUBR_EXPECTED_PREREG_BLOB" ]]' \
+require_runner_named '[[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_PREREG") == "$CUBR_EXPECTED_PREREG_BLOB" ]]' \
     'campaign launch must authenticate preregistration file blob'
-require_runner_named '[[ $(/usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_IDENTITIES") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]]' \
+require_runner_named '[[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_IDENTITIES") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]]' \
     'campaign launch must authenticate identity file blob'
-require_runner_named '[[ $(sha "$target") == "$expected_sha" ]]' \
+require_runner_named 'sha256sum -- "$target"' \
     'campaign launch must read back persisted identity SHA'
-require_runner_named '[[ $(/usr/bin/stat -c %s -- "$target") == "$expected_bytes" ]]' \
+require_runner_named 'run_bounded 30 /usr/bin/stat -c %s -- "$target"' \
     'campaign launch must read back persisted identity bytes'
 
 reject_runner_fixed 'taskset -c 16-19'
@@ -603,7 +608,7 @@ done
 launch_parser_root=$(/usr/bin/mktemp -d)
 if ! /usr/bin/python3 - "$RUNNER" "$launch_parser_root" <<'PY'
 from pathlib import Path
-import hashlib, shutil, subprocess, sys
+import hashlib, os, shutil, subprocess, sys
 
 runner, root_arg = sys.argv[1:]
 root = Path(root_arg)
@@ -657,7 +662,14 @@ def run_pair(prereg_value, identity_value):
     identity.write_text(identity_value, encoding="utf-8")
     return subprocess.run(
         ["/usr/bin/bash", runner, "--verify-launch-identity-files", str(prereg), str(identity)],
-        text=True, capture_output=True, check=False,
+        text=True, capture_output=True, check=False, timeout=2,
+    )
+
+def run_paths(prereg_path, identity_path):
+    return subprocess.run(
+        ["/usr/bin/bash", runner, "--verify-launch-identity-files",
+         str(prereg_path), str(identity_path)],
+        text=True, capture_output=True, check=False, timeout=2,
     )
 
 try:
@@ -679,9 +691,9 @@ try:
                                   "runner_sha256=" + rows["runner_sha256"] + "\nrunner_blob=" + rows["runner_blob"], 1),
             "invalid or reordered launch identity"),
         "duplicate_key": (prereg_text, identity_text + "selection=NO-SELECT\n",
-                          "launch identity key count mismatch"),
+                          "launch identity input exceeds row bound"),
         "unknown_key": (prereg_text, identity_text + "unknown_key=value\n",
-                        "launch identity key count mismatch"),
+                        "launch identity input exceeds row bound"),
         "duplicate_marker": (prereg_text.replace(
             "<!-- g5-protected-launch-identities-v1-end -->",
             "<!-- g5-protected-launch-identities-v1-end -->\n"
@@ -704,12 +716,141 @@ try:
                 f"launch identity parser mutation failed elsewhere: {label} rc={result.returncode} "
                 f"stdout={result.stdout!r} stderr={result.stderr!r}"
             )
+    oversize = root / "identity-oversize.env"
+    oversize.write_bytes(b"x" * 65537)
+    result = run_paths(prereg, oversize)
+    if result.returncode == 0 or "launch identity input exceeds size bound" not in result.stderr:
+        raise SystemExit(f"oversize launch identity did not fail safely: {result}")
+    invalid_utf8 = root / "identity-invalid-utf8.env"
+    invalid_utf8.write_bytes(b"\xff\n")
+    result = run_paths(prereg, invalid_utf8)
+    if result.returncode == 0 or "launch identity input is not exact UTF-8" not in result.stderr:
+        raise SystemExit(f"invalid UTF-8 launch identity did not fail safely: {result}")
+    for label, kind, position in (
+            ("symlink-prereg", "symlink", "prereg"),
+            ("symlink-identity", "symlink", "identity"),
+            ("fifo-prereg", "fifo", "prereg"),
+            ("fifo-identity", "fifo", "identity"),
+            ("directory-prereg", "directory", "prereg"),
+            ("directory-identity", "directory", "identity")):
+        special = root / label
+        if kind == "symlink":
+            special.symlink_to(prereg if position == "prereg" else identity)
+        elif kind == "fifo":
+            os.mkfifo(special)
+        else:
+            special.mkdir()
+        result = run_paths(special if position == "prereg" else prereg,
+                           special if position == "identity" else identity)
+        if result.returncode == 0 or "unsafe launch" not in result.stderr:
+            raise SystemExit(
+                f"special launch input did not fail safely: {label} rc={result.returncode} "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
 finally:
     shutil.rmtree(root)
 PY
 then
     fail 'launch identity parser matrix failed'
 fi
+
+stable_identity_root=$(/usr/bin/mktemp -d)
+if ! /usr/bin/python3 - "$RUNNER" "$stable_identity_root" <<'PY'
+from pathlib import Path
+import hashlib, shutil, subprocess, sys
+
+runner, root_arg = sys.argv[1:]
+root = Path(root_arg)
+keys = (
+    "schema instrument_resulting_main instrument_tree runner_blob runner_sha256 "
+    "runner_test_blob runner_test_sha256 mapper_blob mapper_sha256 mapper_test_blob "
+    "mapper_test_sha256 source_commit source_tree cubrim_rs_tree cargo_inputs_manifest_sha256 "
+    "generated_cargo_lock_sha256 rustc_commit rustc_version cargo_version release_flags "
+    "binary_sha256 binary_build_id binary_size binary_device binary_inode mapping_schema_sha256 "
+    "corpus_manifest_sha256 corpus_rows_sha256 map_stream_sha256 map_manifest_sha256 "
+    "map_summary_sha256 map_row_count map_part_count map_seal_sha256 "
+    "sanitized_allowlist_contract_sha256 runner_contract_test_sha256 runner_contract_test_bytes "
+    "live_fixture_result_sha256 live_fixture_result_bytes live_fixture_test_output_sha256 "
+    "live_fixture_test_output_bytes performance_sample campaign_cells retained_perf_data "
+    "campaign_sample_rows selection"
+).split()
+excluded = {
+    "binary_device", "binary_inode", "live_fixture_result_sha256", "live_fixture_result_bytes",
+    "live_fixture_test_output_sha256", "live_fixture_test_output_bytes",
+}
+fixed = {
+    "schema": "g5-admission-identity-set-v1", "performance_sample": "NO",
+    "campaign_cells": "0", "retained_perf_data": "0", "campaign_sample_rows": "0",
+    "selection": "NO-SELECT",
+}
+rows = {}
+for key in keys:
+    if key in fixed:
+        rows[key] = fixed[key]
+    elif key.endswith(("_blob", "_tree", "_commit", "_main")) or key == "binary_build_id":
+        rows[key] = hashlib.sha1(key.encode()).hexdigest()
+    elif key.endswith("_sha256"):
+        rows[key] = hashlib.sha256(key.encode()).hexdigest()
+    elif key.endswith(("_bytes", "_count", "_size", "_device", "_inode")):
+        rows[key] = "1"
+    else:
+        rows[key] = "fixture-value"
+
+def render(values, ordered=keys):
+    return "".join(f"{key}={values[key]}\n" for key in ordered)
+
+admitted, current = root / "admitted.env", root / "current.env"
+def run_pair(left_text, right_text):
+    admitted.write_text(left_text, encoding="utf-8")
+    current.write_text(right_text, encoding="utf-8")
+    return subprocess.run(
+        ["/usr/bin/bash", runner, "--compare-g5-stable-identities", str(admitted), str(current)],
+        text=True, capture_output=True, check=False, timeout=2,
+    )
+
+def changed(key, value):
+    if len(value) in {40, 64} and all(char in "0123456789abcdef" for char in value):
+        return ("1" if value[0] != "1" else "2") + value[1:]
+    if value.isdigit():
+        return str(int(value) + 1)
+    return value + "-changed"
+
+try:
+    baseline = render(rows)
+    result = run_pair(baseline, baseline)
+    expected = "current_profile_g5_stable_identity_compare=PASS compared=40 excluded=6\n"
+    if result.returncode != 0 or result.stdout != expected or result.stderr:
+        raise SystemExit(f"stable identity positive control failed: {result}")
+    for key in keys:
+        mutated = dict(rows)
+        mutated[key] = changed(key, mutated[key])
+        result = run_pair(baseline, render(mutated))
+        if key in excluded:
+            if result.returncode != 0 or result.stdout != expected or result.stderr:
+                raise SystemExit(f"justified volatile exclusion rejected: {key} result={result}")
+        elif result.returncode == 0:
+            raise SystemExit(f"stable identity field mutation survived: {key}")
+    malformed = {
+        "missing": render(rows, keys[:-1]),
+        "duplicate": baseline + f"{keys[-1]}={rows[keys[-1]]}\n",
+        "reordered": render(rows, [keys[1], keys[0], *keys[2:]]),
+    }
+    for label, text in malformed.items():
+        result = run_pair(baseline, text)
+        if result.returncode == 0 or not any(fragment in result.stderr for fragment in
+                ("key count mismatch", "invalid or reordered stable identity")):
+            raise SystemExit(f"malformed stable identity survived: {label} result={result}")
+finally:
+    shutil.rmtree(root)
+PY
+then
+    fail 'stable admission identity comparison matrix failed'
+fi
+
+exclusive_write_output=$(/usr/bin/bash "$RUNNER" --self-test-exclusive-writes 2>&1) ||
+    fail "exclusive evidence write control failed: $exclusive_write_output"
+[[ $exclusive_write_output == current_profile_g5_exclusive_write_test=PASS ]] ||
+    fail "exclusive evidence write output mismatch: $exclusive_write_output"
 
 self_test_output=
 self_test_rc=0
@@ -852,13 +993,15 @@ admission_line=$(line_of_last '^[[:space:]]{4}admission "\$PREFLIGHT_DIR" 1$')
 suites_line=$(line_of_last '^[[:space:]]{4}run_suites$')
 identity_capture_line=$(line_of_last '^[[:space:]]{4}capture_g5_identity_inputs$')
 map_line=$(line_of_last '^[[:space:]]{4}build_full_instruction_map$')
+stable_identity_line=$(line_of_last '^[[:space:]]{4}compare_g5_stable_identities "\$PREFLIGHT_DIR/admission-sealed-identity-set.env" \\$')
 fixture_line=$(line_of_last '^[[:space:]]{4}verify_feasibility_fixture "\$PARTIAL"$')
 smoke_line=$(line_of_last '^[[:space:]]{4}verify_address_join_smoke "\$PARTIAL"$')
 cells_line=$(line_of_last '^[[:space:]]{4}for cell in "\$\{CELLS\[@\]\}"; do$')
 (( trap_line < partial_line && partial_line < launch_auth_line && launch_auth_line < admission_line &&
     admission_line < suites_line && suites_line < identity_capture_line && identity_capture_line < map_line &&
-    map_line < fixture_line && fixture_line < smoke_line && smoke_line < cells_line )) ||
-    fail 'main ordering must be trap -> launch authentication -> admission -> suites -> identity capture -> full map -> fixture -> address smoke -> cells'
+    map_line < stable_identity_line && stable_identity_line < fixture_line &&
+    fixture_line < smoke_line && smoke_line < cells_line )) ||
+    fail 'main ordering must be auth -> admission -> suites -> capture -> map -> stable identity compare -> fixture/perf -> cells'
 
 finalizing_line=$(line_of_last '^[[:space:]]*FINALIZING=1$')
 terminal_line=$(line_of_last '^[[:space:]]*run_terminal_finalization$')
@@ -921,6 +1064,73 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         set -e
     }
 
+    create_admission_schema_fixture() {
+        local root=$1
+        /usr/bin/python3 - "$root" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+dirs = {
+    "binary", "map", "preflight", "preflight/live-fixture",
+    "preflight/mapper-test-runtime", "suites",
+}
+files = {
+    "address-smoke.binary-snapshot-after.tsv", "address-smoke.binary-snapshot-before.tsv",
+    "address-smoke.out", "binary/admitted-snapshot.tsv", "binary/cubrim",
+    "feasibility-1.cubr", "feasibility-2.cubr", "feasibility-decoded.bin", "feasibility-zero.bin",
+    "map/elf-summary.json", "map/full-map-admission.txt", "map/full-map-resource.txt",
+    "map/instruction-addresses.txt.gz", "map/map-admission-seal.json", "map/map-summary.json.gz",
+    "map/map-worker.stderr.txt", "map/map-worker.stdout.txt", "map/objdump.txt.gz",
+    "map/prefix-coverage-audit.tsv", "map/prefix-table.tsv", "map/raw-stream-evidence.tsv",
+    "map/readelf-programs.txt", "map/readelf-sections.txt", "map/resolver-a.txt.gz",
+    "map/resolver-b.txt.gz", "map/sections.tsv", "map/segments.tsv",
+    "map/g5-full-instruction-map.part-00000.tsv.gz",
+    "preflight/cargo-inputs-manifest.tsv", "preflight/cargo-version.txt", "preflight/cell-inputs.tsv",
+    "preflight/identities.txt", "preflight/instrument-mapper-test.py",
+    "preflight/instrument-mapper.py", "preflight/instrument-runner-test.sh",
+    "preflight/instrument-runner.sh", "preflight/journal.tsv",
+    "preflight/live-fixture/cgroup-live.tsv", "preflight/live-fixture/systemd-run.output.txt",
+    "preflight/map-toolchain.json", "preflight/mapper-help.txt",
+    "preflight/mapper-test-runtime/current_profile_g5_map.py",
+    "preflight/mapper-test-runtime/test_current_profile_g5_map.py", "preflight/mapper-unit-test.txt",
+    "preflight/perf-events.tsv", "preflight/process-conflicts.txt", "preflight/process-snapshot.txt",
+    "preflight/runner-contract-test.txt", "preflight/rustc-version.txt",
+    "preflight/sanitized-environment-contract.txt", "preflight/systemd-cgroup-baseline.pids",
+    "preflight/systemd-contract.txt", "suites/binary-notes.txt", "suites/cargo-test-release.log",
+    "suites/generated-Cargo.lock", "suites/scheme-roundtrip.log",
+}
+events = ("task-clock", "cycles", "instructions", "branches", "branch-misses",
+          "cache-references", "cache-misses", "dTLB-load-misses", "page-faults")
+files.update(f"preflight/perf-{event}.csv" for event in events)
+for directory in sorted(dirs):
+    (root / directory).mkdir(parents=True, exist_ok=True)
+for relative in sorted(files):
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"fixture\n")
+(root / "map/map-parts-manifest.json").write_text(json.dumps({
+    "part_count": 1,
+    "parts": [{"part_index": 0, "path": "g5-full-instruction-map.part-00000.tsv.gz"}],
+}, sort_keys=True) + "\n", encoding="utf-8")
+(root / "address-smoke-feasibility.json").write_text(json.dumps({
+    "schema": "cubr-new24-g5-address-smoke-v1",
+    "purpose": "mechanical-address-join-feasibility-only",
+    "performance_interpretation": "FORBIDDEN",
+    "binary_identity": {}, "binary_snapshot": {}, "binary_sample_count": 1,
+    "binary_unresolved_sample_count": 0, "binary_resolution_gate_pass": True,
+    "lost_record_count": 0, "conservation": {}, "symbol_consulted": False,
+}, sort_keys=True) + "\n", encoding="utf-8")
+(root / "preflight/cell-inputs.tsv").write_text(
+    "dickens\t1\ta\tb\nxml\t1\tc\td\ndickens\t1\te\tf\n", encoding="utf-8")
+(root / "preflight/perf-events.tsv").write_text(
+    "".join(f"{event}\tsupported\n" for event in events), encoding="utf-8")
+PY
+        capture_child /usr/bin/bash "$RUNNER" --self-test-write-admission-manifest "$root"
+        if ! { (( CHILD_RC == 0 )) &&
+            [[ $CHILD_OUTPUT == current_profile_g5_admission_manifest_test=PASS ]]; }; then
+            invalid "admission fixture manifest setup failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
+        fi
+    }
+
     expect_admission_artifact_red() {
         local label=$1 relative=$2 expected=$3 root
         root=$mutation_root/admission-$label
@@ -934,13 +1144,32 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     }
 
     positive_root=$mutation_root/admission-positive
-    /usr/bin/mkdir -p -- "$positive_root/preflight"
-    : >"$positive_root/preflight/journal.tsv"
+    create_admission_schema_fixture "$positive_root"
     capture_child /usr/bin/bash "$RUNNER" --self-test-admission-no-performance "$positive_root"
     if ! { (( CHILD_RC == 0 )) &&
         [[ $CHILD_OUTPUT == current_profile_g5_admission_no_performance_test=PASS ]]; }; then
       invalid "admission no-performance positive control failed: rc=$CHILD_RC output=$CHILD_OUTPUT"
     fi
+    for label in hidden-sample hidden-file hidden-dir performance-content; do
+        mutation=$mutation_root/admission-strict-$label
+        /usr/bin/cp -a -- "$positive_root" "$mutation"
+        case $label in
+            hidden-sample) printf 'campaign_sample_rows=1\n' >"$mutation/.campaign-sample-row.tsv" ;;
+            hidden-file) printf 'unknown\n' >"$mutation/preflight/.unknown-evidence" ;;
+            hidden-dir) /usr/bin/mkdir -- "$mutation/.unknown-directory" ;;
+            performance-content) printf 'performance_sample=YES\n' >"$mutation/preflight/journal.tsv" ;;
+        esac
+        capture_child /usr/bin/bash "$RUNNER" --self-test-admission-no-performance "$mutation"
+        (( CHILD_RC != 0 )) || fail "strict admission schema mutation survived: $label"
+        case $label in
+            performance-content)
+                /usr/bin/grep -qF 'admission contains performance-like content' <<<"$CHILD_OUTPUT" ||
+                    invalid "performance-content mutation failed elsewhere: $CHILD_OUTPUT" ;;
+            *)
+                /usr/bin/grep -Eq 'admission (file|directory) schema mismatch' <<<"$CHILD_OUTPUT" ||
+                    invalid "strict admission path mutation failed elsewhere: $label output=$CHILD_OUTPUT" ;;
+        esac
+    done
     expect_admission_artifact_red retained_perf perf.data 'admission retained perf.data'
     for artifact in address-smoke.data address-smoke.perf-script.txt \
       address-smoke.buildid-list.txt; do
@@ -1126,34 +1355,34 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         's/readonly RUN_MODE/readonly OUT=\$CAMPAIGN_OUT\nreadonly RUN_MODE/' \
         'RUN_MODE must precede every readonly output path'
     expect_runner_mutant_red launch_runner_sha_field \
-        's/launch_identity_value runner_sha256/launch_identity_value wrong_runner_sha256/' \
+        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" runner_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_runner_sha256/' \
         'campaign launch must compare runner SHA'
     expect_runner_mutant_red launch_runner_test_sha_field \
-        's/launch_identity_value runner_test_sha256/launch_identity_value wrong_runner_test_sha256/' \
+        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" runner_test_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_runner_test_sha256/' \
         'campaign launch must compare runner test SHA'
     expect_runner_mutant_red launch_mapper_sha_field \
-        's/launch_identity_value mapper_sha256/launch_identity_value wrong_mapper_sha256/' \
+        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" mapper_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_mapper_sha256/' \
         'campaign launch must compare mapper SHA'
     expect_runner_mutant_red launch_mapper_test_sha_field \
-        's/launch_identity_value mapper_test_sha256/launch_identity_value wrong_mapper_test_sha256/' \
+        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" mapper_test_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_mapper_test_sha256/' \
         'campaign launch must compare mapper test SHA'
     expect_runner_mutant_red installed_runner_sha_field \
-        's#sha "${BASH_SOURCE\[0\]}"#sha "$CUBR_LAUNCH_PREREG"#' \
+        's#sha256sum -- "${BASH_SOURCE\[0\]}"#sha256sum -- "$CUBR_LAUNCH_PREREG"#' \
         'campaign launch must authenticate installed runner SHA'
     expect_runner_mutant_red installed_runner_test_sha_field \
-        's/sha "\$RUNNER_TEST_SOURCE"/sha "$CUBR_LAUNCH_PREREG"/' \
+        's/sha256sum -- "\$RUNNER_TEST_SOURCE"/sha256sum -- "$CUBR_LAUNCH_PREREG"/' \
         'campaign launch must authenticate installed runner test SHA'
     expect_runner_mutant_red installed_mapper_sha_field \
-        's/sha "\$MAPPER_SOURCE"/sha "$CUBR_LAUNCH_PREREG"/' \
+        's/sha256sum -- "\$MAPPER_SOURCE"/sha256sum -- "$CUBR_LAUNCH_PREREG"/' \
         'campaign launch must authenticate installed mapper SHA'
     expect_runner_mutant_red installed_mapper_test_sha_field \
-        's/sha "\$MAPPER_TEST_SOURCE"/sha "$CUBR_LAUNCH_PREREG"/' \
+        's/sha256sum -- "\$MAPPER_TEST_SOURCE"/sha256sum -- "$CUBR_LAUNCH_PREREG"/' \
         'campaign launch must authenticate installed mapper test SHA'
     expect_runner_mutant_red launch_admission_sha_field \
-        's/launch_identity_value admission_identity_set_sha256/launch_identity_value wrong_admission_identity_set_sha256/' \
+        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" admission_identity_set_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_admission_identity_set_sha256/' \
         'campaign launch must compare admission identity SHA'
     expect_runner_mutant_red launch_admission_bytes_field \
-        's/launch_identity_value admission_identity_set_bytes/launch_identity_value wrong_admission_identity_set_bytes/' \
+        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" admission_identity_set_bytes/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_admission_identity_set_bytes/' \
         'campaign launch must compare admission identity bytes'
     expect_runner_mutant_red launch_main_prereg_blob \
         's/\$actual_prereg_blob == "\$CUBR_EXPECTED_PREREG_BLOB"/\$actual_prereg_blob == "$CUBR_EXPECTED_IDENTITIES_BLOB"/' \
@@ -1168,7 +1397,7 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         's/hash-object --no-filters "\$CUBR_LAUNCH_IDENTITIES"/hash-object --no-filters "$CUBR_LAUNCH_PREREG"/' \
         'campaign launch must authenticate identity file blob'
     expect_runner_mutant_red persisted_identity_sha_readback \
-        's/sha "\$target"/sha "$source"/' \
+        's/sha256sum -- "\$target"/sha256sum -- "$source"/' \
         'campaign launch must read back persisted identity SHA'
     expect_runner_mutant_red persisted_identity_bytes_readback \
         's/stat -c %s -- "\$target"/stat -c %s -- "$source"/' \
