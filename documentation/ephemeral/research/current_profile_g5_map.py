@@ -21,6 +21,8 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
+MAX_MAP_PART_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+
 
 class MappingError(ValueError):
     """A frozen input cannot satisfy the G5 contract."""
@@ -661,9 +663,25 @@ def verify_map_parts(parts: Sequence[bytes], manifest: Mapping[str, Any]) -> byt
     previous_offset: int | None = None
     seen_paths: set[str] = set()
     for index, (compressed, item) in enumerate(zip(parts, declared)):
+        require(isinstance(item, Mapping), "map part evidence is malformed")
         require(item.get("part_index") == index, "map part index mismatch")
-        payload = decompress_single_gzip(compressed, max_bytes=int(item["uncompressed_bytes"]))
-        observed_evidence = gzip_evidence(payload, compressed)
+        declared_uncompressed_bytes = item.get("uncompressed_bytes")
+        require(
+            type(declared_uncompressed_bytes) is int
+            and 0 <= declared_uncompressed_bytes <= MAX_MAP_PART_UNCOMPRESSED_BYTES,
+            "invalid map part uncompressed byte count",
+        )
+        payload = decompress_single_gzip(
+            compressed, max_bytes=MAX_MAP_PART_UNCOMPRESSED_BYTES,
+        )
+        observed_evidence = {
+            "uncompressed_bytes": len(payload),
+            "uncompressed_sha256": hashlib.sha256(payload).hexdigest(),
+            "compressed_bytes": len(compressed),
+            "compressed_sha256": hashlib.sha256(compressed).hexdigest(),
+            "gzip_mtime": 0,
+            "gzip_compresslevel": 9,
+        }
         try:
             declared_evidence = {key: item[key] for key in observed_evidence}
         except KeyError as error:

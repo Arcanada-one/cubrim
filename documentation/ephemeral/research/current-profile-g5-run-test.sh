@@ -397,13 +397,41 @@ for literal in "${runner_literals[@]}"; do
     require_runner_fixed "$literal"
 done
 
+require_runner_named '(( $# == 2 )) || die '\''live cgroup fixture requires exactly one export directory'\''' \
+    'live cgroup dispatch does not validate its exact second argument'
+require_runner_named 'self_test_cgroup_live "$2"' \
+    'live cgroup dispatch drops its export-directory argument'
+
+launch_remote_source=$(function_source verify_launch_main_matches_remote)
+[[ $launch_remote_source == *'run_bounded "$timeout_seconds" /usr/bin/git -C "$repo" ls-remote --exit-code origin refs/heads/main'* ]] ||
+    fail 'campaign remote-main query is not bounded ls-remote origin'
+remote_parser_source=$(function_source parse_remote_main_output)
+[[ $remote_parser_source == *'pattern=$'\''^([0-9a-f]{40})\trefs/heads/main$'\'''* ]] ||
+    fail 'remote main parser does not require exactly one canonical ref row'
+[[ $remote_parser_source == *'[[ $remote_main == "$expected" ]]'* ]] ||
+    fail 'fresh remote main equality comparison is missing'
+launch_auth_source=$(function_source authenticate_campaign_launch_inputs)
+remote_main_gate_offset=$(/usr/bin/awk 'index($0, "verify_launch_main_matches_remote") {print NR; exit}' <<<"$launch_auth_source")
+launch_blob_offset=$(/usr/bin/awk 'index($0, "actual_prereg_blob=") {print NR; exit}' <<<"$launch_auth_source")
+[[ -n $remote_main_gate_offset && -n $launch_blob_offset && $remote_main_gate_offset -lt $launch_blob_offset &&
+   $launch_auth_source == *'verify_launch_main_matches_remote "$INSTRUMENT_REPO" "$CUBR_LAUNCH_MAIN" 30'* ]] ||
+    fail 'campaign launch must equal fresh remote main before blob use'
+instrument_gate_source=$(function_source verify_instrument_provenance)
+[[ $instrument_gate_source == *'fetch --quiet origin main'* &&
+   $instrument_gate_source == *'merge-base --is-ancestor "$INSTRUMENT_COMMIT" origin/main'* ]] ||
+    fail 'Task9 instrument origin/main gate was removed'
+
+full_map_source=$(function_source build_full_instruction_map)
+[[ $full_map_source == *'run_process_group_bounded "$limit" /usr/bin/time -v -o "$elapsed_file"'* &&
+   $full_map_source != *'/usr/bin/timeout --kill-after=10s'* ]] ||
+    fail 'full-map worker is not bound to the cgroup-aware deadline wrapper'
+
 perf_probe_source=$(function_source discover_perf_events)
 [[ $perf_probe_source == *'run_bounded 30 "${PIN[@]}" /usr/bin/perf stat -x, -e "$event" -o "$PREFLIGHT_DIR/perf-$event.csv" -- /usr/bin/true'* &&
    $perf_probe_source != *'$CUBRIM'* && $perf_probe_source != *'$CORPUS_ROOT'* &&
    $perf_probe_source != *'$CORPUS_MANIFEST'* ]] ||
     fail 'admission perf capability probe target is not literal true'
 
-launch_auth_source=$(function_source authenticate_campaign_launch_inputs)
 launch_prereg_caller_count=$({ /usr/bin/grep -Fo '$CUBR_LAUNCH_PREREG' <<<"$launch_auth_source" || true; } |
     /usr/bin/wc -l)
 launch_identity_caller_count=$({ /usr/bin/grep -Fo '$CUBR_LAUNCH_IDENTITIES' <<<"$launch_auth_source" || true; } |
@@ -1132,6 +1160,128 @@ then
     fail 'admission feasibility sequence contract failed'
 fi
 
+live_dispatch_root=$(/usr/bin/mktemp -d)
+/usr/bin/mkdir -- "$live_dispatch_root/export"
+/usr/bin/ln -s -- "$live_dispatch_root/export" "$live_dispatch_root/export-link"
+for label in missing extra nonexistent symlink; do
+    live_dispatch_output=
+    live_dispatch_rc=0
+    set +e
+    case $label in
+        missing) live_dispatch_output=$(/usr/bin/bash "$RUNNER" --self-test-cgroup-live 2>&1) ;;
+        extra) live_dispatch_output=$(/usr/bin/bash "$RUNNER" --self-test-cgroup-live \
+            "$live_dispatch_root/export" unexpected 2>&1) ;;
+        nonexistent) live_dispatch_output=$(/usr/bin/bash "$RUNNER" --self-test-cgroup-live \
+            "$live_dispatch_root/nonexistent" 2>&1) ;;
+        symlink) live_dispatch_output=$(/usr/bin/bash "$RUNNER" --self-test-cgroup-live \
+            "$live_dispatch_root/export-link" 2>&1) ;;
+    esac
+    live_dispatch_rc=$?
+    set -e
+    (( live_dispatch_rc != 0 )) || fail "unsafe live cgroup dispatch argument survived: $label"
+    case $label in
+        missing|extra)
+            [[ $live_dispatch_output == *'live cgroup fixture requires exactly one export directory'* ]] ||
+                invalid "live cgroup dispatch arity failed elsewhere: $label output=$live_dispatch_output" ;;
+        nonexistent|symlink)
+            [[ $live_dispatch_output == *'live fixture export directory is unsafe'* ]] ||
+                invalid "live cgroup dispatch path failed elsewhere: $label output=$live_dispatch_output" ;;
+    esac
+done
+/usr/bin/rm -rf -- "$live_dispatch_root"
+
+remote_fixture_root=$(/usr/bin/mktemp -d)
+if ! /usr/bin/python3 - "$RUNNER" "$remote_fixture_root" <<'PY'
+from pathlib import Path
+import os, shutil, subprocess, sys
+
+runner, root_arg = sys.argv[1:]
+root = Path(root_arg)
+remote = root / "remote.git"
+local = root / "local"
+publisher = root / "publisher"
+
+def git(*args, cwd=None):
+    return subprocess.run(
+        ["/usr/bin/git", *args], cwd=cwd, text=True, capture_output=True,
+        check=True, timeout=5,
+    ).stdout.strip()
+
+def invoke(repo, expected, timeout="5", env=None):
+    return subprocess.run(
+        ["/usr/bin/bash", runner, "--self-test-verify-remote-main",
+         str(repo), expected, timeout],
+        text=True, capture_output=True, check=False, timeout=8,
+        env=env,
+    )
+
+def commit(repo, label):
+    (repo / "payload.txt").write_text(label + "\n", encoding="utf-8")
+    git("add", "payload.txt", cwd=repo)
+    git("-c", "user.name=G5 Fixture", "-c", "user.email=g5@example.invalid",
+        "commit", "-m", label, cwd=repo)
+    return git("rev-parse", "HEAD", cwd=repo)
+
+try:
+    git("init", "--bare", str(remote))
+    git("init", str(local))
+    first = commit(local, "first")
+    git("branch", "-M", "main", cwd=local)
+    git("remote", "add", "origin", str(remote), cwd=local)
+    git("push", "-u", "origin", "main", cwd=local)
+    result = invoke(local, first)
+    expected_pass = f"current_profile_g5_remote_main_test=PASS remote_main={first}\n"
+    if result.returncode != 0 or result.stdout != expected_pass or result.stderr:
+        raise SystemExit(f"fresh remote-main positive control failed: {result}")
+
+    local_unmerged = commit(local, "local-unmerged")
+    result = invoke(local, local_unmerged)
+    if result.returncode == 0 or "launch main does not equal fresh remote main" not in result.stderr:
+        raise SystemExit(f"local-unmerged launch main survived: {result}")
+
+    git("clone", str(remote), str(publisher))
+    git("checkout", "main", cwd=publisher)
+    remote_advanced = commit(publisher, "remote-advanced")
+    git("push", "origin", "main", cwd=publisher)
+    result = invoke(local, first)
+    if result.returncode == 0 or "launch main does not equal fresh remote main" not in result.stderr:
+        raise SystemExit(f"stale local tracking ref survived: {result}")
+    result = invoke(local, remote_advanced)
+    expected_pass = f"current_profile_g5_remote_main_test=PASS remote_main={remote_advanced}\n"
+    if result.returncode != 0 or result.stdout != expected_pass or result.stderr:
+        raise SystemExit(f"fresh remote-main stale-tracking control failed: {result}")
+
+    malformed_rows = (
+        remote_advanced,
+        f"{remote_advanced}\trefs/heads/main\n{remote_advanced}\trefs/heads/main",
+    )
+    for output in malformed_rows:
+        result = subprocess.run(
+            ["/usr/bin/bash", runner, "--self-test-parse-remote-main",
+             remote_advanced, output],
+            text=True, capture_output=True, check=False, timeout=2,
+        )
+        if result.returncode == 0 or "remote main response is malformed or ambiguous" not in result.stderr:
+            raise SystemExit(f"malformed or multiple remote-main rows survived: {result}")
+
+    timeout_repo = root / "timeout-repo"
+    git("init", str(timeout_repo))
+    git("remote", "add", "origin", "ssh://fixture.invalid/repo", cwd=timeout_repo)
+    hang = root / "hang-ssh.sh"
+    hang.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+    hang.chmod(0o700)
+    timeout_env = os.environ.copy()
+    timeout_env["GIT_SSH_COMMAND"] = str(hang)
+    result = invoke(timeout_repo, remote_advanced, timeout="1", env=timeout_env)
+    if result.returncode == 0 or "fresh remote main query failed" not in result.stderr:
+        raise SystemExit(f"remote-main timeout survived: {result}")
+finally:
+    shutil.rmtree(root)
+PY
+then
+    fail 'fresh remote-main fixture matrix failed'
+fi
+
 if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     mutation_root=$(/usr/bin/mktemp -d)
     cleanup() {
@@ -1439,6 +1589,27 @@ PY
     expect_runner_mutant_red mode_selected_after_readonly \
         's/readonly RUN_MODE/readonly OUT=\$CAMPAIGN_OUT\nreadonly RUN_MODE/' \
         'RUN_MODE must precede every readonly output path'
+    expect_runner_mutant_red live_dispatch_drops_export_directory \
+        's/self_test_cgroup_live "\$2"/self_test_cgroup_live/' \
+        'live cgroup dispatch drops its export-directory argument'
+    expect_runner_mutant_red remote_main_accepts_local_unmerged \
+        's/\[\[ \$remote_main == "\$expected" \]\]/[[ -n $remote_main ]]/' \
+        'fresh remote main equality comparison is missing'
+    expect_runner_mutant_red remote_main_uses_stale_tracking_ref \
+        's#ls-remote --exit-code origin refs/heads/main#for-each-ref --format=%(objectname) refs/remotes/origin/main#' \
+        'campaign remote-main query is not bounded ls-remote origin'
+    expect_runner_mutant_red remote_main_accepts_malformed_row \
+        's#pattern=.*#pattern=$'\''^([0-9a-f]{40})$'\''#' \
+        'remote main parser does not require exactly one canonical ref row'
+    expect_runner_mutant_red remote_main_accepts_multiple_rows \
+        's#pattern=.*#pattern=$'\''^([0-9a-f]{40})\\trefs/heads/main'\''#' \
+        'remote main parser does not require exactly one canonical ref row'
+    expect_runner_mutant_red remote_main_query_is_unbounded \
+        's/run_bounded "\$timeout_seconds" \/usr\/bin\/git/\/usr\/bin\/git/' \
+        'campaign remote-main query is not bounded ls-remote origin'
+    expect_runner_mutant_red full_map_uses_raw_timeout \
+        's#run_process_group_bounded "\$limit" /usr/bin/time#\/usr/bin/timeout --kill-after=10s "${limit}s" /usr/bin/time#' \
+        'full-map worker is not bound to the cgroup-aware deadline wrapper'
     expect_runner_mutant_red admission_perf_probe_uses_campaign_binary \
         's#-o "\$PREFLIGHT_DIR/perf-\$event.csv" -- /usr/bin/true#-o "$PREFLIGHT_DIR/perf-$event.csv" -- "$CUBRIM"#' \
         'admission perf capability probe target is not literal true'

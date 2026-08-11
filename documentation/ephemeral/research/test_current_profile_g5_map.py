@@ -478,6 +478,43 @@ class GzipTests(unittest.TestCase):
         with self.assertRaisesRegex(g4.MappingError, "decompression limit"):
             g4.decompress_single_gzip(parts[0], max_bytes=4)
 
+        ceiling = 512 * 1024 * 1024
+        self.assertEqual(g4.MAX_MAP_PART_UNCOMPRESSED_BYTES, ceiling)
+        for label, value in (
+            ("missing", None), ("string", "1"), ("boolean", True),
+            ("negative", -1), ("over-ceiling", ceiling + 1),
+        ):
+            with self.subTest(uncompressed_bytes=label):
+                mutated = copy.deepcopy(manifest)
+                if value is None:
+                    del mutated["parts"][0]["uncompressed_bytes"]
+                else:
+                    mutated["parts"][0]["uncompressed_bytes"] = value
+                with mock.patch.object(g4, "decompress_single_gzip") as decoder:
+                    with self.assertRaisesRegex(g4.MappingError, "invalid map part uncompressed byte count"):
+                        g4.verify_map_parts(parts, mutated)
+                    decoder.assert_not_called()
+
+        real_decoder = g4.decompress_single_gzip
+        observed_limits: list[int] = []
+
+        def fixed_ceiling_decoder(compressed: bytes, *, max_bytes: int = ceiling) -> bytes:
+            observed_limits.append(max_bytes)
+            return real_decoder(compressed, max_bytes=max_bytes)
+
+        with mock.patch.object(g4, "decompress_single_gzip", side_effect=fixed_ceiling_decoder):
+            self.assertEqual(
+                g4.verify_map_parts(parts, manifest),
+                g4.render_instruction_map(build_rows()).encode(),
+            )
+        self.assertEqual(observed_limits, [ceiling] * len(parts))
+        with mock.patch.object(
+            g4, "decompress_single_gzip",
+            side_effect=g4.MappingError("decompression limit exceeded"),
+        ):
+            with self.assertRaisesRegex(g4.MappingError, "decompression limit"):
+                g4.verify_map_parts(parts, manifest)
+
 
 class AdmissionSealTests(unittest.TestCase):
     def seal(self, **overrides: object) -> dict:

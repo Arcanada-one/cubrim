@@ -878,8 +878,7 @@ build_full_instruction_map() {
     (( remaining < limit )) && limit=$remaining
     local map_rc
     set +e
-    /usr/bin/time -v -o "$elapsed_file" \
-        /usr/bin/timeout --kill-after=10s "${limit}s" \
+    run_process_group_bounded "$limit" /usr/bin/time -v -o "$elapsed_file" \
         /usr/bin/env CUBR_MAP_INSTRUMENT_SHA="$INSTRUMENT_SHA256" \
             CUBR_EXPECTED_MAPPER_SHA256="$EXPECTED_MAPPER_SHA" \
             CUBR_EXPECTED_MAPPER_TEST_SHA256="$EXPECTED_MAPPER_TEST_SHA" \
@@ -2045,6 +2044,36 @@ snapshot_launch_inputs() {
     write_new_checked "$snapshot_identities" "$caller_identities"
 }
 
+parse_remote_main_output() {
+    local expected=$1 output=$2 pattern remote_main
+    pattern=$'^([0-9a-f]{40})\trefs/heads/main$'
+    [[ $expected =~ ^[0-9a-f]{40}$ ]] || die 'expected launch main is malformed'
+    [[ $output =~ $pattern ]] || die 'remote main response is malformed or ambiguous'
+    remote_main=${BASH_REMATCH[1]}
+    [[ $remote_main == "$expected" ]] || die 'launch main does not equal fresh remote main'
+    printf '%s\n' "$remote_main"
+}
+
+verify_launch_main_matches_remote() {
+    local repo=$1 expected=$2 timeout_seconds=$3 remote_output
+    [[ -d $repo && ! -L $repo && $timeout_seconds =~ ^[1-9][0-9]*$ && $timeout_seconds -le 30 ]] ||
+        die 'remote main query inputs are unsafe'
+    if ! remote_output=$(run_bounded "$timeout_seconds" /usr/bin/git -C "$repo" ls-remote --exit-code origin refs/heads/main); then
+        die 'fresh remote main query failed'
+    fi
+    parse_remote_main_output "$expected" "$remote_output" >/dev/null
+}
+
+self_test_verify_remote_main() {
+    (( $# == 3 )) || die 'remote main self-test requires repository, expected commit, and timeout'
+    local now_ns
+    now_ns=$(monotonic_ns)
+    HARD_DEADLINE_MONOTONIC_NS=$((now_ns + 60 * 1000000000))
+    WORK_DEADLINE_MONOTONIC_NS=$HARD_DEADLINE_MONOTONIC_NS
+    verify_launch_main_matches_remote "$1" "$2" "$3"
+    printf 'current_profile_g5_remote_main_test=PASS remote_main=%s\n' "$2"
+}
+
 authenticate_campaign_launch_inputs() {
     local parser_output actual_prereg_blob actual_identities_blob
     local snapshot_prereg=$PREFLIGHT_DIR/launch-preregistration.snapshot.md
@@ -2055,6 +2084,7 @@ authenticate_campaign_launch_inputs() {
         "$snapshot_prereg" "$snapshot_identities"
     run_bounded 30 /usr/bin/git -C "$INSTRUMENT_REPO" merge-base --is-ancestor \
         "$INSTRUMENT_COMMIT" "$CUBR_LAUNCH_MAIN" || die 'instrument is not ancestor of launch main'
+    verify_launch_main_matches_remote "$INSTRUMENT_REPO" "$CUBR_LAUNCH_MAIN" 30
     actual_prereg_blob=$(run_bounded 30 /usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
         "$CUBR_LAUNCH_MAIN:documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G5-20260810.md")
     actual_identities_blob=$(run_bounded 30 /usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
@@ -2641,9 +2671,11 @@ self_test_cgroup() {
     CGROUP_PROCS=$procs
     CGROUP_STOP_SENTINEL=$sentinel
     capture_cgroup_baseline "$CGROUP_PROCS"
-    printf '%s\n' "$$" 999999 >"$procs"
     set +e
-    assert_cgroup_no_new_pids
+    # PPID and $1 must expand in the bounded child.
+    # shellcheck disable=SC2016
+    run_process_group_bounded 5 /usr/bin/bash -c \
+        '/usr/bin/printf "%s\n" "$PPID" 999999 >"$1"' fixture "$procs"
     rc=$?
     set -e
     if (( rc != 125 )) ||
@@ -3122,6 +3154,8 @@ case ${1:-} in
     --self-test) self_test ;;
     --self-test-mode-roots) self_test_mode_roots ;;
     --self-test-snapshot-launch-inputs) self_test_snapshot_launch_inputs "$2" "$3" "$4" ;;
+    --self-test-verify-remote-main) self_test_verify_remote_main "$2" "$3" "$4" ;;
+    --self-test-parse-remote-main) parse_remote_main_output "$2" "$3" >/dev/null ;;
     --self-test-admission-no-performance) self_test_admission_no_performance "$2" ;;
     --self-test-write-admission-manifest) self_test_write_admission_manifest "$2" ;;
     --verify-launch-identity-files) verify_launch_identity_files "$2" "$3" ;;
@@ -3132,7 +3166,10 @@ case ${1:-} in
     --self-test-cgroup-environment) self_test_cgroup_environment ;;
     --self-test-cgroup) self_test_cgroup ;;
     --self-test-cgroup-precommit) self_test_cgroup_precommit ;;
-    --self-test-cgroup-live) self_test_cgroup_live ;;
+    --self-test-cgroup-live)
+        (( $# == 2 )) || die 'live cgroup fixture requires exactly one export directory'
+        self_test_cgroup_live "$2"
+        ;;
     --self-test-cgroup-live-worker) self_test_cgroup_live_worker ;;
     --self-test-publish) self_test_publish ;;
     --self-test-publish-writes) self_test_publish_writes ;;
