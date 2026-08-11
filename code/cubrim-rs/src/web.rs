@@ -188,70 +188,99 @@ impl BitWriter {
     }
 }
 
+/// MSB-first reader over a refilled 64-bit accumulator.
+///
+/// The bits live in the LOW `count` bits of `acc`, most significant first, so
+/// peeling `n` bits is one shift and one mask rather than `n` iterations. Byte
+/// order on the wire is unchanged — this is the same stream the bit-at-a-time
+/// reader consumed, read a register at a time.
 struct BitReader<'a> {
     data: &'a [u8],
-    bit_pos: usize,
+    /// Next unread byte.
+    pos: usize,
+    /// Buffered bits, held in the low `count` bits, MSB of the stream first.
+    acc: u64,
+    /// How many bits of `acc` are live.
+    count: u32,
 }
 
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Self { data, bit_pos: 0 }
+        Self {
+            data,
+            pos: 0,
+            acc: 0,
+            count: 0,
+        }
     }
 
     fn remaining(&self) -> usize {
-        (self.data.len() * 8).saturating_sub(self.bit_pos)
+        (self.data.len() - self.pos) * 8 + self.count as usize
+    }
+
+    /// Top up the accumulator to at least 57 live bits when bytes remain.
+    ///
+    /// Shifting left can only discard bits above `count`, and those have
+    /// already been consumed, so no unread bit is ever lost.
+    #[inline]
+    fn refill(&mut self) {
+        while self.count <= 56 && self.pos < self.data.len() {
+            self.acc = (self.acc << 8) | self.data[self.pos] as u64;
+            self.pos += 1;
+            self.count += 8;
+        }
     }
 
     fn read(&mut self, len: u32) -> Result<u32, CubrimError> {
-        if (len as usize) > self.remaining() {
+        if len == 0 {
+            return Ok(0);
+        }
+        self.refill();
+        if self.count < len {
             return Err(CubrimError::Decode(format!(
                 "MODE_WEB: bitstream truncated (want {len} bits, {} remain)",
                 self.remaining()
             )));
         }
-        let mut value = 0u32;
-        for _ in 0..len {
-            let byte = self.data[self.bit_pos / 8];
-            let bit = (byte >> (7 - (self.bit_pos % 8))) & 1;
-            value = (value << 1) | bit as u32;
-            self.bit_pos += 1;
-        }
-        Ok(value)
+        self.count -= len;
+        let mask = if len >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << len) - 1
+        };
+        Ok(((self.acc >> self.count) & mask) as u32)
     }
 
     /// Decode one symbol with a prebuilt flat table. Fail-closed: an unmatched
     /// bit pattern or a codeword that runs past the end of the stream is an
     /// error, never a panic and never a silent zero.
+    #[inline]
     fn read_symbol(&mut self, table: &HuffTable) -> Result<usize, CubrimError> {
-        let want = table.bits() as usize;
-        let available = self.remaining();
-        if available == 0 {
+        self.refill();
+        if self.count == 0 {
             return Err(CubrimError::Decode(
                 "MODE_WEB: bitstream exhausted mid-block".into(),
             ));
         }
-        let take = want.min(available);
-        let mut index = 0usize;
-        for i in 0..take {
-            let pos = self.bit_pos + i;
-            let byte = self.data[pos / 8];
-            let bit = (byte >> (7 - (pos % 8))) & 1;
-            index = (index << 1) | bit as usize;
-        }
-        index <<= want - take;
+        let want = table.bits() as u32;
+        // Near the end fewer bits remain than the table indexes; the codeword
+        // itself may still fit, so pad with zeros exactly as the table build
+        // assumes and verify the decoded length against what was available.
+        let take = want.min(self.count);
+        let index =
+            (((self.acc >> (self.count - take)) & ((1u64 << take) - 1)) << (want - take)) as usize;
         let (symbol, len) = table.lookup(index);
         if len == 0 {
-            return Err(CubrimError::Decode(format!(
-                "MODE_WEB: no codeword at bit {} (corrupt stream)",
-                self.bit_pos
-            )));
+            return Err(CubrimError::Decode(
+                "MODE_WEB: no codeword at this position (corrupt stream)".into(),
+            ));
         }
-        if len as usize > available {
+        if len as u32 > self.count {
             return Err(CubrimError::Decode(
                 "MODE_WEB: codeword runs past end of stream".into(),
             ));
         }
-        self.bit_pos += len as usize;
+        self.count -= len as u32;
         Ok(symbol as usize)
     }
 }
@@ -919,9 +948,19 @@ pub(crate) fn decode_web(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
                 ));
             }
             let start = out.len() - distance;
-            for k in 0..length {
-                let byte = out[start + k];
-                out.push(byte);
+            if distance >= length {
+                // Source and destination do not overlap, so the whole run can
+                // be copied at once.
+                out.extend_from_within(start..start + length);
+            } else {
+                // Overlapping run: the copy MUST stay byte-wise, because later
+                // bytes read what earlier iterations just wrote. This is the
+                // run-length case (distance 1 repeats a byte), and a block copy
+                // here would silently produce different output.
+                for k in 0..length {
+                    let byte = out[start + k];
+                    out.push(byte);
+                }
             }
         }
 
