@@ -1,0 +1,45 @@
+# host: arcana-kb | Model name:                              AMD Ryzen 5 3600 6-Core Processor
+# kernel: 6.8.0-134-generic | governor(cpu11): schedutil
+# ratio-binary sha256: c691260667583a82754eb889d1e8af6f7f774fa0f88baa5284ffe1d4f7e0e7da
+# abs-binary   sha256: 75bfebef4cd098ddae920f40eb13b7f5f2b0c2c5762350a49d691506b0e20630
+# payload-set  sha256: c6d893a7cbc2088608cfcb126d50d5994f776f159ea878b9fde0ca65a9e36cd1
+# top process:  1.7 sshd
+# pin: taskset -c 11 | rounds=101 warmups=5 seed=20260811
+=== RATIO ARM (cubrim vs brotli-q5, interleaved, in-process) ===
+# admission-before loadavg: 0.17 0.08 0.02
+# rounds=101 warmups=5 seed=20260811 brotli_quality=5 lgwin=22
+sample                                       orig cbr_bytes  br_bytes    cbr_MB_s     br_MB_s   ratio
+tailwind.css                                65257     10361     10238      295.30      381.12  0.7748
+html-large-web-codec-v2.html               227968     14428     13863      744.84      983.15  0.7576
+html-medium-home-v2.html                    25031      5563      5377      214.03      282.29  0.7582
+magic-string.umd.js                         42936      9375      9769      237.27      313.47  0.7569
+sourcemap-codec.umd.js                      14590      3522      3564      187.94      254.18  0.7394
+resolve-uri.umd.js                           9866      2797      2737      201.67      203.88  0.9892
+json-api-large-world-benchmark-v2.json     320976     18590     18820      750.42     1057.57  0.7096
+json-api-medium-web-benchmark-v2.json       98948      9630      9980      486.89      617.07  0.7890
+json-api-small-hypotheses-v2.json           13880      1558      1522      311.49      417.57  0.7460
+magic-string.umd.js.map                    112594     19058     21142      305.12      387.47  0.7875
+sourcemap-codec.umd.js.map                   9700      2407      2510      240.93      209.82  1.1483
+inter-latin.medium.woff2                    23664     23650     23649      158.88      150.63  1.0548
+AGGREGATE bytes=965410 cubrim_MB_s=441.79 brotli5_MB_s=559.48 decode_throughput_vs_brotli5=0.7896
+# bar: >= 0.50 (hypothesis 11, criterion 57)
+# admission-after loadavg: 0.17 0.08 0.02
+=== ABSOLUTE ARM (hypothesis 12 decode criterion) ===
+# admission-before loadavg: 0.17 0.08 0.02
+# rounds=101 warmups=5 seed=20260811
+sample                                   orig_bytes   archive    best_MB_s  median_MB_s
+tailwind.css                                  65257     10361       297.78       293.85
+html-large-web-codec-v2.html                 227968     14428       741.64       730.80
+html-medium-home-v2.html                      25031      5563       213.19       208.83
+magic-string.umd.js                           42936      9375       236.55       232.60
+sourcemap-codec.umd.js                        14590      3522       194.06       182.24
+resolve-uri.umd.js                             9866      2797       199.83       196.07
+json-api-large-world-benchmark-v2.json       320976     18590       751.64       741.62
+json-api-medium-web-benchmark-v2.json         98948      9630       501.53       487.73
+json-api-small-hypotheses-v2.json             13880      1558       361.17       310.02
+magic-string.umd.js.map                      112594     19058       304.98       301.31
+sourcemap-codec.umd.js.map                     9700      2407       216.85       212.85
+inter-latin.medium.woff2                      23664     23650       157.07       155.58
+AGGREGATE bytes=965410 best_total_s=0.002177 corpus_best_MB_s=443.39
+# admission-after loadavg: 0.23 0.10 0.02
+# date: 2026-08-11T17:54:01Z
