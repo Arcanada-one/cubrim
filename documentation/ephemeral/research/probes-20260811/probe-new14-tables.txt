@@ -1,0 +1,148 @@
+file=nci-full len=33553445
+[4.0MB] minlen=3 tbits=25 positions=4194302
+  distinct grams=6911  slot-occupancy=6911/33554432 (0.0002)  gram/slot pressure=0.0002
+  repeat positions=4187391 (99.8352%)  novel=6911
+  RETRIEVAL rate (repeat & candidate correct): 100.0000%
+  LOST-to-collision rate among repeats:        0.0000%
+  FALSE-candidate rate among novel grams:      0.0000%
+  overall wrong-candidate rate (all positions):  0.0000%
+  survival by true-distance: <=64K: n=4145906 surv=100.000% | 64K-1M: n=38202 surv=100.000% | 1-4M: n=3283 surv=100.000% | 4-8M: n=0 | 8-16M: n=0 | >16M: n=0
+  mean true-distance: retrieved=4,401
+[4.0MB] minlen=6 tbits=25 positions=4194299
+  distinct grams=103934  slot-occupancy=103778/33554432 (0.0031)  gram/slot pressure=0.0031
+  repeat positions=4090365 (97.5220%)  novel=103934
+  RETRIEVAL rate (repeat & candidate correct): 99.9956%
+  LOST-to-collision rate among repeats:        0.0044%
+  FALSE-candidate rate among novel grams:      0.1501%
+  overall wrong-candidate rate (all positions):  0.0080%
+  survival by true-distance: <=64K: n=3918318 surv=99.999% | 64K-1M: n=149354 surv=99.934% | 1-4M: n=22693 surv=99.802% | 4-8M: n=0 | 8-16M: n=0 | >16M: n=0
+  mean true-distance: retrieved=22,709  lost=679,321
+[4.0MB] minlen=12 tbits=25 positions=4194293
+  distinct grams=384544  slot-occupancy=382361/33554432 (0.0114)  gram/slot pressure=0.0115
+  repeat positions=3809749 (90.8317%)  novel=384544
+  RETRIEVAL rate (repeat & candidate correct): 99.9864%
+  LOST-to-collision rate among repeats:        0.0136%
+  FALSE-candidate rate among novel grams:      0.5677%
+  overall wrong-candidate rate (all positions):  0.0644%
+  survival by true-distance: <=64K: n=3488782 surv=99.999% | 64K-1M: n=278599 surv=99.914% | 1-4M: n=42368 surv=99.450% | 4-8M: n=0 | 8-16M: n=0 | >16M: n=0
+  mean true-distance: retrieved=44,766  lost=1,164,262
+[8.0MB] minlen=3 tbits=26 positions=8388606
+  distinct grams=7268  slot-occupancy=7268/67108864 (0.0001)  gram/slot pressure=0.0001
+  repeat positions=8381338 (99.9134%)  novel=7268
+  RETRIEVAL rate (repeat & candidate correct): 100.0000%
+  LOST-to-collision rate among repeats:        0.0000%
+  FALSE-candidate rate among novel grams:      0.0000%
+  overall wrong-candidate rate (all positions):  0.0000%
+  survival by true-distance: <=64K: n=8292748 surv=100.000% | 64K-1M: n=79093 surv=100.000% | 1-4M: n=9159 surv=100.000% | 4-8M: n=338 surv=100.000% | 8-16M: n=0 | >16M: n=0
+  mean true-distance: retrieved=5,438
+[8.0MB] minlen=6 tbits=26 positions=8388603
+  distinct grams=156981  slot-occupancy=156799/67108864 (0.0023)  gram/slot pressure=0.0023
+  repeat positions=8231622 (98.1286%)  novel=156981
+  RETRIEVAL rate (repeat & candidate correct): 99.9984%
+  LOST-to-collision rate among repeats:        0.0016%
+  FALSE-candidate rate among novel grams:      0.1159%
+  overall wrong-candidate rate (all positions):  0.0037%
+  survival by true-distance: <=64K: n=7842773 surv=100.000% | 64K-1M: n=313112 surv=99.986% | 1-4M: n=66055 surv=99.900% | 4-8M: n=9682 surv=99.907% | 8-16M: n=0 | >16M: n=0
+  mean true-distance: retrieved=35,862  lost=1,676,308
+[8.0MB] minlen=12 tbits=26 positions=8388597
+  distinct grams=641512  slot-occupancy=638481/67108864 (0.0095)  gram/slot pressure=0.0096
+  repeat positions=7747085 (92.3526%)  novel=641512
+  RETRIEVAL rate (repeat & candidate correct): 99.9878%
+  LOST-to-collision rate among repeats:        0.0122%
+  FALSE-candidate rate among novel grams:      0.4725%
+  overall wrong-candidate rate (all positions):  0.0474%
+  survival by true-distance: <=64K: n=6985815 surv=99.999% | 64K-1M: n=601952 surv=99.947% | 1-4M: n=134907 surv=99.709% | 4-8M: n=24411 surv=99.295% | 8-16M: n=0 | >16M: n=0
+  mean true-distance: retrieved=79,204  lost=2,164,333
+[16.0MB] minlen=3 tbits=27 positions=16777214
+  distinct grams=7618  slot-occupancy=7618/134217728 (0.0001)  gram/slot pressure=0.0001
+  repeat positions=16769596 (99.9546%)  novel=7618
+  RETRIEVAL rate (repeat & candidate correct): 100.0000%
+  LOST-to-collision rate among repeats:        0.0000%
+  FALSE-candidate rate among novel grams:      0.0000%
+  overall wrong-candidate rate (all positions):  0.0000%
+  survival by true-distance: <=64K: n=16593323 surv=100.000% | 64K-1M: n=153496 surv=100.000% | 1-4M: n=21399 surv=100.000% | 4-8M: n=1239 surv=100.000% | 8-16M: n=139 surv=100.000% | >16M: n=0
+  mean true-distance: retrieved=6,069
+[16.0MB] minlen=6 tbits=27 positions=16777211
+  distinct grams=236246  slot-occupancy=236039/134217728 (0.0018)  gram/slot pressure=0.0018
+  repeat positions=16540965 (98.5919%)  novel=236246
+  RETRIEVAL rate (repeat & candidate correct): 99.9990%
+  LOST-to-collision rate among repeats:        0.0010%
+  FALSE-candidate rate among novel grams:      0.0876%
+  overall wrong-candidate rate (all positions):  0.0022%
+  survival by true-distance: <=64K: n=15759109 surv=100.000% | 64K-1M: n=591378 surv=99.994% | 1-4M: n=144230 surv=99.948% | 4-8M: n=36041 surv=99.922% | 8-16M: n=10207 surv=99.863% | >16M: n=0
+  mean true-distance: retrieved=50,093  lost=3,157,607
+[16.0MB] minlen=12 tbits=27 positions=16777205
+  distinct grams=1027556  slot-occupancy=1023679/134217728 (0.0076)  gram/slot pressure=0.0077
+  repeat positions=15749649 (93.8753%)  novel=1027556
+  RETRIEVAL rate (repeat & candidate correct): 99.9923%
+  LOST-to-collision rate among repeats:        0.0077%
+  FALSE-candidate rate among novel grams:      0.3773%
+  overall wrong-candidate rate (all positions):  0.0303%
+  survival by true-distance: <=64K: n=14145807 surv=100.000% | 64K-1M: n=1170364 surv=99.978% | 1-4M: n=305404 surv=99.864% | 4-8M: n=93823 surv=99.659% | 8-16M: n=34251 surv=99.507% | >16M: n=0
+  mean true-distance: retrieved=125,514  lost=4,036,462
+[32.0MB] minlen=3 tbits=27 positions=33553443
+  distinct grams=7994  slot-occupancy=7994/134217728 (0.0001)  gram/slot pressure=0.0001
+  repeat positions=33545449 (99.9762%)  novel=7994
+  RETRIEVAL rate (repeat & candidate correct): 100.0000%
+  LOST-to-collision rate among repeats:        0.0000%
+  FALSE-candidate rate among novel grams:      0.0000%
+  overall wrong-candidate rate (all positions):  0.0000%
+  survival by true-distance: <=64K: n=33186810 surv=100.000% | 64K-1M: n=308945 surv=100.000% | 1-4M: n=45572 surv=100.000% | 4-8M: n=3271 surv=100.000% | 8-16M: n=684 surv=100.000% | >16M: n=167 surv=100.000%
+  mean true-distance: retrieved=6,679
+[32.0MB] minlen=6 tbits=27 positions=33553440
+  distinct grams=381567  slot-occupancy=381003/134217728 (0.0028)  gram/slot pressure=0.0028
+  repeat positions=33171873 (98.8628%)  novel=381567
+  RETRIEVAL rate (repeat & candidate correct): 99.9985%
+  LOST-to-collision rate among repeats:        0.0015%
+  FALSE-candidate rate among novel grams:      0.1478%
+  overall wrong-candidate rate (all positions):  0.0031%
+  survival by true-distance: <=64K: n=31498906 surv=100.000% | 64K-1M: n=1187101 surv=99.994% | 1-4M: n=313861 surv=99.946% | 4-8M: n=98939 surv=99.907% | 8-16M: n=51705 surv=99.824% | >16M: n=21361 surv=99.775%
+  mean true-distance: retrieved=83,081  lost=6,460,651
+[32.0MB] minlen=12 tbits=27 positions=33553434
+  distinct grams=1812382  slot-occupancy=1800118/134217728 (0.0134)  gram/slot pressure=0.0135
+  repeat positions=31741052 (94.5985%)  novel=1812382
+  RETRIEVAL rate (repeat & candidate correct): 99.9868%
+  LOST-to-collision rate among repeats:        0.0132%
+  FALSE-candidate rate among novel grams:      0.6767%
+  overall wrong-candidate rate (all positions):  0.0491%
+  survival by true-distance: <=64K: n=28292183 surv=100.000% | 64K-1M: n=2286096 surv=99.979% | 1-4M: n=647412 surv=99.857% | 4-8M: n=247706 surv=99.676% | 8-16M: n=179724 surv=99.435% | >16M: n=87931 surv=99.005%
+  mean true-distance: retrieved=242,836  lost=9,417,218
+[FULL-tbits28-counterfactual] minlen=3 tbits=28 positions=33553443
+  distinct grams=7994  slot-occupancy=7994/268435456 (0.0000)  gram/slot pressure=0.0000
+  repeat positions=33545449 (99.9762%)  novel=7994
+  RETRIEVAL rate (repeat & candidate correct): 100.0000%
+  LOST-to-collision rate among repeats:        0.0000%
+  FALSE-candidate rate among novel grams:      0.0000%
+  overall wrong-candidate rate (all positions):  0.0000%
+  survival by true-distance: <=64K: n=33186810 surv=100.000% | 64K-1M: n=308945 surv=100.000% | 1-4M: n=45572 surv=100.000% | 4-8M: n=3271 surv=100.000% | 8-16M: n=684 surv=100.000% | >16M: n=167 surv=100.000%
+  mean true-distance: retrieved=6,679
+[FULL-tbits28-counterfactual] minlen=6 tbits=28 positions=33553440
+  distinct grams=381567  slot-occupancy=381283/268435456 (0.0014)  gram/slot pressure=0.0014
+  repeat positions=33171873 (98.8628%)  novel=381567
+  RETRIEVAL rate (repeat & candidate correct): 99.9993%
+  LOST-to-collision rate among repeats:        0.0007%
+  FALSE-candidate rate among novel grams:      0.0744%
+  overall wrong-candidate rate (all positions):  0.0015%
+  survival by true-distance: <=64K: n=31498906 surv=100.000% | 64K-1M: n=1187101 surv=99.998% | 1-4M: n=313861 surv=99.973% | 4-8M: n=98939 surv=99.962% | 8-16M: n=51705 surv=99.921% | >16M: n=21361 surv=99.888%
+  mean true-distance: retrieved=83,131  lost=6,611,615
+[FULL-tbits28-counterfactual] minlen=12 tbits=28 positions=33553434
+  distinct grams=1812382  slot-occupancy=1806187/268435456 (0.0067)  gram/slot pressure=0.0068
+  repeat positions=31741052 (94.5985%)  novel=1812382
+  RETRIEVAL rate (repeat & candidate correct): 99.9933%
+  LOST-to-collision rate among repeats:        0.0067%
+  FALSE-candidate rate among novel grams:      0.3418%
+  overall wrong-candidate rate (all positions):  0.0248%
+  survival by true-distance: <=64K: n=28292183 surv=100.000% | 64K-1M: n=2286096 surv=99.989% | 1-4M: n=647412 surv=99.930% | 4-8M: n=247706 surv=99.831% | 8-16M: n=179724 surv=99.710% | >16M: n=87931 surv=99.513%
+  mean true-distance: retrieved=243,440  lost=9,372,752
+[FULL] 12-gram repeat structure: positions=33553434 repeats=94.5985%
+    nearest-prev beyond >64K: 10.2787% of positions
+    nearest-prev beyond >1M: 3.4654% of positions
+    nearest-prev beyond >4M: 1.5359% of positions
+    nearest-prev beyond >8M: 0.7977% of positions
+    nearest-prev beyond >16M: 0.2621% of positions
+[FULL] 16-gram repeat structure: positions=33553430 repeats=92.1153%
+    nearest-prev beyond >64K: 13.1059% of positions
+    nearest-prev beyond >1M: 4.3009% of positions
+    nearest-prev beyond >4M: 1.8807% of positions
+    nearest-prev beyond >8M: 0.9762% of positions
+    nearest-prev beyond >16M: 0.3221% of positions
