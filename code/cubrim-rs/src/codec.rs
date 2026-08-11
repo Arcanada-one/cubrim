@@ -276,11 +276,50 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 /// MODE_BINFLOAT container, which prevents binfloat→binfloat recursion while still giving each
 /// column the full LZ / columnar / base competition (that competition — chiefly the LZ
 /// pre-pass — is what compresses the delta streams; encode_base alone bitpacks them raw).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StickyValueStreamPlan {
+    compete_blocks: usize,
+    recheck_every: usize,
+}
+
+// CUBR-0092: MED16 is the only currently authorized caller. Keep the schedule
+// explicit and local to the nested path so the public/default encoder remains
+// byte-identical and other transforms do not silently inherit the experiment.
+const MED16_STICKY_PLAN: StickyValueStreamPlan = StickyValueStreamPlan {
+    compete_blocks: 8,
+    recheck_every: 16,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum BaseValuePolicy {
+    Full,
+    Pinned(ValueScheme),
+    Sticky(StickyValueStreamPlan),
+}
+
+/// The winner is needed only by the sticky block planner. The blob is the
+/// exact wire output and is deliberately kept separate from the policy so
+/// normal callers still receive a plain `Vec<u8>`.
+struct EncodedBase {
+    blob: Vec<u8>,
+    winner: Option<ValueScheme>,
+}
+
 fn encode_with_config_inner(
     data: &[u8],
     config: &EncodeConfig,
     try_binfloat: bool,
     try_lz: bool,
+) -> Vec<u8> {
+    encode_with_config_inner_policy(data, config, try_binfloat, try_lz, BaseValuePolicy::Full)
+}
+
+fn encode_with_config_inner_policy(
+    data: &[u8],
+    config: &EncodeConfig,
+    try_binfloat: bool,
+    try_lz: bool,
+    base_policy: BaseValuePolicy,
 ) -> Vec<u8> {
     // CUBR-0087: `base` is deferred on the multi-block path so the cheap strong
     // backends can establish an incumbent first and bound it (see `EncBound`).
@@ -290,7 +329,11 @@ fn encode_with_config_inner(
     let mut best = if large {
         Vec::new()
     } else {
-        crate::prof::track("base", |v: &Vec<u8>| v.len(), || encode_base(data, config))
+        crate::prof::track(
+            "base",
+            |v: &Vec<u8>| v.len(),
+            || encode_base_with_policy(data, config, base_policy).blob,
+        )
     };
     // `best` is empty *only* as the "not computed yet" marker on the large path;
     // a real candidate is never empty (every mode emits at least a header).
@@ -311,7 +354,10 @@ fn encode_with_config_inner(
             let base = crate::prof::track(
                 "base",
                 |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
-                || encode_base_bounded(data, config, vcf.len()),
+                || {
+                    encode_base_bounded_with_policy(data, config, vcf.len(), base_policy)
+                        .map(|encoded| encoded.blob)
+                },
             );
             return match base {
                 Some(base) if base.len() <= vcf.len() => base,
@@ -506,7 +552,10 @@ fn encode_with_config_inner(
         let base = crate::prof::track(
             "base",
             |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
-            || encode_base_bounded(data, config, bound),
+            || {
+                encode_base_bounded_with_policy(data, config, bound, base_policy)
+                    .map(|encoded| encoded.blob)
+            },
         );
         match base {
             Some(base) if !have_best(&best) || base.len() <= best.len() => {
@@ -558,104 +607,38 @@ fn encode_with_config_inner(
     best
 }
 
-/// Build the value stream for the rANS-family value schemes and return it tagged with the
-/// winning scheme (so the header records the winner). Runs the full consolidated
-/// competition (Gotcha #4) — BWT+rANS, BWT+Huffman, order-1 Huffman, order-2 rANS,
-/// adaptive, context-mix, geomix, LZ+rANS — and keeps the strictly-smaller candidate, so
-/// ties resolve to the earlier-listed scheme (stable, deterministic). Requesting any
-/// family member therefore emits the per-block minimum and can never regress another.
-///
-/// Called exactly once per block: `encode_base` reuses the result for both the raw-vs-cube
-/// size decision and the emitted output (previously the competition ran twice per block).
-fn encode_rans_family_value_stream(
-    seq_codes: &[usize],
-    n_distinct: usize,
-) -> (ValueScheme, Vec<u8>) {
-    let rans_bytes = crate::prof::track(
-        "vs_bwt_rans",
-        |v: &Vec<u8>| v.len(),
-        || bwt_rans_encode(seq_codes, n_distinct),
-    );
-    let bwt_huff_bytes = crate::prof::track(
-        "vs_bwt_huff",
-        |v: &Vec<u8>| v.len(),
-        || bwt_entropy_encode(seq_codes, n_distinct),
-    );
-    let t4_bytes_val = crate::prof::track(
-        "vs_t4_huff",
-        |v: &Vec<u8>| v.len(),
-        || context_huffman_encode(seq_codes, n_distinct),
-    );
-    let order2_bytes = crate::prof::track(
-        "vs_order2_rans",
-        |v: &Vec<u8>| v.len(),
-        || bwt_order2_rans_encode(seq_codes, n_distinct),
-    );
-    let adaptive_bytes = crate::prof::track(
-        "vs_adaptive",
-        |v: &Vec<u8>| v.len(),
-        || bwt_adaptive_encode(seq_codes, n_distinct),
-    );
-    let ctxmix_bytes = crate::prof::track(
-        "vs_ctxmix",
-        |v: &Vec<u8>| v.len(),
-        || bwt_ctxmix_encode(seq_codes, n_distinct),
-    );
-    let geomix_bytes = crate::prof::track(
-        "vs_geomix",
-        |v: &Vec<u8>| v.len(),
-        || bwt_geomix_encode(seq_codes, n_distinct),
-    );
-    let lz_bytes = crate::prof::track(
-        "vs_lz_rans",
-        |v: &Vec<u8>| v.len(),
-        || lz_rans_encode(seq_codes, n_distinct),
-    );
+const RANS_FAMILY_SCHEMES: [ValueScheme; 8] = [
+    ValueScheme::BwtRans,
+    ValueScheme::BwtEntropy,
+    ValueScheme::EntropyContext,
+    ValueScheme::Order2Rans,
+    ValueScheme::BwtAdaptive,
+    ValueScheme::BwtContextMix,
+    ValueScheme::BwtGeoMix,
+    ValueScheme::LzRans,
+];
 
-    let mut winner_scheme = ValueScheme::BwtRans;
-    let mut encoded_values = rans_bytes;
-    if bwt_huff_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::BwtEntropy;
-        encoded_values = bwt_huff_bytes;
-        crate::prof::win("vs_bwt_huff");
+#[inline]
+fn is_rans_family_scheme(scheme: ValueScheme) -> bool {
+    RANS_FAMILY_SCHEMES.contains(&scheme)
+}
+
+fn rans_candidate_prof_name(scheme: ValueScheme) -> &'static str {
+    match scheme {
+        ValueScheme::BwtRans => "vs_bwt_rans",
+        ValueScheme::BwtEntropy => "vs_bwt_huff",
+        ValueScheme::EntropyContext => "vs_t4_huff",
+        ValueScheme::Order2Rans => "vs_order2_rans",
+        ValueScheme::BwtAdaptive => "vs_adaptive",
+        ValueScheme::BwtContextMix => "vs_ctxmix",
+        ValueScheme::BwtGeoMix => "vs_geomix",
+        ValueScheme::LzRans => "vs_lz_rans",
+        _ => "vs_other",
     }
-    if t4_bytes_val.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::EntropyContext;
-        encoded_values = t4_bytes_val;
-        crate::prof::win("vs_t4_huff");
-    }
-    if order2_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::Order2Rans;
-        encoded_values = order2_bytes;
-        crate::prof::win("vs_order2_rans");
-    }
-    if adaptive_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::BwtAdaptive;
-        encoded_values = adaptive_bytes;
-        crate::prof::win("vs_adaptive");
-    }
-    if ctxmix_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::BwtContextMix;
-        encoded_values = ctxmix_bytes;
-        crate::prof::win("vs_ctxmix");
-    }
-    if geomix_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::BwtGeoMix;
-        encoded_values = geomix_bytes;
-        crate::prof::win("vs_geomix");
-    }
-    if lz_bytes.len() < encoded_values.len() {
-        winner_scheme = ValueScheme::LzRans;
-        encoded_values = lz_bytes;
-        crate::prof::win("vs_lz_rans");
-    }
-    // CUBR-0087: record the FINAL winner per block, not the running improvements.
-    // `win()` above fires every time a candidate becomes the running minimum, so
-    // several candidates "win" per block and the counts cannot answer the question
-    // that matters for a sticky-selection lever: does one scheme win *the block*,
-    // and does it keep winning across the file? If it does, the other seven passes
-    // are computing a known answer ~1,100 CPU-seconds at a time.
-    crate::prof::win(match winner_scheme {
+}
+
+fn rans_final_prof_name(scheme: ValueScheme) -> &'static str {
+    match scheme {
         ValueScheme::BwtRans => "FINAL:bwt_rans",
         ValueScheme::BwtEntropy => "FINAL:bwt_huff",
         ValueScheme::EntropyContext => "FINAL:t4_huff",
@@ -665,8 +648,96 @@ fn encode_rans_family_value_stream(
         ValueScheme::BwtGeoMix => "FINAL:geomix",
         ValueScheme::LzRans => "FINAL:lz_rans",
         _ => "FINAL:other",
-    });
+    }
+}
+
+/// Encode exactly one rANS-family candidate. Keeping the candidate order and
+/// profile labels here preserves the full rail's byte and attribution behavior
+/// while giving the sticky rail a one-pass fast path.
+fn encode_rans_family_candidate(
+    seq_codes: &[usize],
+    n_distinct: usize,
+    scheme: ValueScheme,
+) -> Vec<u8> {
+    match scheme {
+        ValueScheme::BwtRans => crate::prof::track(
+            rans_candidate_prof_name(scheme),
+            |v: &Vec<u8>| v.len(),
+            || bwt_rans_encode(seq_codes, n_distinct),
+        ),
+        ValueScheme::BwtEntropy => crate::prof::track(
+            rans_candidate_prof_name(scheme),
+            |v: &Vec<u8>| v.len(),
+            || bwt_entropy_encode(seq_codes, n_distinct),
+        ),
+        ValueScheme::EntropyContext => crate::prof::track(
+            rans_candidate_prof_name(scheme),
+            |v: &Vec<u8>| v.len(),
+            || context_huffman_encode(seq_codes, n_distinct),
+        ),
+        ValueScheme::Order2Rans => crate::prof::track(
+            rans_candidate_prof_name(scheme),
+            |v: &Vec<u8>| v.len(),
+            || bwt_order2_rans_encode(seq_codes, n_distinct),
+        ),
+        ValueScheme::BwtAdaptive => crate::prof::track(
+            rans_candidate_prof_name(scheme),
+            |v: &Vec<u8>| v.len(),
+            || bwt_adaptive_encode(seq_codes, n_distinct),
+        ),
+        ValueScheme::BwtContextMix => crate::prof::track(
+            rans_candidate_prof_name(scheme),
+            |v: &Vec<u8>| v.len(),
+            || bwt_ctxmix_encode(seq_codes, n_distinct),
+        ),
+        ValueScheme::BwtGeoMix => crate::prof::track(
+            rans_candidate_prof_name(scheme),
+            |v: &Vec<u8>| v.len(),
+            || bwt_geomix_encode(seq_codes, n_distinct),
+        ),
+        ValueScheme::LzRans => crate::prof::track(
+            rans_candidate_prof_name(scheme),
+            |v: &Vec<u8>| v.len(),
+            || lz_rans_encode(seq_codes, n_distinct),
+        ),
+        _ => panic!("non-rANS-family scheme passed to candidate encoder"),
+    }
+}
+
+/// Build the value stream for the rANS-family value schemes and return it tagged with the
+/// winning scheme (so the header records the winner). Runs the full consolidated
+/// competition in stable order and keeps the strictly-smaller candidate, so ties resolve to
+/// the earlier-listed scheme exactly as before.
+fn encode_rans_family_value_stream(
+    seq_codes: &[usize],
+    n_distinct: usize,
+) -> (ValueScheme, Vec<u8>) {
+    let mut winner_scheme = RANS_FAMILY_SCHEMES[0];
+    let mut encoded_values = encode_rans_family_candidate(seq_codes, n_distinct, winner_scheme);
+    for &scheme in RANS_FAMILY_SCHEMES.iter().skip(1) {
+        let candidate = encode_rans_family_candidate(seq_codes, n_distinct, scheme);
+        if candidate.len() < encoded_values.len() {
+            winner_scheme = scheme;
+            encoded_values = candidate;
+            crate::prof::win(rans_candidate_prof_name(scheme));
+        }
+    }
+    // CUBR-0087: record the FINAL winner per block, not the running improvements.
+    crate::prof::win(rans_final_prof_name(winner_scheme));
     (winner_scheme, encoded_values)
+}
+
+/// Encode one already-selected scheme. The scheme remains in the block header,
+/// so this changes work selection only; decoding stays wire-compatible.
+fn encode_rans_family_value_stream_pinned(
+    seq_codes: &[usize],
+    n_distinct: usize,
+    scheme: ValueScheme,
+) -> (ValueScheme, Vec<u8>) {
+    debug_assert!(is_rans_family_scheme(scheme));
+    let encoded_values = encode_rans_family_candidate(seq_codes, n_distinct, scheme);
+    crate::prof::win(rans_final_prof_name(scheme));
+    (scheme, encoded_values)
 }
 
 /// Base encoder (single-block cube/raw, or MODE_CHUNKED for large inputs). This is
@@ -676,16 +747,44 @@ fn encode_rans_family_value_stream(
 /// Returns `None` when the chunked accumulation passed the incumbent, i.e. the
 /// candidate provably cannot win. Only the competitive rail may call this — a
 /// caller that embeds the result must use `encode_base`, which always completes.
-fn encode_base_bounded(data: &[u8], config: &EncodeConfig, bound: EncBound) -> Option<Vec<u8>> {
+fn encode_base_bounded_with_policy(
+    data: &[u8],
+    config: &EncodeConfig,
+    bound: EncBound,
+    policy: BaseValuePolicy,
+) -> Option<EncodedBase> {
     if data.len() > config.cube_size_limit() {
         // Only the chunked path has an accumulation to abandon.
-        encode_chunked_bounded(data, config, bound)
+        encode_chunked_bounded_with_policy(data, config, bound, policy)
+            .map(|blob| EncodedBase { blob, winner: None })
     } else {
-        Some(encode_base(data, config))
+        Some(encode_base_with_policy(data, config, policy))
     }
 }
 
 fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    encode_base_with_policy(data, config, BaseValuePolicy::Full).blob
+}
+
+fn encode_base_with_policy(
+    data: &[u8],
+    config: &EncodeConfig,
+    policy: BaseValuePolicy,
+) -> EncodedBase {
+    if data.len() > config.cube_size_limit() {
+        let blob = encode_chunked_bounded_with_policy(data, config, usize::MAX, policy)
+            .expect("unbounded chunked encode cannot be abandoned");
+        EncodedBase { blob, winner: None }
+    } else {
+        encode_base_block_with_policy(data, config, policy)
+    }
+}
+
+fn encode_base_block_with_policy(
+    data: &[u8],
+    config: &EncodeConfig,
+    policy: BaseValuePolicy,
+) -> EncodedBase {
     let l = data.len();
     let b = config.b;
     let gap_scheme = config.gap_scheme;
@@ -693,7 +792,10 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 
     // Special case: empty input -> raw-store
     if l == 0 {
-        return serialize_raw_header(2, b, 0);
+        return EncodedBase {
+            blob: serialize_raw_header(2, b, 0),
+            winner: None,
+        };
     }
 
     let n_min = compute_min_n(l, b);
@@ -723,14 +825,17 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     // them in a MODE_CHUNKED container. Each block re-enters the full competitive
     // machinery (cube / BWT / raw), so big files compress instead of raw-storing.
     if l > config.cube_size_limit() {
-        return encode_chunked(data, config);
+        return encode_base_with_policy(data, config, policy);
     }
 
     // R7: small inputs always raw-store (header alone would exceed any savings)
     if l <= config.raw_store_bound {
         let mut out = serialize_raw_header(n_effective, b, l);
         out.extend_from_slice(data);
-        return out;
+        return EncodedBase {
+            blob: out,
+            winner: None,
+        };
     }
 
     // Step 1: R8 domainize (identity)
@@ -798,10 +903,15 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
             | ValueScheme::LzRans
     );
     let precomputed_values: Option<(ValueScheme, Vec<u8>)> = if rans_family {
-        Some(encode_rans_family_value_stream(
-            &seq_codes,
-            inverse_dict.len(),
-        ))
+        match policy {
+            BaseValuePolicy::Pinned(scheme) if is_rans_family_scheme(scheme) => Some(
+                encode_rans_family_value_stream_pinned(&seq_codes, inverse_dict.len(), scheme),
+            ),
+            _ => Some(encode_rans_family_value_stream(
+                &seq_codes,
+                inverse_dict.len(),
+            )),
+        }
     } else {
         None
     };
@@ -843,7 +953,10 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         // R7: cube does not improve on raw; use raw-store
         let mut out = serialize_raw_header(n, b, l);
         out.extend_from_slice(data);
-        return out;
+        return EncodedBase {
+            blob: out,
+            winner: None,
+        };
     }
 
     // Step 6: Encode gap streams using the configured scheme
@@ -925,7 +1038,10 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
                 out.extend_from_slice(stream);
             }
             out.extend_from_slice(&encoded_values);
-            return out;
+            return EncodedBase {
+                blob: out,
+                winner: Some(winner_scheme),
+            };
         }
         ValueScheme::BwtRans
         | ValueScheme::Order2Rans
@@ -969,7 +1085,10 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
                 out.extend_from_slice(stream);
             }
             out.extend_from_slice(&encoded_values);
-            return out;
+            return EncodedBase {
+                blob: out,
+                winner: Some(winner_scheme),
+            };
         }
     };
 
@@ -981,7 +1100,10 @@ fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         out.extend_from_slice(stream);
     }
     out.extend_from_slice(&encoded_values);
-    out
+    EncodedBase {
+        blob: out,
+        winner: None,
+    }
 }
 
 /// Big-file block size. Each chunk is encoded as an independent single-block blob,
@@ -1054,21 +1176,6 @@ fn bound_exceeded(emitted: usize, bound: EncBound) -> bool {
     emitted > bound
 }
 
-/// Encode an input larger than the single-block ceiling as a MODE_CHUNKED container.
-///
-/// The input is sliced into `chunk_block_size(config)`-byte blocks; each block is
-/// encoded independently via `encode_with_config` (re-entering the full competitive
-/// machinery — cube / BWT / raw) and framed with its serialized length. The decoder
-/// (`decode_chunked`) decodes every sub-blob and concatenates the results, so the
-/// round-trip is byte-exact for any input length.
-///
-/// Wire: [MAGIC 4B][VERSION 1B][MODE_CHUNKED 1B][n_blocks u32 BE]
-///       then n_blocks × ( [sub_len u32 BE][sub_blob] ).
-fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
-    encode_chunked_bounded(data, config, usize::MAX)
-        .expect("unbounded chunked encode cannot be abandoned")
-}
-
 /// `encode_chunked`, optionally abandonable against the competitive bound.
 ///
 /// With `allow_abort`, returns `None` as soon as the accumulated container has
@@ -1078,8 +1185,12 @@ fn encode_chunked(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
 /// not a valid encoding, and handing one to a consumer that does not check for
 /// `None` would corrupt output. Only the competitive rail, which discards
 /// losers, may pass true.
-fn encode_chunked_bounded(data: &[u8], config: &EncodeConfig, bound: EncBound) -> Option<Vec<u8>> {
-    let allow_abort = bound != usize::MAX;
+fn encode_chunked_bounded_with_policy(
+    data: &[u8],
+    config: &EncodeConfig,
+    bound: EncBound,
+    policy: BaseValuePolicy,
+) -> Option<Vec<u8>> {
     let block_size = chunk_block_size(config);
     debug_assert!(block_size >= 1, "chunk block size must be positive");
 
@@ -1097,7 +1208,7 @@ fn encode_chunked_bounded(data: &[u8], config: &EncodeConfig, bound: EncBound) -
     // atomic work-stealing cursor for load balance (block cost varies with the winning
     // value-scheme). The output is reassembled in strict block order, so the wire format
     // — and therefore the round-trip — is byte-identical to a serial encode.
-    let sub_blobs: Vec<Vec<u8>> = match encode_blocks_parallel(&blocks, config, bound) {
+    let sub_blobs: Vec<Vec<u8>> = match encode_blocks_parallel(&blocks, config, bound, policy) {
         Some(blobs) => blobs,
         None => return None,
     };
@@ -1119,14 +1230,31 @@ fn encode_blocks_parallel(
     blocks: &[&[u8]],
     config: &EncodeConfig,
     bound: EncBound,
+    policy: BaseValuePolicy,
 ) -> Option<Vec<Vec<u8>>> {
-    let allow_abort = bound != usize::MAX;
     let n_blocks = blocks.len();
     if n_blocks == 0 {
         return Some(Vec::new());
     }
-    // Single block, or parallelism disabled: encode serially (avoids thread setup cost
-    // and keeps nested candidate encodes — which already saturate the pool — cheap).
+    if let BaseValuePolicy::Sticky(plan) = policy {
+        return encode_blocks_parallel_sticky(blocks, config, bound, plan);
+    }
+
+    let pin = match policy {
+        BaseValuePolicy::Full => None,
+        BaseValuePolicy::Pinned(scheme) => Some(scheme),
+        BaseValuePolicy::Sticky(_) => unreachable!("sticky policy handled above"),
+    };
+    let jobs: Vec<(usize, Option<ValueScheme>)> = (0..n_blocks).map(|i| (i, pin)).collect();
+    let collected = encode_scheduled_blocks_parallel(blocks, config, bound, 0, &jobs)?;
+    let mut out = vec![None; n_blocks];
+    for (i, blob) in collected {
+        out[i] = Some(blob);
+    }
+    out.into_iter().collect()
+}
+
+fn encoder_thread_count(n_jobs: usize) -> usize {
     let max_threads = std::env::var("CUBR_THREADS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
@@ -1136,34 +1264,52 @@ fn encode_blocks_parallel(
                 .map(|n| n.get())
                 .unwrap_or(1)
         });
-    let n_threads = max_threads.min(n_blocks);
+    max_threads.min(n_jobs).max(1)
+}
+
+/// Run a fixed block schedule. `initial_emitted` accounts for probe blobs
+/// already encoded by the sticky planner; the bound remains order-independent.
+fn encode_scheduled_blocks_parallel(
+    blocks: &[&[u8]],
+    config: &EncodeConfig,
+    bound: EncBound,
+    initial_emitted: usize,
+    jobs: &[(usize, Option<ValueScheme>)],
+) -> Option<Vec<(usize, Vec<u8>)>> {
+    if jobs.is_empty() {
+        return Some(Vec::new());
+    }
+    let allow_abort = bound != usize::MAX;
+    if allow_abort && bound_exceeded(initial_emitted, bound) {
+        return None;
+    }
+    let n_threads = encoder_thread_count(jobs.len());
     if n_threads <= 1 {
         // Serial fallback: encode on the calling thread with the fast sweep enabled, then
         // restore the prior flag so unrelated later work on this thread is unaffected.
         let prev = GEOMIX_FAST_SWEEP.with(|f| f.replace(true));
-        let mut out: Vec<Vec<u8>> = Vec::with_capacity(n_blocks);
-        let mut emitted = 0usize;
-        let mut abandoned = false;
-        for b in blocks {
-            let blob = encode_base(b, config);
+        let mut collected = Vec::with_capacity(jobs.len());
+        let mut emitted = initial_emitted;
+        for &(i, pin) in jobs {
+            let policy = pin.map_or(BaseValuePolicy::Full, BaseValuePolicy::Pinned);
+            let blob = encode_base_block_with_policy(blocks[i], config, policy).blob;
             emitted += blob.len() + 4; // + the u32 length frame
-            out.push(blob);
             if allow_abort && bound_exceeded(emitted, bound) {
-                abandoned = true;
-                break;
+                GEOMIX_FAST_SWEEP.with(|f| f.set(prev));
+                return None;
             }
+            collected.push((i, blob));
         }
         GEOMIX_FAST_SWEEP.with(|f| f.set(prev));
-        return if abandoned { None } else { Some(out) };
+        return Some(collected);
     }
 
     let cursor = std::sync::atomic::AtomicUsize::new(0);
     let cursor_ref = &cursor;
     // Bytes emitted so far across all workers. Blocks complete out of order, so
     // this is an order-independent sum — which is exactly what the bound needs:
-    // the finished container is at least this large, so passing the bound here
-    // proves the candidate cannot win, whichever blocks happen to be done.
-    let emitted = std::sync::atomic::AtomicUsize::new(0);
+    // the finished container is at least this large, whichever jobs complete first.
+    let emitted = std::sync::atomic::AtomicUsize::new(initial_emitted);
     let emitted_ref = &emitted;
     let abandoned = std::sync::atomic::AtomicBool::new(false);
     let abandoned_ref = &abandoned;
@@ -1178,11 +1324,13 @@ fn encode_blocks_parallel(
                         if allow_abort && abandoned_ref.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
-                        let i = cursor_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if i >= n_blocks {
+                        let j = cursor_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if j >= jobs.len() {
                             break;
                         }
-                        let blob = encode_base(blocks[i], config);
+                        let (i, pin) = jobs[j];
+                        let policy = pin.map_or(BaseValuePolicy::Full, BaseValuePolicy::Pinned);
+                        let blob = encode_base_block_with_policy(blocks[i], config, policy).blob;
                         if allow_abort {
                             let total = emitted_ref
                                 .fetch_add(blob.len() + 4, std::sync::atomic::Ordering::Relaxed)
@@ -1207,9 +1355,179 @@ fn encode_blocks_parallel(
     if allow_abort && abandoned.load(std::sync::atomic::Ordering::Relaxed) {
         return None;
     }
-    // Reassemble strict block order (threads complete out of order).
     collected.sort_by_key(|(i, _)| *i);
-    Some(collected.into_iter().map(|(_, blob)| blob).collect())
+    Some(collected)
+}
+
+/// Source-order probe indices for CUBR-0092. The first window calibrates the
+/// predicate; later probes are periodic rechecks that can repin the next window.
+fn sticky_probe_indices(n_blocks: usize, plan: StickyValueStreamPlan) -> Vec<usize> {
+    if n_blocks == 0 {
+        return Vec::new();
+    }
+    if plan.compete_blocks == 0 || plan.recheck_every == 0 {
+        return (0..n_blocks).collect();
+    }
+    let first_end = n_blocks.min(plan.compete_blocks);
+    let mut probes: Vec<usize> = (0..first_end).collect();
+    if n_blocks > plan.compete_blocks {
+        let mut i = plan.compete_blocks;
+        while i < n_blocks {
+            probes.push(i);
+            i += plan.recheck_every;
+        }
+    }
+    probes
+}
+
+fn encode_probe_blocks_parallel(
+    blocks: &[&[u8]],
+    config: &EncodeConfig,
+    bound: EncBound,
+    probe_indices: &[usize],
+) -> Option<Vec<(usize, EncodedBase)>> {
+    if probe_indices.is_empty() {
+        return Some(Vec::new());
+    }
+    let allow_abort = bound != usize::MAX;
+    let n_threads = encoder_thread_count(probe_indices.len());
+    if n_threads <= 1 {
+        let prev = GEOMIX_FAST_SWEEP.with(|f| f.replace(true));
+        let mut emitted = 0usize;
+        let mut out = Vec::with_capacity(probe_indices.len());
+        for &i in probe_indices {
+            let encoded = encode_base_block_with_policy(blocks[i], config, BaseValuePolicy::Full);
+            emitted += encoded.blob.len() + 4;
+            if allow_abort && bound_exceeded(emitted, bound) {
+                GEOMIX_FAST_SWEEP.with(|f| f.set(prev));
+                return None;
+            }
+            out.push((i, encoded));
+        }
+        GEOMIX_FAST_SWEEP.with(|f| f.set(prev));
+        return Some(out);
+    }
+
+    let cursor = std::sync::atomic::AtomicUsize::new(0);
+    let cursor_ref = &cursor;
+    let emitted = std::sync::atomic::AtomicUsize::new(0);
+    let emitted_ref = &emitted;
+    let abandoned = std::sync::atomic::AtomicBool::new(false);
+    let abandoned_ref = &abandoned;
+    let collected: Vec<(usize, EncodedBase)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..n_threads)
+            .map(|_| {
+                scope.spawn(move || {
+                    GEOMIX_FAST_SWEEP.with(|f| f.set(true));
+                    let mut local = Vec::new();
+                    loop {
+                        if allow_abort && abandoned_ref.load(std::sync::atomic::Ordering::Relaxed) {
+                            break;
+                        }
+                        let j = cursor_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if j >= probe_indices.len() {
+                            break;
+                        }
+                        let i = probe_indices[j];
+                        let encoded =
+                            encode_base_block_with_policy(blocks[i], config, BaseValuePolicy::Full);
+                        if allow_abort {
+                            let total = emitted_ref.fetch_add(
+                                encoded.blob.len() + 4,
+                                std::sync::atomic::Ordering::Relaxed,
+                            ) + encoded.blob.len()
+                                + 4;
+                            if bound_exceeded(total, bound) {
+                                abandoned_ref.store(true, std::sync::atomic::Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                        local.push((i, encoded));
+                    }
+                    local
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("probe-encode thread panicked"))
+            .collect()
+    });
+    if allow_abort && abandoned.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    Some(collected)
+}
+
+fn encode_blocks_parallel_sticky(
+    blocks: &[&[u8]],
+    config: &EncodeConfig,
+    bound: EncBound,
+    plan: StickyValueStreamPlan,
+) -> Option<Vec<Vec<u8>>> {
+    let n_blocks = blocks.len();
+    let probe_indices = sticky_probe_indices(n_blocks, plan);
+    let probe_results = encode_probe_blocks_parallel(blocks, config, bound, &probe_indices)?;
+    let mut by_index: Vec<Option<EncodedBase>> = (0..n_blocks).map(|_| None).collect();
+    for (i, encoded) in probe_results {
+        by_index[i] = Some(encoded);
+    }
+
+    // The first eight source-order winners are the calibration predicate. Any
+    // disagreement, raw fallback, or non-family winner fails open for the file.
+    let calibration_winner = if n_blocks >= plan.compete_blocks && plan.compete_blocks > 0 {
+        let first = by_index[0].as_ref().and_then(|encoded| encoded.winner);
+        if first.is_some()
+            && (1..plan.compete_blocks)
+                .all(|i| by_index[i].as_ref().and_then(|encoded| encoded.winner) == first)
+        {
+            first
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let mut is_probe = vec![false; n_blocks];
+    for &i in &probe_indices {
+        is_probe[i] = true;
+    }
+    let mut pins: Vec<Option<ValueScheme>> = vec![None; n_blocks];
+    if calibration_winner.is_some() {
+        let mut current = calibration_winner;
+        for i in plan.compete_blocks..n_blocks {
+            if is_probe[i] {
+                current = by_index[i].as_ref().and_then(|encoded| encoded.winner);
+            } else {
+                pins[i] = current;
+            }
+        }
+    }
+
+    let mut initial_emitted = 0usize;
+    let mut out: Vec<Option<Vec<u8>>> = (0..n_blocks).map(|_| None).collect();
+    for &i in &probe_indices {
+        let encoded = by_index[i]
+            .take()
+            .expect("sticky probe result must cover every probe index");
+        initial_emitted += encoded.blob.len() + 4;
+        if bound != usize::MAX && bound_exceeded(initial_emitted, bound) {
+            return None;
+        }
+        out[i] = Some(encoded.blob);
+    }
+
+    let jobs: Vec<(usize, Option<ValueScheme>)> = (0..n_blocks)
+        .filter(|&i| !is_probe[i])
+        .map(|i| (i, pins[i]))
+        .collect();
+    for (i, blob) in
+        encode_scheduled_blocks_parallel(blocks, config, bound, initial_emitted, &jobs)?
+    {
+        out[i] = Some(blob);
+    }
+    out.into_iter().collect()
 }
 
 /// Candidate field delimiters tried for the columnar transform, in no particular order
@@ -2778,7 +3096,13 @@ fn encode_med16(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
             if tail_byte == 1 {
                 resid.push(data[len - 1]);
             }
-            let nested = encode_with_config_inner(&resid, &nested_config, false, false);
+            let nested = encode_with_config_inner_policy(
+                &resid,
+                &nested_config,
+                false,
+                false,
+                BaseValuePolicy::Sticky(MED16_STICKY_PLAN),
+            );
             // apm flag is packed into the free high bit of the u16 width (widths are ≤4096 ≪
             // 0x7FFF), so the container stays 13 bytes: a plain-MED16 file (apm=0) is byte-for-
             // byte identical to the pre-FH3-09 format — strict zero regression, no +1B overhead.
@@ -10742,6 +11066,47 @@ pub(crate) fn lz_rans_size(seq_codes: &[usize], n_distinct: usize) -> usize {
 mod tests {
     use super::*;
 
+    #[test]
+    fn cubr0092_sticky_probe_schedule_is_source_ordered() {
+        let plan = MED16_STICKY_PLAN;
+        assert_eq!(sticky_probe_indices(7, plan), (0..7).collect::<Vec<_>>());
+        assert_eq!(sticky_probe_indices(8, plan), (0..8).collect::<Vec<_>>());
+        assert_eq!(
+            sticky_probe_indices(40, plan),
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 24]
+        );
+    }
+
+    #[test]
+    fn cubr0092_pinned_value_stream_roundtrips() {
+        let data: Vec<u8> = (0..32_768).map(|i| (i % 8) as u8).collect();
+        let mut config = EncodeConfig::v1_default();
+        config.value_scheme = ValueScheme::BwtRans;
+        let encoded = encode_base_block_with_policy(
+            &data,
+            &config,
+            BaseValuePolicy::Pinned(ValueScheme::BwtRans),
+        );
+        assert_eq!(encoded.winner, Some(ValueScheme::BwtRans));
+        assert_eq!(decode(&encoded.blob).expect("pinned blob decodes"), data);
+    }
+
+    #[test]
+    fn cubr0092_sticky_blocks_roundtrip_after_calibration() {
+        let mut config = EncodeConfig::v1_default();
+        config.value_scheme = ValueScheme::BwtRans;
+        let storage: Vec<Vec<u8>> = (0..10)
+            .map(|_| (0..1024).map(|i| (i % 7) as u8).collect())
+            .collect();
+        let blocks: Vec<&[u8]> = storage.iter().map(Vec::as_slice).collect();
+        let blobs = encode_blocks_parallel_sticky(&blocks, &config, usize::MAX, MED16_STICKY_PLAN)
+            .expect("unbounded sticky block encode");
+        assert_eq!(blobs.len(), blocks.len());
+        for (blob, original) in blobs.iter().zip(storage.iter()) {
+            assert_eq!(decode(blob).expect("sticky block decodes"), *original);
+        }
+    }
+
     /// The CM2 size floor is a runtime budget, not a compression judgement. Inputs in the
     /// window above `cube_size_limit()` (where the heavy-candidate block runs) and below the
     /// old 256 KiB floor must now actually reach the strong backend.
@@ -12312,7 +12677,13 @@ mod tests {
         assert_eq!(lz[5], MODE_LZ, "cross-block long-range must select MODE_LZ");
 
         // It must be far smaller than the chunked (no whole-file LZ) encoding.
-        let chunked = encode_chunked(&data, &EncodeConfig::v1_default());
+        let chunked = encode_chunked_bounded_with_policy(
+            &data,
+            &EncodeConfig::v1_default(),
+            usize::MAX,
+            BaseValuePolicy::Full,
+        )
+        .expect("unbounded chunked encode cannot be abandoned");
         assert_eq!(decode(&chunked).unwrap(), data);
         assert_eq!(chunked[5], MODE_CHUNKED);
         assert!(
