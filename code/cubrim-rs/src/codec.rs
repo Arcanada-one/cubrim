@@ -5857,6 +5857,14 @@ fn build_context_tables(seq_codes: &[usize], n_distinct: usize) -> Vec<(u16, Vec
     let mut result: Vec<(u16, Vec<u8>)> = vec![(FALLBACK_CTX, fallback_code_len)];
 
     for (&ctx, freq) in &ctx_freq {
+        if ctx == FALLBACK_CTX {
+            // Wire id 0 is reserved for the global fallback table emitted above.
+            // Emitting a second entry with the same id makes the decoder's
+            // ctx_id -> table map resolve FALLBACK_CTX to this narrower table,
+            // which may lack symbols the fallback carries — a silent round-trip
+            // break, not just a wasted table.
+            continue;
+        }
         let obs: usize = *total_ctx_obs.get(&ctx).unwrap_or(&0);
         if obs < MIN_CTX_COUNT {
             continue; // use fallback for this context
@@ -14311,6 +14319,20 @@ mod tests {
             blob.len(),
             data.len()
         );
+    }
+
+    #[test]
+    fn test_entropy_context_uses_global_fallback_for_sparse_context() {
+        // Context 0 is frequent enough to get its own table, but it never emits
+        // symbol 2. Context 1 is sparse and must use the global fallback, where
+        // symbol 2 is present.
+        let mut seq = vec![0usize; 20];
+        seq.extend_from_slice(&[1, 2]);
+
+        let encoded = context_huffman_encode(&seq, 3);
+        let (decoded, _) = context_huffman_decode(&encoded, 0, seq.len(), 3).unwrap();
+
+        assert_eq!(decoded, seq);
     }
 
     #[test]

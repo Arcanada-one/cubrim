@@ -1117,3 +1117,90 @@ created: 2026-06-17
 **Рекомендованная первая волна проб (по дешевизне × информативности):** (1) FH2-09 probe-1 — минуты (`cjxl` на ptt5); (2) FH2-06 аудит — полдня, точная граница, полезен и Opus'у; (3) FH2-03 probe-1 — часы (orz/RAZOR на mozilla: решает судьбу самой дорогой стройки волны); (4) FH2-04+FH2-05 совместная проба — часы (один и тот же по-членный разрез mozilla, обе гипотезы из одного скрипта); (5) FH2-02 Python-автомат на nci/webster. Нейрокарточки (FH2-01/10) — после операторского сигнала о GPU/времени.
 
 **Покрытие:** text — FH2-01/02/06/08(+10); exe — FH2-03/04/05; binary — FH2-03/07(+06); database — FH2-02; image — FH2-09; code — FH2-04/05/08. Инварианты: все карточки wire-чарджированы (Gotcha #6), без передаваемых по-значных перестановок (Gotcha #7; FH2-04 — по-сегментная, оплачена явно), пробы — реальные адаптивные кодеры (Gotcha #9), всё за competitive-min (ноль регрессии), целочисленный детерминизм (FH2-01 — int16 fixed-point, якорь arXiv 2601.10678).
+
+---
+
+## Recovered entries (INFRA-0394, 2026-08-11)
+
+The four records below were written on feature branches that were never merged
+into `main`. Their subject matter did ship (`ValueScheme::BwtAdaptive` = H-21 and
+`ValueScheme::BwtContextMix` = H-22 are in `code/cubrim-rs/src/config.rs`; the
+CM2-EXE validation is the basis of `MODE_CM2`), but the log entries themselves
+were left behind. They are appended verbatim so the journal stops having a hole
+between H-20 and H-25.
+
+---
+
+### H-21 — adaptive / streaming entropy coding (no transmitted frequency tables)
+
+- **Hypothesis (queue item 2, 2026-06-23):** the champion BwtRans (scheme 7) transmits a per-context frequency table; on short, structured BWT'd streams those tables dominate the value-stream cost. An ADAPTIVE model removes the tables entirely — the decoder rebuilds the exact same order-1 model symbol-by-symbol from the codes it has already decoded. The only side information is the alphabet size (already in the cube header) and one `inc` byte (learning rate).
+- **Probe FIRST (`docs/ephemeral/research/probe_h21_adaptive_rans.py`):** modelled the adaptive code length (sum of −log2 p) for order-0 and order-1 over the BWT'd value-code stream, two ways: (a) an idealised float Laplace model, and (b) a FAITHFUL integer-count model **with periodic rescaling** (init 1/symbol, increment `inc`, halve at total > 2^15) — exactly what a real cumulative-frequency range coder achieves to <0.01%. A bug in the first faithful draft (missing context advance → accidental order-0) was caught by cross-checking against the idealised model (867 vs 156 on sparse_clustered) and fixed. The faithful order-1 model projected aggregate ≈ **0.194** holding raw files conservatively — a strong GO signal, the win concentrated on the structured files where static tables are largest.
+- **BACKEND CHOICE — range coder, not rANS (faithful to the hypothesis intent, not its letter):** rANS encodes LIFO (reverse), which fights a forward-adapting model: the state at position i depends on symbols [0,i), but a reverse encoder visits i last. The decrement trick recovers that ONLY when counts never rescale — yet byte-rANS REQUIRES the model total stay ≤ ~2^15, so a growing adaptive model MUST rescale, and rescaling (a lossy halving) is not reversible for the reverse pass. A range coder codes FORWARD; the decoder mirrors the model update and the rescale identically, so determinism is trivial. Range coding and rANS are informationally equivalent (both reach the entropy bound), so this realizes the "adaptive / no-table" hypothesis faithfully. Recorded explicitly because the queue item said "rANS".
+- **IMPLEMENTATION (`ValueScheme::BwtAdaptive`, header byte 9, `code/cubrim-rs/src/codec.rs`):** BWT front-end (reuse `bwt_encode_codes`) + adaptive order-1 carryless (Subbotin) range coder. Per-context (context = previous code) integer freqs, init 1 each, increment `inc` per observation (effective Laplace alpha = 1/inc), halved when a context total exceeds 2^15 (kept under RC_BOT = 2^16 so `range/total ≥ 1`). The encoder tries `inc ∈ {8,16,32,64}` and keeps the smallest payload; the winning `inc` is one wire byte. NO frequency tables on the wire. Added as a 4th competitive candidate inside the scheme-7 `min(BwtRans, BwtEntropy, EntropyContext, BwtAdaptive)` rail — structurally regression-proof (Gotcha #4). (Header byte 8 is reserved for H-20 Order2Rans on its own branch; H-21 uses 9 to avoid collision.)
+- **MEASURED (frozen corpus, `python3 code/bench/run_bench.py --value-scheme bwt-rans`, round-trip PASS on all 10; champion 0.221726 reproduced byte-exact first):**
+
+  | file | champion BwtRans (B) | + BwtAdaptive (B) | Δ B | winning scheme |
+  |---|---:|---:|---:|---|
+  | sparse_clustered | 443 | 179 | −264 | 9 (adaptive) |
+  | text | 3177 | 1784 | −1393 | 9 (adaptive) |
+  | log_like | 1402 | 570 | −832 | 9 (adaptive) |
+  | binary_mixed | 8205 (raw) | 6148 (cube) | −2057 | 9 (adaptive) |
+  | block_bound_runs | 4169 | 3495 | −674 | 9 (adaptive) |
+  | dense | 4109 | 4109 | 0 | raw |
+  | random_high | 4109 | 4109 | 0 | raw |
+  | sparse_small | 269 | 269 | 0 | raw |
+  | both_sparse_16 | 29 | 29 | 0 | raw |
+  | both_sparse_24 | 37 | 37 | 0 | raw |
+  | **aggregate** | **0.221726** | **0.177122** | — | **−0.044604 (−20.12% rel)** |
+
+  The largest win in the project so far. Adaptive coding pays NO explicit table; its implicit "learning" cost is far smaller than the static per-context tables on these short structured streams (sparse_clustered 12 contexts, text 27, log_like 53). `binary_mixed` flips from raw storage to cube (6148 < 8205) — its order-1 structure was real but the static tables were too expensive to exploit; the adaptive model captures it for free. Truly incompressible files (dense, random_high) stay raw — adaptive cannot beat ~8 bits/symbol there, and the competitive rail keeps them byte-identical.
+- **VERDICT: GO.** Round-trip non-negotiable ✅ (10/10 byte-exact; `cargo test` 190 passed incl. 8 new range-coder tests — unit all-inc, empty/singleton, high-entropy + rescale stress, full-codec corpus round-trip via both entry points, competitive non-regression, 40-trial property, truncated-blob no-panic). No tables to charge — the model is rebuilt, not transmitted; the only side info (alphabet, `inc`) is charged. Competitive per-file rail ✅ (`gate-competitive.sh --value-scheme bwt-rans` PASS, no regression; direct vs pinned champion: 5 improved, 5 unchanged, 0 regressed). Aggregate strictly improves vs the pinned champion 0.221726 ✅. Round-trip determinism (the brief's flagged risk) is handled by forward coding + symmetric rescale, verified by the rescale stress test and the 40-trial property suite. Leaderboard untouched (operator-gated); promotion is the Mac monitor's job after independent re-verification.
+- **Harness notes:** same as H-20 — `gate-corpus-hash.sh` manifest-level check fails only on machine-specific absolute paths (per-file sha256 all match + champion reproduces byte-exact = corpus verified frozen); `gate-ratio.sh` standalone benches the stale committed BwtEntropy leaderboard scheme, so the authoritative comparison is the controlled `run_bench.py --value-scheme bwt-rans` champion-vs-candidate above.
+
+---
+
+### H-22 — context-mixing of order-1 + order-0 on the BWT'd value stream
+
+- **Hypothesis (queue item 3, 2026-06-23):** the strongest single model is adaptive order-1 (H-21, 0.177122); mixing its prediction with the stabler order-0 prediction, weighted by learned/static weights, should reduce the variance of low-count contexts (classic context mixing).
+- **Probe FIRST (`docs/ephemeral/research/probe_h22_context_mixing.py`):** two mixing forms on the BWT'd value-code stream, both compared to the H-21 pure-order-1 value-stream:
+  - **Static interpolation (order-0 as a fixed Jelinek-Mercer / Witten-Bell backoff PRIOR) = NO-GO** on every file (sparse_clustered 120→145, text 1719→1828, block_bound_runs 3433→3462), even at beta=0.25 (≈95% order-1). Root cause: **BWT makes order-1 contexts locally sharp but globally MISALIGNED** — a fixed order-0 prior puts mass on globally-common symbols and mispredicts the locally-dominant (often globally-rare) symbol, so order-0 is a strictly worse smoother than the uniform prior here.
+  - **LEARNED-weight linear mix (w·p1 + (1−w)·p0, w adapts by log-loss gradient toward the better model) = GO signal:** beats pure order-1 on 4/5 cube files (value-stream block_bound_runs 3433→2722, binary_mixed 5840→5384, text 1719→1648, sparse_clustered 120→116; only log_like regresses). The adaptive weight reduces order-1's low-count variance by blending toward the stabler order-0. Projected aggregate ≈ 0.1665 — below the H-21 frontier 0.177122.
+- **IMPLEMENTATION (`ValueScheme::BwtContextMix`, header byte 10, `code/cubrim-rs/src/codec.rs`):** BWT front-end + a carryless (Subbotin) range coder with a one-byte mode selector — mode 0 = pure adaptive order-1 (integer counts, identical to scheme 9), mode 1 = learned-weight linear mix of order-1 and order-0. The encoder sweeps pure (inc ∈ {8,16,32,64}) and mix (inc ∈ {16,32} × lr ∈ {0.02,0.05}) and keeps the smallest, so it never loses to pure order-1 by more than the 2-byte mode/lr header. NO frequency tables on the wire. Competitive 4th candidate inside the scheme-7 rail (Gotcha #4). (Bytes 8/9 are reserved for H-20/H-21 on their own branches; H-22 uses 10.)
+  - **f64 DETERMINISM:** mode 1 uses f64 only for the mix weight and the per-symbol blend; encode and decode compute the quantized freq table (sum = 2^14) from the SAME integer model state and SAME f64 weight using only IEEE-754 +,−,*,/ (no fma, no transcendentals), so both sides are bit-identical on any IEEE-754 platform. Verified by the rescale stress test + 40-trial property suite.
+- **MEASURED (frozen corpus, `python3 code/bench/run_bench.py --value-scheme bwt-rans`, round-trip PASS on all 10; champion 0.221726 reproduced byte-exact first):**
+
+  | file | champion (B) | + BwtContextMix (B) | Δ B | winning scheme/mode |
+  |---|---:|---:|---:|---|
+  | sparse_clustered | 443 | 181 | −262 | 10 |
+  | text | 3177 | 1757 | −1420 | 10 (mix) |
+  | log_like | 1402 | 572 | −830 | 10 |
+  | binary_mixed | 8205 (raw) | 5679 (cube) | −2526 | 10 (mix) |
+  | block_bound_runs | 4169 | 2950 | −1219 | 10 (mix) |
+  | dense / random_high / sparse_small / both_sparse_16 / both_sparse_24 | (raw) | unchanged | 0 | raw |
+  | **aggregate** | **0.221726** | **0.168262** | — | **−0.053464 (−24.11% rel)** |
+
+  Beats the champion AND the H-21 adaptive-order-1 frontier (0.177122 → 0.168262, −5.0% rel vs H-21). That mode 1 (learned mix) is the lever is provable: mode 0 IS H-21's exact pure-order-1 model (independently measured 3495 on block_bound_runs), so reaching 2950 is only possible via the mix. `block_bound_runs` 2950 also **beats gzip-9 (3072)** — the first corpus file where Cubrim's value path beats a general-purpose compressor.
+- **VERDICT: GO.** Round-trip non-negotiable ✅ (10/10 byte-exact; `cargo test` 190 passed incl. 8 new tests — pure+mix unit round-trip, high-entropy + dual-model rescale stress (f64 determinism), full-codec corpus round-trip via both entry points, competitive non-regression, 40-trial property, truncated-blob no-panic). No tables to charge (model rebuilt, not transmitted; only alphabet + mode/inc/lr side info, all charged). Competitive per-file rail ✅ (`gate-competitive.sh --value-scheme bwt-rans` PASS; direct vs pinned champion: 5 improved, 5 unchanged, 0 regressed). Aggregate strictly improves vs the pinned champion 0.221726 ✅. Static-prior backoff is the documented NO-GO sub-result; the learned-weight mix is the GO. Leaderboard untouched (operator-gated); promotion is the Mac monitor's job after independent re-verification.
+- **Harness notes:** same as H-20/H-21 — `gate-corpus-hash.sh` manifest-level check fails only on machine-specific absolute paths (per-file sha256 all match + champion reproduces byte-exact = corpus verified frozen); `gate-ratio.sh` standalone benches the stale committed BwtEntropy leaderboard, so the authoritative comparison is the controlled `run_bench.py --value-scheme bwt-rans` champion-vs-candidate above.
+
+---
+
+### H-23 — rANS interleaving / SIMD-friendly state (THROUGHPUT-ONLY)
+
+- **Hypothesis (queue item 4, 2026-06-23):** N independent interleaved rANS states (symbol i → state i mod N) expose instruction-level parallelism / SIMD, raising entropy-coder throughput. The brief frames this explicitly as a THROUGHPUT lever, not a ratio lever, and gates it on "ratio space exhausted."
+- **Two facts settle it up front:** (1) ratio space is NOT exhausted — H-20/H-21/H-22 just found large ratio gains (0.221726 → 0.168262). (2) Interleaving is ratio-neutral-to-NEGATIVE BY CONSTRUCTION: N states flush N×4 bytes instead of 1×4, so output = single-stream + (N−1)×4 bytes per stream. It can never lower the aggregate. The leaderboard metric is ratio, so interleaving cannot earn a slot now.
+- **EXECUTED (`docs/ephemeral/research/h23_interleaved_rans_bench.rs`, standalone `rustc -O`, no crate changes):** single-stream vs 2-way vs 4-way interleaved order-0 byte-rANS (identical production model: RANS_L=1<<23, M=1<<12), round-trip asserted for every variant, measured on real corpus files.
+  - **SIZE (ratio):** block_bound_runs single=24387 B, 2-way=24391 (+4), 4-way=24398 (+11). text single=9112, 2-way=9116 (+4), 4-way=9123 (+11). Exactly the (N−1)×4 extra-state overhead — applied to all 5 cube files, 4-way would ADD ~55 B → aggregate slightly WORSE. **Ratio = NO-GO.**
+  - **THROUGHPUT:** decode 4-way **2.35×** (501.7 vs 213.7 MB/s), 2-way 1.68×; encode ~flat (1.04×, the reverse-pass renorm-to-shared-buffer is sequential and gains little ILP). Decode is the archiver's hot path (compress once, decompress many), so the realizable win is the ~2.3× decode speedup.
+- **VERDICT: NO-GO for ratio (throughput-only).** Interleaving costs +4..+11 bytes/stream — it cannot improve the compression-ratio leaderboard, which is the project's headline metric, so no ValueScheme byte is spent and the production codec is left unchanged. The technique is REAL and BANKED: when ratio space is genuinely exhausted and decode throughput becomes the priority, 4-way interleaving of the order-1/mix range-coder (or the rANS schemes) is a ~2× decode win with negligible (+~11 B/file) ratio cost. The benchmark is preserved for that future. Round-trip correctness of all interleaved variants is asserted in the bench. `cargo test` 182 passed (crate untouched).
+- **Note on the order-1/context-mix path:** the production winners (H-19/21/22) are context-adaptive; interleaving them keeps the same ~2× decode-ILP win (the N per-round state updates are register-independent even though contexts are sequential) at the same +(N−1)×4-byte cost — same throughput-only verdict, just with more implementation surface. Not worth it until ratio work stops paying.
+
+---
+
+## CM2-EXE + strong-CM-text — VALIDATED на полном world-benchmark (2026-07-22)
+
+- **Гипотеза и итог:** сильный context-mixing backend оказался общим материальным рычагом для text и exe. `MODE_CM2=16`, встроенный в штатный CLI, прошёл независимый полный прогон 24/24: encode/decode rc=0 и внешний `cmp=0` на каждом файле. В санкционированной архитектуре strict per-file retained-min новый кандидат выигрывает 15 строк, ещё 9 verified live-строк сохраняются без регрессии.
+- **Measurement void:** прогон commit `28df853` показал exe около `0.308`, но это не true-negative: gating bug исключал действующий FH-10/default rail. Этот прогон объявлен void и в числовые таблицы БД не публикуется.
+- **Исправление и воспроизводимость:** композиция исправлена commit `6eaefad7e165cd74f7d660aeb6d0828bfbe12c41`. Независимо собранный CLI имеет SHA256 `e3da2f33ef7e9f0cfb4e07c4dbe4b406ba00ab17d8b9c40bf3aeb21abd1a546a`; corpus manifest SHA256 `fa88c6c12249c1261068112eb56c24d4ef3b60d1d89711aa97770f07f3c007e6`; raw results TSV SHA256 `02e73f013fa33731ad374ae29c11b95d7aaa02ec04b20f83eba5f1793186fae2`.
+- **Валидные weighted per-type результаты:** text `0.17693132733728506`; exe `0.2481901139274113`; binary `0.4656539095049861`; code `0.14534561821088132`; database `0.08872319610228702`; image `0.3119487161633968`. Все шесть типов занимают первое место; overall `60206894 / 314749364 = 0.19128519668748242`.
+- **Вердикт:** `CM2-EXE: VALIDATED`, `H-61/IW-04 strong-CM-text: VALIDATED`. Старые механизм-специфичные NO-GO, включая `FH-08`, остаются исторически корректными: успех относится к более сильному общему CM backend и regression-proof per-file routing, а не переписывает результаты отвергнутых exe-моделей.

@@ -1,0 +1,44 @@
+{
+  "aggregate_by_type": {
+    "binary": {
+      "compressed": 3901918,
+      "orig": 8319928,
+      "ratio": 0.46898458736662146
+    },
+    "code": {
+      "compressed": 3152188,
+      "orig": 21621271,
+      "ratio": 0.1457910591842635
+    },
+    "database": {
+      "compressed": 3871803,
+      "orig": 43639129,
+      "ratio": 0.08872319610228702
+    },
+    "exe": {
+      "compressed": 14239330,
+      "orig": 57372672,
+      "ratio": 0.2481901139274113
+    },
+    "image": {
+      "compressed": 5913932,
+      "orig": 18958020,
+      "ratio": 0.3119488216596459
+    },
+    "text": {
+      "compressed": 29206553,
+      "orig": 164838344,
+      "ratio": 0.1771830042165432
+    }
+  },
+  "all_rt_cmp0": true,
+  "binary_commit": "6eaefad7e165cd74f7d660aeb6d0828bfbe12c41",
+  "binary_sha256": "e3da2f33ef7e9f0cfb4e07c4dbe4b406ba00ab17d8b9c40bf3aeb21abd1a546a",
+  "failures": [],
+  "overall": {
+    "compressed": 60285724,
+    "orig": 314749364,
+    "ratio": 0.19153564993383115
+  },
+  "rows": 24
+}

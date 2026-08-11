@@ -1,0 +1,31 @@
+{
+  "baseline": {
+    "blob_size": 15788540,
+    "cmp": 0,
+    "decode_seconds": 1.0598787469789386,
+    "encode_seconds": 408.7397268610075,
+    "mode": 3
+  },
+  "cubrim_binary_sha256": "b2d286d1dd5ff25a0f93f16b4ba8fd41ab6da7ef91b2a7f24bfbd1298368cdfd",
+  "full": null,
+  "input_sha256": "657fc3764b0c75ac9de9623125705831ebbfbe08fed248df73bc2dc66e2a963b",
+  "input_size": 51220480,
+  "member_count": 525,
+  "screen": {
+    "blob_sum": 4792505,
+    "charged_size": 4792785,
+    "concat_cmp": 0,
+    "improvement_percent": -11.19338145819969,
+    "input_sha256": "91bdadc2692d72276bb765bd0c7ca4e786a2cda14083360383d3607f961cc7ba",
+    "input_size": 7341568,
+    "members": 64,
+    "mode_counts": {
+      "0": 10,
+      "1": 27,
+      "3": 27
+    },
+    "whole_blob_size": 4310315
+  },
+  "seven_zip_size": 13342812,
+  "verdict": "SCREEN NO-GO"
+}

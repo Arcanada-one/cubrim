@@ -1,0 +1,33 @@
+[7z] rc=0
+
+7-Zip 23.01 (x64) : Copyright (c) 1999-2023 Igor Pavlov : 2023-06-20
+ 64-bit locale=C.UTF-8 Threads:64 OPEN_MAX:1024
+
+Usage: 7z <command> [<switches>...] <archive_name> [<file_names>...] [@listfile]
+[rar] rc=0
+
+RAR 7.00   Copyright (c) 1993-2024 Alexander Roshal   26 Feb 2024
+Trial version             Type 'rar -?' for help
+
+Usage:     rar <command> -<switch 1> -<switch N> <archive> <files...>
+[xz] rc=0
+xz (XZ Utils) 5.4.5
+liblzma 5.4.5
+[brotli] rc=0
+brotli 1.1.0
+[zstd] rc=0
+*** Zstandard CLI (64-bit) v1.5.5, by Yann Collet ***
+[bzip2] rc=0
+bzip2, a block-sorting file compressor.  Version 1.0.8, 13-Jul-2019.
+
+   usage: bzip2 [flags and input files in any order]
+
+   -h --help           print this message
+[gzip] rc=0
+gzip 1.12
+Copyright (C) 2018 Free Software Foundation, Inc.
+Copyright (C) 1993 Jean-loup Gailly.
+This is free software.  You may redistribute copies of it under the terms of
+the GNU General Public License <https://www.gnu.org/licenses/gpl.html>.
+[lz4] rc=0
+*** LZ4 command line interface 64-bits v1.9.4, by Yann Collet ***

@@ -1,0 +1,71 @@
+{
+  "baseline": {
+    "cubrim_bytes": 15788540,
+    "cubrim_cmp": 0,
+    "cubrim_ratio": 0.3082466232257097,
+    "seven_zip_bytes": 13342812,
+    "seven_zip_cmp": 0,
+    "seven_zip_ratio": 0.2604975978366461
+  },
+  "bcj_screen": {
+    "bytes": 1048576,
+    "forced_x86_bcj_lzma2_bytes": 641863,
+    "forced_x86_bcj_lzma2_cmp": 0,
+    "plain_lzma2_bytes": 641771,
+    "plain_lzma2_cmp": 0,
+    "regression_bytes": 92,
+    "regression_percent": 0.014335331450003194,
+    "verdict": "NO-GO; no full BCJ run"
+  },
+  "cubrim_full": {
+    "baseline_bytes": 15788540,
+    "charged_bytes": 15770702,
+    "encoded_bytes": 15770021,
+    "encode_max_rss_kib": 7124932,
+    "encode_wall_seconds": 400.11,
+    "inverse_cmp": 0,
+    "inverse_sha256": "657fc3764b0c75ac9de9623125705831ebbfbe08fed248df73bc2dc66e2a963b",
+    "nested_cmp": 0,
+    "permutation_charge_bytes": 681,
+    "ratio": 0.3078983640918633,
+    "saved_bytes": 17838,
+    "saved_percent": 0.11298068092426532,
+    "verdict": "NO-GO"
+  },
+  "cubrim_screen": {
+    "baseline_bytes": 4310315,
+    "charged_bytes": 4307731,
+    "encoded_bytes": 4307659,
+    "input_bytes": 7341568,
+    "inverse_cmp": 0,
+    "nested_cmp": 0,
+    "permutation_charge_bytes": 72,
+    "saved_bytes": 2584,
+    "saved_percent": 0.05994921484856675
+  },
+  "decision_gate_percent": 1.5,
+  "method": {
+    "directory_headers": 318,
+    "full_changed_positions": 525,
+    "full_order_sha256": "b7e87caa8c1bc17a800380e76aab0c2cdeb63a94e8e158791af79d1d481447a8",
+    "members": 525,
+    "screen_changed_positions": 61,
+    "screen_members": 64,
+    "screen_order_sha256": "63b09fa9989152ce69253b585bb3627d7622c129a08d9931adcbc200e41928fc"
+  },
+  "source": {
+    "bytes": 51220480,
+    "sha256": "657fc3764b0c75ac9de9623125705831ebbfbe08fed248df73bc2dc66e2a963b"
+  },
+  "verdict": "FH2-04 NO-GO",
+  "xz_full": {
+    "charged_reordered_bytes": 13365017,
+    "original_bytes": 13376240,
+    "permutation_charge_bytes": 681,
+    "reordered_bytes": 13364336,
+    "round_trip_cmp": 0,
+    "saved_bytes": 11223,
+    "saved_percent": 0.08390250174937053,
+    "verdict": "NO-GO"
+  }
+}
