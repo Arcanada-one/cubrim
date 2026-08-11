@@ -1,0 +1,15 @@
+CUBR-SAMEHOST-FIELD-20260811 — provenance
+
+prereg : CUBR-SAMEHOST-FIELD-20260811.md, merged to main as eee2e59 at 2026-08-11T23:01:48Z.
+         Measurement began 23:02:11Z. Prediction preceded measurement.
+host   : arcana-devs, load1 30.5-45.2 during the run. taskset -c 0-15, pin not widened.
+         systemd-run --scope MemoryMax=64G MemorySwapMax=0.
+tools  : 7-Zip 23.01 PPMd (7z a -m0=PPMd -mmem=256m ; decode 7z e -so)
+         bzip2 1.0.8 -9 ; cubrim 8947ea9b (commit 3a13f486) --preset max
+input  : corpus-silesia/x-ray, 8,474,240 B
+archives (compression duration is NOT a measured quantity in this lane):
+         ppmd   3,851,299 B  ratio 0.454471   <- matches the 0.454471 already in the record
+         bzip2  4,051,112 B  ratio 0.478050
+         cubrim 3,637,036 B  ratio 0.429187
+gates  : cmp AND sha256 vs the original before any timing row. 9 observations, 0 VOID.
+design : interleaved — all three tools decoded back-to-back within each of 3 rounds.
