@@ -231,6 +231,33 @@ Untrusted input reaches every field. A conformant decoder:
 
 The reference decoder's default output ceiling is 64 MiB.
 
+## 10a. Raw-store frames on the same media type
+
+An encoder offering the Web Profile competes it against a verbatim copy per
+file and emits whichever is smaller. For an already-compressed asset — WOFF2,
+PNG, a pre-gzipped bundle — the copy wins, so a response labelled
+`application/cubrim` is legitimately **not** a `MODE_WEB` frame:
+
+```
+ offset  size  field
+      0     4  MAGIC      = CB 52 49 4D
+      4     1  VERSION    = 1
+      5     1  MODE       = 1            (MODE_RAW)
+      6     1  N          dimension count (unused by this container)
+      7     2  B          edge bound (unused by this container)
+      9     4  LEN        payload length, u32 BE
+     13     …  PAYLOAD    the original bytes, verbatim
+```
+
+There is no checksum: the payload *is* the content. `LEN` is untrusted and MUST
+be checked against the caller's output budget and against the bytes actually
+present.
+
+**A decoder for `application/cubrim` SHOULD accept both containers.** One that
+handles only `MODE_WEB` fails precisely on the payloads where compression was
+correctly declined, which makes the media type undeployable for real sites. The
+reference decoder accepts both and exposes `is_decodable_frame()` to say so.
+
 ## 11. Conformance
 
 A decoder is conformant if, for every frame this specification calls valid, it

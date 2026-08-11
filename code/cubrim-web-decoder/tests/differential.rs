@@ -222,3 +222,53 @@ fn both_decoders_reject_the_same_corrupted_multi_block_frames() {
         }
     }
 }
+
+/// A page fetching `application/cubrim` can legitimately receive a raw-store
+/// frame: the web profile competes against a verbatim copy per file, and an
+/// already-compressed asset (WOFF2, PNG) is where compression is correctly
+/// declined. A decoder that only understood MODE_WEB would fail on exactly
+/// those payloads.
+#[test]
+fn reference_decoder_handles_raw_store_frames() {
+    // Incompressible bytes: the profile must decline and store.
+    let mut state = 0x51EEDu32;
+    let data: Vec<u8> = (0..30_000)
+        .map(|_| {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
+            (state >> 16) as u8
+        })
+        .collect();
+    let frame = encode_with_config(&data, &web_config());
+    assert_eq!(frame[5], 1, "expected the raw-store fallback");
+    assert!(refdec::is_decodable_frame(&frame));
+    assert!(!refdec::is_web_frame(&frame));
+    assert_eq!(refdec::declared_len(&frame), Some(data.len()));
+
+    let ours = refdec::decode(&frame).expect("reference decode of a raw frame");
+    let theirs = cubrim::decode(&frame).expect("cubrim decode");
+    assert_eq!(ours, data);
+    assert_eq!(ours, theirs);
+}
+
+#[test]
+fn raw_store_frames_respect_limits_and_truncation() {
+    let data = vec![0xA5u8; 5000];
+    let mut config = EncodeConfig::v1_default();
+    config.web_profile = true;
+    config.web_block_size = Some(16); // blocking makes store win
+    let frame = encode_with_config(&data, &config);
+    if frame[5] != 1 {
+        return; // the web frame still won; nothing to assert here
+    }
+    let limits = refdec::DecodeLimits {
+        max_output_size: data.len() - 1,
+    };
+    let err = refdec::decode_with_limits(&frame, &limits).unwrap_err();
+    assert!(err.0.contains("exceeds the limit"), "got {err:?}");
+    for cut in 0..frame.len() {
+        assert!(
+            refdec::decode(&frame[..cut]).is_err(),
+            "truncation to {cut} must fail closed"
+        );
+    }
+}
