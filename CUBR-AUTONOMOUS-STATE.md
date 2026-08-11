@@ -31,7 +31,7 @@ last_run_id: "none"
 # ── Win condition ─────────────────────────────────────────────────────────────
 # Once current_best.aggregate in cubrim-leaderboard.json falls below
 # win_target.gzip_aggregate, the loop shifts to defend-mode.
-# See docs/how-to/stop-the-cubrim-cluster.md § Win Condition for details.
+# See documentation/how-to/stop-the-cubrim-cluster.md § Win Condition for details.
 win_condition_met: "false"
 ---
 
@@ -71,4 +71,4 @@ sudo systemctl start cubrim-loop.service
 
 ## Kill switch
 
-See `docs/how-to/stop-the-cubrim-cluster.md` — two commands stop the loop safely.
+See `documentation/how-to/stop-the-cubrim-cluster.md` — two commands stop the loop safely.

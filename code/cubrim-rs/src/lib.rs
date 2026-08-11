@@ -6,20 +6,31 @@
 //   decode(blob: &[u8]) -> Result<...>   — decompress; fail-closed on corrupt input
 
 pub mod bitpack;
+pub(crate) mod cm2;
 pub mod codec;
 pub mod config;
 pub mod cube;
 pub mod distance_map;
 pub mod domainize;
+pub(crate) mod geocm;
 pub mod error;
 pub mod header;
 pub(crate) mod huffman;
 pub mod limits;
 pub mod phi;
+pub(crate) mod prof;
+pub(crate) mod ppmd;
 pub mod rle;
 
 pub use codec::{decode, decode_with_limits, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
-pub use config::{EncodeConfig, GapScheme, ValueScheme};
+
+/// Write the encoder candidate-attribution table to stderr, given the wall time
+/// of the encode it should be attributed against. No-op unless
+/// `CUBRIM_PROFILE=1`. Development instrumentation — see `prof`.
+pub fn report_encode_profile(total_nanos: u128) {
+    prof::report(total_nanos);
+}
+pub use config::{EncodeConfig, GapScheme, Preset, ValueScheme};
 pub use error::CubrimError;
 pub use limits::DecodeLimits;
 

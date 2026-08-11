@@ -297,7 +297,8 @@ pub(crate) fn huffman_decode_scan(
     }
 
     let data = &blob[offset..];
-    let mut result = Vec::with_capacity(crate::limits::bounded_capacity(count));
+    // QA-F-005 fail-closed: cap the pre-allocation for an attacker-controlled count.
+    let mut result = Vec::with_capacity(count.min(crate::codec::DECODE_PREALLOC_CAP));
     let mut bit_pos = 0usize; // current bit position in the bitstream (MSB-first)
 
     while result.len() < count {
@@ -444,7 +445,7 @@ pub(crate) fn huffman_decode_tabled(
     table: &HuffTable,
     count: usize,
 ) -> Result<(Vec<usize>, usize), CubrimError> {
-    let mut result = Vec::with_capacity(crate::limits::bounded_capacity(count));
+    let mut result = Vec::with_capacity(count.min(crate::codec::DECODE_PREALLOC_CAP));
     let mut bit_pos = 0usize;
     let total_bits = data.len() * 8;
     let want = table.bits as usize;

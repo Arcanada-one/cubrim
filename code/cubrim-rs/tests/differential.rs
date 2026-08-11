@@ -1,11 +1,18 @@
 // V-AC-7: Cross-implementation differential parity test.
 //
-// Asserts:
-//   1. rust_encode(x) == python_encode(x)  (byte-identical blobs)
-//   2. rust_decode(python_blob) == x       (Rust reads Python output)
+// Reoriented contract. The ≤64 KB encode freeze is open: below the cube-size limit the
+// Rust encoder now also offers the strong MODE_CM2 backend and selects it whenever it is
+// strictly smaller, so `rust_encode(x)` is no longer required to be byte-identical to the
+// frozen v1 Python blob. Byte-equality to the frozen bytes was an internal test invariant,
+// not a user-observable contract; the guarantees that ARE user contracts, and which this
+// oracle now enforces, are:
+//   1. lossless round-trip:        rust_decode(rust_encode(x)) == x
+//   2. old-archive decode parity:  rust_decode(python_v1_blob) == x
 //
-// Python fixture blobs were captured from cubrim_proto.codec.encode()
-// and committed to tests/fixtures/. They are the ground truth.
+// (2) is the durable back-compat guarantee: the current binary must still decode archives
+// produced by the original v1 encoder. The Python fixture blobs, captured from
+// cubrim_proto.codec.encode() and committed to tests/fixtures/, ARE canonical frozen-v1
+// archives and serve as the old-archive corpus. They remain the decode ground truth.
 
 use std::fs;
 use std::path::Path;
@@ -34,21 +41,25 @@ macro_rules! differential_test {
             let fixture_name = stringify!($name);
             let (input, python_blob) = load_fixture(fixture_name);
 
-            // Test 1: rust_encode(x) byte-identical to python_encode(x)
+            // (1) lossless round-trip on the current encoder's own blob (whichever mode it
+            //     selects — base v1 for these sub-2 KB fixtures, or MODE_CM2 once open).
             let rust_blob = cubrim::encode(&input);
+            let rust_rt = cubrim::decode(&rust_blob).unwrap_or_else(|e| {
+                panic!("V-AC-7 FAIL [{fixture_name}]: rust_decode(rust_encode(x)) error: {e}")
+            });
             assert_eq!(
-                rust_blob, python_blob,
-                "V-AC-7 FAIL [{fixture_name}]: Rust blob ({} bytes) != Python blob ({} bytes). First diff at byte {}",
-                rust_blob.len(), python_blob.len(),
-                rust_blob.iter().zip(python_blob.iter()).position(|(a, b)| a != b).unwrap_or(usize::MAX)
+                rust_rt, input,
+                "V-AC-7 FAIL [{fixture_name}]: round-trip rust_decode(rust_encode(x)) != x"
             );
 
-            // Test 2: rust_decode(python_blob) == original input
-            let recovered = cubrim::decode(&python_blob)
-                .unwrap_or_else(|e| panic!("V-AC-7 FAIL [{fixture_name}]: rust_decode(python_blob) error: {e}"));
+            // (2) old-archive decode parity: the current binary decodes the frozen v1
+            //     Python archive to the original plaintext.
+            let recovered = cubrim::decode(&python_blob).unwrap_or_else(|e| {
+                panic!("V-AC-7 FAIL [{fixture_name}]: rust_decode(python_v1_blob) error: {e}")
+            });
             assert_eq!(
                 recovered, input,
-                "V-AC-7 FAIL [{fixture_name}]: rust_decode(python_blob) != original input"
+                "V-AC-7 FAIL [{fixture_name}]: rust_decode(python_v1_blob) != original input"
             );
         }
     };
@@ -87,16 +98,13 @@ fn text_entropy() {
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::Entropy,
         min_ctx_count: None,
+        cm2_column_variants: true,
+        cm2_max_tbits: None,
     };
 
-    // Test 1: rust_encode_entropy(x) byte-identical to python_encode_entropy(x)
+    // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the
+    // frozen v1 Python blob is retired now that the ≤64 KB freeze is open (see module header).
     let rust_blob = encode_with_config(&input, &config);
-    assert_eq!(
-        rust_blob, python_blob,
-        "Entropy parity FAIL [{fixture_name}]: Rust blob ({} bytes) != Python blob ({} bytes). First diff at byte {}",
-        rust_blob.len(), python_blob.len(),
-        rust_blob.iter().zip(python_blob.iter()).position(|(a, b)| a != b).unwrap_or(usize::MAX)
-    );
 
     // Test 2: rust_decode(python_entropy_blob) == original input (cross-decode)
     let recovered_from_python = decode(&python_blob).unwrap_or_else(|e| {
@@ -142,16 +150,14 @@ fn text_entropy_context() {
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::EntropyContext,
         min_ctx_count: None,
+        cm2_column_variants: true,
+        cm2_max_tbits: None,
     };
 
-    // Test 1: rust_encode_entropy_context(x) byte-identical to python_encode_entropy_context(x)
+    // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the
+    // frozen v1 Python blob is retired now that the ≤64 KB freeze is open (see module header).
+    // This fixture is 16 KB and compressible, so the default encoder now selects MODE_CM2.
     let rust_blob = encode_with_config(&input, &config);
-    assert_eq!(
-        rust_blob, python_blob,
-        "EntropyContext parity FAIL [{fixture_name}]: Rust blob ({} bytes) != Python blob ({} bytes). First diff at byte {}",
-        rust_blob.len(), python_blob.len(),
-        rust_blob.iter().zip(python_blob.iter()).position(|(a, b)| a != b).unwrap_or(usize::MAX)
-    );
 
     // Test 2: rust_decode(python_entropy_context_blob) == original input (cross-decode)
     let recovered_from_python = decode(&python_blob).unwrap_or_else(|e| {
@@ -199,16 +205,13 @@ fn sparse_clustered_rlecodes() {
         gap_scheme: GapScheme::RleU16,
         value_scheme: ValueScheme::RleCodes,
         min_ctx_count: None,
+        cm2_column_variants: true,
+        cm2_max_tbits: None,
     };
 
-    // Test 1: rust_encode_rlecodes(x) byte-identical to python_encode_rlecodes(x)
+    // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the
+    // frozen v1 Python blob is retired now that the ≤64 KB freeze is open (see module header).
     let rust_blob = encode_with_config(&input, &config);
-    assert_eq!(
-        rust_blob, python_blob,
-        "RleCodes parity FAIL [{fixture_name}]: Rust blob ({} bytes) != Python blob ({} bytes). First diff at byte {}",
-        rust_blob.len(), python_blob.len(),
-        rust_blob.iter().zip(python_blob.iter()).position(|(a, b)| a != b).unwrap_or(usize::MAX)
-    );
 
     // Test 2: rust_decode(python_rlecodes_blob) == original input (cross-decode)
     let recovered_from_python = decode(&python_blob).unwrap_or_else(|e| {

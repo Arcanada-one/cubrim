@@ -129,7 +129,10 @@ pub fn bitpack_decode(
         )));
     }
 
-    let mut values = Vec::with_capacity(crate::limits::bounded_capacity(count));
+    // QA-F-005 fail-closed: `count` is an attacker-controlled header value; cap the
+    // pre-allocation (a hint only — the vec grows as codes are decoded) so a corrupt count
+    // cannot force a multi-GB reservation before any bit is read.
+    let mut values = Vec::with_capacity(count.min(crate::codec::DECODE_PREALLOC_CAP));
     let mut bit_pos = 0usize; // current bit position from MSB of first byte
 
     for _ in 0..count {

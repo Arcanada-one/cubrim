@@ -38,6 +38,146 @@ pub const VERSION: u8 = 1;
 // Mode constants (R6/R7)
 pub const MODE_CUBE: u8 = 0;
 pub const MODE_RAW: u8 = 1;
+/// Chunked container (CUBR big-file support). Wraps N independent sub-blobs, each
+/// of which is itself a self-describing Cubrim blob (mode 0/1) for an input slice
+/// of at most `cube_size_limit()` (≤65536) bytes. Used only when the whole input
+/// exceeds the single-block cube ceiling; smaller inputs are byte-identical to v1.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_CHUNKED 1B][n_blocks 4B BE]
+///       then n_blocks × ( [sub_len 4B BE][sub_blob sub_len bytes] ).
+pub const MODE_CHUNKED: u8 = 2;
+/// Whole-file LZ container (H-25d). The entire input is LZ77-tokenized over a
+/// full-file window BEFORE chunking, so long-range repeats that cross the 64KB
+/// block boundary become reachable. The literal residue is encoded through the
+/// normal pipeline (a nested self-describing blob, itself possibly MODE_CHUNKED);
+/// the match length/distance streams (with the repeat-offset cache) are coded at
+/// file level. Emitted only when strictly smaller than the non-LZ encoding
+/// (competitive size pick), so it is structurally regression-proof.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_LZ 1B][orig_len 4B][n_tokens 4B][n_matches 4B]
+///       [lit_blob_len 4B][lit_blob …][token streams …].
+pub const MODE_LZ: u8 = 3;
+/// Columnar field-split container (H-29, class-C specialization). For record-structured
+/// text (CSV / TSV / delimited telemetry), the input is split into rows (by '\n') and
+/// fields (by a detected delimiter), then re-serialized column-major so each column's
+/// values cluster — dramatically improving BWT-run quality and entropy coding on
+/// telemetry/columnar data. Fully reversible (field boundaries kept as separators, a
+/// per-row field-count side stream restores the row layout). Emitted only when strictly
+/// smaller than every other candidate (competitive size pick) AND only attempted on
+/// inputs larger than the single-block ceiling, so all ≤64KB inputs are byte-identical
+/// to v1 (zero regression on the frozen leaderboard).
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_COLUMNAR 1B][orig_len 4B][delim 1B][n_rows 4B]
+///       [n_cols 4B][kblob_len 4B][kblob …][colblob_len 4B][colblob …].
+pub const MODE_COLUMNAR: u8 = 4;
+/// VCF genotype-matrix container (H-52, genomic class). For a detected VCF (`##fileformat=VCF`
+/// preamble + `#CHROM…` header + `GT`-only genotype rows), the genotype matrix is transformed
+/// by PBWT (Positional BWT, Durbin 2014): haplotypes are reordered per variant by their
+/// reversed-prefix match so linkage disequilibrium yields long allele-column runs (RLE'd).
+/// The permutation is rebuilt incrementally by the decoder (like BWT's LF-mapping), so it is
+/// NOT transmitted — a structural win unreachable by a per-byte backend. Multi-allelic /
+/// unphased / missing cells are a charged exception list. Emitted only when strictly smaller
+/// than the base encoding (competitive) AND only on detected VCF input, so every non-VCF
+/// input (the whole tuned/holdout corpus) is byte-identical to v1.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_VCF 1B][orig_len 4B][ends_nl 1B][n_var 4B][n_samp 4B]
+///       [n_exc 4B] then 4 length-prefixed sub-blobs: preamble, fixed-fields, PBWT-RLE, exceptions.
+pub const MODE_VCF: u8 = 5;
+
+/// Binary float-array container (H-54, point-cloud / binary-float class). For a detected
+/// fixed-width little-endian float32 record stream (e.g. a raw LiDAR `.bin`: N points ×
+/// {x,y,z,…} float32, array-of-structs), the records are split column-major (struct-of-
+/// arrays) and each column is competitively coded raw or as a reversible wrapping-uint32
+/// delta of the float bit pattern. Spatially-smooth row order (a raw spinning-LiDAR firing
+/// sweep) makes consecutive coordinate bits nearly equal, so the delta column collapses;
+/// attribute columns (reflectance) that do not benefit stay raw (per-column mode flag).
+/// This is the telemetry-columnar lever (AoS→SoA + integer delta) transplanted to a binary
+/// float input the cube/BWT/LZ path cannot reach. Emitted only when strictly smaller than
+/// the base encoding (competitive min) AND only on detected plausible-float input gated
+/// >cube_size_limit, so every non-matching input (the whole tuned/holdout corpus) is
+/// byte-identical to v1.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_BINFLOAT 1B][orig_len 4B][rec_width 1B][n_cols 1B]
+///       [col_modes n_cols B][tail_len 1B][tail bytes] then n_cols length-prefixed sub-blobs.
+pub const MODE_BINFLOAT: u8 = 6;
+
+/// 16-bit grayscale image MED predictor (H-60 x-ray / H-63 MR-DICOM). For a detected 16-bit
+/// raster (little-endian u16 samples, row width auto-detected by min vertical-abs-diff), each
+/// sample is replaced by its JPEG-LS/LOCO-I MED residual (median of left/up + gradient),
+/// which the 1-D cube/BWT pipeline cannot reach. Emitted only when strictly smaller than base
+/// (competitive min), gated >cube_size_limit — every non-image input stays byte-identical.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_MED16 1B][orig_len 4B][width_px 2B BE][tail_byte 1B]
+///       then a length-implicit nested sub-blob (the MED residual, decodes to orig_len bytes).
+pub const MODE_MED16: u8 = 7;
+
+/// BCJ branch-conversion filter for executables (H-45 x86 / H-57 ARM64). A detected ELF/PE
+/// binary has its arch-matched relative CALL/JMP operands (x86 E8/E9; ARM64 BL) rewritten to
+/// absolute so repeated targets become byte-identical, then coded via the base pipeline.
+/// Arch is matched to the ELF e_machine / PE machine field; mismatched filters are never
+/// applied. Competitive min; small files participate only after strict ELF/PE architecture
+/// detection, so non-executable inputs stay byte-identical.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_BCJ 1B][orig_len 4B][arch 1B] then nested sub-blob.
+pub const MODE_BCJ: u8 = 8;
+
+/// Byte-plane Structure-of-Arrays de-interleave for fixed-width binary records (H-40, sao
+/// star catalog). A detected fixed record width W (min lag-W abs-diff) is transposed so every
+/// record's byte-offset-p bytes are contiguous, grouping smoothly-varying columns into runs
+/// the backend captures. Tail (< W) kept verbatim. Competitive min, gated >cube_size_limit.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_SOA 1B][orig_len 4B][width 2B BE] then nested sub-blob.
+pub const MODE_SOA: u8 = 9;
+
+/// Context-mixing backend (CUBR-0043, NEW-01). A lpaq-lite byte predictor with order-0..6,
+/// word, and match contexts codes the raw byte stream directly via a range coder. It is a
+/// top-level backend, not a cube value-scheme: the outer dispatcher keeps it only when it
+/// strictly beats the current competitive minimum. Gated to large text-like inputs so binary
+/// type-specializations do not pay the CM probe cost.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_CM 1B][orig_len 8B BE][block_size 4B BE][n_blocks 4B BE]
+///       then n_blocks x ([comp_len 4B BE][raw_hash 8B BE]) followed by concatenated CM blocks.
+pub const MODE_CM: u8 = 10;
+
+/// Large-block raw-byte BWT + order-1 rANS candidate (FU-01). This additive top-level
+/// mode uses u32 primary indexes without changing any existing v1 value-scheme wire.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_LARGEBWT 1B][orig_len 8B BE]
+///       [block_size 4B BE][n_blocks 4B BE]
+///       n_blocks x [raw_len 4B][primary 4B][comp_len 4B][raw_hash64 8B]
+///       followed by concatenated rANS payloads.
+pub const MODE_LARGEBWT: u8 = 11;
+
+/// Forced-only BIFF record-group transform (FH-BIFF2 / NEW-11). Complete BIFF records
+/// are keyed by exact (type, payload length), and each group's payload is byte-plane
+/// transposed before nested encoding. An incomplete final record is preserved verbatim.
+pub const MODE_BIFF: u8 = 12;
+
+/// Forced-only record-aware context mixer (FH-10). Raw byte order is preserved;
+/// the predictor additionally receives byte offset within a fixed-width record
+/// and the previous record's byte at the same offset.
+pub const MODE_RECORDCM: u8 = 13;
+
+/// Forced-only executable-aware context mixer (FH-08). An architecture-matched
+/// BCJ filter feeds a CM profile with aligned t-4/t-8 sparse contexts.
+pub const MODE_EXECM: u8 = 14;
+
+/// Forced-only tar-aware DEC Alpha ECOFF BCJ (FH-18). A well-formed POSIX ustar
+/// stream is walked by its 512-byte headers; every regular-file member whose
+/// payload starts with ECOFF ALPHAMAGIC 0x0183 has its Alpha BR (0x30) / BSR
+/// (0x34) 21-bit PC-relative displacements rewritten to absolute word indexes
+/// (words 1.., word 0 with the magic is never touched, so the member decision
+/// re-derives identically on decode — no member map is transmitted). The
+/// transformed stream is coded via the base competitive pipeline.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_TARBCJ 1B][orig_len 4B BE] then nested sub-blob.
+pub const MODE_TARBCJ: u8 = 15;
+
+/// Strong context-mixing backend (CUBR-0059 CM track): a bit-level integer
+/// context-mixing codec (dual counters, bit-history state machine, 2-layer
+/// mixer, adaptive hash tables). Gated to large text/xml/exe inputs in
+/// competitive-min (it is slow), where it beats ppmd (text) and 7z (exe).
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_CM2 1B] then the cm2 blob
+/// ([orig_len 8B BE][bit-range-coded]).
+pub const MODE_CM2: u8 = 16;
+
+/// GeoCM image codec (D→A port of cubr2-geocm v6): detected native-axis (stride)
+/// neighbour contexts feeding an integer logistic mixer + APM through a carryless
+/// binary range coder. Gated to image-like inputs (strong byte-periodicity, bounded
+/// size) in competitive-min; dominates the image class (ptt5/x-ray/mr) where a
+/// detected vertical axis carries structure no 1D rail model sees. Integer-
+/// deterministic, fail-closed (inner CG2 container carries its own FNV-1a-64 checksum).
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_GEOCM 1B] then the self-contained CG2 blob.
+pub const MODE_GEOCM: u8 = 17;
 
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;

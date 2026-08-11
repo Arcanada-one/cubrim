@@ -48,12 +48,10 @@ pub const MIN_RADIX: usize = 2;
 
 /// Ceiling on any single pre-allocation driven by an attacker-controlled count.
 ///
-/// Sites that used to call `Vec::with_capacity(count)` now reserve at most this
-/// many elements up front and let the vector grow as real data is decoded. A
-/// dishonest count therefore costs a bounded reservation and then fails when
-/// the input runs out, instead of reserving tens of gigabytes before reading a
-/// single byte of payload.
-pub const MAX_PREALLOC_ELEMENTS: usize = 1 << 16;
+/// Delegates to the trunk's `codec::DECODE_PREALLOC_CAP` (CUBR-0087 QA-F-005
+/// arrived at the same fix independently) so there is one ceiling rather than
+/// two that can drift apart.
+pub const MAX_PREALLOC_ELEMENTS: usize = crate::codec::DECODE_PREALLOC_CAP;
 
 /// Limits applied to a single `decode()` call.
 #[derive(Debug, Clone, Copy)]

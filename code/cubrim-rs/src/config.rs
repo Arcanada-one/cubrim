@@ -233,6 +233,30 @@ pub enum ValueScheme {
     ///
     /// Header byte = 11.
     BwtGeoMix,
+    /// LZ77 match modeling + rANS — a NON-BWT value-stream class (H-25).
+    ///
+    /// The value-code stream is tokenized into (literal, match) tokens by greedy
+    /// LZ77 (3-code hash chains, full prior window). Every sub-stream is then
+    /// entropy-coded: literals through the BWT + order-1 rANS backend (scheme 7),
+    /// the token flags through order-1 rANS over {0,1}, and the match length and
+    /// distance values through a bit-length BUCKET (order-1 rANS) + raw extra bits.
+    /// The distance stream is the dominant cost; bucket+extra reaches ~log2(d)
+    /// (the information floor) while rANS models the bucket distribution.
+    ///
+    /// Captures long-range repeats that the BWT-family schemes leave on the table
+    /// (the holdout gap to gzip/zstd). Competitive (Gotcha #4): produced only as a
+    /// winner of the scheme-7 selection rail, so it can never regress a file.
+    ///
+    /// Wire (after header + gap streams):
+    ///   [n_tokens u32][n_lits u32][n_matches u32]
+    ///   [flags  : order-1 rANS over {0,1}]
+    ///   [lits   : BWT + order-1 rANS (scheme-7 body), count = n_lits]
+    ///   [lenbkt : order-1 rANS over bit-length buckets, count = n_matches]
+    ///   [distbkt: order-1 rANS over bit-length buckets, count = n_matches]
+    ///   [extra_len u32][extra bits: per match (token order), len-extra then dist-extra]
+    ///
+    /// Header byte = 12.
+    LzRans,
 }
 
 impl GapScheme {
@@ -269,6 +293,7 @@ impl ValueScheme {
             ValueScheme::BwtAdaptive => 9,
             ValueScheme::BwtContextMix => 10,
             ValueScheme::BwtGeoMix => 11,
+            ValueScheme::LzRans => 12,
         }
     }
 
@@ -286,6 +311,7 @@ impl ValueScheme {
             9 => Some(ValueScheme::BwtAdaptive),
             10 => Some(ValueScheme::BwtContextMix),
             11 => Some(ValueScheme::BwtGeoMix),
+            12 => Some(ValueScheme::LzRans),
             _ => None,
         }
     }
@@ -330,6 +356,118 @@ pub struct EncodeConfig {
     /// never from EncodeConfig).
     /// None → use the scheme default (128). Range: 1..=65535.
     pub min_ctx_count: Option<u16>,
+
+    /// Run the CM2 column-position model variants (FH4-03).
+    ///
+    /// `cm2_encode` encodes the input once for the base model and once more for
+    /// each candidate column delimiter, keeping the smallest — while the decoder
+    /// replays exactly the one variant recorded in the blob header. Measured
+    /// price of the extra passes (CUBR-0087, 2 MB Silesia slices, byte-exact
+    /// round-trip): `xml` 160,517 → 159,384 bytes, **−0.71% for 2.27×** the CM2
+    /// encode time; `osdb` 496,824 → 472,809 bytes, **−4.83% for 3.30×**.
+    ///
+    /// Turning it off is **wire-compatible in both directions**: the column model
+    /// and its delimiter live in the blob's length header, so a base-only blob
+    /// decodes under any build and an archive written with the variants enabled
+    /// still opens when they are disabled. That is what makes this a legitimate
+    /// speed preset rather than a format change.
+    ///
+    /// v1-default: `true` — byte-identical to the shipped encoder. It costs
+    /// ratio, so it is never disabled implicitly; only a preset that states the
+    /// trade may turn it off.
+    pub cm2_column_variants: bool,
+
+    /// Cap on the CM2 model-table exponent, i.e. a memory budget.
+    ///
+    /// `None` keeps the size CM2 derives from the input length,
+    /// `clamp(ceil_log2(len) + 3, 18, 27)`, which gives **13.50 GiB of model
+    /// tables** to any input of 16 MB or more (24 counter tables at 4 B x 2^27
+    /// plus three match tables at 4 B x 2^27).
+    ///
+    /// The cap is recorded in the blob (CM2 length header, bits 56..60), so a
+    /// capped archive decodes on a decoder that was given no configuration at
+    /// all — which is what makes this a usable option rather than a private
+    /// build flag. It can only lower the derived exponent, never raise it.
+    ///
+    /// **Compatibility is one-directional, and the direction matters.** A blob
+    /// that leaves the field zero (any uncapped encode) is byte-identical to one
+    /// written before the field existed, so **old archives and uncapped new
+    /// archives decode everywhere**. A blob that *uses* the field needs a decoder
+    /// that reads it. An older decoder does not silently produce wrong bytes —
+    /// verified: it fails closed with
+    /// `DecodeError: MODE_CM2: coded stream exhausted before orig_len bytes
+    /// decoded`, exit 2, no output file — but it does fail. Setting a cap is
+    /// therefore a decision about who can read the result.
+    ///
+    /// Measured on a quiet 64-core host, `dickens` 2 MB slice, byte-exact
+    /// round-trip on every row (decode peak RSS is the figure that matters, and
+    /// it is class-independent because decode is CM2 alone):
+    ///
+    /// | cap | output | decode peak RSS |
+    /// |---|---|---|
+    /// | none (=24 here) | 461,437 B | 1.47 GiB |
+    /// | 22 | +1.03% | 0.40 GiB |
+    /// | 20 | +3.32% | **0.109 GiB** |
+    /// | 18 | +8.32% | 0.033 GiB |
+    ///
+    /// v1-default: `None` — byte-identical to the shipped encoder.
+    pub cm2_max_tbits: Option<usize>,
+}
+
+/// Speed/ratio operating point.
+///
+/// Cubrim leads on ratio (0.1890 against ppmd 0.2286 on the reference corpus)
+/// and is ~410× slower than ppmd to encode. Publishing only the maximum-ratio
+/// point forces every user to pay 3.7 hours for 300 MB; publishing only a fast
+/// point would give away the thing Cubrim is best at. Both are true and both are
+/// products, so the operating point is explicit.
+///
+/// Every preset must state its trade in **measured** numbers. A preset whose cost
+/// has not been measured on the real corpus does not exist yet — it is not
+/// guessed into being here.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Preset {
+    /// Maximum ratio, whatever it costs. Byte-identical to the shipped v0.3.2
+    /// encoder: every competitive candidate runs, including the CM2 column
+    /// variants.
+    Max,
+    /// Drops the CM2 column-variant passes. Measured on 2 MB Silesia slices:
+    /// **2.27–3.30× less CM2 encode time for 0.71–4.83% larger output** on the
+    /// classes CM2 wins (text, xml, database). No effect on the classes where a
+    /// type transform wins (exe, image), because CM2 is not the winner there.
+    /// Archives stay mutually decodable with `Max`.
+    Balanced,
+    /// Bounded decoder memory, for environments that have a hard ceiling —
+    /// chiefly `wasm32`, whose 4 GiB address space cannot hold the 12.3 GiB of
+    /// model tables a >=16 MB file otherwise demands of the **decoder**.
+    ///
+    /// Caps the CM2 table exponent at 20: measured **decode peak 1.47 GiB ->
+    /// 0.109 GiB on a 2 MB slice, +3.32% output**. Also drops the column
+    /// variants, since an environment that cares about decoder memory is not
+    /// paying 3x encode time for 2% ratio.
+    ///
+    /// Readable by any decoder that understands the table-exponent field.
+    /// **Not** readable by a decoder older than that field — such a decoder
+    /// fails closed with a decode error rather than returning wrong bytes
+    /// (verified), but it cannot open the archive. `Max` and `Balanced` archives
+    /// have no such restriction: they leave the field zero and decode
+    /// everywhere, including on builds that predate it.
+    Web,
+}
+
+impl Preset {
+    /// Apply the preset to a config, returning it.
+    pub fn apply(self, mut config: EncodeConfig) -> EncodeConfig {
+        match self {
+            Preset::Max => {}
+            Preset::Balanced => config.cm2_column_variants = false,
+            Preset::Web => {
+                config.cm2_column_variants = false;
+                config.cm2_max_tbits = Some(20);
+            }
+        }
+        config
+    }
 }
 
 impl EncodeConfig {
@@ -344,6 +482,8 @@ impl EncodeConfig {
             gap_scheme: GapScheme::RleU16,
             value_scheme: ValueScheme::BitpackFixed,
             min_ctx_count: None,
+            cm2_column_variants: true,
+            cm2_max_tbits: None,
         }
     }
 
@@ -434,9 +574,13 @@ mod tests {
             Some(ValueScheme::BwtGeoMix)
         );
         assert_eq!(
-            ValueScheme::from_byte(12),
+            ValueScheme::from_byte(ValueScheme::LzRans.scheme_byte()),
+            Some(ValueScheme::LzRans)
+        );
+        assert_eq!(
+            ValueScheme::from_byte(13),
             None,
-            "12 is not a valid value_scheme byte"
+            "13 is not a valid value_scheme byte"
         );
         assert_eq!(
             ValueScheme::from_byte(99),
@@ -528,6 +672,8 @@ mod tests {
             gap_scheme: GapScheme::RleU16,
             value_scheme: ValueScheme::BitpackFixed,
             min_ctx_count: None,
+            cm2_column_variants: true,
+            cm2_max_tbits: None,
         };
 
         let inputs: Vec<Vec<u8>> = vec![
