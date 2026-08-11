@@ -63,12 +63,33 @@ This is defence in depth. **It does not fix the defect above**, and it must not
 be reported as having done so: a forged manifest naming
 `https://attacker.example/binary` with a matching hash still passes.
 
-Deliberately **not** done: a host allowlist. It would be the strongest bounded
-control available, but the release host cannot be established from this
-repository — the manifest is served by the API, and no `release` table exists in
-`arcanada_cubrim`. Pinning a guessed host would silently break real users'
-updates, which is a worse failure than the one it mitigates. It should be added
-the moment the true host is confirmed.
+Deliberately **not** done: a host allowlist — and on reflection it should not be
+added later either. This corrects an earlier reading of this note.
+
+The first reason was practical: the release host is not establishable from this
+repository. The manifest is served by the API, `arcanada_cubrim` has no
+`release` table, and neither `cubrim-site` nor the database host carries the
+handler. Release *assets* do live on GitHub
+(`https://github.com/Arcanada-one/cubrim/releases/download/…`), but what the API
+actually places in `platform.url` is unverified, and the endpoint cannot be
+probed to find out because `usage_payload` would write a `usage_events` row.
+
+The second reason is stronger and does not go away once the host is known: **a
+host allowlist compiled into a self-updater is a pin on a mutable identity, in
+the one artefact that cannot be re-pinned.** If releases later move to a CDN or
+a new domain, every already-installed binary refuses every update — permanently,
+because the update path is also the repair path. The failure is silent, delayed,
+and unfixable by shipping a new release, since the stranded binaries are exactly
+the ones that cannot fetch it.
+
+That is gotcha 12 in `CLAUDE.md` wearing different clothes: freezing an identity
+that the world is free to move. Buying a partial mitigation at the price of a
+latent mass-stranding is a bad trade for a control that a signature supersedes
+anyway.
+
+If a host constraint is ever wanted, it belongs **server-side** — where the
+manifest is generated and can be corrected — not compiled into clients that
+cannot be reached afterwards.
 
 ## What would actually fix it
 
