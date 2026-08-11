@@ -18,6 +18,12 @@ Codec: champion commit `6eaefad` (DB meta 12,
   check, documented exit codes (1/2/3), and the `--quiet` contract.
 - `CHANGELOG.md` and a release checklist (`docs/release-checklist.md`).
 - Throughput (MB/s) in the compress/decompress stats line.
+- `scripts/build-macos-perarch.sh` — Mac-host build path that emits per-arch
+  tarballs (`cubrim-v<version>-macos-apple-silicon.tar.gz` /
+  `-macos-intel.tar.gz` + `.sha256`/`.size`) matching the shipped download-page
+  and Homebrew-tap naming, via the existing `package-release.sh`. Preferred over
+  the off-convention universal build for releases; notarization + `.pkg` and the
+  site update stay Mac-monitor / operator steps (`MACOS_BUILD_HANDOFF.md`).
 
 ### Changed
 - `--help` decluttered: the research/tuning knobs (`--b`, `--n`,
