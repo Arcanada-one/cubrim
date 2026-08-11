@@ -112,6 +112,26 @@ must **not** be fetched over the same channel as the artefact — that is the
 defect being repaired, and re-introducing it would make the signature
 decorative.
 
+### Rollout, and why it must be staged
+
+Option 1 is now started: `release.yml` runs
+`actions/attest-build-provenance` over the release tarballs and zips, with
+`id-token: write` / `attestations: write` on the publish job. The action is
+SHA-pinned to the same revision the sibling `datarim` repository already runs in
+production, so this is a replicated configuration rather than a new one.
+
+**Producer side only.** The updater still does not require an attestation, and
+must not until at least one attested release exists and has been verified with
+`gh attestation verify`. Enforcing verification first would reject every release
+published before attestation began — which is every release that currently
+exists — and strand every installed binary, because the update path is also the
+repair path. That is the same stranding failure the host-allowlist section
+rejects, arriving from the other direction.
+
+The order is therefore: attest (done here) → cut a release → verify its
+attestation out of band → only then teach the updater to require one, failing
+closed.
+
 ## Status
 
 - Severity is high, exploitability is gated on compromising the API or its
