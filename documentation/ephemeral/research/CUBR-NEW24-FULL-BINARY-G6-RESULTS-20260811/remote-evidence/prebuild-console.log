@@ -1,0 +1,20 @@
+Cloning into '/root/cubr-new24-full-binary-g6-src-a'...
+HEAD is now at 830a9a3 research: record NEW-24 G3 attribution void (#71)
+Cloning into '/root/cubr-new24-full-binary-g6-src-b'...
+HEAD is now at 830a9a3 research: record NEW-24 G3 attribution void (#71)
+    Updating crates.io index
+     Locking 174 packages to latest compatible versions
+      Adding aes-gcm v0.10.3 (available: v0.11.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding rand v0.8.7 (available: v0.10.2)
+      Adding sha2 v0.10.9 (available: v0.11.0)
+      Adding ureq v2.12.1 (available: v3.4.0)
+    Updating crates.io index
+     Locking 174 packages to latest compatible versions
+      Adding aes-gcm v0.10.3 (available: v0.11.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding rand v0.8.7 (available: v0.10.2)
+      Adding sha2 v0.10.9 (available: v0.11.0)
+      Adding ureq v2.12.1 (available: v3.4.0)
+G6 PREBUILD NO-ATTEMPT / NO-SELECT: lock SHA-256 /root/cubr-new24-full-binary-g6-src-a/code/cubrim-rs/Cargo.lock mismatch: expected 0080335ef71fa475f167338b96f1c6dfb5cd6bf3e188dfa0a86aeed68caa35b9, got 0d17c1fc2ac4e17ef3c9a0ca0c21468950c820607ea0ce11875f9698d688d924
+PREBUILD_EXIT=1
