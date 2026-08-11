@@ -93,24 +93,44 @@ metas 37 and 38 report a single archiver, so **no competitor comparison exists
 at those operating points in any table**. The correct output there is empty, not
 borrowed.
 
-## On "structurally impossible"
+## On "structurally impossible" — already true, and this corrects an earlier claim
 
-Fully closing this needs a database-side constraint — a `CHECK` or trigger
-asserting I1/I2 on the table that backs the view, so a violating row cannot be
-written rather than merely being noticed afterwards. That is the right
-enforcement and it is deliberately **not applied here**.
+An earlier revision of this note said a `CHECK` or trigger was owed, and deferred
+it because the database was assumed to be under continuous concurrent write.
+Both halves were wrong, and probing settled it.
 
-`arcanada_cubrim` is the live source of truth and is under continuous concurrent
-write by parallel sessions working the benchmark track. Adding a constraint to a
-shared production table mid-flight can fail an unrelated in-flight write, and the
-failure would surface in someone else's lane as an unexplained error. A schema
-change there wants the benchmark track's own change window, not a drive-by from
-an adjacent lane.
+**`world_benchmark_operating_point` is a VIEW, not a base table**, and its
+definition ends:
 
-What this note does instead: fixes the decision so the question is not reopened
-per-reader, and states the invariants as runnable queries so the constraint, when
-it is written, has an agreed specification rather than a fresh argument. The
-enforcement is owed; the decision is not.
+```sql
+  FROM world_benchmark_meta m
+    JOIN world_benchmark_aggregate a ON a.meta_id = m.id
+    LEFT JOIN world_benchmark_timing_aggregate t
+      ON t.meta_id = a.meta_id AND t.scope = a.scope AND t.archiver = a.archiver
+ WHERE m.task = 'CUBR-0087-phaseC' AND a.archiver = 'cubrim';
+```
+
+`a.archiver = 'cubrim'` is hardcoded in the view body. **I1 and I2 are therefore
+already structurally impossible to violate** — the view cannot emit a
+non-cubrim row, and no constraint could be attached to it anyway, because a view
+has no rows of its own to constrain. The `competitor_note` documents a property
+the SQL already guarantees rather than a convention a reader must uphold.
+
+The timing join is equally tight: it matches on `meta_id`, `scope` **and**
+`archiver`, so the speed columns on any row come from that row's own meta. No
+cross-meta value can enter the view through the join.
+
+The deferral reason was also overstated. Probed directly: one active backend
+(this session's own query) and **zero locks** on the target relation. The
+database was quiet, not busy.
+
+**What remains genuinely unenforced is I3, and no constraint can fix it.** I3 is
+a property of how a *reader* queries `world_benchmark_timing_aggregate` — a
+comparison that groups across `meta_id` values is cross-meta, and that mistake
+happens in the query, not in stored data. The defence there is the measurement
+in this note: metas 37 and 38 carry a single archiver, so a competitor
+comparison at those operating points does not exist to be read. Nothing is owed
+against this view.
 
 ## Boundary
 
