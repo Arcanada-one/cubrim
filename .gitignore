@@ -9,6 +9,9 @@ dist/
 **/dist/
 **/*.rs.bk
 Cargo.lock
+# ...except the shipped CLI's lock: builds must resolve one graph, not re-resolve
+# live crates.io on every job (the negation must follow the Cargo.lock line).
+!code/cubrim-rs/Cargo.lock
 
 # Python prototyping
 __pycache__/

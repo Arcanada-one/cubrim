@@ -157,3 +157,70 @@ python3 analyze.py      # every table above, from results.tsv / interleaved.tsv 
 `analyze.py` refuses to print any number if a gate is VOID or if a timing row lacks a passing gate.
 63 gated decode observations, 0 VOID. Memory cap, pin, corpus hashes and toolchain in
 `provenance.txt`.
+
+---
+
+## Correction — 2026-08-11: the lock is NOT why the binaries differed
+
+The section above attributed the `8947ea9b…` vs `d4b9fc85…` difference to `Cargo.lock` being
+gitignored with unpinned semver deps, "so two builds of one commit are not bit-identical". **A
+direct experiment refutes that causal claim**, and it is corrected here rather than left standing.
+
+Two independent worktrees were created at the same commit `3a13f486` on one host and built with one
+toolchain (cargo 1.97.1):
+
+| clone | binary sha256 | Cargo.lock sha256 |
+|---|---|---|
+| A | `8947ea9b155c10d3…` | `13e71e9bcdb2f043…` |
+| B | `8947ea9b155c10d3…` | `13e71e9bcdb2f043…` |
+
+**Bit-identical binaries, and byte-identical independently-resolved locks.** Two clones resolving
+the same dependency graph at the same moment is exactly what NEW-24 G6 also observed — its own two
+locks were byte-identical (`0d17c1fc…`, 41115 bytes). So same-moment resolution was never the
+failing property, and committing the lock alone would not have made G6 pass.
+
+What actually differs across the two recorded builds is the **toolchain and build environment**, not
+the dependency graph. Bit-identity is achievable — it was just demonstrated — but it requires
+holding rustc/cargo version, and the paths and system libraries the build sees, constant.
+
+### The lock still matters, for a different reason — cross-time drift, now measured
+
+Resolution is stable within a moment but **not across time**. G6's lock and the lock resolved here
+hours later differ by exactly one transitive dependency:
+
+```
+962c962
+< version = "0.103.13"        rustls-webpki
+> version = "0.103.14"
+964c964
+< checksum = 61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e
+> checksum = 0527518605e68109d875e248ea259b6758801cf165e4b2c2733ae3b51f12535a
+```
+
+Both files are 41115 bytes — the version strings are the same length, so a size check would have
+missed it entirely. A patch release landed on crates.io between the two runs and every build after
+it silently changed dependency graph. That is the real, measured hazard a committed lock removes,
+and it also means the release matrix (three `cargo`/`cross` build jobs from fresh checkouts) can
+diverge mid-run today.
+
+So: commit the lock — the justification is cross-time and cross-job drift, demonstrated above, not
+the same-moment binary difference this report originally blamed it for. And do not expect the lock
+by itself to deliver bit-identity; see `CUBR-BUILD-DETERMINISM-20260811.md`.
+
+### Second correction: G6 is terminal, not blocked, and already used `--locked`
+
+This report called the lock issue "a live blocker on that lane" with "no branch or PR implementing
+the fix G6 itself prescribes". That is wrong on three counts, each verified against `origin/main`:
+
+- **G6's protocol already built with `--locked`** (`datarim/plans/NEW-24-current-profile-g6-plan.md`
+  lines 190, 231-232), so it was never missing that.
+- **G6 cannot be retried** — *"Its prebuild allowance is spent"* (G6 results line 103); any further
+  attempt is a new protocol with a new preregistration. Nothing is waiting to be unblocked.
+- **G6 did not fail on the gitignored lock.** It failed comparing a freshly-resolved lock against a
+  `LOCK_SHA` frozen 2026-08-09T16:57:54Z and invalidated by crates published in between —
+  *"unreproducible by construction"* (G6 results line 32). Its two clones' locks were byte-identical.
+  The lesson, already in `CLAUDE.md` Lesson #12, is that a frozen identity must pin its **inputs**,
+  not its **outputs**.
+
+Committing the lock is therefore worth doing on supply-chain merits alone, and is **not** a NEW-24
+fix. The successor-protocol design is PROGRAM's.

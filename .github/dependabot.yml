@@ -7,3 +7,10 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: /code/cubrim-rs
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
