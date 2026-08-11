@@ -224,3 +224,23 @@ the fix G6 itself prescribes". That is wrong on three counts, each verified agai
 
 Committing the lock is therefore worth doing on supply-chain merits alone, and is **not** a NEW-24
 fix. The successor-protocol design is PROGRAM's.
+
+---
+
+## Amendment 2026-08-11 — the rank language in this report is cross-meta, not same-host
+
+Every "ninth place" / "eighth place" phrase above is measured against ppmd **25.69 MiB/s** and bzip2
+**52.71**, taken from `world_benchmark_timing_aggregate`. Those markers were later measured on this
+host and **they do not transfer** (`CUBR-SAMEHOST-FIELD-RESULTS-20260811.md`): same-host on x-ray,
+interleaved and gated, ppmd decodes at **1.84 MiB/s** (14× lower) and bzip2 at **8.73** (6× lower).
+
+Cause: `d_max` is a **maximum over files**, so 25.69 is ppmd's *best* file while x-ray is near its
+worst; host load compounds it. cubrim's own discrepancy is only 2.0× precisely because its `d_max`
+sits on x-ray — the same leaderboard column means "this file" for cubrim and "some other file" for
+every competitor, which is what made the comparison feel valid while being invalid.
+
+**No figure in this report changes, and its conclusions hold — conservatively.** The same-host margin
+is *larger*, not smaller (the geocm floor clears same-host ppmd by 15.3× rather than 1.09×). But read
+every rank phrase above as **"against the cross-meta leaderboard"**, never as a same-host claim.
+Stated same-host, a perfected geocm rail at the 28.1 MiB/s floor ranks **5th of the 8 tools measured
+on x-ray** — behind lz4/zstd/gzip/brotli, ahead of xz/bzip2/current cubrim.
