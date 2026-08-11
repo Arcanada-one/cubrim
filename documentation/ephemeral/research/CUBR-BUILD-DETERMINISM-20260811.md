@@ -120,3 +120,35 @@ Untouched because they never read the lock: `release-lineage-guard.yml`,
   attribution's `d4b9fc85…`. It establishes only that the lock is not the cause and that bit-identity
   holds when toolchain and environment are constant. The G2 build's toolchain version was never
   recorded, so that hypothesis is untested and stated as a void rather than assumed.
+
+---
+
+## Mutation verification of the `--locked` gate (2026-08-11, post-merge)
+
+The PR that landed this change reported five green CI checks and called that "proof the committed
+lock is in sync". **Green checks are not proof.** A gate that never fails proves nothing, so the gate
+was tested by mutation: break the thing it is supposed to catch, and confirm it catches it.
+
+Disposable worktree at `origin/main` `a742db7`, cargo 1.97.1. Each arm restored before the next.
+
+| arm | mutation | `cargo metadata --locked` | without `--locked` |
+|---|---|---|---|
+| 1 control | none | **SUCCEEDS** | — |
+| 2 | added `itoa = "1"` to `Cargo.toml`, lock untouched | **FAILS** | **SUCCEEDS** |
+| 3 | edited `Cargo.lock`: `rustls-webpki` 0.103.14 → 0.103.13, checksum left stale | **FAILS** — `error: checksum for rustls-webpki v0.103.13 changed between lock files` | — |
+| 1 again | restored | **SUCCEEDS** | — |
+
+Arm 2 is the discriminating one. The same desynced tree that **fails** under `--locked` **succeeds**
+without it, silently re-resolving — which is precisely what every CI job in this repo did before this
+change. That is the behaviour difference the flag buys, demonstrated rather than asserted.
+
+Arm 3 shows the lock is also integrity-checked, not merely present: a tampered pin is rejected on the
+recorded checksum, so committing the lock gives a real supply-chain assertion and not just a file.
+
+Two limits, stated rather than glossed:
+
+- These arms exercise `cargo metadata --locked`, which performs the same resolution check as
+  `cargo build/clippy/test --locked`. They do **not** exercise the `cross build --locked` legs
+  (arm64, Windows), which remain untested here as noted above.
+- This verifies the gate rejects a desynced or tampered lock. It says nothing about bit-identity of
+  the resulting binary, which this change explicitly does not deliver.
