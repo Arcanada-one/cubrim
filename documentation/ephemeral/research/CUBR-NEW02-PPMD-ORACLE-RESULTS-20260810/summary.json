@@ -1,0 +1,52 @@
+{
+  "parameter_axes": {
+    "var_h": {
+      "levels": [
+        4,
+        6,
+        8
+      ],
+      "parameter": "PPMd order",
+      "reported_effect": "adjacent charged-archive byte deltas per file at fixed memory"
+    },
+    "var_i": {
+      "levels": [
+        16,
+        64,
+        256
+      ],
+      "parameter": "requested PPMd memory MiB",
+      "reported_effect": "adjacent charged-archive byte deltas per file at fixed order"
+    }
+  },
+  "schema": "new02-ppmd-oracle-results-v1",
+  "scope": {
+    "canterbury_policy": "All six registered Canterbury files remain measured in results.tsv and effects.tsv but are excluded from broader claims.",
+    "corpus_wide_average": "NOT_COMPUTED",
+    "inventory_entries": 27,
+    "observation_cells": 243,
+    "per_file_only": true
+  },
+  "validation": {
+    "archive_authentication": "exact per-cell archive SHA-256 and fresh landed 7z inspection",
+    "cell_status": "243/243 PASS",
+    "cmp_equal": "243/243 true",
+    "cmp_returncode": "243/243 zero",
+    "decode_returncode": "243/243 zero",
+    "encode_returncode": "243/243 zero",
+    "inspection_returncode": "243/243 zero",
+    "round_trip": "243/243 true",
+    "sha256_equal": "243/243 true"
+  },
+  "verdict": {
+    "candidate": "NONE",
+    "ceiling": "NOT_DEFINED_IN_PREREGISTRATION",
+    "evidence_validation": "PASS",
+    "fraction_of_ceiling": "NOT_COMPUTED",
+    "go_no_go": "NOT_ISSUED",
+    "outcome": "CHARACTERIZED_NO_SELECT",
+    "reason": "The prospective preregistration froze measurement mechanics but no ceiling, aggregate, ranking, winner rule, or implementation-selection rule.",
+    "selection": "NO-SELECT",
+    "source_status": "COMPLETE"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "cpu_set": "0-15",
+  "environment": {
+    "LANG": "C",
+    "LC_ALL": "C",
+    "python": "3.12.3"
+  },
+  "execution_identity": {
+    "exact_main_sha": "708cda945a285526610371d812e4f54725eb6baf",
+    "harness_run_id": "4352d71ee8f4479c17312750d3b08f7095f0fb57737fbf55ac8877b10e0864ba",
+    "identity_basis": "harness_run_id",
+    "systemd_invocation_id": "NOT_RECORDED_BY_CANONICAL_HARNESS",
+    "systemd_unit": "NOT_RECORDED_BY_CANONICAL_HARNESS"
+  },
+  "frozen_identities": {
+    "grid_sha256": "8c5f8d8ba6016f03eded06842d444a6ac06f417e6ae8fd01db9d0e0abef206f4",
+    "harness_sha256": "35c2f7eb7dc7f3ef5008136b7658607342273df36c8c9b13d3fdeda80f3143c5",
+    "inventory_sha256": "77b355f6b109acb26eb5606cf1538e2e6628fac3f6ed88b76f99f70a9716ceda",
+    "preregistration_git_blob": "d96df7e3478a6ba52b737ef30dea63d68b0e01ac",
+    "preregistration_sha256": "fd712e0f0936b2fcce94ff49e1d559852d8e7db7b89ec8affa83263c6e6dd093",
+    "test_sha256": "35be4a2cdcf5f09487eddd542966c3435bedf40874e6b081fe282b6edb8eb005"
+  },
+  "memory_mib": [
+    16,
+    64,
+    256
+  ],
+  "orders": [
+    4,
+    6,
+    8
+  ],
+  "publication_contract": "all-or-nothing",
+  "schema": "new02-ppmd-oracle-results-v1",
+  "source_publication": {
+    "final_namespace": "/home/dev/cubr-new02-canonical-runs/new02-ppmd-oracle-4352d71ee8f4479c-20260810T020926Z",
+    "observation_count": 243,
+    "status": "COMPLETE",
+    "top_level_sha256": {
+      "COMPLETE": "9db58ad5bfa01bfeaff2f46807d0645baa2e002cd1ed930585fcefb2ce177d06",
+      "MANIFEST.json": "4a39fb5ec1914ae7e1e296c44b2cec4cf4ecf2afa48af3216a9ec2552f3cb88c",
+      "observations.jsonl": "7622bb1eed1199f98c599cdad588340fcffc3df74b03eef32f37b16c4eabe75c",
+      "provenance.json": "42caafdbcf13c37e3f7b6f57f62a1923c35c470bf2c22bda04d645b3f1b6fc6b"
+    },
+    "void_record_scope": {
+      "scope": "/home/dev/cubr-new02-canonical-runs",
+      "status": "NO_VOID_RECORD_PRESENT_IN_SOURCE_PARENT"
+    }
+  },
+  "tools": {
+    "7z": {
+      "binary_sha256": "60fc00b4e1ed37668972c51f03426973d8006db3c7224075878f6d66196d7c27",
+      "path": "/usr/bin/7z",
+      "version": "7-Zip 23.01 (x64) : Copyright (c) 1999-2023 Igor Pavlov : 2023-06-20"
+    },
+    "cmp": {
+      "binary_sha256": "e10750ef3db9bd3595d3cbb1e25bcfd6a964dc6aa0ba9561034067913ee1cc04",
+      "path": "/usr/bin/cmp",
+      "version": "cmp (GNU diffutils) 3.10"
+    },
+    "taskset": {
+      "binary_sha256": "a9c851792e54e91fba7b827019380abee54e715b6817899c835e4f221354b260",
+      "path": "/usr/bin/taskset",
+      "version": "taskset from util-linux 2.39.3"
+    },
+    "time": {
+      "binary_sha256": "3b11dec50514a8473e9f6efa7a34d584d0657538c09988f61b72d38ad4991a10",
+      "path": "/usr/bin/time",
+      "version": "time (GNU Time) UNKNOWN"
+    }
+  }
+}
