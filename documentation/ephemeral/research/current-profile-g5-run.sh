@@ -2717,6 +2717,91 @@ self_test_cgroup_live_worker() {
     exit 126
 }
 
+verify_live_cgroup_fixture_result() {
+    local rc=$1 fixture_result=$2 fixture_unit=$3 systemd_output=$4 verification_error
+    [[ $rc =~ ^[0-9]+$ && $fixture_unit =~ ^[A-Za-z0-9_.:@-]+[.]service$ &&
+       $fixture_unit != *'..'* ]] ||
+        die 'live fixture result verifier inputs are malformed'
+    (( rc == 0 )) || die 'live fixture systemd-run status is not expected success'
+    [[ -f $fixture_result && ! -L $fixture_result ]] || die 'live fixture result is missing or unsafe'
+    [[ -f $systemd_output && ! -L $systemd_output ]] ||
+        die 'live fixture systemd-run output is missing or unsafe'
+    if ! verification_error=$(/usr/bin/python3 - "$fixture_result" "$fixture_unit" "$systemd_output" 2>&1 <<'PY'
+import os, re, stat, sys
+
+result_path, unit, output_path = sys.argv[1:]
+
+def read_regular(path, label):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        raise SystemExit(f"{label} is missing or unsafe") from error
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 1_048_576:
+            raise SystemExit(f"{label} is missing or unsafe")
+        chunks, total = [], 0
+        while True:
+            try:
+                chunk = os.read(fd, min(65536, 1_048_577 - total))
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > 1_048_576:
+                raise SystemExit(f"{label} exceeds size bound")
+        payload = b"".join(chunks)
+    finally:
+        os.close(fd)
+    try:
+        return payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise SystemExit(f"{label} is not exact UTF-8") from error
+
+output_lines = read_regular(output_path, "live fixture systemd-run output").splitlines()
+running = re.compile(
+    rf"Running as unit: {re.escape(unit)}; invocation ID: [0-9a-f]{{32}}"
+)
+finished = "Finished with result: success"
+terminated = "Main processes terminated with: code=killed/status=TERM"
+optional = re.compile(
+    r"(?:Service runtime|CPU time consumed|Memory peak|Memory swap peak): [ -~]+"
+)
+if (sum(bool(running.fullmatch(line)) for line in output_lines) != 1 or
+        output_lines.count(finished) != 1 or output_lines.count(terminated) != 1 or
+        any(not (running.fullmatch(line) or line in {finished, terminated} or optional.fullmatch(line))
+            for line in output_lines)):
+    raise SystemExit("live fixture systemd-run output authentication failed")
+
+result_lines = read_regular(result_path, "live fixture result").splitlines()
+timestamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\t"
+new_pid = re.compile(
+    timestamp + r"cgroup_new_pid=[1-9][0-9]*(?:,[1-9][0-9]*)* "
+    r"control_group=/[A-Za-z0-9_.:@/\\x-]+"
+)
+stop = re.compile(timestamp + rf"unit_stop_request={re.escape(unit)} scope=user")
+if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):
+    raise SystemExit("live cgroup guard unexpectedly returned")
+if sum(bool(new_pid.fullmatch(line)) for line in result_lines) != 1:
+    raise SystemExit("live fixture did not retain a new cgroup PID")
+if sum(bool(stop.fullmatch(line)) for line in result_lines) != 1:
+    raise SystemExit("live fixture did not request the exact fixture unit stop")
+if len(result_lines) != 2:
+    raise SystemExit("live fixture result contains unexpected evidence")
+PY
+    ); then
+        die "$verification_error"
+    fi
+}
+
+self_test_verify_cgroup_live_result() {
+    (( $# == 4 )) || die 'live result self-test requires rc, result, unit, and systemd output'
+    verify_live_cgroup_fixture_result "$1" "$2" "$3" "$4"
+    printf 'current_profile_g5_live_result_test=PASS\n'
+}
+
 self_test_cgroup_live() {
     local export_dir=${1:-} root fixture_result fixture_unit runner_path systemd_output rc result_sha output_sha
     local -a systemd_args
@@ -2751,13 +2836,7 @@ self_test_cgroup_live() {
     "${systemd_args[@]}" >"$systemd_output" 2>&1
     rc=$?
     set -e
-    (( rc != 0 )) || die 'live fixture unexpectedly returned success'
-    [[ -f $fixture_result && ! -L $fixture_result ]] || die 'live fixture result is missing or unsafe'
-    /usr/bin/grep -qF 'cgroup_new_pid=' "$fixture_result" || die 'live fixture did not retain a new cgroup PID'
-    /usr/bin/grep -qF "unit_stop_request=$fixture_unit scope=user" "$fixture_result" ||
-        die 'live fixture did not request the exact fixture unit stop'
-    ! /usr/bin/grep -qF 'live_cgroup_guard_unexpected_return=' "$fixture_result" ||
-        die 'live cgroup guard unexpectedly returned'
+    verify_live_cgroup_fixture_result "$rc" "$fixture_result" "$fixture_unit" "$systemd_output"
     /usr/bin/install -m 0444 -- "$fixture_result" "$export_dir/cgroup-live.tsv"
     /usr/bin/install -m 0444 -- "$systemd_output" "$export_dir/systemd-run.output.txt"
     result_sha=$(sha "$export_dir/cgroup-live.tsv")
@@ -3169,6 +3248,9 @@ case ${1:-} in
     --self-test-cgroup-live)
         (( $# == 2 )) || die 'live cgroup fixture requires exactly one export directory'
         self_test_cgroup_live "$2"
+        ;;
+    --self-test-verify-cgroup-live-result)
+        self_test_verify_cgroup_live_result "$2" "$3" "$4" "$5"
         ;;
     --self-test-cgroup-live-worker) self_test_cgroup_live_worker ;;
     --self-test-publish) self_test_publish ;;

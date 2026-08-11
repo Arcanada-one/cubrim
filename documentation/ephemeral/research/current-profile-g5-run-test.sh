@@ -401,6 +401,15 @@ require_runner_named '(( $# == 2 )) || die '\''live cgroup fixture requires exac
     'live cgroup dispatch does not validate its exact second argument'
 require_runner_named 'self_test_cgroup_live "$2"' \
     'live cgroup dispatch drops its export-directory argument'
+require_runner_named 'verify_live_cgroup_fixture_result "$rc" "$fixture_result" "$fixture_unit" "$systemd_output"' \
+    'live cgroup fixture does not authenticate the terminal systemd result'
+require_runner_named '(( rc == 0 )) || die '\''live fixture systemd-run status is not expected success'\''' \
+    'live cgroup fixture does not accept the authenticated rc=0 success form'
+require_runner_named 'terminated = "Main processes terminated with: code=killed/status=TERM"' \
+    'live cgroup fixture accepts an unauthenticated terminal process form'
+require_runner_named 'if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):' \
+    'live cgroup fixture does not reject an unexpected worker return'
+reject_runner_fixed "(( rc != 0 )) || die 'live fixture unexpectedly returned success'"
 
 launch_remote_source=$(function_source verify_launch_main_matches_remote)
 [[ $launch_remote_source == *'run_bounded "$timeout_seconds" /usr/bin/git -C "$repo" ls-remote --exit-code origin refs/heads/main'* ]] ||
@@ -1160,6 +1169,89 @@ then
     fail 'admission feasibility sequence contract failed'
 fi
 
+live_result_root=$(/usr/bin/mktemp -d)
+if ! /usr/bin/python3 - "$RUNNER" "$live_result_root" <<'PY'
+from pathlib import Path
+import shutil, subprocess, sys
+
+runner, root_arg = sys.argv[1:]
+root = Path(root_arg)
+unit = "current-profile-g5-cgroup-selftest-4242.service"
+control_group = "/user.slice/user-1000.slice/user@1000.service/app.slice/" + unit
+baseline_result = (
+    f"2026-08-11T00:00:00Z\tcgroup_new_pid=4243 control_group={control_group}\n"
+    f"2026-08-11T00:00:01Z\tunit_stop_request={unit} scope=user\n"
+)
+baseline_output = (
+    f"Running as unit: {unit}; invocation ID: {'a' * 32}\n"
+    "Finished with result: success\n"
+    "Main processes terminated with: code=killed/status=TERM\n"
+    "Service runtime: 1.234s\n"
+    "CPU time consumed: 10ms\n"
+    "Memory peak: 1.0M\n"
+    "Memory swap peak: 0B\n"
+)
+
+def invoke(label, rc, result_text=baseline_result, output_text=baseline_output,
+           result_path=None):
+    case = root / label
+    case.mkdir()
+    result_file = case / "cgroup-live.tsv"
+    output_file = case / "systemd-run.output.txt"
+    if result_text is not None:
+        result_file.write_text(result_text, encoding="utf-8")
+    output_file.write_text(output_text, encoding="utf-8")
+    return subprocess.run(
+        ["/usr/bin/bash", runner, "--self-test-verify-cgroup-live-result", str(rc),
+         str(result_path or result_file), unit, str(output_file)],
+        text=True, capture_output=True, check=False, timeout=2,
+    )
+
+try:
+    result = invoke("positive", 0)
+    if (result.returncode != 0 or
+            result.stdout != "current_profile_g5_live_result_test=PASS\n" or result.stderr):
+        raise SystemExit(f"authenticated rc=0 live result was rejected: {result}")
+    cases = {
+        "nonzero-status": (1, baseline_result, baseline_output,
+                           "live fixture systemd-run status is not expected success"),
+        "false-success": (0, baseline_result,
+                          baseline_output.replace("code=killed/status=TERM", "code=exited/status=0"),
+                          "live fixture systemd-run output authentication failed"),
+        "failed-result": (0, baseline_result,
+                          baseline_output.replace("Finished with result: success", "Finished with result: failed"),
+                          "live fixture systemd-run output authentication failed"),
+        "wrong-output-unit": (0, baseline_result,
+                              baseline_output.replace(unit, "current-profile-g5-cgroup-selftest-9999.service", 1),
+                              "live fixture systemd-run output authentication failed"),
+        "wrong-stop-unit": (0, baseline_result.replace(
+                                f"unit_stop_request={unit}",
+                                "unit_stop_request=current-profile-g5-cgroup-selftest-9999.service"),
+                            baseline_output,
+                            "live fixture did not request the exact fixture unit stop"),
+        "missing-new-pid": (0, baseline_result.splitlines(keepends=True)[1], baseline_output,
+                            "live fixture did not retain a new cgroup PID"),
+        "unexpected-return": (0, baseline_result + "live_cgroup_guard_unexpected_return=125\n",
+                              baseline_output, "live cgroup guard unexpectedly returned"),
+        "duplicate-terminal": (0, baseline_result,
+                               baseline_output + "Finished with result: success\n",
+                               "live fixture systemd-run output authentication failed"),
+    }
+    for label, (rc, result_text, output_text, expected_error) in cases.items():
+        result = invoke(label, rc, result_text, output_text)
+        if result.returncode == 0 or expected_error not in result.stderr:
+            raise SystemExit(f"live result mutation failed elsewhere: {label} result={result}")
+    missing_path = root / "missing-evidence.tsv"
+    result = invoke("missing-evidence", 0, result_path=missing_path)
+    if result.returncode == 0 or "live fixture result is missing or unsafe" not in result.stderr:
+        raise SystemExit(f"missing live evidence survived: {result}")
+finally:
+    shutil.rmtree(root)
+PY
+then
+    fail 'authenticated live cgroup result matrix failed'
+fi
+
 live_dispatch_root=$(/usr/bin/mktemp -d)
 /usr/bin/mkdir -- "$live_dispatch_root/export"
 /usr/bin/ln -s -- "$live_dispatch_root/export" "$live_dispatch_root/export-link"
@@ -1592,6 +1684,15 @@ PY
     expect_runner_mutant_red live_dispatch_drops_export_directory \
         's/self_test_cgroup_live "\$2"/self_test_cgroup_live/' \
         'live cgroup dispatch drops its export-directory argument'
+    expect_runner_mutant_red live_result_restores_rc_nonzero_assumption \
+        's/(( rc == 0 )) || die '\''live fixture systemd-run status is not expected success'\''/(( rc != 0 )) || die '\''live fixture unexpectedly returned success'\''/' \
+        'live cgroup fixture does not accept the authenticated rc=0 success form'
+    expect_runner_mutant_red live_result_accepts_exited_zero \
+        's/code=killed\/status=TERM/code=exited\/status=0/' \
+        'live cgroup fixture accepts an unauthenticated terminal process form'
+    expect_runner_mutant_red live_result_allows_unexpected_worker_return \
+        's/if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):/if False:/' \
+        'live cgroup fixture does not reject an unexpected worker return'
     expect_runner_mutant_red remote_main_accepts_local_unmerged \
         's/\[\[ \$remote_main == "\$expected" \]\]/[[ -n $remote_main ]]/' \
         'fresh remote main equality comparison is missing'
