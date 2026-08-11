@@ -41,23 +41,6 @@ readonly SAMPLE_COUNT_MIN=4787
 readonly ZERO_HIT_BOUND_MAX=0.001
 readonly EXPECTED_INSTRUCTION_COUNT=739548
 readonly EXPECTED_PAGE_SIZE=4096
-readonly EXPECTED_MAPPING_SCHEMA_SHA=1c8f5be539eaaa94f3a64d071e859ee5eccf8f4314908e143246f47bd8760e12
-readonly EXPECTED_MAP_SEAL_SHA=565cce3c44c9fb8a228184e0af37270e0caeb2160f15c36b4690bc81aa139a6f
-readonly EXPECTED_PREFIX_LOCATION_ROWS=2815329
-readonly EXPECTED_MAP_BYTES=1111781924
-readonly EXPECTED_MAP_SHA=8bd7b254793cb5a3bf84b7e7c995f8f65d55e04e2e69d86340b876cb2a9d03b7
-readonly EXPECTED_MAP_MANIFEST_SHA=db0bb37f8b96e73c6e39288e5224fd476cbf3abe4241d7e634b6e54de36859c4
-readonly EXPECTED_MAP_PART_COUNT=1
-readonly EXPECTED_MAP_PART_COMPRESSED_BYTES=40287882
-readonly EXPECTED_MAP_PART_COMPRESSED_SHA=cb8674ded7be56a114873ad86ea75771955107a8013adcf9ead48c9a136dc668
-readonly EXPECTED_MAP_FIRST_DSO_OFFSET=1156800
-readonly EXPECTED_MAP_LAST_DSO_OFFSET=4182859
-readonly EXPECTED_SUMMARY_BYTES=121941235
-readonly EXPECTED_SUMMARY_SHA=bfcd4c3d3dc3fcb652c5e49cdb8fb60b4bb082cb4de0264456ccfb303948c961
-readonly EXPECTED_SUMMARY_COMPRESSED_BYTES=27591662
-readonly EXPECTED_SUMMARY_COMPRESSED_SHA=5811308b6c98bbd730c61aa98a08619a1ab99346cf5aa9f32d79eeb88ac495fe
-readonly EXPECTED_SOURCE_REVERSE_COUNT=188054
-readonly EXPECTED_EMITTED_REVERSE_COUNT=5047
 readonly FEASIBILITY_FIXTURE_BYTES=65536
 readonly FEASIBILITY_FIXTURE_SHA=de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31
 readonly FEASIBILITY_ARCHIVE_SHA=352840f3350619078b42ff316ade28a2b4a9e2ce5dd9385c439ed2a27bb0cae3
@@ -98,6 +81,7 @@ BINARY_BUILD_ID=
 MAP_MANIFEST=
 INSTRUMENT_SHA256=${CUBR_MAP_INSTRUMENT_SHA:-}
 MAPPING_SCHEMA_SHA256=
+MAP_SEAL_SHA256=
 PERF_EVENTS_CSV=cycles
 FAILURE_REASON=
 FAILURE_COMMAND=
@@ -111,6 +95,25 @@ declare -Ag CGROUP_ALLOWED_PIDS=()
 
 now() { /usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ; }
 sha() { /usr/bin/sha256sum -- "$1" | /usr/bin/awk '{print $1}'; }
+
+json_value() {
+    /usr/bin/python3 - "$1" "$2" <<'PY'
+import json, os, pathlib, sys
+path, key = pathlib.Path(sys.argv[1]), sys.argv[2]
+fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+try:
+    with os.fdopen(fd, encoding="utf-8") as handle:
+        value = json.load(handle)[key]
+finally:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+if isinstance(value, (dict, list)) or value is None:
+    raise SystemExit("JSON value is not scalar")
+print(str(value))
+PY
+}
 monotonic_ns() {
     /usr/bin/python3 - <<'PY'
 import time
@@ -330,8 +333,6 @@ verify_instrument_provenance() {
         printf 'mapper_sha256=%s\n' "$EXPECTED_MAPPER_SHA"
         printf 'mapper_test_sha256=%s\n' "$EXPECTED_MAPPER_TEST_SHA"
     } | /usr/bin/sha256sum | /usr/bin/awk '{print $1}')
-    [[ $MAPPING_SCHEMA_SHA256 == "$EXPECTED_MAPPING_SCHEMA_SHA" ]] ||
-        die 'mapping schema identity mismatch'
 }
 
 verify_source_checkout() {
@@ -705,8 +706,6 @@ build_full_instruction_map_worker() {
         printf 'mapper_sha256=%s\n' "$EXPECTED_MAPPER_SHA"
         printf 'mapper_test_sha256=%s\n' "$EXPECTED_MAPPER_TEST_SHA"
     } | /usr/bin/sha256sum | /usr/bin/awk '{print $1}')
-    [[ $MAPPING_SCHEMA_SHA256 == "$EXPECTED_MAPPING_SCHEMA_SHA" ]] ||
-        die 'map worker mapping schema identity mismatch'
     [[ -x $MEASURED_BINARY && $(sha "$MEASURED_BINARY") == "$EXPECTED_BINARY_SHA" ]] || die 'map worker binary identity mismatch'
     /usr/bin/mkdir -p -- "$map_dir"
     /usr/bin/readelf -W -l "$MEASURED_BINARY" >"$map_dir/readelf-programs.txt"
@@ -735,7 +734,7 @@ build_full_instruction_map_worker() {
         --resolver-a map/resolver-a.txt --resolver-b map/resolver-b.txt \
         --prefix-table map/prefix-table.tsv --binary-dso "$MEASURED_BINARY" \
         --source-base-id "$CODE_COMMIT" --mapping-schema-sha256 "$MAPPING_SCHEMA_SHA256" \
-        --map-part-prefix g4-full-instruction-map \
+        --map-part-prefix g5-full-instruction-map \
         --map-manifest-out map-parts-manifest.json \
         --summary-out map-summary.json \
         --max-part-bytes "$EVIDENCE_PART_MAX_BYTES"
@@ -833,87 +832,62 @@ if (summary.get("canonical_uncompressed_sha256") != manifest.get("full_uncompres
         summary.get("canonical_uncompressed_bytes") != manifest.get("full_uncompressed_bytes")):
     raise SystemExit("map full reconstruction mismatch")
 declared = {item["path"] for item in parts}
-observed = {path.name for path in evidence_root.glob("g4-full-instruction-map.part-*.tsv.gz")}
+observed = {path.name for path in evidence_root.glob("g5-full-instruction-map.part-*.tsv.gz")}
 if observed != declared:
     raise SystemExit("map manifest has extra or missing parts")
 PY
-    /usr/bin/python3 - "$map_dir" "$EXPECTED_MAP_SEAL_SHA" "$EXPECTED_MAPPING_SCHEMA_SHA" \
-        "$EXPECTED_PAGE_SIZE" "$EXPECTED_INSTRUCTION_COUNT" "$EXPECTED_PREFIX_LOCATION_ROWS" \
-        "$EXPECTED_MAP_BYTES" "$EXPECTED_MAP_SHA" "$EXPECTED_MAP_MANIFEST_SHA" \
-        "$EXPECTED_MAP_PART_COUNT" \
-        "$EXPECTED_MAP_PART_COMPRESSED_BYTES" "$EXPECTED_MAP_PART_COMPRESSED_SHA" \
-        "$EXPECTED_MAP_FIRST_DSO_OFFSET" "$EXPECTED_MAP_LAST_DSO_OFFSET" \
-        "$EXPECTED_SUMMARY_BYTES" "$EXPECTED_SUMMARY_SHA" "$EXPECTED_SUMMARY_COMPRESSED_BYTES" \
-        "$EXPECTED_SUMMARY_COMPRESSED_SHA" "$EXPECTED_SOURCE_REVERSE_COUNT" \
-        "$EXPECTED_EMITTED_REVERSE_COUNT" <<'PY'
-import gzip, hashlib, json, os, pathlib, sys
-root = pathlib.Path(sys.argv[1])
-(seal_sha, schema_sha, page_size, instruction_count, resolver_rows, map_bytes,
- map_sha, manifest_sha, part_count, part_cbytes, part_csha, first_offset, last_offset,
- summary_bytes, summary_sha, summary_cbytes, summary_csha, source_count,
- emitted_count) = sys.argv[2:]
-page_size, instruction_count, resolver_rows, map_bytes, part_count = map(
-    int, (page_size, instruction_count, resolver_rows, map_bytes, part_count))
-part_cbytes, first_offset, last_offset = map(int, (part_cbytes, first_offset, last_offset))
-summary_bytes, summary_cbytes, source_count, emitted_count = map(
-    int, (summary_bytes, summary_cbytes, source_count, emitted_count))
-seal = {
-    "schema": "cubr-new24-g5-map-admission-seal-v1", "attempt": 9,
-    "page_size": page_size, "mapping_schema_sha256": schema_sha,
-    "instruction_count": instruction_count,
-    "classified_resolver_location_rows": resolver_rows,
-    "canonical_map": {"bytes": map_bytes, "sha256": map_sha},
-    "manifest_sha256": manifest_sha, "part_count": part_count,
-    "part": {"path": "g4-full-instruction-map.part-00000.tsv.gz",
-             "compressed_bytes": part_cbytes, "compressed_sha256": part_csha,
-             "uncompressed_bytes": map_bytes, "uncompressed_sha256": map_sha,
-             "first_row_index": 0, "last_row_index": instruction_count - 1,
-             "first_dso_file_offset": first_offset, "last_dso_file_offset": last_offset},
-    "summary": {"uncompressed_bytes": summary_bytes, "uncompressed_sha256": summary_sha,
-                "compressed_bytes": summary_cbytes, "compressed_sha256": summary_csha,
-                "source_reverse_index_count": source_count,
-                "emitted_reverse_index_count": emitted_count},
+    /usr/bin/python3 - "$PREFLIGHT_DIR/map-toolchain.json" \
+        "$($RUSTC -vV | /usr/bin/tr '\n' ';')" "$($CARGO --version)" \
+        "$(/usr/bin/readelf --version | /usr/bin/awk 'NR == 1 {print; exit}')" \
+        "$(/usr/bin/objdump --version | /usr/bin/awk 'NR == 1 {print; exit}')" \
+        "$(/usr/bin/addr2line --version | /usr/bin/awk 'NR == 1 {print; exit}')" \
+        "$(/usr/bin/gzip --version | /usr/bin/awk 'NR == 1 {print; exit}')" <<'PY'
+import json, os, pathlib, sys
+target_arg, rustc, cargo, readelf, objdump, addr2line, gzip = sys.argv[1:]
+target = pathlib.Path(target_arg)
+toolchain = {
+    "addr2line": addr2line,
+    "cargo": cargo,
+    "compression": "gzip -n -9",
+    "gzip": gzip,
+    "max_object_bytes": 90000000,
+    "objdump": objdump,
+    "readelf": readelf,
+    "rustc": rustc,
 }
-seal_payload = (json.dumps(seal, sort_keys=True, separators=(",", ":")) + "\n").encode()
-if hashlib.sha256(seal_payload).hexdigest() != seal_sha:
-    raise SystemExit("reviewed map admission seal hash mismatch")
-manifest_blob = (root / "map-parts-manifest.json").read_bytes()
-manifest = json.loads(manifest_blob)
-part = manifest.get("parts", [None])[0] if manifest.get("part_count") == 1 else None
-part_blob = (root / seal["part"]["path"]).read_bytes()
-summary_blob = (root / "map-summary.json.gz").read_bytes()
-summary_payload = gzip.decompress(summary_blob)
-summary = json.loads(summary_payload)
-prefix_total = [line for line in (root / "prefix-coverage-audit.tsv").read_text().splitlines()
-                if line.startswith("TOTAL\t")]
-actual_ok = (
-    hashlib.sha256(manifest_blob).hexdigest() == manifest_sha and
-    manifest.get("row_count") == instruction_count and manifest.get("part_count") == part_count and
-    manifest.get("full_uncompressed_bytes") == map_bytes and
-    manifest.get("full_uncompressed_sha256") == map_sha and
-    isinstance(part, dict) and
-    all(part.get(key) == value for key, value in seal["part"].items()
-        if key not in {"compressed_sha256"}) and
-    len(part_blob) == part_cbytes and hashlib.sha256(part_blob).hexdigest() == part_csha and
-    prefix_total == [f"TOTAL\t{resolver_rows}"] and
-    len(summary_payload) == summary_bytes and hashlib.sha256(summary_payload).hexdigest() == summary_sha and
-    len(summary_blob) == summary_cbytes and hashlib.sha256(summary_blob).hexdigest() == summary_csha and
-    summary.get("schema") == "cubr-new24-g5-static-map-summary-v3" and
-    summary.get("mapping_schema_sha256") == schema_sha and
-    summary.get("instruction_count") == instruction_count and
-    summary.get("manifest_sha256") == manifest_sha and
-    len(summary.get("family_reverse_index", {}).get("source", {})) == source_count and
-    len(summary.get("family_reverse_index", {}).get("emitted", {})) == emitted_count)
-if not actual_ok:
-    raise SystemExit("fresh full map differs from reviewed attempt9 admission seal")
-path = root / "map-admission-seal.json"
-fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o444)
+payload = (json.dumps(toolchain, sort_keys=True, separators=(",", ":")) + "\n").encode()
+fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o444)
 try:
-    os.write(fd, seal_payload)
+    view = memoryview(payload)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise SystemExit("map toolchain identity short write")
+        view = view[written:]
     os.fsync(fd)
 finally:
     os.close(fd)
 PY
+    /usr/bin/python3 "$MAPPER" seal-admission \
+        --input-root "$PARTIAL" --output-root "$PARTIAL/map" \
+        --binary-build-id "$BINARY_BUILD_ID" --binary-sha256 "$EXPECTED_BINARY_SHA" \
+        --instrument-resulting-main "$INSTRUMENT_COMMIT" \
+        --mapper-sha256 "$EXPECTED_MAPPER_SHA" --mapper-test-sha256 "$EXPECTED_MAPPER_TEST_SHA" \
+        --mapping-schema-sha256 "$MAPPING_SCHEMA_SHA256" \
+        --reuse-decision REJECTED_IDENTITY_MISMATCH \
+        --source-tree "$(/usr/bin/git -C "$CODE_DIR" rev-parse 'HEAD^{tree}')" \
+        --toolchain-json preflight/map-toolchain.json \
+        --map-manifest map/map-parts-manifest.json \
+        --map-summary map/map-summary.json.gz \
+        --raw-stream-evidence map/raw-stream-evidence.tsv \
+        --seal-out map-admission-seal.json
+    test -f "$PARTIAL/map/map-admission-seal.json"
+    test ! -e "$PARTIAL/map/map/map-admission-seal.json"
+    test "$(json_value "$PARTIAL/map/map-admission-seal.json" schema)" = \
+        cubr-new24-g5-map-admission-seal-v1
+    test "$(json_value "$PARTIAL/map/map-admission-seal.json" reuse_decision)" = \
+        REJECTED_IDENTITY_MISMATCH
+    MAP_SEAL_SHA256=$(sha "$PARTIAL/map/map-admission-seal.json")
     freeze_admitted_binary_identity
 }
 
@@ -1260,7 +1234,7 @@ publish_campaign() {
         "$CAMPAIGN_STATUS" "$CODE_COMMIT" "$INSTRUMENT_COMMIT" "$completed" \
         "$hard_deadline_ns" "$commit_margin_seconds" "$crash_at" \
         "$delay_before_final" "$CGROUP_PROCS" "$CGROUP_BASELINE_PIDS" \
-        "$EXPECTED_MAP_SEAL_SHA" <<'PY'
+        "${MAP_SEAL_SHA256:-NO-MAP-SEAL}" <<'PY'
 import ctypes, hashlib, os, pathlib, stat, sys, time
 source_path, publishing_path, destination_path, late_path = map(pathlib.Path, sys.argv[1:5])
 status, source_commit, instrument_commit, completed = sys.argv[5:9]
@@ -1584,7 +1558,7 @@ PY
 reject_and_freeze_tree() {
     local source=$1 target=$2 expected_final=$3 reason=$4
     /usr/bin/python3 - "$source" "$target" "$expected_final" "$CAMPAIGN_STATUS" \
-        "$CODE_COMMIT" "$INSTRUMENT_COMMIT" "$EXPECTED_MAP_SEAL_SHA" "$(now)" \
+        "$CODE_COMMIT" "$INSTRUMENT_COMMIT" "${MAP_SEAL_SHA256:-NO-MAP-SEAL}" "$(now)" \
         "${CURRENT_CELL:-none}" "$reason" "${FAILURE_COMMAND:-none}" <<'PY'
 import ctypes, os, pathlib, stat, sys
 source, target, expected_final = map(pathlib.Path, sys.argv[1:4])

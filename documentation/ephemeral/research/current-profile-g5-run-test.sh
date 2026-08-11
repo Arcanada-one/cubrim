@@ -205,21 +205,6 @@ runner_literals=(
     'readonly EXPECTED_INSTRUCTION_COUNT=739548'
     'readonly EXPECTED_PAGE_SIZE=4096'
     'readonly EXPECTED_RUSTC_COMMIT=31fca3adb283cc9dfd56b49cdee9a96eb9c96ffd'
-    'readonly EXPECTED_MAPPING_SCHEMA_SHA=1c8f5be539eaaa94f3a64d071e859ee5eccf8f4314908e143246f47bd8760e12'
-    'readonly EXPECTED_MAP_SEAL_SHA=565cce3c44c9fb8a228184e0af37270e0caeb2160f15c36b4690bc81aa139a6f'
-    'readonly EXPECTED_MAP_PART_COUNT=1'
-    'readonly EXPECTED_PREFIX_LOCATION_ROWS=2815329'
-    'readonly EXPECTED_MAP_BYTES=1111781924'
-    'readonly EXPECTED_MAP_SHA=8bd7b254793cb5a3bf84b7e7c995f8f65d55e04e2e69d86340b876cb2a9d03b7'
-    'readonly EXPECTED_MAP_MANIFEST_SHA=db0bb37f8b96e73c6e39288e5224fd476cbf3abe4241d7e634b6e54de36859c4'
-    'readonly EXPECTED_MAP_PART_COMPRESSED_BYTES=40287882'
-    'readonly EXPECTED_MAP_PART_COMPRESSED_SHA=cb8674ded7be56a114873ad86ea75771955107a8013adcf9ead48c9a136dc668'
-    'readonly EXPECTED_SUMMARY_BYTES=121941235'
-    'readonly EXPECTED_SUMMARY_SHA=bfcd4c3d3dc3fcb652c5e49cdb8fb60b4bb082cb4de0264456ccfb303948c961'
-    'readonly EXPECTED_SUMMARY_COMPRESSED_BYTES=27591662'
-    'readonly EXPECTED_SUMMARY_COMPRESSED_SHA=5811308b6c98bbd730c61aa98a08619a1ab99346cf5aa9f32d79eeb88ac495fe'
-    'readonly EXPECTED_SOURCE_REVERSE_COUNT=188054'
-    'readonly EXPECTED_EMITTED_REVERSE_COUNT=5047'
     'readonly CYCLE_DISAGREEMENT_MAX=0.10'
     'readonly RECORD_RATIO_MAX=1.10'
     'readonly SHARE_DELTA_MAX=1.00'
@@ -296,6 +281,7 @@ runner_literals=(
     '352840f3350619078b42ff316ade28a2b4a9e2ce5dd9385c439ed2a27bb0cae3'
     'normalize-elf'
     'build-map'
+    'seal-admission'
     'reduce-record'
     'summarize-file'
     '--buildid-all --buildid-mmap'
@@ -312,14 +298,20 @@ runner_literals=(
     'binary-snapshot-before'
     'binary-snapshot-after'
     'map-parts-manifest.json'
+    '--map-part-prefix g5-full-instruction-map'
     'map full reconstruction mismatch'
     'map-summary.json.gz'
     'compress_map_artifact "$map_dir/map-summary.json" "$map_dir/raw-stream-evidence.tsv"'
     'map summary deterministic gzip readback mismatch'
     'exact frozen instruction count mismatch'
-    'fresh full map differs from reviewed attempt9 admission seal'
-    'reviewed map admission seal hash mismatch'
     'map-admission-seal.json'
+    '--toolchain-json preflight/map-toolchain.json'
+    '--map-manifest map/map-parts-manifest.json'
+    '--map-summary map/map-summary.json.gz'
+    '--raw-stream-evidence map/raw-stream-evidence.tsv'
+    '--seal-out map-admission-seal.json'
+    '--reuse-decision REJECTED_IDENTITY_MISMATCH'
+    'cubr-new24-g5-map-admission-seal-v1'
     'map manifest has extra or missing parts'
     'map evidence part exceeds 90000000 bytes'
     'full_map_elapsed_seconds'
@@ -388,6 +380,23 @@ reject_runner_fixed '--foreground'
 reject_runner_fixed '/usr/bin/mv -- "$OUT" "$LATE"'
 reject_runner_fixed 'ps --sid'
 reject_runner_fixed 'pgrep'
+reject_runner_fixed 'EXPECTED_MAPPING_SCHEMA_SHA'
+reject_runner_fixed 'EXPECTED_MAP_SEAL_SHA'
+reject_runner_fixed 'EXPECTED_MAP_'
+reject_runner_fixed 'EXPECTED_SUMMARY_'
+reject_runner_fixed 'EXPECTED_PREFIX_LOCATION_ROWS'
+reject_runner_fixed 'attempt": 9'
+reject_runner_fixed '--seal-out map/map-admission-seal.json'
+reject_runner_fixed '36226ff6caf35983a97fa472b1433e37f18a6ac4b565d1ae016e27cd957ae5e1'
+reject_runner_fixed '97af2daacca00b20d9eb56dee34d56f9a3a9c22ffcdba820bfce171e7a371314'
+reject_runner_fixed '1c8f5be539eaaa94f3a64d071e859ee5eccf8f4314908e143246f47bd8760e12'
+reject_runner_fixed '565cce3c44c9fb8a228184e0af37270e0caeb2160f15c36b4690bc81aa139a6f'
+seal_out_count=$(/usr/bin/grep -Fc -- '--seal-out map-admission-seal.json' "$RUNNER")
+[[ $seal_out_count == 1 ]] || fail 'runner seal output must be exactly one relative basename'
+map_build_line=$(/usr/bin/grep -nF '/usr/bin/python3 "$MAPPER" build-map' "$RUNNER" | /usr/bin/cut -d: -f1)
+map_seal_line=$(/usr/bin/grep -nF '/usr/bin/python3 "$MAPPER" seal-admission' "$RUNNER" | /usr/bin/cut -d: -f1)
+[[ -n $map_build_line && -n $map_seal_line && $map_build_line -lt $map_seal_line ]] ||
+    fail 'fresh map construction must precede G5 admission sealing'
 
 require_runner_fixed '/root/cubr-new24-full-binary-g5-src'
 require_runner_fixed '/root/cubr-new24-full-binary-g5-target'
@@ -413,7 +422,7 @@ record_call_count=$({ /usr/bin/grep -F '/usr/bin/perf record -q --buildid-all --
     /usr/bin/wc -l)
 [[ $record_call_count == 2 ]] || fail 'each cell must define exactly two build-ID MMAP record decodes'
 
-mapper_commands=(normalize-elf build-map reduce-record summarize-file)
+mapper_commands=(normalize-elf build-map seal-admission reduce-record summarize-file)
 for command in "${mapper_commands[@]}"; do
     /usr/bin/python3 "$MAPPER" "$command" --help >/dev/null 2>&1 ||
         invalid "mapper CLI missing command: $command"
@@ -816,15 +825,6 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
         'runner missing literal: readonly EVIDENCE_PART_MAX_BYTES=90000000'
     expect_runner_mutant_red instruction_count 's/EXPECTED_INSTRUCTION_COUNT=739548/EXPECTED_INSTRUCTION_COUNT=739549/' \
         'runner missing literal: readonly EXPECTED_INSTRUCTION_COUNT=739548'
-    expect_runner_mutant_red same_count_map_byte_drift \
-        's/8bd7b254793cb5a3bf84b7e7c995f8f65d55e04e2e69d86340b876cb2a9d03b7/8bd7b254793cb5a3bf84b7e7c995f8f65d55e04e2e69d86340b876cb2a9d03b8/g' \
-        'runner missing literal: readonly EXPECTED_MAP_SHA=8bd7b254793cb5a3bf84b7e7c995f8f65d55e04e2e69d86340b876cb2a9d03b7'
-    expect_runner_mutant_red summary_byte_drift \
-        's/EXPECTED_SUMMARY_BYTES=121941235/EXPECTED_SUMMARY_BYTES=121941236/' \
-        'runner missing literal: readonly EXPECTED_SUMMARY_BYTES=121941235'
-    expect_runner_mutant_red resolver_count_drift \
-        's/EXPECTED_PREFIX_LOCATION_ROWS=2815329/EXPECTED_PREFIX_LOCATION_ROWS=2815330/' \
-        'runner missing literal: readonly EXPECTED_PREFIX_LOCATION_ROWS=2815329'
     expect_runner_mutant_red page_size 's/EXPECTED_PAGE_SIZE=4096/EXPECTED_PAGE_SIZE=8192/' \
         'runner missing literal: readonly EXPECTED_PAGE_SIZE=4096'
     expect_runner_mutant_red rustc_full_commit \
@@ -833,6 +833,15 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     expect_runner_mutant_red summary_compression \
         's/compress_map_artifact "\$map_dir\/map-summary.json" "\$map_dir\/raw-stream-evidence.tsv"/\/usr\/bin\/true/' \
         'runner missing literal: compress_map_artifact "$map_dir/map-summary.json" "$map_dir/raw-stream-evidence.tsv"'
+    expect_runner_mutant_red g5_map_part_namespace \
+        's/g5-full-instruction-map/g4-full-instruction-map/g' \
+        'runner missing literal: --map-part-prefix g5-full-instruction-map'
+    expect_runner_mutant_red seal_output_nested \
+        's/--seal-out map-admission-seal.json/--seal-out map\/map-admission-seal.json/' \
+        'runner missing literal: --seal-out map-admission-seal.json'
+    expect_runner_mutant_red reuse_silently_accepted \
+        's/--reuse-decision REJECTED_IDENTITY_MISMATCH/--reuse-decision REUSED_IDENTITY_MATCH/' \
+        'runner missing literal: --reuse-decision REJECTED_IDENTITY_MISMATCH'
     expect_runner_mutant_red record_mode 's/--buildid-all --buildid-mmap/--buildid-all/' \
         'runner missing literal: --buildid-all --buildid-mmap'
     expect_runner_mutant_red source_sha \

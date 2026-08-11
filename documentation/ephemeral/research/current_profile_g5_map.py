@@ -23,7 +23,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 
 class MappingError(ValueError):
-    """A frozen input cannot satisfy the G4 contract."""
+    """A frozen input cannot satisfy the G5 contract."""
 
 
 def require(condition: bool, message: str) -> None:
@@ -1172,8 +1172,50 @@ def decode_map_gzip(path: Path) -> str:
         raise MappingError("instruction map is not UTF-8") from error
 
 
+def build_g5_admission_seal(*, binary_build_id: str, binary_sha256: str,
+                            instrument_resulting_main: str,
+                            map_artifacts: Sequence[Mapping[str, Any]],
+                            mapper_sha256: str, mapper_test_sha256: str,
+                            mapping_schema_sha256: str, reuse_decision: str,
+                            source_tree: str,
+                            toolchain: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "binary_build_id": binary_build_id,
+        "binary_sha256": binary_sha256,
+        "instrument_resulting_main": instrument_resulting_main,
+        "map_artifacts": sorted(map_artifacts, key=lambda row: row["path"]),
+        "mapper_sha256": mapper_sha256,
+        "mapper_test_sha256": mapper_test_sha256,
+        "mapping_schema_sha256": mapping_schema_sha256,
+        "page_size": 4096,
+        "performance_sample": "NO",
+        "reuse_decision": reuse_decision,
+        "schema": "cubr-new24-g5-map-admission-seal-v1",
+        "source_tree": source_tree,
+        "toolchain": dict(sorted(toolchain.items())),
+    }
+
+
+def g5_reuse_decision(existing: Mapping[str, Any], candidate: Mapping[str, Any]) -> str:
+    identity_matches = (
+        existing.get("mapper_sha256") == candidate.get("mapper_sha256")
+        and existing.get("mapper_test_sha256") == candidate.get("mapper_test_sha256")
+        and existing.get("mapping_schema_sha256") == candidate.get("mapping_schema_sha256")
+        and existing.get("source_tree") == candidate.get("source_tree")
+        and (
+            existing.get("binary_sha256"), existing.get("binary_build_id")
+        ) == (
+            candidate.get("binary_sha256"), candidate.get("binary_build_id")
+        )
+        and existing.get("toolchain") == candidate.get("toolchain")
+        and existing.get("page_size") == candidate.get("page_size")
+        and existing.get("map_artifacts") == candidate.get("map_artifacts")
+    )
+    return "REUSED_IDENTITY_MATCH" if identity_matches else "REJECTED_IDENTITY_MISMATCH"
+
+
 def json_bytes(value: Mapping[str, Any]) -> bytes:
-    return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
 def _declared_root(path: Path, label: str) -> Path:
@@ -1239,6 +1281,21 @@ def make_parser() -> argparse.ArgumentParser:
     build.add_argument("--map-manifest-out", type=Path, required=True)
     build.add_argument("--max-part-bytes", type=int, default=90_000_000)
     build.add_argument("--summary-out", type=Path, required=True)
+    seal = commands.add_parser("seal-admission")
+    _roots(seal)
+    seal.add_argument("--binary-build-id", required=True)
+    seal.add_argument("--binary-sha256", required=True)
+    seal.add_argument("--instrument-resulting-main", required=True)
+    seal.add_argument("--mapper-sha256", required=True)
+    seal.add_argument("--mapper-test-sha256", required=True)
+    seal.add_argument("--mapping-schema-sha256", required=True)
+    seal.add_argument("--reuse-decision", required=True)
+    seal.add_argument("--source-tree", required=True)
+    seal.add_argument("--toolchain-json", type=Path, required=True)
+    seal.add_argument("--map-manifest", type=Path, required=True)
+    seal.add_argument("--map-summary", type=Path, required=True)
+    seal.add_argument("--raw-stream-evidence", type=Path, required=True)
+    seal.add_argument("--seal-out", type=Path, required=True)
     reduce = commands.add_parser("reduce-record")
     _roots(reduce)
     for name in ("map-manifest", "segments", "perf-script", "build-id-list"):
@@ -1270,6 +1327,104 @@ def _json_input(path: Path) -> dict[str, Any]:
         raise MappingError(f"invalid JSON artifact: {path}") from error
     require(isinstance(value, dict), f"JSON artifact is not an object: {path}")
     return value
+
+
+def _artifact_identity(path: Path, relative: PurePosixPath) -> dict[str, Any]:
+    payload = read_regular_bytes(path)
+    require(len(payload) <= 90_000_000, f"map artifact exceeds 90000000 bytes: {relative}")
+    return {
+        "bytes": len(payload),
+        "path": str(relative),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _g5_map_artifacts(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    manifest_path = _input(args.input_root, args.map_manifest)
+    manifest = _json_input(manifest_path)
+    require(manifest.get("schema") == "cubr-new24-g5-map-parts-v1",
+            "map manifest schema mismatch")
+    manifest_parent = PurePosixPath(str(args.map_manifest)).parent
+    declared_parts = manifest.get("parts")
+    require(isinstance(declared_parts, list) and declared_parts,
+            "map manifest parts are not a nonempty list")
+    artifacts: dict[str, dict[str, Any]] = {}
+
+    def add_artifact(relative: PurePosixPath) -> dict[str, Any]:
+        row = _artifact_identity(_input(args.input_root, Path(str(relative))), relative)
+        previous = artifacts.setdefault(row["path"], row)
+        require(previous == row, f"conflicting map artifact identity: {relative}")
+        return row
+
+    add_artifact(PurePosixPath(str(args.map_manifest)))
+    for item in declared_parts:
+        require(isinstance(item, dict) and isinstance(item.get("path"), str),
+                "map manifest part path is invalid")
+        relative = manifest_parent / validate_relative_artifact_name(item["path"])
+        row = add_artifact(relative)
+        require(row["bytes"] == item.get("compressed_bytes") and
+                row["sha256"] == item.get("compressed_sha256"),
+                "map part compressed identity mismatch")
+
+    summary_relative = PurePosixPath(str(args.map_summary))
+    summary_row = add_artifact(summary_relative)
+    summary_blob = read_regular_bytes(_input(args.input_root, args.map_summary))
+    require(summary_blob[4:8] == b"\0\0\0\0", "map summary gzip mtime mismatch")
+    summary_payload = decompress_single_gzip(summary_blob)
+    try:
+        summary = json.loads(summary_payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise MappingError("invalid compressed map summary") from error
+    require(isinstance(summary, dict) and
+            summary.get("schema") == "cubr-new24-g5-static-map-summary-v3",
+            "map summary schema mismatch")
+    require(summary.get("mapping_schema_sha256") == args.mapping_schema_sha256,
+            "map summary mapping schema mismatch")
+
+    evidence_relative = PurePosixPath(str(args.raw_stream_evidence))
+    evidence_path = _input(args.input_root, args.raw_stream_evidence)
+    add_artifact(evidence_relative)
+    try:
+        evidence_reader = csv.DictReader(io.StringIO(read_text(evidence_path)), delimiter="\t")
+        evidence_rows = list(evidence_reader)
+    except csv.Error as error:
+        raise MappingError("invalid raw-stream evidence") from error
+    expected_fields = [
+        "source", "uncompressed_bytes", "uncompressed_sha256", "compressed",
+        "compressed_bytes", "compressed_sha256",
+    ]
+    require(bool(evidence_rows) and evidence_reader.fieldnames == expected_fields,
+            "raw-stream evidence schema mismatch")
+    summary_evidence_count = 0
+    for evidence in evidence_rows:
+        compressed_name = validate_relative_artifact_name(evidence["compressed"])
+        compressed_relative = evidence_relative.parent / compressed_name
+        row = add_artifact(compressed_relative)
+        try:
+            compressed_bytes = int(evidence["compressed_bytes"])
+            uncompressed_bytes = int(evidence["uncompressed_bytes"])
+        except ValueError as error:
+            raise MappingError("raw-stream evidence byte count is invalid") from error
+        require(row["bytes"] == compressed_bytes and
+                row["sha256"] == evidence["compressed_sha256"],
+                "raw-stream compressed identity mismatch")
+        require(re.fullmatch(r"[0-9a-f]{64}", evidence["uncompressed_sha256"]) is not None and
+                uncompressed_bytes >= 0,
+                "raw-stream uncompressed identity mismatch")
+        if compressed_relative == summary_relative:
+            summary_evidence_count += 1
+            require(summary_row == row and len(summary_payload) == uncompressed_bytes and
+                    hashlib.sha256(summary_payload).hexdigest() == evidence["uncompressed_sha256"],
+                    "map summary raw-stream identity mismatch")
+    require(summary_evidence_count == 1,
+            "map summary raw-stream evidence cardinality mismatch")
+
+    toolchain = _json_input(_input(args.input_root, args.toolchain_json))
+    require(bool(toolchain) and all(
+        isinstance(key, str) and isinstance(value, (str, int, bool))
+        for key, value in toolchain.items()
+    ), "toolchain identity must contain scalar values")
+    return list(artifacts.values()), toolchain
 
 
 def run_command(args: argparse.Namespace) -> None:
@@ -1320,6 +1475,33 @@ def run_command(args: argparse.Namespace) -> None:
             write_new_bytes(_output(args.output_root, Path(item["path"])), compressed)
         write_new_bytes(_output(args.output_root, args.map_manifest_out), manifest_payload)
         write_new_bytes(_output(args.output_root, args.summary_out), json_bytes(summary))
+    elif args.command == "seal-admission":
+        for label in ("binary_sha256", "mapper_sha256", "mapper_test_sha256"):
+            require(re.fullmatch(r"[0-9a-f]{64}", getattr(args, label)) is not None,
+                    f"invalid {label.replace('_', ' ')}")
+        require(re.fullmatch(r"[0-9a-f]+", args.binary_build_id) is not None,
+                "invalid binary build ID")
+        require(re.fullmatch(r"[0-9a-f]{40}", args.instrument_resulting_main) is not None,
+                "invalid instrument resulting-main")
+        require(re.fullmatch(r"[0-9a-f]{40}", args.source_tree) is not None,
+                "invalid source tree")
+        require(args.reuse_decision in {
+            "REJECTED_IDENTITY_MISMATCH", "REUSED_IDENTITY_MATCH"
+        }, "invalid reuse decision")
+        map_artifacts, toolchain = _g5_map_artifacts(args)
+        seal = build_g5_admission_seal(
+            binary_build_id=args.binary_build_id,
+            binary_sha256=args.binary_sha256,
+            instrument_resulting_main=args.instrument_resulting_main,
+            map_artifacts=map_artifacts,
+            mapper_sha256=args.mapper_sha256,
+            mapper_test_sha256=args.mapper_test_sha256,
+            mapping_schema_sha256=args.mapping_schema_sha256,
+            reuse_decision=args.reuse_decision,
+            source_tree=args.source_tree,
+            toolchain=toolchain,
+        )
+        write_new_bytes(_output(args.output_root, args.seal_out), json_bytes(seal))
     elif args.command == "reduce-record":
         manifest_path = _input(args.input_root, args.map_manifest)
         manifest = _json_input(manifest_path)

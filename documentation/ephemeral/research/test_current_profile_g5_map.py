@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import dataclasses
 import gzip
 import hashlib
@@ -391,6 +392,25 @@ class StaticMapTests(unittest.TestCase):
 
 
 class GzipTests(unittest.TestCase):
+    def test_required_g5_map_schemas_are_exact(self) -> None:
+        source_tree = ast.parse(Path(g4.__file__).read_text(encoding="utf-8"))
+        emitted_schemas = {
+            value.value
+            for node in ast.walk(source_tree)
+            if isinstance(node, ast.Dict)
+            for key, value in zip(node.keys, node.values)
+            if isinstance(key, ast.Constant)
+            and key.value == "schema"
+            and isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+        }
+        self.assertTrue({
+            "cubr-new24-g5-normalized-elf-v1",
+            "cubr-new24-g5-static-map-summary-v3",
+            "cubr-new24-g5-map-parts-v1",
+            "cubr-new24-g5-map-admission-seal-v1",
+        }.issubset(emitted_schemas), emitted_schemas)
+
     def test_every_emitted_schema_is_g5_namespaced_without_fresh_output_residue(self) -> None:
         source_tree = ast.parse(Path(g4.__file__).read_text(encoding="utf-8"))
         emitted_schemas = [
@@ -457,6 +477,157 @@ class GzipTests(unittest.TestCase):
             g4.verify_map_parts(parts + [parts[0]], manifest)
         with self.assertRaisesRegex(g4.MappingError, "decompression limit"):
             g4.decompress_single_gzip(parts[0], max_bytes=4)
+
+
+class AdmissionSealTests(unittest.TestCase):
+    def seal(self, **overrides: object) -> dict:
+        arguments = {
+            "binary_build_id": BUILD_ID,
+            "binary_sha256": "1" * 64,
+            "instrument_resulting_main": "2" * 40,
+            "map_artifacts": [
+                {"path": "map/z.tsv.gz", "bytes": 2, "sha256": "3" * 64},
+                {"path": "map/a.json", "bytes": 1, "sha256": "4" * 64},
+            ],
+            "mapper_sha256": "5" * 64,
+            "mapper_test_sha256": "6" * 64,
+            "mapping_schema_sha256": "7" * 64,
+            "reuse_decision": "REJECTED_IDENTITY_MISMATCH",
+            "source_tree": "8" * 40,
+            "toolchain": {"rustc": "rustc 1.96.1", "cargo": "cargo 1.96.1"},
+        }
+        arguments.update(overrides)
+        return g4.build_g5_admission_seal(**arguments)
+
+    def test_g4_identity_reuse_is_rejected(self) -> None:
+        g4_identity = self.seal(
+            mapper_sha256="36226ff6caf35983a97fa472b1433e37f18a6ac4b565d1ae016e27cd957ae5e1",
+            mapper_test_sha256="97af2daacca00b20d9eb56dee34d56f9a3a9c22ffcdba820bfce171e7a371314",
+            mapping_schema_sha256="1c8f5be539eaaa94f3a64d071e859ee5eccf8f4314908e143246f47bd8760e12",
+            reuse_decision="REUSED_IDENTITY_MATCH",
+        )
+        g4_identity["schema"] = "cubr-new24-g4-map-admission-seal-v1"
+        mutations = {
+            "mapper_sha256": [{"mapper_sha256": "5" * 64}],
+            "mapper_test_sha256": [{"mapper_test_sha256": "6" * 64}],
+            "mapping_schema_sha256": [{"mapping_schema_sha256": "7" * 64}],
+            "source_tree": [{"source_tree": "c" * 40}],
+            "binary_sha256_build_id": [
+                {"binary_sha256": "d" * 64},
+                {"binary_build_id": "e" * 40},
+            ],
+            "toolchain": [{
+                "toolchain": {"cargo": "cargo changed", "rustc": "rustc 1.96.1"}
+            }],
+            "page_size": [{"page_size": 8192}],
+            "map_artifacts": [{"map_artifacts": [
+                {"path": "map/a.json", "bytes": 1, "sha256": "f" * 64},
+                {"path": "map/z.tsv.gz", "bytes": 2, "sha256": "3" * 64},
+            ]}],
+        }
+        self.assertEqual(len(mutations), 8)
+        for axis, variants in mutations.items():
+            for changes in variants:
+                with self.subTest(identity_axis=axis, changes=changes):
+                    candidate = copy.deepcopy(g4_identity)
+                    candidate.update(changes)
+                    self.assertEqual(
+                        g4.g5_reuse_decision(g4_identity, candidate),
+                        "REJECTED_IDENTITY_MISMATCH",
+                    )
+
+        fresh = self.seal()
+        self.assertEqual(fresh["reuse_decision"], "REJECTED_IDENTITY_MISMATCH")
+        self.assertEqual(fresh["performance_sample"], "NO")
+        self.assertEqual(fresh["schema"], "cubr-new24-g5-map-admission-seal-v1")
+
+    def test_seal_is_compact_deterministic_and_sorts_identity_maps(self) -> None:
+        first = self.seal()
+        second = self.seal(
+            map_artifacts=list(reversed(first["map_artifacts"])),
+            toolchain={"cargo": "cargo 1.96.1", "rustc": "rustc 1.96.1"},
+        )
+        self.assertEqual(first, second)
+        self.assertEqual(first["page_size"], 4096)
+        self.assertEqual(
+            g4.json_bytes(first),
+            (json.dumps(first, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+        )
+
+    def test_seal_admission_uses_single_output_join(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            output_root = Path(td) / "partial"
+            map_root = output_root / "map"
+            preflight_root = output_root / "preflight"
+            map_root.mkdir(parents=True)
+            preflight_root.mkdir()
+
+            part_blobs, manifest = g4.split_instruction_map(
+                build_rows(), max_rows=10, part_prefix="g5-map"
+            )
+            part_name = manifest["parts"][0]["path"]
+            (map_root / part_name).write_bytes(part_blobs[0])
+            (map_root / "map-parts-manifest.json").write_bytes(g4.json_bytes(manifest))
+            summary_payload = g4.json_bytes({
+                "schema": "cubr-new24-g5-static-map-summary-v3",
+                "mapping_schema_sha256": "7" * 64,
+            })
+            summary_blob = g4.deterministic_gzip(summary_payload)
+            (map_root / "map-summary.json.gz").write_bytes(summary_blob)
+            (map_root / "raw-stream-evidence.tsv").write_text(
+                "source\tuncompressed_bytes\tuncompressed_sha256\tcompressed\tcompressed_bytes\tcompressed_sha256\n"
+                f"map-summary.json\t{len(summary_payload)}\t{hashlib.sha256(summary_payload).hexdigest()}\t"
+                f"map-summary.json.gz\t{len(summary_blob)}\t{hashlib.sha256(summary_blob).hexdigest()}\n",
+                encoding="utf-8",
+            )
+            (preflight_root / "map-toolchain.json").write_bytes(g4.json_bytes({
+                "cargo": "cargo 1.96.1",
+                "rustc": "rustc 1.96.1",
+            }))
+
+            parser = g4.make_parser()
+            with mock.patch.object(
+                g4, "build_g5_admission_seal", wraps=g4.build_g5_admission_seal
+            ) as constructor:
+                g4.run_command(parser.parse_args([
+                    "seal-admission", "--input-root", str(output_root),
+                    "--output-root", str(map_root), "--binary-build-id", BUILD_ID,
+                    "--binary-sha256", "1" * 64, "--instrument-resulting-main", "2" * 40,
+                    "--mapper-sha256", "5" * 64, "--mapper-test-sha256", "6" * 64,
+                    "--mapping-schema-sha256", "7" * 64,
+                    "--reuse-decision", "REJECTED_IDENTITY_MISMATCH",
+                    "--source-tree", "8" * 40,
+                    "--toolchain-json", "preflight/map-toolchain.json",
+                    "--map-manifest", "map/map-parts-manifest.json",
+                    "--map-summary", "map/map-summary.json.gz",
+                    "--raw-stream-evidence", "map/raw-stream-evidence.tsv",
+                    "--seal-out", "map-admission-seal.json",
+                ]))
+            self.assertEqual(constructor.call_count, 1)
+            seal_path = output_root / "map" / "map-admission-seal.json"
+            nested_path = output_root / "map" / "map" / "map-admission-seal.json"
+            self.assertTrue(seal_path.is_file())
+            self.assertFalse(nested_path.exists())
+            seal = json.loads(seal_path.read_text(encoding="utf-8"))
+            self.assertEqual(seal["reuse_decision"], "REJECTED_IDENTITY_MISMATCH")
+            self.assertEqual(seal["performance_sample"], "NO")
+            self.assertEqual(seal["schema"], "cubr-new24-g5-map-admission-seal-v1")
+            self.assertEqual(seal["toolchain"], {
+                "cargo": "cargo 1.96.1", "rustc": "rustc 1.96.1"
+            })
+            self.assertEqual(
+                {row["path"] for row in seal["map_artifacts"]},
+                {
+                    "map/g5-map.part-00000.tsv.gz",
+                    "map/map-parts-manifest.json",
+                    "map/map-summary.json.gz",
+                    "map/raw-stream-evidence.tsv",
+                },
+            )
+            self.assertEqual(
+                seal_path.read_bytes(),
+                (json.dumps(seal, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+            )
 
 
 class RuntimeJoinTests(unittest.TestCase):
