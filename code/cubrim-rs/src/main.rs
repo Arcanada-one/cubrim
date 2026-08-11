@@ -10,7 +10,7 @@ use std::fs;
 use std::process;
 use std::time::Instant;
 
-use cubrim::{decode, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
+use cubrim::{decode, encode_forced_cm, encode_with_config, EncodeConfig, GapScheme, ValueScheme};
 
 const VERSION_TEXT: &str = concat!(env!("CARGO_PKG_VERSION"), " (CUBR-0043)");
 
@@ -18,7 +18,7 @@ fn print_usage() {
     println!("Cubrim {VERSION_TEXT}");
     println!();
     println!("Usage:");
-    println!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2|bwt-entropy|bwt-rans|order2-rans|bwt-adaptive|bwt-ctxmix|bwt-geomix|lz-rans] [--min-ctx-count N]");
+    println!("  cubrim compress   <input> <output> [--raw-store-bound N] [--b N] [--n N] [--gap-scheme rle|packed_nibble] [--value-scheme bitpack-fixed|rle-codes|entropy|entropy-context|entropy-context-2|bwt-entropy|bwt-rans|order2-rans|bwt-adaptive|bwt-ctxmix|bwt-geomix|lz-rans] [--min-ctx-count N] [--force-mode cm]");
     println!("  cubrim decompress <input> <output>");
     println!();
     println!("Options:");
@@ -66,10 +66,17 @@ fn cmd_compress(
     input: &str,
     output: &str,
     config: &EncodeConfig,
+    force_mode: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let data = fs::read(input)?;
-    let blob = encode_with_config(&data, config);
+    let blob = match force_mode {
+        Some("cm") => encode_forced_cm(&data),
+        Some(other) => {
+            return Err(format!("unsupported --force-mode value: {other}").into());
+        }
+        None => encode_with_config(&data, config),
+    };
     fs::write(output, &blob)?;
     let elapsed = started.elapsed();
     let ratio = if data.is_empty() {
@@ -181,7 +188,8 @@ fn main() {
             if let Some(mcc) = parse_flag_u16(extra_args, "--min-ctx-count") {
                 config.min_ctx_count = Some(mcc);
             }
-            cmd_compress(input, output, &config)
+            let force_mode = parse_flag_str(extra_args, "--force-mode");
+            cmd_compress(input, output, &config, force_mode)
         }
         "decompress" => cmd_decompress(input, output),
         _ => {

@@ -17,7 +17,7 @@ pub(crate) mod huffman;
 pub mod phi;
 pub mod rle;
 
-pub use codec::{decode, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
+pub use codec::{decode, encode, encode_forced_cm, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
 pub use config::{EncodeConfig, GapScheme, ValueScheme};
 pub use error::CubrimError;
 

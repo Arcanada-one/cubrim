@@ -229,6 +229,12 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     encode_with_config_inner(data, config, true, true)
 }
 
+/// Probe-only direct MODE_CM encoder. This intentionally bypasses the dispatcher
+/// gate so research runs can measure CM on filtered non-text bytes.
+pub fn encode_forced_cm(data: &[u8]) -> Vec<u8> {
+    build_cm_blob(data)
+}
+
 /// Inner encoder. `try_binfloat` is false when called recursively to encode one column of a
 /// MODE_BINFLOAT container, which prevents binfloat→binfloat recursion while still giving each
 /// column the full LZ / columnar / base competition (that competition — chiefly the LZ
