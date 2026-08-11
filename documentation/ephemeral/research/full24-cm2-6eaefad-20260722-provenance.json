@@ -1,0 +1,9 @@
+{
+  "binary": "/root/cubr-verify-integration/bin/cubrim-6eaefad",
+  "binary_commit": "6eaefad7e165cd74f7d660aeb6d0828bfbe12c41",
+  "binary_sha256": "e3da2f33ef7e9f0cfb4e07c4dbe4b406ba00ab17d8b9c40bf3aeb21abd1a546a",
+  "binary_version": "cubrim 0.1.0-cubr0043",
+  "binary_version_rc": 0,
+  "manifest": "/root/cubr-verify-baseline/full24-20260722T100143Z/manifest.tsv",
+  "manifest_sha256": "fa88c6c12249c1261068112eb56c24d4ef3b60d1d89711aa97770f07f3c007e6"
+}
