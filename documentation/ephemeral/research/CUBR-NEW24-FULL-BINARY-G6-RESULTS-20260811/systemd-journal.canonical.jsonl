@@ -1,0 +1,1 @@
+{"record":"[NOT REACHED: no systemd unit was submitted under G6; the exact-once prebuild terminated NO-ATTEMPT before Task 6, so no unit journal exists]","admission_unit":"cubr-new24-full-binary-g6-admission-20260811.service","admission_unit_load_state":"not-found","campaign_unit":"cubr-new24-full-binary-g6-20260811.service","campaign_unit_load_state":"not-found"}

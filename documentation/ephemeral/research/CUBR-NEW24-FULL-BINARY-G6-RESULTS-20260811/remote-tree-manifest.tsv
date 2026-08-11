@@ -1,0 +1,11 @@
+path	type	mode	owner	bytes
+cubr-new24-full-binary-g6-instrument	d	755	root	4096
+cubr-new24-full-binary-g6-src-a	d	500	root	4096
+cubr-new24-full-binary-g6-src-b	d	500	root	4096
+cubr-new24-full-binary-g6-target-a	absent	-	-	-
+cubr-new24-full-binary-g6-target-b	absent	-	-	-
+cubr-new24-full-binary-g6-prebuild-receipt-20260811	absent	-	-	-
+cubr-new24-full-binary-g6-prebuild-receipt-20260811.partial	absent	-	-	-
+cubr-new24-full-binary-g6-map-dryrun-20260811	absent	-	-	-
+cubr-new24-full-binary-g6-20260811	absent	-	-	-
+cubr-new24-full-binary-g6-admission-inputs-20260811.env	absent	-	-	-

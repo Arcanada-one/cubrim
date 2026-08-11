@@ -1,0 +1,94 @@
+{
+  "date": "2026-08-11",
+  "evidence_sha256": {
+    "identities.tsv": "76c5d2fc62cffb72d1608e2990e8530ba192d774de6a23e141c13c4cb4966013",
+    "remote-evidence/Cargo.lock.src-a": "0d17c1fc2ac4e17ef3c9a0ca0c21468950c820607ea0ce11875f9698d688d924",
+    "remote-evidence/Cargo.lock.src-b": "0d17c1fc2ac4e17ef3c9a0ca0c21468950c820607ea0ce11875f9698d688d924",
+    "remote-evidence/prebuild-console.log": "801af2aa67871a32c9a31793119b1bbc79af48b0cfc70f46474f166d47994134",
+    "remote-tree-manifest.tsv": "5deeeb230b0ec3485e65429b9ebc4e47283ed7cf12c417c499290ddc10a8a475",
+    "systemd-journal.canonical.jsonl": "e54a8e5b3111b6b96f492f776e179b36675cc0c4b13f8ec2b448e28d1ee6e6ce",
+    "unit-properties.txt": "464b67c193dd859161bc7d67d7f5e5def0307e1f8050d69ecd85b58169dd745e"
+  },
+  "experiment": "NEW-24 FULL-BINARY G6",
+  "external_effects": {
+    "api": 0,
+    "credential": 0,
+    "database": 0,
+    "site": 0,
+    "social": 0,
+    "source_selection": 0
+  },
+  "failure": {
+    "drifted_crates": [
+      {
+        "crate": "futures-core",
+        "published_utc": "2026-08-11T12:13:01.547638Z",
+        "version": "0.3.34"
+      },
+      {
+        "crate": "futures-task",
+        "published_utc": "2026-08-11T12:13:07.886026Z",
+        "version": "0.3.34"
+      },
+      {
+        "crate": "futures-util",
+        "published_utc": "2026-08-11T12:13:19.272525Z",
+        "version": "0.3.34"
+      }
+    ],
+    "expected_lock_sha256": "0080335ef71fa475f167338b96f1c6dfb5cd6bf3e188dfa0a86aeed68caa35b9",
+    "independent_clones_agree": true,
+    "mechanism": "Cargo.lock is gitignored and every dependency in code/cubrim-rs/Cargo.toml is a semver-compatible range, so cargo generate-lockfile resolves against the live crates.io index at run time; the frozen LOCK_SHA was captured 2026-08-09T16:57:54Z and three semver-compatible crates were published 2026-08-11T12:13Z, before the G6 prebuild ran",
+    "observed_lock_bytes": 41115,
+    "observed_lock_sha256": "0d17c1fc2ac4e17ef3c9a0ca0c21468950c820607ea0ce11875f9698d688d924",
+    "stage": "assert_lock_identity"
+  },
+  "instrument": {
+    "ci_conclusion": "success",
+    "ci_run": "31495032444",
+    "pull_request": 86,
+    "resulting_main": "756ff160814cb1a8b452df68ad844514e8cf54a6"
+  },
+  "one_shot_allowances": {
+    "admission": {
+      "consumed": false,
+      "outcome": "NOT REACHED"
+    },
+    "campaign": {
+      "consumed": false,
+      "outcome": "NOT REACHED"
+    },
+    "prebuild": {
+      "consumed": true,
+      "exit_status": 1,
+      "outcome": "NO-ATTEMPT"
+    },
+    "validation": {
+      "consumed": false,
+      "outcome": "NOT REACHED"
+    }
+  },
+  "per_file_evaluation": {
+    "files": {},
+    "note": "P1-P5 are not evaluable: G6 produced no sample on any file"
+  },
+  "route": "prebuild-only",
+  "selection": {
+    "reason": "no attribution was produced; G6 terminated before any measurement",
+    "source_change_selected": false
+  },
+  "verdict": "NO-ATTEMPT / NO-SELECT",
+  "zero_counts": {
+    "admission_submitted": 0,
+    "attribution_artifacts": 0,
+    "campaign_cells": 0,
+    "campaign_submitted": 0,
+    "interpreted_family_artifacts": 0,
+    "perf_data": 0,
+    "receipt_published": 0,
+    "record_artifacts": 0,
+    "stat_artifacts": 0,
+    "targets_built": 0,
+    "timing_artifacts": 0
+  }
+}
