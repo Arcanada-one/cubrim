@@ -98,6 +98,12 @@ unverified assumption, and re-probing it is what made this record possible.
 - **A gate-passing profile (≤1.05) has still never been taken on x-ray.** Reaching it would need a
   lower sampling frequency or a lighter instrument, under its own preregistration. Until then every
   x-ray share in the record — landed and this one — is perturbed.
+  **CLOSED 2026-08-11** by `CUBR-XRAY-ATTRIB-CLEAN-RESULTS-20260811.md`: perturbation **1.00533** at
+  `-F 25`, geocm 98.36%, `decode_stream_mix` 86.38%. Precision was recovered by *repetition* rather
+  than frequency (12 runs pooled -> +/-1.20 pp, better than this report's single `-F 99` run). Three
+  profiles at 1.202 / 1.087 / 1.005 agree, so the instrument caveat is retired. Note the follow-up
+  also found the ceiling **unmeasurable from above** — quote only the floor (>=28.1 MiB/s, ninth
+  place), never the point estimates in this report.
 - The 25.69 / 52.71 field markers remain cross-meta, not same-host, and the ninth-vs-eighth
   distinction sits exactly between them.
 - One file, one preset. Per-file only.

@@ -97,6 +97,11 @@ action.
 - **`dickens/web` remains unmeasured.** Its component shares sum to 99.22% with no combined row
   published; deriving a bound and using it as a decision number is the step this lane refuses. It
   stays a void rather than becoming a third data point.
+  **CLOSED 2026-08-11** by `CUBR-SPEEDFLOOR-WEB-RESULTS-20260811.md`. The refusal above was correct
+  — a naive sum of `cm2_*` buckets gives 14.948x against the published 13.986x. The cell became
+  measurable once the bound was derived from the attribution's committed raw `symbols.tsv` under a
+  rule *validated against both published bounds first* (sum `cm2_*`, exclude `cm2_decode_shell`):
+  98.56% -> 69.444x. Measured best case 3.373 MiB/s, 7.6x short of ninth place.
 - The 25.69 MiB/s ninth-place marker is cross-meta, not same-host. The conclusion survives a wide
   margin of error in it — 79.6× is not a rounding question.
 
