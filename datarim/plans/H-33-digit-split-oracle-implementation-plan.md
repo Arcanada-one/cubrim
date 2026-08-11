@@ -396,6 +396,36 @@ or candidate implementation.
 
 ## Task 9: Perform admission without H-33 outcome access
 
+0. **Build-readiness precondition — run before anything in this task, and treat
+   a NO-GO as terminal for the attempt rather than for the allowance.** On
+   `arcana-devs`, in a scratch detached worktree at the intended resulting main
+   and with a scratch target directory, run
+
+   ```bash
+   documentation/ephemeral/research/preflight-build-readiness.sh --repo <scratch>
+   ```
+
+   and require `BUILD_READINESS=GO`. It asserts `Cargo.lock` is *tracked* (not
+   merely present in a working tree), that the toolchain resolves, that the lock
+   and manifest agree, and that the frozen `--offline --locked` build actually
+   succeeds against this host's cargo cache.
+
+   This carries no scientific allowance and may be rerun without limit. It
+   exists because the one-shot property belongs to the measurement, never to the
+   environment check: an earlier revision of this plan would have reached step 1
+   and failed the frozen build with `exit 101`, because `Cargo.lock` was
+   gitignored and `--locked` refuses to create one, consuming the admission on a
+   defect unrelated to H-33. Measured both sides in
+   `documentation/ephemeral/research/CUBR-H33-BUILD-FEASIBILITY-20260811.md`.
+
+   If the probe reports a download in offline mode, run `cargo fetch --locked`
+   out of band, online, and re-run the probe. Crate availability is a property
+   of this host's cargo home, not of the commit, so no merge can carry it.
+
+   The probe changes no frozen scientific variable and does not alter the
+   permitted build below; it runs the same array in a scratch location to prove
+   it can pass.
+
 1. On `arcana-devs`, create the exact detached execution worktree
    `/home/dev/.worktrees/cubrim/CUBR-H33-EXEC` at freshly authenticated
    resulting main. Refuse an existing nonmatching path. The exact build array is
