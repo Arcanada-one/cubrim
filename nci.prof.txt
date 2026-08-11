@@ -1,0 +1,32 @@
+
+=== CUBRIM ENCODER CANDIDATE ATTRIBUTION ===
+total measured wall: 396.396 s
+candidate                      calls      seconds   share%      wins      out_bytes
+vs_ctxmix                        768      791.268   199.62       768       23760541
+vs_geomix                        768      756.555   190.86       768       22819952
+cm2                                1      225.160    56.80         1         201576
+cm2_variant_col                    2      142.676    35.99         1         408753
+vs_order2_rans                   768      138.495    34.94       384       42061223
+base                              14      127.452    32.15        13       25958725
+med16                              1      127.174    32.08         1        1130674
+cm2_variant_base                   1       82.480    20.81         1         208422
+lz_prepass                         1       63.658    16.06         0         257788
+vs_bwt_huff                      768       46.300    11.68        34       54669504
+vs_adaptive                      768       45.133    11.39       768       24968685
+vs_bwt_rans                      768       40.565    10.23         0       46947369
+vs_lz_rans                       768       28.249     7.13       266       23066436
+record_cm                          1       22.858     5.77         1         251824
+geocm                              1       20.403     5.15         1         393401
+vs_t4_huff                       768       16.371     4.13         0       60890626
+soa                                1        0.593     0.15         0        3151915
+columnar                           1        0.042     0.01         0              0
+binfloat                           1        0.001     0.00         0              0
+vcf                               14        0.000     0.00         0              0
+bcj_cm2                            1        0.000     0.00         0              0
+bcj                                1        0.000     0.00         0              0
+cm                                 1        0.000     0.00         0              0
+FINAL:geomix                       0        0.000     0.00       502              0
+FINAL:lz_rans                      0        0.000     0.00       266              0
+=== END ATTRIBUTION (nested candidates double-count; attribution, not partition) ===
+
+compressed: 4194304 bytes -> 201576 bytes ratio=0.048059 time_ms=396402
