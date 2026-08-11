@@ -61,7 +61,7 @@ jobs:
       # fetch-depth: 0 is mandatory. A depth-1 clone carries no merge-base
       # information, so the ancestry test would be unanswerable; the script
       # exits 2 rather than reporting a false pass if that ever regresses.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.gate.outputs.skip != 'true'
         with:
           fetch-depth: 0
