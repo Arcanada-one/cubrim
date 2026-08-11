@@ -1,0 +1,33 @@
+[package]
+name = "cubrim-web-decoder"
+version = "0.1.0"
+edition = "2021"
+description = "Reference decoder for the Cubrim Web Profile frame (MODE_WEB), buildable for wasm32"
+license-file = "../cubrim-rs/LICENSE"
+publish = false
+
+# Public by the CUBR-0072 / ADR-0003 disclosure split: wire format, framing,
+# limits and the reference DECODER are public; encoder-side technique is not
+# present in this crate at all.
+#
+# Deliberately dependency-light so it builds for wasm32-unknown-unknown: the
+# main `cubrim` crate pulls ureq / dirs / rpassword / walkdir / rand for its CLI
+# and archive layers, none of which a decoder needs (and several of which do not
+# build for wasm32 — the blocker recorded against CUBR-0077 in the corpus
+# manifest).
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+blake3 = { version = "1.8.5", default-features = false }
+
+[dev-dependencies]
+cubrim = { path = "../cubrim-rs" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
