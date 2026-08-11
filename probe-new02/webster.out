@@ -1,0 +1,2 @@
+PROBE arm=ppm file=/home/dev/cubr-cubecore-research/corpus-silesia/webster slice=4000000 model_bytes=812877 bpB=1.6258 ratio=0.20322
+PROBE arm=cm file=/home/dev/cubr-cubecore-research/corpus-silesia/webster slice=4000000 model_bytes=977331 bpB=1.9547 ratio=0.24433

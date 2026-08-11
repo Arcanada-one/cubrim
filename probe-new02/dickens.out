@@ -1,0 +1,2 @@
+PROBE arm=ppm file=/home/dev/cubr-cubecore-research/corpus-silesia/dickens slice=4000000 model_bytes=1012563 bpB=2.0251 ratio=0.25314
+PROBE arm=cm file=/home/dev/cubr-cubecore-research/corpus-silesia/dickens slice=4000000 model_bytes=1205254 bpB=2.4105 ratio=0.30131
