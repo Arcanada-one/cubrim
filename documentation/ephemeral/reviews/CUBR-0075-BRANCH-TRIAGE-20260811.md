@@ -55,7 +55,17 @@ vanishing is a provenance hole, not a filing inconvenience.
    in-process long ago, and the CUBR-0076 work has since measured the same axis
    end to end on a quiet host.
 4. **Retire both remote branches** once this lands, so the next reader is not
-   triaging them a third time.
+   triaging them a third time — but retire, not destroy. Both tips are
+   preserved as remote tags, so the discarded instrumentation stays
+   recoverable by anyone who disagrees with this triage:
+
+   | tag | tip | was |
+   |---|---|---|
+   | `retired/cubr-0075-profile` | `cbdae7d42d4c7374ebee45761d8cb70c738bb7de` | `codex/cubr-0075-profile` |
+   | `retired/cubr-0075-speed-streaming-core` | `75965fe6b6d848283bdde596bb9ced198cba0334` | `CUBR-0075-speed-streaming-core` |
+
+   Deleting a branch whose contents were judged superseded is a judgement that
+   should be reversible. `git fetch origin refs/tags/retired/*` brings it back.
 
 ## What is deliberately not claimed
 
