@@ -1114,6 +1114,97 @@ than proving one. The empirical corpus re-run is still worth having as
 belt-and-braces, and is reported separately — but the argument does not depend on
 it.
 
+## F21 — the speed branch has a measured floor and no measurable ceiling, and two of my own numbers over-reached
+
+The density branch closed this week: NEW-02, NEW-04, NEW-05, NEW-06, NEW-08, NEW-13 and H-25i are
+all NO-GO, and the one residual they left with a named mechanism — nci vs xz, +7.3%, ~105 KB — is
+closed by measurement. nci turns out to be intensely **local**: 95.028% of nearest-previous
+occurrences fall within 64 KB and only **0.076%** beyond 16 MiB, against webster's 1.469%. The
+inherited premise that its deficit is a whole-file long-range effect is not supported by the file's
+structure; closing the gap would need 42.0% coverage at whole-file distance, so the match-capacity
+lever is short by **552×**.
+
+That leaves speed, and the branch now has a shape.
+
+### The CM2 rail cannot reach the field at any effort
+
+Applying the G2 attribution's own combined outer bounds — which it calls impossible whole-path
+bounds, not promised speedups — to measured per-file throughput:
+
+| cell | bound | best case | short of ninth place |
+|---|---:|---:|---:|
+| xml/max | 10.707× (published) | 0.323 MiB/s | 79.6× |
+| dickens/max | 13.986× (published) | 0.634 MiB/s | 40.5× |
+| dickens/web | 69.444× (derived, validated) | 3.373 MiB/s | 7.6× |
+
+Driving every named CM2 component to zero cost still leaves text decode short of **ninth** place.
+This is structural to running an adaptive context-mixing model per bit, and it is consistent with
+F10: the codec is compute-bound in the mixer, so there is no memory-side slack to recover.
+
+The `dickens/web` bound was not published. It was derived from the attribution's committed raw
+`symbols.tsv` under a rule **validated against both published bounds first** — sum the `cm2_*`
+buckets, exclude `cm2_decode_shell`, reproducing 92.85%/13.986× and 90.66%/10.707× exactly. A naive
+sum of all `cm2_*` buckets does not reproduce them (14.948×, 11.416×), which is why two earlier
+lanes were right to refuse the cell until the rule could be checked.
+
+### The headline 1.71 MiB/s is a maximum, not a typical value
+
+`d_max` is a maximum over files, and cubrim's maximum sits on the image/geocm rail. Measured:
+**1.1747 MiB/s** on x-ray against **0.0454** on dickens — text is ~26× slower than the headline. So
+"last by 15×" describes the best case only; on text the same-host gap to the *slowest* competitor
+measured (bzip2) is **290×**, and to lz4 **10,715×**.
+
+### The enormous text gaps belong to the CM2 rail, not to cubrim
+
+Same-round decode ratio against `xz -9`, one host, one pin: **23×** on x-ray (geocm) against 800×
+(dickens/web), 1256× (dickens/max) and 2098× (xml/max). On the image class cubrim is one order of
+magnitude behind the field, not three, and 12× from bzip2.
+
+### geocm is the only measured route into the field — floor ninth, ceiling unmeasurable
+
+The geocm replay path is ~98–99% of x-ray decode, and that concentration is now established on an
+instrument that meets its own gate: **perturbation 1.00533** at `-F 25` against the ≤1.05 requirement
+the G3 run failed at 1.20161. Three profiles at 1.202 / 1.087 / 1.005 agree, so the instrument
+caveat is retired. Precision came from **repetition, not frequency** — twelve pooled runs gave
+±1.20 pp, better than a single `-F 99` run at a quarter the frequency.
+
+But the ceiling derived from it does not converge. With `s ≈ 0.983`, `1/(1-s)` turns a ±1.20 pp
+measurement error into a **6× spread**: the bound interval is [34.4×, 198.4×] and the best case
+[28.1, 162.2] MiB/s. At `-F 10` the interval degenerates entirely — the CI touches 100% and the bound
+runs to infinity.
+
+**Amdahl is singular where this system sits.** The defensible statement is a floor:
+
+> Perfecting the geocm replay path buys **at least ninth place** (≥28.1 MiB/s, above ppmd's 25.69).
+> The top of that range is not measurable by this method, and a lever capturing a realistic fraction
+> of it lands below ninth.
+
+### Where my own numbers over-reached
+
+Two, stated plainly in the register's habit:
+
+1. I reported the geocm ceiling as **41.69–45.40 MiB/s**, and later as 72.32, as though the arithmetic
+   were tight. It is not — those are points drawn from an interval the method cannot narrow, and
+   none of them should be quoted as the ceiling. Only the floor survives.
+2. I recorded x-ray's throughput from a **non-interleaved** pass, with competitors timed forty
+   minutes earlier at a different host load. Re-measured same-window it is 0.8172 MiB/s, not 1.1747
+   — the series' only P3 refutation had been inflated by **44%** by the method it was taken with.
+
+A third, on method rather than number: a plain-vs-instrumented comparison run non-paired returned a
+perturbation **below 1.0** (0.913). Instrumentation cannot make a decode faster, and that
+impossibility is the only reason the error surfaced — a broken design returning 1.03 would have
+passed the gate and been believed.
+
+### What this licenses, and what it does not
+
+It licenses redirecting speed effort away from CM2 optimisation entirely, and toward either a
+different rail or an operating point that does not run CM2 — which is what NEW-24 already targets.
+It does **not** license a claim that geocm work will reach any particular throughput, because the
+ceiling above the floor is unmeasured and, by this method, unmeasurable.
+
+Every figure above is per-file. No corpus aggregate is computed anywhere, and no corpus-wide average
+speedup is stated. Records: `CUBR-NCI-MATCHCAP-*`, `CUBR-SPEEDFLOOR-*`, `CUBR-XRAY-ATTRIB-*`.
+
 ## Status of the pre-registered measurements
 
 | ID | question | state |
