@@ -106,17 +106,20 @@ remote_live_gate_name=CUBR_REMOTE_LIVE_FIXTURE
 nested_contract_selector=SELF_MUTATION_TESTS
 nested_gate0_assignment="${remote_live_gate_name}=0"
 outer_gate1_assignment="${remote_live_gate_name}=1"
-nested_contract_lines=$({ /usr/bin/grep -F "${nested_contract_selector}=0" "$SELF" || true; })
+non_comment_contract_source=$(/usr/bin/grep -Ev '^[[:space:]]*#' "$SELF")
+nested_contract_lines=$({
+    /usr/bin/grep -F "${nested_contract_selector}=0" <<<"$non_comment_contract_source" || true
+})
 nested_contract_count=$(/usr/bin/wc -l <<<"$nested_contract_lines")
 [[ $nested_contract_count == 7 ]] || fail 'nested self-contract gate0 scope count mismatch'
 while IFS= read -r nested_contract_line; do
     [[ $nested_contract_line == *"$nested_gate0_assignment"* ]] ||
         fail 'nested self-contract inherited remote live gate'
 done <<<"$nested_contract_lines"
-nested_gate0_count=$({ /usr/bin/grep -F "$nested_gate0_assignment" "$SELF" || true; } |
+nested_gate0_count=$({ /usr/bin/grep -F "$nested_gate0_assignment" <<<"$non_comment_contract_source" || true; } |
     /usr/bin/wc -l)
 [[ $nested_gate0_count == 7 ]] || fail 'nested self-contract gate0 scope count mismatch'
-outer_gate1_count=$({ /usr/bin/grep -F "$outer_gate1_assignment" "$SELF" || true; } |
+outer_gate1_count=$({ /usr/bin/grep -F "$outer_gate1_assignment" <<<"$non_comment_contract_source" || true; } |
     /usr/bin/wc -l)
 [[ $outer_gate1_count == 1 ]] || fail 'outer inherited-live simulation count mismatch'
 
@@ -685,6 +688,9 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
     /usr/bin/cp -- "$SELF" "$comment_variant"
     /usr/bin/sed -i \
         '0,/^    verify_admitted_campaign_identity$/s//    # harmless comment-only adjacency separator\n    verify_admitted_campaign_identity/' \
+        "$comment_variant"
+    /usr/bin/sed -i \
+        "1a# harmless comment-only ${remote_live_gate_name}=0 ${nested_contract_selector}=0 example" \
         "$comment_variant"
     ! /usr/bin/cmp -s -- "$SELF" "$comment_variant" ||
         fail 'comment-only adjacency control did not change contract source'
