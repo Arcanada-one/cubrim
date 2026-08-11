@@ -1,0 +1,24 @@
+CUBR-XRAY-ATTRIB-CLEAN-20260811 — provenance
+
+prereg : CUBR-XRAY-ATTRIB-CLEAN-20260811.md, merged to main as 4ed32a8 at 2026-08-11T22:31:59Z.
+         Measurement began 22:32:24Z. Prediction preceded measurement.
+host   : arcana-devs, taskset -c 0-15, pin not widened.
+perf   : 6.8.12. kernel.perf_event_paranoid 4 -> 1 via sudo -n for the run, RESTORED to 4
+         afterwards (verified reads 4).
+design : frequency ladder declared in advance (-F 25, then -F 10); BOTH rungs run and BOTH
+         reported, per the preregistration. 12 plain/perf PAIRS per rung.
+
+METHOD CORRECTION, recorded rather than hidden:
+  The first attempt (timings-firstattempt-nonpaired.tsv) ran all 3 plain decodes FIRST and
+  all 24 instrumented decodes afterwards. It produced perturbation ratios BELOW 1.0 (0.913,
+  0.908) — instrumentation cannot make a decode faster, so the baseline was simply taken in a
+  different load window. This is the same cross-window error this lane had already identified
+  for tool comparisons, repeated here for plain-vs-instrumented. Re-run with plain and perf
+  INTERLEAVED as same-window pairs (run2.sh); perturbation is the median of per-pair ratios.
+  The non-paired file is retained as evidence of the discarded attempt.
+  A second defect: the share parser dropped the [.]/[k] DSO column that sits between period
+  and symbol, yielding 0.00% for every bucket. Fixed; shares below are pooled sample PERIODS.
+
+binary : 8947ea9b155c10d33316cba60647ff4d755e7a6a3ceff3c75a9b5b3e01fa8d9c (commit 3a13f486)
+archive: x-ray.cubrim.cbr, 3,637,036 B, ratio 0.429187
+gates  : cmp AND sha256 on every decode; 48 observations across both rungs, 0 VOID.
