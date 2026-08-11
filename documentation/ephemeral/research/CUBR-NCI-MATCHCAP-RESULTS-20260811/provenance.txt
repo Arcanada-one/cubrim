@@ -1,0 +1,29 @@
+CUBR-NCI-MATCHCAP-20260811 — probe provenance
+
+preregistration : documentation/ephemeral/research/CUBR-NCI-MATCHCAP-20260811.md
+  committed to main as 38b939e3e91201c0b9107fe2a6b62682bc412f06 at 2026-08-11T16:47:37Z
+  probe started 2026-08-11T16:48:10Z, ended 16:48:28Z — measurement strictly AFTER the
+  prediction was on main. That ordering is the evidence, not a formality.
+
+host            : arcana-devs, 16 cores, load1 16.06 at probe start (nice -10)
+                  wall time is irrelevant here: this probe measures file structure, not speed.
+python          : Python 3.12.3
+numpy           : 2.5.1
+
+input           : /home/dev/cubr-cubecore-research/corpus-silesia/nci
+  bytes         : 33553445  (canonical Silesia nci, whole file — NOT a head slice)
+  sha256        : fc63a31770947b8c2062d3b19ca94c00485a232bb91b502021948fee983e1635
+
+probe script    : probe_longrange.py, taken UNMODIFIED from
+                  documentation/ephemeral/research/probes-20260809/probe_longrange.py on main
+  sha256        : c1bcb89a306df42c21d1694af40cce7afd4c5e2456f3cc536246b8e8f29dedda
+
+command         : nice -10 python3 probe_longrange.py <input> nci-whole
+raw output      : nci-probe.out
+regeneration    : python3 ceiling.py   (recomputes every ceiling and verdict in the report
+                  from the bucket table in nci-probe.out — no hand-typed arithmetic)
+
+baseline figures (meta-36, measured, from probe-h25i-notes.md table):
+  cubrim nci 0.046335 -> 1,554,699 B ; xz 0.043193 -> 1,449,274 B ; gap 105,425 B (+7.3% rel)
+
+no encoder, wire format, database, API, site or social action was touched by this lane.

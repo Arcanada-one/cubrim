@@ -1,0 +1,10 @@
+# nci-whole: 33553445 bytes, 33553430 gram positions, 8764893 sampled (26.12%)
+# no-prev-occurrence: 164731 (1.88%)  hash-collisions dropped: 0
+nci-whole PROBE bucket   <=64K: anchors   8329117 frac 95.028%  mean-ext-len     29.5
+nci-whole PROBE bucket  64K-1M: anchors    181624 frac  2.072%  mean-ext-len     68.0
+nci-whole PROBE bucket   1M-8M: anchors     69132 frac  0.789%  mean-ext-len     87.4
+nci-whole PROBE bucket  8M-16M: anchors     13660 frac  0.156%  mean-ext-len    142.3
+nci-whole PROBE bucket    >16M: anchors      6629 frac  0.076%  mean-ext-len     81.2
+nci-whole PROBE coverage nearest-prev  >1M:  1.020%
+nci-whole PROBE coverage nearest-prev  >8M:  0.231%
+nci-whole PROBE coverage nearest-prev >16M:  0.076%
