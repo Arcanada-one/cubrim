@@ -4386,7 +4386,35 @@ fn encode_cm2(data: &[u8], config: &EncodeConfig) -> Option<Vec<u8>> {
     if !cm2_gate(data) {
         return None;
     }
-    let cm = cm2_encode_with(data, config.cm2_column_variants, config.cm2_max_tbits);
+    let full = cm2_encode_with(data, config.cm2_column_variants, config.cm2_max_tbits);
+    // NEW-24 guarded tier integration: `CUBR_CM2_TIER=f12|m8|m8s` adds the
+    // tiered CM2 candidate next to the full one. Selection stays competitive
+    // with a hard guard — the shipped CM2 stream must never exceed the
+    // full-CM2 stream by more than the tier header charge, which is 0 bytes
+    // (the tier rides in the existing 8-byte length header) — unless the
+    // operator explicitly buys density for speed with `CUBR_CM2_TIER_FORCE=1`.
+    // The diagnostic line records both stream sizes for the density
+    // measurement either way. No knob = no tiered pass = byte-identical
+    // output to the pre-tier build.
+    let cm = match crate::cm2::cm2_tier_env() {
+        None => full,
+        Some(tier) => {
+            let tiered = crate::cm2::cm2_encode_tiered(data, tier, config.cm2_max_tbits);
+            eprintln!(
+                "CM2-TIER tier={} orig_len={} full_cm2_blob={} tiered_cm2_blob={} delta_pct={:+.4}",
+                tier.label(),
+                data.len(),
+                full.len(),
+                tiered.len(),
+                (tiered.len() as f64 - full.len() as f64) / full.len() as f64 * 100.0
+            );
+            if crate::cm2::cm2_tier_force() || tiered.len() <= full.len() {
+                tiered
+            } else {
+                full
+            }
+        }
+    };
     let mut out = Vec::with_capacity(6 + cm.len());
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);

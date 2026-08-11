@@ -489,6 +489,12 @@ fn tbits_cap() -> Option<usize> {
             .map(|v| v.clamp(12, TBITS_MAX))
     })
 }
+/// The 6 sparse skip-gram (a, b) byte-offset pairs, in model order. The
+/// full-tier `start_byte` writes them longhand (kept verbatim so the
+/// byte-identity surface is reviewable in place); the NEW-24 tiered path
+/// indexes this table via [`Cm2Tier::sparse_ids`].
+const SP_PAIRS: [(usize, usize); 6] = [(1, 3), (1, 4), (2, 4), (2, 3), (1, 5), (3, 5)];
+
 const IBITS: usize = 20; // indirect map bits
 const M1_MIN: usize = 6;
 const M2_MIN: usize = 3;
@@ -587,28 +593,42 @@ impl Match {
 
 struct CmModel {
     lg: Logistic,
+    // NEW-24: at reduced tiers `ord`/`sp` hold only the recorded models and the
+    // `Option` models are `None` — no tables allocated, no probes, no
+    // `Ctr::upd` targets. At Full every Option is Some and the code paths are
+    // the pre-tier ones (byte-identity gated against the pre-change binary).
+    tier: Cm2Tier,
     ord: Vec<Ctr>,
     sp: Vec<Ctr>,
-    ind: Ctr,
-    ind_map: Vec<u32>,
+    ind: Option<Ctr>,
+    ind_map: Vec<u32>, // empty when the indirect model is absent (tiered)
     ind_mask: usize,
     wtab: Ctr,
     word_hash: u32,
-    wtab2: Ctr,
+    wtab2: Option<Ctr>,
     prev_word: u32,
     word2_cx: usize,
     word2state: u8,
-    wtab3: Ctr,
+    wtab3: Option<Ctr>,
     word_lc: u32,
     word3_cx: usize,
     word3state: u8,
-    wtab4: Ctr,
+    wtab4: Option<Ctr>,
     prev_word_lc: u32,
     word4_cx: usize,
     word4state: u8,
     m1: Match,
-    m2: Match,
+    m2: Option<Match>,
     m3: Match,
+    // NEW-24 tiered-layout mixer-input offsets (compact layout; all 0 at Full,
+    // which keeps the historical interleaved constants — see predict_bit_tiered).
+    t_sp_st: usize,
+    t_m1: usize,
+    t_m3: usize,
+    t_word_st: usize,
+    t_ord_sm: usize,
+    t_sp_sm: usize,
+    t_word_sm: usize,
     // FH4-03 column-position model — None on the default path
     col: Option<Ctr>,
     col_delim: u8,
@@ -653,9 +673,43 @@ struct CmModel {
 
 impl CmModel {
     /// `col_delim = Some(d)` enables the FH4-03 column-position model keyed on
-    /// bytes-since-`d`. `None` reproduces the default model set exactly.
-    fn new_with_col(tbits: usize, col_delim: Option<u8>) -> Self {
-        let nin = if col_delim.is_some() { NIN_COL } else { NIN };
+    /// bytes-since-`d`; `None` + `Cm2Tier::Full` reproduces the pre-tier
+    /// default model set exactly.
+    ///
+    /// Build the model set a blob records: `tier` selects which models EXIST.
+    /// At reduced tiers absent models are not allocated (no hash tables, no
+    /// probes, no `Ctr::upd` targets) and the layer-1 mixers are constructed
+    /// narrower — the NEW-24 speed model prices the work being absent, not
+    /// zero-fed. The FH4-03 column model is a full-tier variant only: no tier's
+    /// recorded set contains it.
+    fn new_cfg(tbits: usize, col_delim: Option<u8>, tier: Cm2Tier) -> Self {
+        debug_assert!(
+            col_delim.is_none() || tier == Cm2Tier::Full,
+            "FH4-03 column model is a full-tier variant only"
+        );
+        let full = tier == Cm2Tier::Full;
+        let nord = tier.nord();
+        let nsp = tier.sparse_ids().len();
+        // Compact tiered mixer-input layout (Full keeps the historical
+        // interleaved constants instead):
+        // [ord st | sparse st | m1 (m2) m3 | word st | ord sm | sparse sm | word sm | bias]
+        let nmatch = 2 + usize::from(tier.has_m2());
+        let t_sp_st = nord;
+        let t_m1 = nord + nsp;
+        let t_m3 = t_m1 + nmatch - 1;
+        let t_word_st = t_m3 + 1;
+        let t_ord_sm = t_word_st + 1;
+        let t_sp_sm = t_ord_sm + nord;
+        let t_word_sm = t_sp_sm + nsp;
+        let nin = if full {
+            if col_delim.is_some() {
+                NIN_COL
+            } else {
+                NIN
+            }
+        } else {
+            t_word_sm + 2 // + bias at nin-1
+        };
         let lg = Logistic::new();
         let apm1 = Apm::new(&lg, 256);
         let apm2 = Apm::new(&lg, 1024);
@@ -674,30 +728,40 @@ impl CmModel {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1023);
         Self {
-            ord: (0..NORD).map(|_| Ctr::new(tbits, ctrlim, smcap)).collect(),
-            sp: (0..NSPARSE)
-                .map(|_| Ctr::new(tbits, ctrlim, smcap))
-                .collect(),
-            ind: Ctr::new(tbits, ctrlim, smcap),
-            ind_map: vec![0u32; 1usize << IBITS],
+            tier,
+            ord: (0..nord).map(|_| Ctr::new(tbits, ctrlim, smcap)).collect(),
+            sp: (0..nsp).map(|_| Ctr::new(tbits, ctrlim, smcap)).collect(),
+            ind: full.then(|| Ctr::new(tbits, ctrlim, smcap)),
+            ind_map: if full {
+                vec![0u32; 1usize << IBITS]
+            } else {
+                Vec::new()
+            },
             ind_mask: (1usize << IBITS) - 1,
             wtab: Ctr::new(tbits, ctrlim, smcap),
             word_hash: 0,
-            wtab2: Ctr::new(tbits, ctrlim, smcap),
+            wtab2: full.then(|| Ctr::new(tbits, ctrlim, smcap)),
             prev_word: 0,
             word2_cx: 0,
             word2state: 0,
-            wtab3: Ctr::new(tbits, ctrlim, smcap),
+            wtab3: full.then(|| Ctr::new(tbits, ctrlim, smcap)),
             word_lc: 0,
             word3_cx: 0,
             word3state: 0,
-            wtab4: Ctr::new(tbits, ctrlim, smcap),
+            wtab4: full.then(|| Ctr::new(tbits, ctrlim, smcap)),
             prev_word_lc: 0,
             word4_cx: 0,
             word4state: 0,
             m1: Match::new(M1_MIN, tbits),
-            m2: Match::new(M2_MIN, tbits),
+            m2: tier.has_m2().then(|| Match::new(M2_MIN, tbits)),
             m3: Match::new(M3_MIN, tbits),
+            t_sp_st,
+            t_m1,
+            t_m3,
+            t_word_st,
+            t_ord_sm,
+            t_sp_sm,
+            t_word_sm,
             col: col_delim.map(|_| Ctr::new(tbits, ctrlim, smcap)),
             col_delim: col_delim.unwrap_or(0),
             col_pos: 0,
@@ -755,6 +819,9 @@ impl CmModel {
     }
 
     fn start_byte(&mut self, buf: &[u8]) {
+        if self.tier != Cm2Tier::Full {
+            return self.start_byte_tiered(buf);
+        }
         let t = buf.len();
         for k in 0..NORD {
             self.hk[k] = if k == 0 {
@@ -800,11 +867,59 @@ impl CmModel {
                 .wrapping_add(self.prev.wrapping_mul(0x85EB_CA77));
         }
         self.m1.start(buf);
-        self.m2.start(buf);
+        if let Some(m2) = self.m2.as_mut() {
+            m2.start(buf);
+        }
+        self.m3.start(buf);
+    }
+
+    /// NEW-24 reduced-tier `start_byte`: hashes only the recorded models. The
+    /// order-2 key is still computed — it selects layer-1 mixer #1's weight set
+    /// and the apm2 context (mixing structure, part of the held-out fixed
+    /// residue) — but the indirect MODEL is absent: no `ind_map` read (there is
+    /// no map), no table probe, no write-back.
+    fn start_byte_tiered(&mut self, buf: &[u8]) {
+        let t = buf.len();
+        for k in 0..self.ord.len() {
+            self.hk[k] = if k == 0 {
+                0
+            } else if t >= k {
+                Self::bhash(0x9E37_79B1 ^ k as u32, &buf[t - k..t])
+            } else {
+                0xDEAD ^ k
+            };
+        }
+        // Only the recorded sparse skip-grams are hashed (M8S: g(1,3), g(2,3)).
+        for (i, &id) in self.tier.sparse_ids().iter().enumerate() {
+            let (a, b) = SP_PAIRS[id];
+            self.sphash[i] = if t > a && t > b {
+                let mut h = 0x1000_0193u32;
+                h = h.wrapping_mul(0x85EB_CA77).wrapping_add(buf[t - a] as u32);
+                h ^= h >> 15;
+                h = h.wrapping_mul(0x85EB_CA77).wrapping_add(buf[t - b] as u32);
+                h ^= h >> 15;
+                h as usize
+            } else {
+                0xBEEF ^ (a * 7 + b)
+            };
+        }
+        self.ind_key = if t >= 2 {
+            Self::bhash(0x2222_3333, &buf[t - 2..t]) & self.ind_mask
+        } else {
+            0
+        };
+        self.prev = if t > 0 { buf[t - 1] as usize } else { 0 };
+        self.m1.start(buf);
+        if let Some(m2) = self.m2.as_mut() {
+            m2.start(buf);
+        }
         self.m3.start(buf);
     }
 
     fn predict_bit(&mut self, c0: usize, bit: u32) -> i32 {
+        if self.tier != Cm2Tier::Full {
+            return self.predict_bit_tiered(c0, bit);
+        }
         for k in 0..NORD {
             let cx = self.hk[k].wrapping_mul(0x2545_F491).wrapping_add(c0);
             self.cxs[k] = cx;
@@ -823,12 +938,16 @@ impl CmModel {
         }
         let icx = self.ind_hist.wrapping_mul(0x2545_F491).wrapping_add(c0);
         self.indcx = icx;
-        let (ips, ipsm, ist) = self.ind.predict(icx);
-        self.indstate = ist;
-        self.st[IND_I] = self.lg.stretch(ips);
-        self.st[SM_IND_I] = self.lg.stretch(ipsm);
+        if let Some(ind) = self.ind.as_ref() {
+            let (ips, ipsm, ist) = ind.predict(icx);
+            self.indstate = ist;
+            self.st[IND_I] = self.lg.stretch(ips);
+            self.st[SM_IND_I] = self.lg.stretch(ipsm);
+        }
         self.st[M1_I] = self.m1.stretch_in(&self.lg, bit);
-        self.st[M2_I] = self.m2.stretch_in(&self.lg, bit);
+        if let Some(m2) = self.m2.as_mut() {
+            self.st[M2_I] = m2.stretch_in(&self.lg, bit);
+        }
         self.st[M3_I] = self.m3.stretch_in(&self.lg, bit);
         let wcx = (self.word_hash as usize)
             .wrapping_mul(0x2545_F491)
@@ -846,19 +965,23 @@ impl CmModel {
             .wrapping_mul(0x2545_F491)
             .wrapping_add(c0);
         self.word2_cx = w2cx;
-        let (w2ps, w2psm, w2st) = self.wtab2.predict(w2cx);
-        self.word2state = w2st;
-        self.st[WORD2_I] = self.lg.stretch(w2ps);
-        self.st[SM_WORD2_I] = self.lg.stretch(w2psm);
+        if let Some(wtab2) = self.wtab2.as_ref() {
+            let (w2ps, w2psm, w2st) = wtab2.predict(w2cx);
+            self.word2state = w2st;
+            self.st[WORD2_I] = self.lg.stretch(w2ps);
+            self.st[SM_WORD2_I] = self.lg.stretch(w2psm);
+        }
         // 3rd word model: case-folded current word.
         let w3cx = (self.word_lc as usize)
             .wrapping_mul(0x2545_F491)
             .wrapping_add(c0);
         self.word3_cx = w3cx;
-        let (w3ps, w3psm, w3st) = self.wtab3.predict(w3cx);
-        self.word3state = w3st;
-        self.st[WORD3_I] = self.lg.stretch(w3ps);
-        self.st[SM_WORD3_I] = self.lg.stretch(w3psm);
+        if let Some(wtab3) = self.wtab3.as_ref() {
+            let (w3ps, w3psm, w3st) = wtab3.predict(w3cx);
+            self.word3state = w3st;
+            self.st[WORD3_I] = self.lg.stretch(w3ps);
+            self.st[SM_WORD3_I] = self.lg.stretch(w3psm);
+        }
         // 4th word model: case-folded word bigram.
         let w4cx = (self
             .prev_word_lc
@@ -867,10 +990,12 @@ impl CmModel {
             .wrapping_mul(0x2545_F491)
             .wrapping_add(c0);
         self.word4_cx = w4cx;
-        let (w4ps, w4psm, w4st) = self.wtab4.predict(w4cx);
-        self.word4state = w4st;
-        self.st[WORD4_I] = self.lg.stretch(w4ps);
-        self.st[SM_WORD4_I] = self.lg.stretch(w4psm);
+        if let Some(wtab4) = self.wtab4.as_ref() {
+            let (w4ps, w4psm, w4st) = wtab4.predict(w4cx);
+            self.word4state = w4st;
+            self.st[WORD4_I] = self.lg.stretch(w4ps);
+            self.st[SM_WORD4_I] = self.lg.stretch(w4psm);
+        }
         // FH4-03: column-position inputs sit after every default model, so the
         // bias moves to nin-1 and the default layout is untouched.
         if let Some(col) = self.col.as_mut() {
@@ -907,7 +1032,70 @@ impl CmModel {
         ((pmix * 10 + a1 * 3 + a2 * 3) >> 4).clamp(1, PSCALE - 1)
     }
 
+    /// NEW-24 reduced-tier `predict_bit`: probes only the recorded models over
+    /// the compact input layout (`t_*` offsets). The mixing structure is
+    /// identical to the full tier — the same 5 context-selected layer-1 views,
+    /// layer-2 combine, APM chain and blend — but each dot product runs over
+    /// `nin` inputs (22 / 15 / 19 at F12 / M8 / M8S vs 50 full), and every
+    /// probe that is not performed here is also a `Ctr::upd` write-back that
+    /// never happens in `update_bit_tiered`.
+    fn predict_bit_tiered(&mut self, c0: usize, bit: u32) -> i32 {
+        for k in 0..self.ord.len() {
+            let cx = self.hk[k].wrapping_mul(0x2545_F491).wrapping_add(c0);
+            self.cxs[k] = cx;
+            let (ps, psm, s) = self.ord[k].predict(cx);
+            self.ostate[k] = s;
+            self.st[k] = self.lg.stretch(ps);
+            self.st[self.t_ord_sm + k] = self.lg.stretch(psm);
+        }
+        for s in 0..self.sp.len() {
+            let cx = self.sphash[s].wrapping_mul(0x2545_F491).wrapping_add(c0);
+            self.spcx[s] = cx;
+            let (ps, psm, stt) = self.sp[s].predict(cx);
+            self.spstate[s] = stt;
+            self.st[self.t_sp_st + s] = self.lg.stretch(ps);
+            self.st[self.t_sp_sm + s] = self.lg.stretch(psm);
+        }
+        self.st[self.t_m1] = self.m1.stretch_in(&self.lg, bit);
+        if let Some(m2) = self.m2.as_mut() {
+            self.st[self.t_m1 + 1] = m2.stretch_in(&self.lg, bit);
+        }
+        self.st[self.t_m3] = self.m3.stretch_in(&self.lg, bit);
+        let wcx = (self.word_hash as usize)
+            .wrapping_mul(0x2545_F491)
+            .wrapping_add(c0);
+        self.word_cx = wcx;
+        let (wps, wpsm, wst) = self.wtab.predict(wcx);
+        self.wordstate = wst;
+        self.st[self.t_word_st] = self.lg.stretch(wps);
+        self.st[self.t_word_sm] = self.lg.stretch(wpsm);
+        self.st[self.nin - 1] = 256; // bias
+
+        self.mctx[0] = self.prev;
+        self.mctx[1] = self.ind_key & 1023;
+        self.mctx[2] = ((self.m1.len.min(15) << 1) | (self.m1.active as usize)) & 63;
+        self.mctx[3] = c0 & 255;
+        self.mctx[4] = self.hk[3] & 1023; // order-3 hash (every tier keeps orders 0..4)
+        for m in 0..NL1 {
+            self.l2in[m] = self.l1[m].mix(&self.lg, &self.st, self.mctx[m]);
+        }
+        self.l2in[NL1] = 256; // layer-2 bias
+        let _ = self.l2.mix(&self.lg, &self.l2in, self.prev & 63);
+        let pmix = self.l2.px;
+        self.pmix = pmix;
+
+        let (a1, i1) = self.apm1.refine(&self.lg, self.prev, pmix);
+        self.apm1_idx = i1;
+        let a2ctx = (self.ind_key ^ (c0 << 3)) & 1023;
+        let (a2, i2) = self.apm2.refine(&self.lg, a2ctx, a1);
+        self.apm2_idx = i2;
+        ((pmix * 10 + a1 * 3 + a2 * 3) >> 4).clamp(1, PSCALE - 1)
+    }
+
     fn update_bit(&mut self, y: i32) {
+        if self.tier != Cm2Tier::Full {
+            return self.update_bit_tiered(y);
+        }
         if self.audit {
             // FH2-06: layer-2 mixer output — quantized (12-bit squash + ST_MAX
             // clamp) vs the f64-ideal (unclamped logistic of the raw dot). The
@@ -929,16 +1117,54 @@ impl CmModel {
         for s in 0..NSPARSE {
             self.sp[s].upd(self.spcx[s], self.spstate[s], y, &self.nex);
         }
-        self.ind.upd(self.indcx, self.indstate, y, &self.nex);
+        if let Some(ind) = self.ind.as_mut() {
+            ind.upd(self.indcx, self.indstate, y, &self.nex);
+        }
         self.wtab.upd(self.word_cx, self.wordstate, y, &self.nex);
-        self.wtab2.upd(self.word2_cx, self.word2state, y, &self.nex);
-        self.wtab3.upd(self.word3_cx, self.word3state, y, &self.nex);
-        self.wtab4.upd(self.word4_cx, self.word4state, y, &self.nex);
+        if let Some(wtab2) = self.wtab2.as_mut() {
+            wtab2.upd(self.word2_cx, self.word2state, y, &self.nex);
+        }
+        if let Some(wtab3) = self.wtab3.as_mut() {
+            wtab3.upd(self.word3_cx, self.word3state, y, &self.nex);
+        }
+        if let Some(wtab4) = self.wtab4.as_mut() {
+            wtab4.upd(self.word4_cx, self.word4state, y, &self.nex);
+        }
         if let Some(col) = self.col.as_mut() {
             col.upd(self.col_cx, self.col_state, y, &self.nex);
         }
         self.m1.update(y);
-        self.m2.update(y);
+        if let Some(m2) = self.m2.as_mut() {
+            m2.update(y);
+        }
+        self.m3.update(y);
+        self.apm1.upd(self.apm1_idx, y);
+        if self.apm2_idx != usize::MAX {
+            self.apm2.upd(self.apm2_idx, y);
+        }
+    }
+
+    /// NEW-24 reduced-tier `update_bit`: write-back for the recorded models
+    /// only — every absent model is a `Ctr::upd` random RMW that never
+    /// happens (the ~33% decode cost centre), and the mixer updates run over
+    /// the narrower `nin`. The FH2-06 quant-audit instrument stays a full-tier
+    /// facility.
+    fn update_bit_tiered(&mut self, y: i32) {
+        for m in 0..NL1 {
+            self.l1[m].update(&self.st, y);
+        }
+        self.l2.update(&self.l2in, y);
+        for k in 0..self.ord.len() {
+            self.ord[k].upd(self.cxs[k], self.ostate[k], y, &self.nex);
+        }
+        for s in 0..self.sp.len() {
+            self.sp[s].upd(self.spcx[s], self.spstate[s], y, &self.nex);
+        }
+        self.wtab.upd(self.word_cx, self.wordstate, y, &self.nex);
+        self.m1.update(y);
+        if let Some(m2) = self.m2.as_mut() {
+            m2.update(y);
+        }
         self.m3.update(y);
         self.apm1.upd(self.apm1_idx, y);
         if self.apm2_idx != usize::MAX {
@@ -947,6 +1173,9 @@ impl CmModel {
     }
 
     fn end_byte(&mut self, buf: &[u8]) {
+        if self.tier != Cm2Tier::Full {
+            return self.end_byte_tiered(buf);
+        }
         let t = buf.len() - 1;
         let b = buf[t];
         // FH4-03: advance the within-record position (reset on the delimiter).
@@ -982,7 +1211,31 @@ impl CmModel {
             self.word_lc = 0;
         }
         self.m1.end(buf);
-        self.m2.end(buf);
+        if let Some(m2) = self.m2.as_mut() {
+            m2.end(buf);
+        }
+        self.m3.end(buf);
+    }
+
+    /// NEW-24 reduced-tier `end_byte`: no indirect model means no
+    /// history-of-history fold; word1 is the only word model, so the
+    /// previous-word and case-folded tracking is absent; no column model.
+    /// The absent m2 also skips its per-byte hashing (`Match::end`).
+    fn end_byte_tiered(&mut self, buf: &[u8]) {
+        let t = buf.len() - 1;
+        let b = buf[t];
+        if b.is_ascii_alphanumeric() {
+            self.word_hash = self
+                .word_hash
+                .wrapping_mul(0x6F4A_7C13)
+                .wrapping_add(b as u32 + 1);
+        } else {
+            self.word_hash = 0;
+        }
+        self.m1.end(buf);
+        if let Some(m2) = self.m2.as_mut() {
+            m2.end(buf);
+        }
         self.m3.end(buf);
     }
 }
@@ -1105,6 +1358,132 @@ fn effective_tbits(orig_len: usize, declared: u64) -> usize {
     (d as usize).clamp(12, TBITS_MAX).min(derived)
 }
 
+// NEW-24 (Fast-CM tier ladder) wire packing: the model-set tier, in bits
+// 45..47 of the 8-byte CM2 length header.
+//
+// Placement is the point. The two header extensions above chose bits the
+// PRE-CHANGE parse provably ignores (bit 63 + 48..55 column model, 56..60
+// tbits), which is right for backward-COMPATIBLE fields: 0 means "as before"
+// and old archives decode byte-identically. A tier is the opposite kind of
+// field — FORWARD-incompatible by design: an old decoder that ignored it would
+// build the full 26-probe model set against a stream coded with fewer models,
+// desynchronize silently and fabricate output until a guard happened to trip
+// (the preregistration calls that unsound: "silent decode = unsound", P-D).
+// The remaining free header bits (61..62) have exactly that silent-ignore
+// failure mode — nothing in the pre-change parse reads them — so they are
+// unusable for this field.
+//
+// Instead the tier lives INSIDE the 48-bit length field, above MAX_DECODE_LEN
+// (2^40): a nonzero tier makes the pre-change parse compute
+// `orig_len = raw & CM2_LEN_MASK >= 2^45 > MAX_DECODE_LEN` and reject the blob
+// in O(1) with "orig_len exceeds maximum" — deterministic fail-closed under
+// the OLD validation logic, before any allocation. Valid lengths never
+// collide: every decodable archive has orig_len <= 2^40, so bits 45..47 are
+// zero on all tier-less blobs and the tier-less parse stays bit-identical to
+// the pre-tier one.
+const CM2_TIER_SHIFT: u32 = 45;
+const CM2_TIER_FIELD_MASK: u64 = 0x7; // 3 bits: 0 = full set, 1..3 = tiers, 4..7 reserved (reject)
+const CM2_TIER_LEN_MASK: u64 = (1u64 << CM2_TIER_SHIFT) - 1;
+
+/// NEW-24 model-set tier: which probed-model subset the wire records. The
+/// decoder builds ONLY the recorded set — absent models are not allocated, not
+/// probed, not updated, and the mixers' dot products are constructed narrower.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Cm2Tier {
+    /// Full 26-probe set — wire value 0, byte-identical to the pre-tier codec.
+    Full,
+    /// {orders 0-7, word1, m1, m2, m3} — 12 probed models.
+    F12,
+    /// {orders 0-4, word1, m1, m3} — 8 probed models.
+    M8,
+    /// M8 + sparse {g(1,3), g(2,3)} — the database/record-structure variant.
+    M8S,
+}
+
+impl Cm2Tier {
+    fn wire(self) -> u64 {
+        match self {
+            Cm2Tier::Full => 0,
+            Cm2Tier::F12 => 1,
+            Cm2Tier::M8 => 2,
+            Cm2Tier::M8S => 3,
+        }
+    }
+    fn from_wire(v: u64) -> Option<Self> {
+        match v {
+            0 => Some(Cm2Tier::Full),
+            1 => Some(Cm2Tier::F12),
+            2 => Some(Cm2Tier::M8),
+            3 => Some(Cm2Tier::M8S),
+            _ => None,
+        }
+    }
+    /// Active order-k models (k in 0..nord). Every tier keeps at least orders
+    /// 0..4, so the order-3 hash the layer-1 mixer #4 selects on always exists.
+    fn nord(self) -> usize {
+        match self {
+            Cm2Tier::Full => NORD,
+            Cm2Tier::F12 => 8,
+            Cm2Tier::M8 | Cm2Tier::M8S => 5,
+        }
+    }
+    /// Active sparse skip-gram models, as indices into [`SP_PAIRS`].
+    fn sparse_ids(self) -> &'static [usize] {
+        match self {
+            Cm2Tier::Full => &[0, 1, 2, 3, 4, 5],
+            Cm2Tier::M8S => &[0, 3], // g(1,3), g(2,3) — the record-structure carriers
+            _ => &[],
+        }
+    }
+    /// The short-minlen match model (M2_MIN = 3) is kept down to F12 and
+    /// dropped at M8/M8S (probe: free at tier M on every class, <=0.12pp).
+    fn has_m2(self) -> bool {
+        matches!(self, Cm2Tier::Full | Cm2Tier::F12)
+    }
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Cm2Tier::Full => "full",
+            Cm2Tier::F12 => "f12",
+            Cm2Tier::M8 => "m8",
+            Cm2Tier::M8S => "m8s",
+        }
+    }
+}
+
+/// NEW-24 measurement knob: `CUBR_CM2_TIER=f12|m8|m8s` makes the encoder emit
+/// the tiered CM2 candidate alongside the full one (see `encode_cm2` in
+/// codec.rs). Unset or unrecognized = no tiered pass — the default output is
+/// byte-identical to the pre-tier build.
+pub(crate) fn cm2_tier_env() -> Option<Cm2Tier> {
+    use std::sync::OnceLock;
+    static T: OnceLock<Option<Cm2Tier>> = OnceLock::new();
+    *T.get_or_init(|| {
+        std::env::var("CUBR_CM2_TIER")
+            .ok()
+            .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
+                "f12" => Some(Cm2Tier::F12),
+                "m8" => Some(Cm2Tier::M8),
+                "m8s" => Some(Cm2Tier::M8S),
+                _ => None,
+            })
+    })
+}
+
+/// `CUBR_CM2_TIER_FORCE=1` — the operator escape the preregistration names
+/// ("unless the operator's preset explicitly buys density for speed"): ship
+/// the tiered CM2 candidate even when it is larger than the full stream.
+/// Required to produce real tiered archives for the decode-speed bench and the
+/// old-binary fail-closed check; never on by default.
+pub(crate) fn cm2_tier_force() -> bool {
+    use std::sync::OnceLock;
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| {
+        std::env::var("CUBR_CM2_TIER_FORCE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
 /// FH4-03 gate: propose record-delimiter candidates whose spacing is regular
 /// enough that a within-record position is a meaningful context.
 ///
@@ -1166,24 +1545,41 @@ pub(crate) fn cm2_encode_audit(data: &[u8]) -> (Vec<u8>, f64, f64) {
 }
 
 fn cm2_encode_variant(data: &[u8], col_delim: Option<u8>, max_tbits: Option<usize>) -> Vec<u8> {
-    cm2_encode_audit_variant_with(data, col_delim, max_tbits).0
+    cm2_encode_audit_variant_with(data, col_delim, max_tbits, Cm2Tier::Full).0
+}
+
+/// NEW-24: encode `data` at a reduced model-set tier. The tier is recorded in
+/// the length header (bits 45..47); pre-tier decoders fail closed on the blob
+/// ("orig_len exceeds maximum") and the tiered decoder builds only the
+/// recorded model set. Base variant only — the FH4-03 column model is not part
+/// of any tier's recorded set.
+pub(crate) fn cm2_encode_tiered(data: &[u8], tier: Cm2Tier, max_tbits: Option<usize>) -> Vec<u8> {
+    cm2_encode_audit_variant_with(data, None, max_tbits, tier).0
 }
 
 // Intentionally unused outside the manual audit instrument above; keep it for
 // the ignored `self_probe` test without hiding unrelated dead code.
 #[allow(dead_code)]
 fn cm2_encode_audit_variant(data: &[u8], col_delim: Option<u8>) -> (Vec<u8>, f64, f64) {
-    cm2_encode_audit_variant_with(data, col_delim, None)
+    cm2_encode_audit_variant_with(data, col_delim, None, Cm2Tier::Full)
 }
 
 fn cm2_encode_audit_variant_with(
     data: &[u8],
     col_delim: Option<u8>,
     max_tbits: Option<usize>,
+    tier: Cm2Tier,
 ) -> (Vec<u8>, f64, f64) {
     let mut hdr = data.len() as u64;
     if let Some(d) = col_delim {
         hdr |= CM2_COL_FLAG | ((d as u64) << CM2_COL_DELIM_SHIFT);
+    }
+    if tier != Cm2Tier::Full {
+        // NEW-24: record the model-set tier. Bits 45..47 sit above
+        // MAX_DECODE_LEN on purpose — see the tier constants for the
+        // fail-closed argument.
+        debug_assert!((data.len() as u64) < (1u64 << CM2_TIER_SHIFT));
+        hdr |= tier.wire() << CM2_TIER_SHIFT;
     }
     // NEW-27: declare the table exponent when it is smaller than the derived
     // one, so the decoder can allocate the same reduced model instead of
@@ -1198,7 +1594,7 @@ fn cm2_encode_audit_variant_with(
         hdr |= (tb as u64 & CM2_TBITS_MASK) << CM2_TBITS_SHIFT;
     }
     let mut out = hdr.to_be_bytes().to_vec();
-    let mut model = CmModel::new_with_col(tb, col_delim);
+    let mut model = CmModel::new_cfg(tb, col_delim, tier);
     let mut enc = RangeEncoder::new();
     let mut buf: Vec<u8> = Vec::with_capacity(data.len());
     // M1 (pre-registered by the CUBR-0087 consilium): split the per-bit budget
@@ -1285,12 +1681,34 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     // FH4-03: unpack the column-model flag/delimiter first, so every guard below
     // sees the true declared length and not the packed word.
     let raw = u64::from_be_bytes(blob[..8].try_into().unwrap());
+    // NEW-24: the model-set tier, bits 45..47 of the length field — the ONE new
+    // decoder branch (prereg P-D). Tier-less blobs (tier_bits == 0) take the
+    // exact pre-tier parse: same mask, same guards, same model set.
+    let tier_bits = (raw >> CM2_TIER_SHIFT) & CM2_TIER_FIELD_MASK;
+    let (tier, len_mask) = if tier_bits == 0 {
+        (Cm2Tier::Full, CM2_LEN_MASK)
+    } else {
+        let Some(t) = Cm2Tier::from_wire(tier_bits) else {
+            return Err(CubrimError::Decode(format!(
+                "MODE_CM2: unknown model-set tier {tier_bits}"
+            )));
+        };
+        if raw & CM2_COL_FLAG != 0 {
+            // No tier's recorded set contains the FH4-03 column model; a blob
+            // claiming both is nothing any encoder produces — fail closed,
+            // never guess a model set.
+            return Err(CubrimError::Decode(
+                "MODE_CM2: tiered blob carries a column-model flag".into(),
+            ));
+        }
+        (t, CM2_TIER_LEN_MASK)
+    };
     let col_delim = if raw & CM2_COL_FLAG != 0 {
         Some(((raw >> CM2_COL_DELIM_SHIFT) & 0xFF) as u8)
     } else {
         None
     };
-    let orig_len = raw & CM2_LEN_MASK;
+    let orig_len = raw & len_mask;
     // QA-F-001 fail-closed guard (part 1 — decompression-bomb cap): a corrupt MODE_CM2
     // blob can carry an attacker-controlled orig_len up to 2^64. Reject anything beyond a
     // sane absolute maximum before allocating or looping, so the classic 2^64 claim fails
@@ -1316,7 +1734,8 @@ pub(crate) fn cm2_decode(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
     }
     let cap = orig_len.min(1 << 20) as usize;
     let mut out = Vec::with_capacity(cap);
-    let mut model = CmModel::new_with_col(effective_tbits(orig_len as usize, raw), col_delim);
+    // NEW-24: the decoder builds ONLY the recorded model set.
+    let mut model = CmModel::new_cfg(effective_tbits(orig_len as usize, raw), col_delim, tier);
     let mut dec = RangeDecoder::new(&blob[8..]);
     // QA-F-001 fail-closed guard (part 2 — stall detector): once the coded stream is
     // exhausted the range decoder only reads zero-padding and stops consuming input, yet
@@ -1626,6 +2045,194 @@ mod tests {
             ceiling_pct,
         );
         assert!(rt, "self-probe RT cmp!=0");
+    }
+
+    // ---- NEW-24 model-set tier ladder (CUBR-NEW24-TIERS-20260809 prereg) ----
+
+    const TIERS: [Cm2Tier; 3] = [Cm2Tier::F12, Cm2Tier::M8, Cm2Tier::M8S];
+
+    /// The NEW-24 speed model prices fewer probes / fewer `Ctr::upd` targets /
+    /// narrower mixer dot products. Assert the models are structurally ABSENT
+    /// at reduced tiers — no tables allocated, mixer weight rows constructed
+    /// narrower — not zero-fed.
+    #[test]
+    fn cm2_tier_reduced_model_sets_are_actually_absent() {
+        let full = CmModel::new_cfg(12, None, Cm2Tier::Full);
+        assert_eq!(full.ord.len(), NORD);
+        assert_eq!(full.sp.len(), NSPARSE);
+        assert!(full.ind.is_some() && full.m2.is_some());
+        assert!(full.wtab2.is_some() && full.wtab3.is_some() && full.wtab4.is_some());
+        assert_eq!(full.nin, NIN);
+        assert_eq!(full.ind_map.len(), 1usize << IBITS);
+
+        let f12 = CmModel::new_cfg(12, None, Cm2Tier::F12);
+        assert_eq!(f12.ord.len(), 8);
+        assert_eq!(f12.sp.len(), 0);
+        assert!(f12.ind.is_none(), "indirect model must be absent at F12");
+        assert!(f12.m2.is_some(), "m2 is part of the F12 set");
+        assert!(f12.wtab2.is_none() && f12.wtab3.is_none() && f12.wtab4.is_none());
+        assert!(f12.ind_map.is_empty(), "no indirect model => no map");
+        // 12 probed models -> 2*(8 orders + 1 word) stationary+SM + 3 match + bias.
+        assert_eq!(f12.nin, 22);
+
+        let m8 = CmModel::new_cfg(12, None, Cm2Tier::M8);
+        assert_eq!(m8.ord.len(), 5);
+        assert_eq!(m8.sp.len(), 0);
+        assert!(m8.ind.is_none() && m8.m2.is_none());
+        // 8 probed models -> 2*(5 orders + 1 word) + 2 match + bias.
+        assert_eq!(m8.nin, 15);
+        // Each L1 mixer's weight rows are exactly nin wide — the dot product
+        // IS narrower, not zero-padded.
+        for m in &m8.l1 {
+            assert_eq!(m.nin, 15);
+        }
+
+        let m8s = CmModel::new_cfg(12, None, Cm2Tier::M8S);
+        assert_eq!(m8s.ord.len(), 5);
+        assert_eq!(m8s.sp.len(), 2, "M8S adds g(1,3), g(2,3)");
+        assert!(m8s.ind.is_none() && m8s.m2.is_none());
+        assert_eq!(m8s.nin, 19);
+    }
+
+    /// NEW-24 focused test (b), synthetic leg: every tier round-trips
+    /// byte-exact on text, mixed and record-shaped inputs.
+    #[test]
+    fn cm2_tier_roundtrip_byte_exact_synthetic() {
+        let text: Vec<u8> = b"the quick brown fox jumps over the lazy dog. "
+            .repeat(400)
+            .to_vec();
+        let mut x: u32 = 0xC0FF_EE11;
+        let mixed: Vec<u8> = (0..24_000)
+            .map(|i| {
+                x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                if i % 3 == 0 {
+                    (x >> 24) as u8
+                } else {
+                    b'a' + (i % 26) as u8
+                }
+            })
+            .collect();
+        let record: Vec<u8> = (0..24_000)
+            .map(|i| {
+                if i % 16 == 0 {
+                    b'\n'
+                } else {
+                    b'0' + ((i * 7) % 10) as u8
+                }
+            })
+            .collect();
+        for data in [&text, &mixed, &record] {
+            for tier in TIERS {
+                let blob = cm2_encode_tiered(data, tier, None);
+                let out = cm2_decode(&blob).expect("tiered decode");
+                assert_eq!(&out, data, "tier {tier:?} RT cmp!=0");
+            }
+        }
+    }
+
+    /// NEW-24 focused test (b), real-data leg: tier round-trip byte-exact on
+    /// real corpus bytes — 128 KiB heads of three Silesia files (real data,
+    /// labelled heads; whole-file RT at max tables belongs to the lane's
+    /// binary-level gates, not a unit test). Skips loudly when the corpus is
+    /// absent (CI boxes) — the lane record carries the executed evidence.
+    #[test]
+    fn cm2_tier_roundtrip_real_corpus_heads() {
+        let dir = std::env::var("CUBR_CORPUS_DIR")
+            .unwrap_or_else(|_| "/home/dev/cubr-cubecore-research/corpus-silesia".into());
+        if !std::path::Path::new(&dir).exists() {
+            eprintln!("SKIP cm2_tier_roundtrip_real_corpus_heads: corpus dir {dir} absent");
+            return;
+        }
+        for f in ["dickens", "xml", "osdb"] {
+            let path = format!("{dir}/{f}");
+            let Ok(mut data) = std::fs::read(&path) else {
+                eprintln!("SKIP {path}: unreadable");
+                continue;
+            };
+            data.truncate(128 * 1024);
+            let full = cm2_encode_variant(&data, None, None);
+            for tier in TIERS {
+                let blob = cm2_encode_tiered(&data, tier, None);
+                let out = cm2_decode(&blob).expect("tiered decode");
+                assert_eq!(out, data, "tier {tier:?} RT cmp!=0 on {f} head");
+                // Models are absent, not zero-weighted: the tiered coded
+                // stream must actually differ from the full stream.
+                assert_ne!(
+                    blob[8..],
+                    full[8..],
+                    "tier {tier:?} stream identical to full on {f} — models not absent?"
+                );
+            }
+        }
+    }
+
+    /// NEW-24 prereg P-D (fail-closed leg): the OLD parse — pre-tier
+    /// validation logic, reproduced bit-for-bit here — must reject every
+    /// tiered blob deterministically in O(1) via the MAX_DECODE_LEN guard,
+    /// never silently decode. (The lane record additionally exercises a real
+    /// pre-change binary; this pins the predicate the old guard evaluates.)
+    #[test]
+    fn cm2_tiered_blob_fails_closed_under_old_parse() {
+        let data = b"records,records,records\n".repeat(200);
+        for tier in TIERS {
+            let blob = cm2_encode_tiered(&data, tier, None);
+            let raw = u64::from_be_bytes(blob[..8].try_into().unwrap());
+            // Pre-tier parse: bit 63 column flag (clear here), bits 0..47 the
+            // declared length. The tier bits land inside that length field
+            // above MAX_DECODE_LEN, so the old `orig_len` guard fires first.
+            assert_eq!(raw & CM2_COL_FLAG, 0);
+            let old_orig_len = raw & CM2_LEN_MASK;
+            assert!(
+                old_orig_len > crate::codec::MAX_DECODE_LEN as u64,
+                "tier {tier:?}: old parse would accept orig_len {old_orig_len} — silent-decode hazard"
+            );
+            // The tiered decoder reads the same blob byte-exactly.
+            assert_eq!(cm2_decode(&blob).expect("tiered decode"), data);
+        }
+    }
+
+    /// NEW-24: reserved tier values (4..7) and the tier+column-flag
+    /// combination no encoder produces must fail closed in the NEW decoder.
+    #[test]
+    fn cm2_decode_rejects_reserved_tier_and_col_combination() {
+        let data = b"abcdabcdabcd".repeat(100);
+        let blob = cm2_encode_tiered(&data, Cm2Tier::F12, None);
+        for t in 4u64..8 {
+            let mut b = blob.clone();
+            let mut raw = u64::from_be_bytes(b[..8].try_into().unwrap());
+            raw = (raw & !(CM2_TIER_FIELD_MASK << CM2_TIER_SHIFT)) | (t << CM2_TIER_SHIFT);
+            b[..8].copy_from_slice(&raw.to_be_bytes());
+            let e = cm2_decode(&b).expect_err("reserved tier must fail closed");
+            assert!(e.to_string().contains("tier"), "got: {e}");
+        }
+        let mut b = blob;
+        let mut raw = u64::from_be_bytes(b[..8].try_into().unwrap());
+        raw |= CM2_COL_FLAG;
+        b[..8].copy_from_slice(&raw.to_be_bytes());
+        let e = cm2_decode(&b).expect_err("tier+column flag must fail closed");
+        assert!(e.to_string().contains("column"), "got: {e}");
+    }
+
+    /// NEW-24 prereg P-D (header-charge leg): recording a tier costs exactly
+    /// the header charge — 0 bytes beyond the pre-existing 8-byte length
+    /// header, whose word differs from the base encode's in the tier bits
+    /// ONLY. (The coded stream length differs across tiers — that is the
+    /// density cost, priced separately by the measurement runs — but the
+    /// CHARGE for recording the tier is the header bits alone.)
+    #[test]
+    fn cm2_tier_header_charge_is_exactly_the_tier_bits() {
+        let data = b"the header charge is the whole price. ".repeat(300);
+        let base = cm2_encode_variant(&data, None, None);
+        let hdr_base = u64::from_be_bytes(base[..8].try_into().unwrap());
+        for tier in TIERS {
+            let blob = cm2_encode_tiered(&data, tier, None);
+            let hdr = u64::from_be_bytes(blob[..8].try_into().unwrap());
+            assert_eq!(
+                hdr,
+                hdr_base | (tier.wire() << CM2_TIER_SHIFT),
+                "tier {tier:?}: header must differ from base in the tier bits only"
+            );
+        }
     }
 
     /// The reciprocal path must equal `/` exactly on its full declared domain:
