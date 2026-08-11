@@ -499,6 +499,130 @@ class AdmissionSealTests(unittest.TestCase):
         arguments.update(overrides)
         return g4.build_g5_admission_seal(**arguments)
 
+    def complete_identity(self) -> dict:
+        return self.seal(reuse_decision="REUSED_IDENTITY_MATCH")
+
+    def test_complete_identical_identity_is_reusable(self) -> None:
+        identity = self.complete_identity()
+        self.assertEqual(
+            g4.g5_reuse_decision(identity, copy.deepcopy(identity)),
+            "REUSED_IDENTITY_MATCH",
+        )
+
+    def test_missing_identity_axes_are_rejected(self) -> None:
+        identity = self.complete_identity()
+        axis_field_variants = {
+            "mapper_sha256": (("mapper_sha256",),),
+            "mapper_test_sha256": (("mapper_test_sha256",),),
+            "mapping_schema_sha256": (("mapping_schema_sha256",),),
+            "source_tree": (("source_tree",),),
+            "binary_sha256_build_id": (
+                ("binary_sha256",),
+                ("binary_build_id",),
+                ("binary_sha256", "binary_build_id"),
+            ),
+            "toolchain": (("toolchain",),),
+            "page_size": (("page_size",),),
+            "map_artifacts": (("map_artifacts",),),
+        }
+        self.assertEqual(len(axis_field_variants), 8)
+        for axis, variants in axis_field_variants.items():
+            for fields in variants:
+                with self.subTest(identity_axis=axis, missing_fields=fields):
+                    incomplete = copy.deepcopy(identity)
+                    for field in fields:
+                        incomplete.pop(field)
+                    self.assertEqual(
+                        g4.g5_reuse_decision(incomplete, copy.deepcopy(incomplete)),
+                        "REJECTED_IDENTITY_MISMATCH",
+                    )
+                    self.assertEqual(
+                        g4.g5_reuse_decision(identity, incomplete),
+                        "REJECTED_IDENTITY_MISMATCH",
+                    )
+                    self.assertEqual(
+                        g4.g5_reuse_decision(incomplete, identity),
+                        "REJECTED_IDENTITY_MISMATCH",
+                    )
+
+    def test_partial_identity_is_rejected(self) -> None:
+        identity = self.complete_identity()
+        partials = [
+            {},
+            {"mapper_sha256": identity["mapper_sha256"]},
+            {
+                "mapper_sha256": identity["mapper_sha256"],
+                "mapper_test_sha256": identity["mapper_test_sha256"],
+                "mapping_schema_sha256": identity["mapping_schema_sha256"],
+            },
+        ]
+        for partial in partials:
+            with self.subTest(fields=sorted(partial)):
+                self.assertEqual(
+                    g4.g5_reuse_decision(partial, copy.deepcopy(partial)),
+                    "REJECTED_IDENTITY_MISMATCH",
+                )
+
+    def test_invalid_identity_shapes_and_types_are_rejected(self) -> None:
+        identity = self.complete_identity()
+        invalid_identities: dict[str, object] = {}
+
+        def invalid(label: str, **changes: object) -> None:
+            candidate = copy.deepcopy(identity)
+            candidate.update(changes)
+            invalid_identities[label] = candidate
+
+        invalid("mapper_sha256_type", mapper_sha256=bytes(32))
+        invalid("mapper_sha256_shape", mapper_sha256="A" * 64)
+        invalid("mapper_test_sha256_shape", mapper_test_sha256="6" * 63)
+        invalid("mapping_schema_sha256_shape", mapping_schema_sha256="not-a-sha")
+        invalid("source_tree_shape", source_tree="8" * 39)
+        invalid("binary_sha256_shape", binary_sha256="1" * 63)
+        invalid("binary_build_id_shape", binary_build_id="not-hex")
+        invalid("page_size_bool", page_size=True)
+        invalid("page_size_value", page_size=8192)
+        invalid("toolchain_type", toolchain=[])
+        invalid("toolchain_empty", toolchain={})
+        invalid("toolchain_nested", toolchain={"rustc": {"version": "1.96.1"}})
+        invalid("map_artifacts_type", map_artifacts=())
+        invalid("map_artifacts_empty", map_artifacts=[])
+        invalid("map_artifact_missing_field", map_artifacts=[{
+            "path": "map/a.json", "sha256": "4" * 64,
+        }])
+        invalid("map_artifact_extra_field", map_artifacts=[{
+            "path": "map/a.json", "bytes": 1, "sha256": "4" * 64,
+            "extra": "not-sealed",
+        }])
+        invalid("map_artifact_unsafe_path", map_artifacts=[{
+            "path": "../map/a.json", "bytes": 1, "sha256": "4" * 64,
+        }])
+        invalid("map_artifact_bytes_type", map_artifacts=[{
+            "path": "map/a.json", "bytes": True, "sha256": "4" * 64,
+        }])
+        invalid("map_artifact_sha256_shape", map_artifacts=[{
+            "path": "map/a.json", "bytes": 1, "sha256": "invalid",
+        }])
+        invalid("map_artifact_duplicate_path", map_artifacts=[
+            {"path": "map/a.json", "bytes": 1, "sha256": "4" * 64},
+            {"path": "map/a.json", "bytes": 2, "sha256": "3" * 64},
+        ])
+        invalid("map_artifact_unsorted", map_artifacts=[
+            {"path": "map/z.tsv.gz", "bytes": 2, "sha256": "3" * 64},
+            {"path": "map/a.json", "bytes": 1, "sha256": "4" * 64},
+        ])
+        invalid_identities["outer_list"] = []
+        invalid_identities["outer_none"] = None
+        for label, malformed in invalid_identities.items():
+            with self.subTest(invalid_identity=label):
+                self.assertEqual(
+                    g4.g5_reuse_decision(malformed, copy.deepcopy(malformed)),  # type: ignore[arg-type]
+                    "REJECTED_IDENTITY_MISMATCH",
+                )
+                self.assertEqual(
+                    g4.g5_reuse_decision(identity, malformed),  # type: ignore[arg-type]
+                    "REJECTED_IDENTITY_MISMATCH",
+                )
+
     def test_g4_identity_reuse_is_rejected(self) -> None:
         g4_identity = self.seal(
             mapper_sha256="36226ff6caf35983a97fa472b1433e37f18a6ac4b565d1ae016e27cd957ae5e1",

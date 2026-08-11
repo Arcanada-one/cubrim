@@ -1196,7 +1196,79 @@ def build_g5_admission_seal(*, binary_build_id: str, binary_sha256: str,
     }
 
 
+def _valid_identity_text(value: Any) -> bool:
+    return type(value) is str and bool(value) and not any(
+        character in value for character in "\0\t\r\n"
+    )
+
+
+def _valid_toolchain_identity(value: Any) -> bool:
+    if not isinstance(value, Mapping) or not value:
+        return False
+    for key, item in value.items():
+        if not _valid_identity_text(key):
+            return False
+        if type(item) is str:
+            if not _valid_identity_text(item):
+                return False
+        elif type(item) is int:
+            if item < 0:
+                return False
+        elif type(item) is not bool:
+            return False
+    return True
+
+
+def _valid_map_artifact_identity(value: Any) -> bool:
+    if type(value) is not list or not value:
+        return False
+    paths: list[str] = []
+    for row in value:
+        if type(row) is not dict or set(row) != {"bytes", "path", "sha256"}:
+            return False
+        path = row["path"]
+        if not _valid_identity_text(path):
+            return False
+        pure_path = PurePosixPath(path)
+        if (pure_path.is_absolute() or ".." in pure_path.parts or
+                pure_path.as_posix() != path or path in {".", ".."}):
+            return False
+        if type(row["bytes"]) is not int or row["bytes"] <= 0:
+            return False
+        if type(row["sha256"]) is not str or re.fullmatch(
+                r"[0-9a-f]{64}", row["sha256"]
+        ) is None:
+            return False
+        paths.append(path)
+    return paths == sorted(paths) and len(paths) == len(set(paths))
+
+
+def _valid_g5_reuse_identity(identity: Any) -> bool:
+    if not isinstance(identity, Mapping):
+        return False
+    return (
+        type(identity.get("mapper_sha256")) is str
+        and re.fullmatch(r"[0-9a-f]{64}", identity["mapper_sha256"]) is not None
+        and type(identity.get("mapper_test_sha256")) is str
+        and re.fullmatch(r"[0-9a-f]{64}", identity["mapper_test_sha256"]) is not None
+        and type(identity.get("mapping_schema_sha256")) is str
+        and re.fullmatch(r"[0-9a-f]{64}", identity["mapping_schema_sha256"]) is not None
+        and type(identity.get("source_tree")) is str
+        and re.fullmatch(r"[0-9a-f]{40}", identity["source_tree"]) is not None
+        and type(identity.get("binary_sha256")) is str
+        and re.fullmatch(r"[0-9a-f]{64}", identity["binary_sha256"]) is not None
+        and type(identity.get("binary_build_id")) is str
+        and re.fullmatch(r"[0-9a-f]{40}", identity["binary_build_id"]) is not None
+        and type(identity.get("page_size")) is int
+        and identity["page_size"] == 4096
+        and _valid_toolchain_identity(identity.get("toolchain"))
+        and _valid_map_artifact_identity(identity.get("map_artifacts"))
+    )
+
+
 def g5_reuse_decision(existing: Mapping[str, Any], candidate: Mapping[str, Any]) -> str:
+    if not (_valid_g5_reuse_identity(existing) and _valid_g5_reuse_identity(candidate)):
+        return "REJECTED_IDENTITY_MISMATCH"
     identity_matches = (
         existing.get("mapper_sha256") == candidate.get("mapper_sha256")
         and existing.get("mapper_test_sha256") == candidate.get("mapper_test_sha256")
