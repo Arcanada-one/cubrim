@@ -53,7 +53,7 @@ PINNED_HASHES = {
     "provenance.json": "1d3fef5e8dd141939e9e4b94dc9ea13ef73b9840332ec4c2fea618d749530a80",
     "results.tsv": "c9489a378b9e0a246ca3c594b85146e8d57e970214c105e331b7273b8a420c8f",
     "effects.tsv": "529ff0b05eba3155c4a37a0208aaa37cd5c42ce19e9fd37398351595201c6ee0",
-    "summary.json": "326aeec7d27ff73f6559d87ac6fe96db4712b4a516f9d44a9aa8ca565e341116",
+    "summary.json": "c163d9a8b191e7e69793c4e0b1ba1c2864cc45981ddf60581240b265a3e59ffc",
 }
 
 RESULT_COLUMNS = (
@@ -381,6 +381,21 @@ def _provenance_document(source: Mapping[str, object]) -> dict[str, object]:
 def _summary_document() -> dict[str, object]:
     return {
         "schema": PACKAGE_SCHEMA,
+        # The five independent status layers the plan defines. They are kept
+        # separate on purpose: a later layer must never be able to launder an
+        # earlier one. In particular a PASS here authenticates *stored* claims;
+        # it never asserts that this validator re-ran 7-Zip or reproduced a
+        # measurement, and it never upgrades NO-SELECT into a selection.
+        "status_layers": {
+            "CAPTURE_STATUS": "COMPLETE",
+            "HISTORICAL_VALIDATION_STATUS": "PASS",
+            "SCIENTIFIC_CHARACTERIZATION": "CHARACTERIZED_NO_SELECT",
+            "PRODUCT_SELECTION_STATUS": "NOT_ISSUED",
+            # No supplemental systemd snapshot was ever captured, so the
+            # correlated state is unavailable rather than absent-and-ignored.
+            # Absence is recorded as absence, never as N/A or PASS.
+            "SYSTEMD_CORRELATION_STATUS": "SYSTEMD_EVIDENCE_UNAVAILABLE",
+        },
         "verdict": {
             "outcome": "CHARACTERIZED_NO_SELECT",
             "source_status": "COMPLETE",

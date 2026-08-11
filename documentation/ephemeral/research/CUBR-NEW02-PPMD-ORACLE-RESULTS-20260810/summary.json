@@ -27,6 +27,13 @@
     "observation_cells": 243,
     "per_file_only": true
   },
+  "status_layers": {
+    "CAPTURE_STATUS": "COMPLETE",
+    "HISTORICAL_VALIDATION_STATUS": "PASS",
+    "PRODUCT_SELECTION_STATUS": "NOT_ISSUED",
+    "SCIENTIFIC_CHARACTERIZATION": "CHARACTERIZED_NO_SELECT",
+    "SYSTEMD_CORRELATION_STATUS": "SYSTEMD_EVIDENCE_UNAVAILABLE"
+  },
   "validation": {
     "archive_authentication": "exact per-cell archive SHA-256 and fresh landed 7z inspection",
     "cell_status": "243/243 PASS",
