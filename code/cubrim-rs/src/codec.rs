@@ -285,7 +285,24 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// size pick, so an input that does not benefit falls back byte-identically to the
 /// base encoding (zero regression). Single-block inputs skip the pre-pass entirely.
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
-    encode_with_config_inner(data, config, true, true)
+    let incumbent = encode_with_config_inner(data, config, true, true);
+    // CUBR-0076: the web profile offers one more candidate — a table-driven
+    // static-entropy container (MODE_WEB) whose decode adapts nothing. It is
+    // opt-in and kept only when strictly smaller, so the default path and every
+    // file that does not benefit are byte-identical to before.
+    if config.web_profile {
+        if let Some(web) = crate::prof::track(
+            "web",
+            |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+            || crate::web::encode_web(data),
+        ) {
+            if web.len() < incumbent.len() {
+                crate::prof::win("web");
+                return web;
+            }
+        }
+    }
+    incumbent
 }
 
 /// Inner encoder. `try_binfloat` is false when called recursively to encode one column of a
@@ -5046,6 +5063,18 @@ pub fn decode_with_limits(blob: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>,
                 let (hdr, _) = parse_header(blob)?;
                 crate::limits::validate_header(&hdr, limits)?;
             }
+            // MODE_WEB carries its declared output length in a fixed field, so
+            // the caller's output budget is enforceable before a byte is
+            // decoded rather than after the buffer has grown.
+            crate::header::MODE_WEB if blob.len() >= 10 => {
+                let declared = u32::from_be_bytes([blob[6], blob[7], blob[8], blob[9]]) as usize;
+                if declared > limits.max_output_size {
+                    return Err(CubrimError::Decode(format!(
+                        "MODE_WEB: declared output {declared} exceeds the limit {}",
+                        limits.max_output_size
+                    )));
+                }
+            }
             _ => {}
         }
     }
@@ -5103,6 +5132,9 @@ fn decode_unlimited(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_GEOCM {
             return decode_geocm(blob);
+        }
+        if blob[5] == crate::header::MODE_WEB {
+            return crate::web::decode_web(blob);
         }
         if blob[5] == MODE_LARGEBWT {
             return decode_large_bwt(blob);
