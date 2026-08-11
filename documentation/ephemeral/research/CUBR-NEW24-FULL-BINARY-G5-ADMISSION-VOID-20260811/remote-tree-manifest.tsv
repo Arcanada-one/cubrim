@@ -1,0 +1,6 @@
+	d	500	4096
+FAILED.STAMP	f	444	115
+preflight	d	500	4096
+preflight/journal.tsv	f	444	193
+cd43d8eb4c9c6ff76659f1ffe33f4d80a35678083b646cf9dc94bcca1e45e4e8	115	FAILED.STAMP
+0203131c33cf51508ef12d47b27be41e956db5e847a7b02c4e620d4cfe8bb4bc	193	preflight/journal.tsv
