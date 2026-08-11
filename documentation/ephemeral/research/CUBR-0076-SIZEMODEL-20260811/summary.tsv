@@ -1,0 +1,22 @@
+variant	parse_chain	samples	total_bytes	vs_gzip9	vs_brotli11	vs_static_today	beats_gzip9	beats_brotli11	beats_static_today
+V1-whole-file	1024	12	131829	1.020404	1.21507	0.833164	False	False	True
+V1-whole-file	128	12	132766	1.027656	1.223706	0.839086	False	False	True
+V1-whole-file	16	12	136415	1.055901	1.257339	0.862147	False	False	True
+V1-whole-file	opt256	12	123192	0.95355	1.135462	0.778578	True	False	True
+V2-64KiB-blocks	1024	12	135740	1.050676	1.251118	0.857881	False	False	True
+V2-64KiB-blocks	128	12	136422	1.055955	1.257404	0.862192	False	False	True
+V2-64KiB-blocks	16	12	139639	1.080856	1.287055	0.882523	False	False	True
+V2-64KiB-blocks	opt256	12	128127	0.991749	1.180948	0.809767	True	False	True
+V3-whole-file-ctx2	1024	12	131589	1.018546	1.212858	0.831647	False	False	True
+V3-whole-file-ctx2	128	12	132487	1.025497	1.221135	0.837322	False	False	True
+V3-whole-file-ctx2	16	12	136042	1.053014	1.253901	0.85979	False	False	True
+V3-whole-file-ctx2	opt256	12	123153	0.953248	1.135103	0.778331	True	False	True
+V3-whole-file-ctx3	1024	12	130714	1.011773	1.204793	0.826117	False	False	True
+V3-whole-file-ctx3	128	12	131607	1.018685	1.213024	0.831761	False	False	True
+V3-whole-file-ctx3	16	12	135144	1.046063	1.245624	0.854115	False	False	True
+V3-whole-file-ctx3	opt256	12	121691	0.941932	1.121628	0.769091	True	False	True
+V4-64KiB-blocks-ctx2	1024	12	135711	1.050452	1.25085	0.857698	False	False	True
+V4-64KiB-blocks-ctx2	128	12	136356	1.055444	1.256795	0.861775	False	False	True
+V4-64KiB-blocks-ctx2	16	12	139475	1.079586	1.285543	0.881487	False	False	True
+V4-64KiB-blocks-ctx2	opt256	12	128356	0.993521	1.183059	0.811214	True	False	True
+BEST-PER-FILE(scheme byte selects)	mixed	12	121608	0.941289	1.120863	0.768567	True	False	True

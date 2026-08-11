@@ -1,0 +1,67 @@
+CUBR-0076 charged size-model spike — provenance
+Executed: 2026-08-11 UTC
+Task: CUBR-0076 (hypothesis 13, table-driven-entropy-stage)
+
+Question: the density a table-driven (static-table, zero decode-time
+adaptation) value scheme can hold on the real web census, with EVERY decoder
+branch charged, static tables in the header included.
+
+Scope: bytes only. NO timing claim of any kind appears in this experiment.
+No src/ change, no Rust, no DB write, evaluation stays 0. Load-insensitive:
+byte counts are identical on any host.
+
+Preregistration (decision rule + falsifiable prediction, committed BEFORE the
+model existed):
+  documentation/ephemeral/research/CUBR-0076-SIZEMODEL-PREREG-20260811.md
+  commit c39f957123593217ecca302ffd70bb0f2e1ec5bf
+  pushed to origin/cubr-0076-size-model-spike before size_model.py was written.
+Design base: 472be81dae400c29460d3f88092d9e19e5424a20 (= origin/main when the
+preregistration was written; origin/main advanced during execution — the
+archival lane lands continuously — which changes nothing here, because every
+input this spike reads is present and unchanged at the design base).
+
+Host: arcana-devs (Intel i9-9900K). Host identity is recorded for
+traceability only; no wall-clock or throughput number is claimed from it.
+Python: 3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]
+No third-party Python packages are used. Standard library only.
+
+Artefact sha256:
+  size_model.py       8a03c6e4404eb07ed7c2724e552baab6275a709bb38adf4a874b892c755e2485
+  driver.py           14e39d9e4560c18527efed9cd35f1af88fc3f85ff5c752efe9bfd870661b8f87
+  test_size_model.py  f8a3bb7458ac9cd7f062cc3a608ab8098213c288e7285afa598a4d70c9707527
+
+Inputs (all already on main, none re-derived):
+  bench/web-corpus/manifest.v2.json and payloads-v2/  — every payload's
+    sha256 is re-verified against the manifest by driver.py at run time; a
+    mismatch aborts the run rather than degrading it.
+  .../CUBR-0076-DENSITY-20260806/baselines.tsv        — gzip9 / brotli11 / zstd19
+  .../CUBR-0076-DENSITY-20260806/static-detail.tsv    — today's static family
+  .../CUBR-0076-WEBMODE-CENSUS-20260806/census.tsv    — CM2 champion
+
+Column-provenance caveat carried from the preregistration: static-detail.tsv's
+header row is offset by one against its data rows. The bytes of the best
+static scheme are in the field labelled "static_stream"; the field labelled
+"static_min" holds the scheme NAME. driver.py reads the bytes field and says
+so in a comment at the read site.
+
+Soundness gates (all green before any number below was read):
+  python3 test_size_model.py  ->  0 failure(s), 23 tests
+  including: every token stream reconstructs its input byte-exactly; Kraft
+  equality and the 15-bit length limit on every constructed code; itemised
+  branch charges sum exactly to the reported size; the store floor is never
+  undercut; the Charge dataclass exposes exactly the preregistered branch set.
+
+Reproduce:
+  cd documentation/ephemeral/research/CUBR-0076-SIZEMODEL-20260811
+  python3 test_size_model.py
+  python3 driver.py
+Deterministic: no randomness in the model or the driver (the test suite seeds
+its own generators). Re-running reproduces results.tsv and summary.tsv byte
+for byte.
+
+Outputs:
+  results.tsv  — one row per (sample, variant, parse tier): itemised charge in
+                 bits per decoder branch, modelled/store/chosen bytes, and the
+                 four reference numbers for that sample.
+  summary.tsv  — aggregate per configuration, and the per-file best-of
+                 (what the scheme byte would actually select).
