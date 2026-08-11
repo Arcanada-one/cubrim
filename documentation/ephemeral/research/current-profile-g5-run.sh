@@ -15,7 +15,32 @@ readonly CUBRIM=$PROFILE_TARGET/release/cubrim
 readonly CODE_COMMIT=830a9a31deb00926a97f3fa5bd74f58003573fc0
 readonly CORPUS_MANIFEST=/root/phaseC/corpus_manifest.tsv
 readonly CORPUS_ROOT=/root/corpus-full/silesia
-readonly OUT=/root/cubr-new24-full-binary-g5-20260810
+
+case ${1:-} in
+    --admission-feasibility|--self-test-mode-roots) RUN_MODE=admission ;;
+    *) RUN_MODE=campaign ;;
+esac
+readonly RUN_MODE
+
+ROOT_PREFIX=${CUBR_G5_TEST_ROOT_PREFIX:-}
+if [[ -n $ROOT_PREFIX && ${1:-} != --self-test-mode-roots ]]; then
+    printf 'current_profile_g5_contract=HARNESS_INVALID reason=test root outside root self-test\n' >&2
+    exit 2
+fi
+if [[ -n $ROOT_PREFIX ]]; then
+    CAMPAIGN_OUT=$ROOT_PREFIX/cubr-new24-full-binary-g5-20260810
+    ADMISSION_OUT=$ROOT_PREFIX/cubr-new24-full-binary-g5-map-dryrun-20260810
+else
+    CAMPAIGN_OUT=/root/cubr-new24-full-binary-g5-20260810
+    ADMISSION_OUT=/root/cubr-new24-full-binary-g5-map-dryrun-20260810
+fi
+readonly ROOT_PREFIX CAMPAIGN_OUT ADMISSION_OUT
+if [[ $RUN_MODE == admission ]]; then
+    OUT=$ADMISSION_OUT
+else
+    OUT=$CAMPAIGN_OUT
+fi
+readonly OUT
 readonly PARTIAL=$OUT.partial
 readonly PUBLISHING=$OUT.publishing
 readonly LATE=$OUT.late
@@ -98,20 +123,56 @@ sha() { /usr/bin/sha256sum -- "$1" | /usr/bin/awk '{print $1}'; }
 
 json_value() {
     /usr/bin/python3 - "$1" "$2" <<'PY'
-import json, os, pathlib, sys
-path, key = pathlib.Path(sys.argv[1]), sys.argv[2]
-fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+import json, os, stat, sys
+path, key = sys.argv[1:]
+fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
 try:
-    with os.fdopen(fd, encoding="utf-8") as handle:
-        value = json.load(handle)[key]
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        raise SystemExit("JSON input is not regular")
+    with os.fdopen(fd, "r", encoding="utf-8") as handle:
+        value = json.load(handle).get(key)
+    fd = -1
 finally:
-    try:
+    if fd >= 0:
         os.close(fd)
-    except OSError:
-        pass
 if isinstance(value, (dict, list)) or value is None:
-    raise SystemExit("JSON value is not scalar")
-print(str(value))
+    raise SystemExit(f"missing or nonscalar JSON key: {key}")
+print(str(value).lower() if isinstance(value, bool) else value)
+PY
+}
+
+write_new_checked() {
+    /usr/bin/python3 - "$1" "$2" <<'PY'
+import hashlib, os, secrets, sys
+from pathlib import Path
+target, source = map(Path, sys.argv[1:])
+payload = source.read_bytes()
+parent = target.parent
+tmp = parent / ("." + target.name + "." + secrets.token_hex(16) + ".tmp")
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+try:
+    view = memoryview(payload)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise OSError("zero-progress identity write")
+        view = view[written:]
+    os.fsync(fd)
+finally:
+    os.close(fd)
+try:
+    os.link(tmp, target, follow_symlinks=False)
+finally:
+    os.unlink(tmp)
+dirfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    os.fsync(dirfd)
+finally:
+    os.close(dirfd)
+if target.read_bytes() != payload:
+    raise SystemExit("identity readback mismatch")
+os.chmod(target, 0o444, follow_symlinks=False)
 PY
 }
 monotonic_ns() {
@@ -747,8 +808,9 @@ build_full_instruction_map_worker() {
 }
 
 build_full_instruction_map() {
-    local map_dir=$PARTIAL/map elapsed_file=$PARTIAL/map/full-map-resource.txt
+    local map_dir=$PARTIAL/map evidence_root elapsed_file=$PARTIAL/map/full-map-resource.txt
     local start end elapsed remaining limit
+    evidence_root=${map_dir%/map}
     /usr/bin/mkdir -p -- "$map_dir"
     start=$(monotonic_seconds)
     remaining=$(remaining_command_budget_seconds)
@@ -836,40 +898,8 @@ observed = {path.name for path in evidence_root.glob("g5-full-instruction-map.pa
 if observed != declared:
     raise SystemExit("map manifest has extra or missing parts")
 PY
-    /usr/bin/python3 - "$PREFLIGHT_DIR/map-toolchain.json" \
-        "$($RUSTC -vV | /usr/bin/tr '\n' ';')" "$($CARGO --version)" \
-        "$(/usr/bin/readelf --version | /usr/bin/awk 'NR == 1 {print; exit}')" \
-        "$(/usr/bin/objdump --version | /usr/bin/awk 'NR == 1 {print; exit}')" \
-        "$(/usr/bin/addr2line --version | /usr/bin/awk 'NR == 1 {print; exit}')" \
-        "$(/usr/bin/gzip --version | /usr/bin/awk 'NR == 1 {print; exit}')" <<'PY'
-import json, os, pathlib, sys
-target_arg, rustc, cargo, readelf, objdump, addr2line, gzip = sys.argv[1:]
-target = pathlib.Path(target_arg)
-toolchain = {
-    "addr2line": addr2line,
-    "cargo": cargo,
-    "compression": "gzip -n -9",
-    "gzip": gzip,
-    "max_object_bytes": 90000000,
-    "objdump": objdump,
-    "readelf": readelf,
-    "rustc": rustc,
-}
-payload = (json.dumps(toolchain, sort_keys=True, separators=(",", ":")) + "\n").encode()
-fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o444)
-try:
-    view = memoryview(payload)
-    while view:
-        written = os.write(fd, view)
-        if written <= 0:
-            raise SystemExit("map toolchain identity short write")
-        view = view[written:]
-    os.fsync(fd)
-finally:
-    os.close(fd)
-PY
     /usr/bin/python3 "$MAPPER" seal-admission \
-        --input-root "$PARTIAL" --output-root "$PARTIAL/map" \
+        --input-root "$evidence_root" --output-root "$map_dir" \
         --binary-build-id "$BINARY_BUILD_ID" --binary-sha256 "$EXPECTED_BINARY_SHA" \
         --instrument-resulting-main "$INSTRUMENT_COMMIT" \
         --mapper-sha256 "$EXPECTED_MAPPER_SHA" --mapper-test-sha256 "$EXPECTED_MAPPER_TEST_SHA" \
@@ -881,13 +911,13 @@ PY
         --map-summary map/map-summary.json.gz \
         --raw-stream-evidence map/raw-stream-evidence.tsv \
         --seal-out map-admission-seal.json
-    test -f "$PARTIAL/map/map-admission-seal.json"
-    test ! -e "$PARTIAL/map/map/map-admission-seal.json"
-    test "$(json_value "$PARTIAL/map/map-admission-seal.json" schema)" = \
+    test -f "$map_dir/map-admission-seal.json"
+    test ! -e "$map_dir/map/map-admission-seal.json"
+    test "$(json_value "$map_dir/map-admission-seal.json" schema)" = \
         cubr-new24-g5-map-admission-seal-v1
-    test "$(json_value "$PARTIAL/map/map-admission-seal.json" reuse_decision)" = \
+    test "$(json_value "$map_dir/map-admission-seal.json" reuse_decision)" = \
         REJECTED_IDENTITY_MISMATCH
-    MAP_SEAL_SHA256=$(sha "$PARTIAL/map/map-admission-seal.json")
+    MAP_SEAL_SHA256=$(sha "$map_dir/map-admission-seal.json")
     freeze_admitted_binary_identity
 }
 
@@ -1759,6 +1789,340 @@ self_test_fail() {
     exit 1
 }
 
+self_test_mode_roots() {
+    [[ $RUN_MODE == admission && -n $ROOT_PREFIX ]] || {
+        printf 'current_profile_g5_mode_root_test=FAIL unsafe-mode\n'
+        exit 1
+    }
+    refuse_existing_output
+    /usr/bin/mkdir -m 0700 -- "$PARTIAL"
+    /usr/bin/printf 'mode=admission\nperformance_sample=NO\n' >"$PARTIAL/MODE-ROOT.PASS"
+    /usr/bin/chmod 0444 -- "$PARTIAL/MODE-ROOT.PASS"
+    /usr/bin/chmod 0555 -- "$PARTIAL"
+    /usr/bin/mv -T --no-clobber -- "$PARTIAL" "$OUT"
+    printf 'current_profile_g5_mode_root_test=PASS\n'
+}
+
+verify_launch_identity_files() {
+    /usr/bin/python3 - "$1" "$2" <<'PY'
+from pathlib import Path
+import re, sys
+prereg, identity = map(Path, sys.argv[1:])
+begin = "<!-- g5-protected-launch-identities-v1-begin -->\n"
+end = "<!-- g5-protected-launch-identities-v1-end -->"
+text = prereg.read_text(encoding="utf-8")
+if text.count(begin) != 1 or text.count(end) != 1:
+    raise SystemExit("launch identity markers must occur exactly once")
+block = text.split(begin, 1)[1].split(end, 1)[0]
+canonical = identity.read_text(encoding="utf-8")
+if block != canonical:
+    raise SystemExit("preregistration block and identity file differ")
+keys = (
+    "schema original_prereg_blob g4_terminal_journal_sha256 g4_terminal_journal_bytes "
+    "g4_failure_manifest_sha256 g4_failure_manifest_bytes g4_capability_probe_count "
+    "g4_perf_data_count g4_campaign_cell_count g4_campaign_sample_row_count g4_terminal_gate "
+    "g4_verdict instrument_resulting_main instrument_tree runner_blob runner_sha256 "
+    "runner_test_blob runner_test_sha256 mapper_blob mapper_sha256 mapper_test_blob "
+    "mapper_test_sha256 source_commit source_tree cubrim_rs_tree cargo_inputs_manifest_sha256 "
+    "generated_cargo_lock_sha256 rustc_commit rustc_version cargo_version release_flags "
+    "binary_sha256 binary_build_id binary_size binary_device binary_inode mapping_schema_sha256 "
+    "corpus_manifest_sha256 corpus_rows_sha256 map_stream_sha256 map_manifest_sha256 "
+    "map_summary_sha256 map_row_count map_part_count map_seal_sha256 "
+    "sanitized_allowlist_contract_sha256 runner_contract_test_sha256 runner_contract_test_bytes "
+    "live_fixture_result_sha256 live_fixture_result_bytes live_fixture_test_output_sha256 "
+    "live_fixture_test_output_bytes performance_sample campaign_cells retained_perf_data "
+    "campaign_sample_rows selection admission_identity_set_sha256 admission_identity_set_bytes"
+).split()
+lines = canonical.splitlines()
+if len(lines) != len(keys):
+    raise SystemExit(f"launch identity key count mismatch: {len(lines)}")
+parsed = {}
+for expected, line in zip(keys, lines):
+    key, sep, value = line.partition("=")
+    if not sep or key != expected or key in parsed or not value:
+        raise SystemExit(f"invalid or reordered launch identity: {line!r}")
+    if any(ord(ch) < 0x20 or ord(ch) > 0x7e for ch in value):
+        raise SystemExit(f"control or non-ASCII value: {key}")
+    parsed[key] = value
+hex40 = {k for k in keys if k.endswith(("_blob", "_tree", "_commit", "_main"))}
+hex64 = {k for k in keys if k.endswith("_sha256")}
+integers = {k for k in keys if k.endswith(("_bytes", "_count", "_size", "_device", "_inode"))}
+hex40.add("binary_build_id")
+for key in hex40:
+    if not re.fullmatch(r"[0-9a-f]{40}", parsed[key]):
+        raise SystemExit(f"invalid Git identity: {key}")
+for key in hex64:
+    if not re.fullmatch(r"[0-9a-f]{64}", parsed[key]):
+        raise SystemExit(f"invalid SHA-256 identity: {key}")
+for key in integers:
+    if not re.fullmatch(r"0|[1-9][0-9]*", parsed[key]):
+        raise SystemExit(f"invalid integer identity: {key}")
+required_literals = {
+    "schema": "g5-protected-launch-identities-v1",
+    "original_prereg_blob": "5a0eb4c18b2cd407d0135e0ca2130b3b27d84b6f",
+    "g4_capability_probe_count": "9", "g4_perf_data_count": "0",
+    "g4_campaign_cell_count": "0", "g4_campaign_sample_row_count": "0",
+    "g4_terminal_gate": "admission-runner-contract", "g4_verdict": "VOID-NO-SELECT",
+    "source_commit": "830a9a31deb00926a97f3fa5bd74f58003573fc0",
+    "performance_sample": "NO", "campaign_cells": "0", "retained_perf_data": "0",
+    "campaign_sample_rows": "0", "selection": "NO-SELECT",
+}
+for key, expected in required_literals.items():
+    if parsed[key] != expected:
+        raise SystemExit(f"fixed launch identity mismatch: {key}")
+print(f"current_profile_g5_launch_identity_parser=PASS schema={parsed['schema']} keys={len(keys)}")
+PY
+}
+
+persist_authenticated_admission_identity() {
+    local source=${CUBR_ADMISSION_IDENTITY_SET:?missing admission identity path}
+    local expected_sha=${CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256:?missing admission identity SHA}
+    local expected_bytes=${CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES:?missing admission identity bytes}
+    local target=$PREFLIGHT_DIR/admission-sealed-identity-set.env
+    [[ $expected_sha =~ ^[0-9a-f]{64}$ && $expected_bytes =~ ^(0|[1-9][0-9]*)$ ]] ||
+        die 'invalid sealed admission identity expectation'
+    [[ -f $source && ! -L $source ]] || die 'unsafe sealed admission identity source'
+    [[ $(sha "$source") == "$expected_sha" ]] || die 'sealed admission identity SHA mismatch'
+    [[ $(/usr/bin/stat -c %s -- "$source") == "$expected_bytes" ]] ||
+        die 'sealed admission identity byte mismatch'
+    /usr/bin/install -m 0444 -- "$source" "$target"
+    [[ $(sha "$target") == "$expected_sha" ]] || die 'persisted admission identity SHA mismatch'
+    [[ $(/usr/bin/stat -c %s -- "$target") == "$expected_bytes" ]] ||
+        die 'persisted admission identity byte mismatch'
+}
+
+launch_identity_value() {
+    /usr/bin/awk -F= -v wanted="$1" '$1 == wanted { print substr($0, index($0, "=") + 1) }' \
+        "$CUBR_LAUNCH_IDENTITIES"
+}
+
+authenticate_campaign_launch_inputs() {
+    local parser_output actual_prereg_blob actual_identities_blob
+    [[ $CUBR_LAUNCH_MAIN =~ ^[0-9a-f]{40}$ && $CUBR_EXPECTED_PREREG_BLOB =~ ^[0-9a-f]{40}$ &&
+       $CUBR_EXPECTED_IDENTITIES_BLOB =~ ^[0-9a-f]{40}$ ]] || die 'invalid launch Git identity'
+    /usr/bin/git -C "$INSTRUMENT_REPO" merge-base --is-ancestor \
+        "$INSTRUMENT_COMMIT" "$CUBR_LAUNCH_MAIN" || die 'instrument is not ancestor of launch main'
+    actual_prereg_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
+        "$CUBR_LAUNCH_MAIN:documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G5-20260810.md")
+    actual_identities_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
+        "$CUBR_LAUNCH_MAIN:documentation/ephemeral/research/CUBR-NEW24-FULL-BINARY-G5-LAUNCH-IDENTITIES-20260810.env")
+    [[ $actual_prereg_blob == "$CUBR_EXPECTED_PREREG_BLOB" ]] ||
+        die 'launch-main preregistration blob mismatch'
+    [[ $actual_identities_blob == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]] ||
+        die 'launch-main identity blob mismatch'
+    parser_output=$(verify_launch_identity_files "$CUBR_LAUNCH_PREREG" "$CUBR_LAUNCH_IDENTITIES")
+    [[ $parser_output == 'current_profile_g5_launch_identity_parser=PASS schema=g5-protected-launch-identities-v1 keys=59' ]] ||
+        die 'protected launch identity parser output mismatch'
+    [[ $(/usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_PREREG") == "$CUBR_EXPECTED_PREREG_BLOB" ]] ||
+        die 'launch preregistration blob mismatch'
+    [[ $(/usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_IDENTITIES") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]] ||
+        die 'launch identity blob mismatch'
+    [[ $(launch_identity_value instrument_resulting_main) == "$INSTRUMENT_COMMIT" ]] ||
+        die 'launch instrument commit mismatch'
+    [[ $(launch_identity_value runner_sha256) == "$EXPECTED_RUNNER_SHA" &&
+       $(launch_identity_value runner_test_sha256) == "$EXPECTED_TEST_SHA" &&
+       $(launch_identity_value mapper_sha256) == "$EXPECTED_MAPPER_SHA" &&
+       $(launch_identity_value mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
+        die 'launch runtime asset identity mismatch'
+    [[ $(sha "${BASH_SOURCE[0]}") == "$EXPECTED_RUNNER_SHA" &&
+       $(sha "$RUNNER_TEST_SOURCE") == "$EXPECTED_TEST_SHA" &&
+       $(sha "$MAPPER_SOURCE") == "$EXPECTED_MAPPER_SHA" &&
+       $(sha "$MAPPER_TEST_SOURCE") == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
+        die 'installed runtime asset identity mismatch'
+    [[ $(launch_identity_value admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256" &&
+       $(launch_identity_value admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES" ]] ||
+        die 'launch admission identity expectation mismatch'
+    printf '%s\n' "$parser_output" >"$PREFLIGHT_DIR/launch-identity-parser.txt"
+    /usr/bin/chmod 0444 -- "$PREFLIGHT_DIR/launch-identity-parser.txt"
+    persist_authenticated_admission_identity
+}
+
+capture_g5_identity_inputs() {
+/root/.cargo/bin/rustc -vV >"$PREFLIGHT_DIR/rustc-version.txt"
+/root/.cargo/bin/cargo -V >"$PREFLIGHT_DIR/cargo-version.txt"
+/usr/bin/find "$CODE_DIR/code/cubrim-rs" -xdev -type f \
+  \( -name Cargo.toml -o -name Cargo.lock -o -name build.rs -o -name '*.rs' \) \
+  -print0 | LC_ALL=C /usr/bin/sort -z | /usr/bin/xargs -0 /usr/bin/sha256sum \
+  >"$PREFLIGHT_DIR/cargo-inputs-manifest.tsv"
+/usr/bin/chmod 0444 "$PREFLIGHT_DIR/rustc-version.txt" \
+  "$PREFLIGHT_DIR/cargo-version.txt" "$PREFLIGHT_DIR/cargo-inputs-manifest.tsv"
+/usr/bin/python3 - "$PREFLIGHT_DIR/rustc-version.txt" \
+  "$PREFLIGHT_DIR/cargo-version.txt" "$PREFLIGHT_DIR/map-toolchain.json" <<'PY'
+import json, pathlib, sys
+rustc, cargo, target = map(pathlib.Path, sys.argv[1:])
+value = {"cargo": cargo.read_text().strip(), "release_debug": "1",
+         "rustc": rustc.read_text().strip(), "taskset": "0-15", "threads": 4}
+target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+PY
+/usr/bin/chmod 0444 "$PREFLIGHT_DIR/map-toolchain.json"
+contract_tmp=$PREFLIGHT_DIR/sanitized-environment-contract.txt.source
+{
+  printf 'schema=g5-sanitized-environment-contract-v1\n'
+  printf 'pure_mock=LC_ALL,PATH,CUBR_SYSTEMD_UNIT\n'
+  printf 'outer_user_systemd=LC_ALL,PATH,HOME,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS\n'
+  printf 'service_outer=HOME,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,CUBR_THREADS,RAYON_NUM_THREADS,OMP_NUM_THREADS,MKL_NUM_THREADS\n'
+  printf 'child_boundary=env-i\n'
+} >"$contract_tmp"
+write_new_checked "$PREFLIGHT_DIR/sanitized-environment-contract.txt" "$contract_tmp"
+/usr/bin/rm -- "$contract_tmp"
+}
+
+assert_admission_has_no_performance() {
+    local root=$1 perf_count address_raw_count cell_dir_count max_min_summary_count
+    local attribution_count pstat_count prec_count cell_journal_count
+    perf_count=$(/usr/bin/find "$root" -type f -name perf.data -printf '.\n' | /usr/bin/wc -l)
+    address_raw_count=$(/usr/bin/find "$root" -type f \
+        \( -name address-smoke.data -o -name address-smoke.perf-script.txt \
+        -o -name address-smoke.buildid-list.txt \) -printf '.\n' | /usr/bin/wc -l)
+    cell_dir_count=$(/usr/bin/find "$root" -type d \
+        -path "$root/cells/silesia-*" -printf '.\n' | /usr/bin/wc -l)
+    max_min_summary_count=$(/usr/bin/find "$root" -type f \
+        \( -path '*/silesia-*-max/attribution-summary.json' -o \
+        -path '*/silesia-*-min/attribution-summary.json' \) -printf '.\n' | /usr/bin/wc -l)
+    attribution_count=$(/usr/bin/find "$root" -type f -name attribution-summary.json \
+        -printf '.\n' | /usr/bin/wc -l)
+    pstat_count=$(/usr/bin/find "$root" -type f -name 'pstat*.perf-stat.csv' \
+        -printf '.\n' | /usr/bin/wc -l)
+    prec_count=$(/usr/bin/find "$root" -type f \
+        \( -name 'prec*.data' -o -name 'prec*.perf-script.txt' \
+        -o -name 'prec*.buildid-list.txt' -o -name 'prec*.record.json' \
+        -o -name 'prec*.time.txt' \) -printf '.\n' | /usr/bin/wc -l)
+    cell_journal_count=$(/usr/bin/awk -F '\t' \
+        '{ for (i=1; i<=NF; i++) if ($i ~ /^cell=/) count++ } END { print count+0 }' \
+        "$JOURNAL")
+    [[ $perf_count == 0 ]] || die 'admission retained perf.data'
+    [[ $address_raw_count == 0 ]] || die 'admission retained address-smoke raw artifact'
+    [[ $max_min_summary_count == 0 ]] || die 'admission contains max/min attribution summary'
+    [[ $attribution_count == 0 ]] || die 'admission contains attribution summary'
+    [[ $pstat_count == 0 ]] || die 'admission contains pstat artifact'
+    [[ $prec_count == 0 ]] || die 'admission contains prec artifact'
+    [[ $cell_dir_count == 0 ]] || die 'admission contains campaign cell directory'
+    [[ $cell_journal_count == 0 ]] || die 'admission journal contains cell row'
+}
+
+write_g5_admission_identity_set() {
+    local root=$1 target tmp
+    local instrument_tree source_tree cubrim_rs_tree runner_blob runner_test_blob
+    local mapper_blob mapper_test_blob rustc_version cargo_version release_flags
+    local binary_size binary_device binary_inode map_stream_sha map_manifest_sha
+    local map_summary_sha map_row_count map_part_count map_seal_sha
+    target=$root/sealed-identity-set.env
+    instrument_tree=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse 'HEAD^{tree}')
+    source_tree=$(/usr/bin/git -C "$CODE_DIR" rev-parse 'HEAD^{tree}')
+    cubrim_rs_tree=$(/usr/bin/git -C "$CODE_DIR" rev-parse HEAD:code/cubrim-rs)
+    runner_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
+        "$INSTRUMENT_COMMIT:documentation/ephemeral/research/current-profile-g5-run.sh")
+    runner_test_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
+        "$INSTRUMENT_COMMIT:documentation/ephemeral/research/current-profile-g5-run-test.sh")
+    mapper_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
+        "$INSTRUMENT_COMMIT:documentation/ephemeral/research/current_profile_g5_map.py")
+    mapper_test_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
+        "$INSTRUMENT_COMMIT:documentation/ephemeral/research/test_current_profile_g5_map.py")
+    rustc_version=$(/usr/bin/tr '\n' ';' <"$PREFLIGHT_DIR/rustc-version.txt")
+    cargo_version=$(/usr/bin/tr '\n' ';' <"$PREFLIGHT_DIR/cargo-version.txt")
+    release_flags='CARGO_PROFILE_RELEASE_DEBUG=1;debug_assertions=false;CUBR_THREADS=4;RAYON_NUM_THREADS=4;OMP_NUM_THREADS=4;MKL_NUM_THREADS=4;taskset=0-15'
+    binary_size=$(/usr/bin/stat -c %s -- "$MEASURED_BINARY")
+    binary_device=$(/usr/bin/stat -c %d -- "$MEASURED_BINARY")
+    binary_inode=$(/usr/bin/stat -c %i -- "$MEASURED_BINARY")
+    map_stream_sha=$(json_value "$root/map/map-parts-manifest.json" full_uncompressed_sha256)
+    map_manifest_sha=$(sha "$root/map/map-parts-manifest.json")
+    map_summary_sha=$(sha "$root/map/map-summary.json.gz")
+    map_row_count=$(json_value "$root/map/map-parts-manifest.json" row_count)
+    map_part_count=$(json_value "$root/map/map-parts-manifest.json" part_count)
+    map_seal_sha=$(sha "$root/map/map-admission-seal.json")
+    tmp=$target.tmp
+    {
+        printf 'schema=g5-admission-identity-set-v1\n'
+        printf 'instrument_resulting_main=%s\n' "$INSTRUMENT_COMMIT"
+        printf 'instrument_tree=%s\n' "$instrument_tree"
+        printf 'runner_blob=%s\nrunner_sha256=%s\n' "$runner_blob" "$EXPECTED_RUNNER_SHA"
+        printf 'runner_test_blob=%s\nrunner_test_sha256=%s\n' "$runner_test_blob" "$EXPECTED_TEST_SHA"
+        printf 'mapper_blob=%s\nmapper_sha256=%s\n' "$mapper_blob" "$EXPECTED_MAPPER_SHA"
+        printf 'mapper_test_blob=%s\nmapper_test_sha256=%s\n' "$mapper_test_blob" "$EXPECTED_MAPPER_TEST_SHA"
+        printf 'source_commit=%s\nsource_tree=%s\ncubrim_rs_tree=%s\n' "$CODE_COMMIT" "$source_tree" "$cubrim_rs_tree"
+        printf 'cargo_inputs_manifest_sha256=%s\n' "$(sha "$PREFLIGHT_DIR/cargo-inputs-manifest.tsv")"
+        printf 'generated_cargo_lock_sha256=%s\n' "$(sha "$root/suites/generated-Cargo.lock")"
+        printf 'rustc_commit=%s\nrustc_version=%s\ncargo_version=%s\nrelease_flags=%s\n' \
+            "$EXPECTED_RUSTC_COMMIT" "$rustc_version" "$cargo_version" "$release_flags"
+        printf 'binary_sha256=%s\nbinary_build_id=%s\nbinary_size=%s\nbinary_device=%s\nbinary_inode=%s\n' \
+            "$(sha "$MEASURED_BINARY")" "$BINARY_BUILD_ID" "$binary_size" "$binary_device" "$binary_inode"
+        printf 'mapping_schema_sha256=%s\n' "$MAPPING_SCHEMA_SHA256"
+        printf 'corpus_manifest_sha256=%s\ncorpus_rows_sha256=%s\n' \
+            "$(sha "$CORPUS_MANIFEST")" "$(sha "$PREFLIGHT_DIR/cell-inputs.tsv")"
+        printf 'map_stream_sha256=%s\nmap_manifest_sha256=%s\nmap_summary_sha256=%s\n' \
+            "$map_stream_sha" "$map_manifest_sha" "$map_summary_sha"
+        printf 'map_row_count=%s\nmap_part_count=%s\nmap_seal_sha256=%s\n' \
+            "$map_row_count" "$map_part_count" "$map_seal_sha"
+        printf 'sanitized_allowlist_contract_sha256=%s\n' \
+            "$(sha "$PREFLIGHT_DIR/sanitized-environment-contract.txt")"
+        printf 'runner_contract_test_sha256=%s\nrunner_contract_test_bytes=%s\n' \
+            "$(sha "$PREFLIGHT_DIR/runner-contract-test.txt")" \
+            "$(/usr/bin/stat -c %s -- "$PREFLIGHT_DIR/runner-contract-test.txt")"
+        printf 'live_fixture_result_sha256=%s\nlive_fixture_result_bytes=%s\n' \
+            "$(sha "$PREFLIGHT_DIR/live-fixture/cgroup-live.tsv")" \
+            "$(/usr/bin/stat -c %s -- "$PREFLIGHT_DIR/live-fixture/cgroup-live.tsv")"
+        printf 'live_fixture_test_output_sha256=%s\nlive_fixture_test_output_bytes=%s\n' \
+            "$(sha "$PREFLIGHT_DIR/live-fixture/systemd-run.output.txt")" \
+            "$(/usr/bin/stat -c %s -- "$PREFLIGHT_DIR/live-fixture/systemd-run.output.txt")"
+        printf 'performance_sample=NO\ncampaign_cells=0\nretained_perf_data=0\ncampaign_sample_rows=0\nselection=NO-SELECT\n'
+    } >"$tmp"
+    [[ $(/usr/bin/wc -l <"$tmp") == 46 ]] || die 'admission identity key count mismatch'
+    write_new_checked "$target" "$tmp"
+    /usr/bin/rm -- "$tmp"
+}
+
+self_test_admission_no_performance() {
+    local fixture_root=$1
+    [[ $fixture_root == /tmp/* && -d $fixture_root && ! -L $fixture_root ]] ||
+        die 'unsafe admission no-performance fixture root'
+    PREFLIGHT_DIR=$fixture_root/preflight
+    JOURNAL=$PREFLIGHT_DIR/journal.tsv
+    [[ -f $JOURNAL && ! -L $JOURNAL ]] || die 'unsafe admission fixture journal'
+    assert_admission_has_no_performance "$fixture_root"
+    printf 'current_profile_g5_admission_no_performance_test=PASS\n'
+}
+
+admission_feasibility_run() {
+    trap on_exit EXIT
+    trap on_error ERR
+    [[ $RUN_MODE == admission && $OUT == "$ADMISSION_OUT" ]] ||
+        die 'admission root selection mismatch'
+    refuse_existing_output
+    /usr/bin/mkdir -m 0700 -- "$PARTIAL"
+    PREFLIGHT_DIR=$PARTIAL/preflight
+    /usr/bin/mkdir -m 0700 -- "$PREFLIGHT_DIR"
+    JOURNAL=$PREFLIGHT_DIR/journal.tsv
+    local campaign_start_monotonic_ns
+    campaign_start_monotonic_ns=$(monotonic_ns)
+    readonly HARD_DEADLINE_MONOTONIC_NS=$((campaign_start_monotonic_ns + CAMPAIGN_BUDGET_SECONDS * 1000000000))
+    readonly WORK_DEADLINE_MONOTONIC_NS=$((HARD_DEADLINE_MONOTONIC_NS - FINALIZATION_RESERVE_SECONDS * 1000000000))
+    admission "$PREFLIGHT_DIR" 1
+    run_suites
+    capture_g5_identity_inputs
+    build_full_instruction_map
+    verify_feasibility_fixture "$PARTIAL"
+    verify_address_join_smoke "$PARTIAL"
+    for artifact in address-smoke.data address-smoke.perf-script.txt \
+        address-smoke.buildid-list.txt; do
+        [[ -f $PARTIAL/$artifact && ! -L $PARTIAL/$artifact ]] ||
+            die "address-smoke artifact missing or unsafe: $artifact"
+        /usr/bin/rm -- "$PARTIAL/$artifact"
+    done
+    assert_admission_has_no_performance "$PARTIAL"
+    write_g5_admission_identity_set "$PARTIAL"
+    /usr/bin/grep -qx 'performance_sample=NO' "$PARTIAL/sealed-identity-set.env" ||
+        die 'admission identity performance_sample mismatch'
+    /usr/bin/grep -qx 'campaign_cells=0' "$PARTIAL/sealed-identity-set.env" ||
+        die 'admission identity campaign_cells mismatch'
+    /usr/bin/grep -qx 'retained_perf_data=0' "$PARTIAL/sealed-identity-set.env" ||
+        die 'admission identity retained_perf_data mismatch'
+    /usr/bin/grep -qx 'campaign_sample_rows=0' "$PARTIAL/sealed-identity-set.env" ||
+        die 'admission identity campaign_sample_rows mismatch'
+    CAMPAIGN_STATUS=NO-PERFORMANCE-ADMISSION
+    FINALIZING=1
+    run_terminal_finalization
+}
+
 self_test() {
     local audit_dir audit_resolver audit_prefix audit_summary
     [[ $CYCLE_DISAGREEMENT_MAX == 0.10 ]] || self_test_fail cycle_threshold_boundary
@@ -2274,10 +2638,13 @@ main_run() {
     campaign_start_monotonic_ns=$(monotonic_ns)
     readonly HARD_DEADLINE_MONOTONIC_NS=$((campaign_start_monotonic_ns + CAMPAIGN_BUDGET_SECONDS * 1000000000))
     readonly WORK_DEADLINE_MONOTONIC_NS=$((HARD_DEADLINE_MONOTONIC_NS - FINALIZATION_RESERVE_SECONDS * 1000000000))
+    require_deadline before-launch-authentication
+    authenticate_campaign_launch_inputs
     require_deadline before-admission
     admission "$PREFLIGHT_DIR" 1
     require_deadline before-suites
     run_suites
+    capture_g5_identity_inputs
     require_deadline before-full-map
     build_full_instruction_map
     require_deadline before-feasibility-fixture
@@ -2299,7 +2666,11 @@ main_run() {
 
 case ${1:-} in
     --map-worker) build_full_instruction_map_worker ;;
+    --admission-feasibility) admission_feasibility_run ;;
     --self-test) self_test ;;
+    --self-test-mode-roots) self_test_mode_roots ;;
+    --self-test-admission-no-performance) self_test_admission_no_performance "$2" ;;
+    --verify-launch-identity-files) verify_launch_identity_files "$2" "$3" ;;
     --self-test-fake-cargo) self_test_fake_cargo ;;
     --self-test-cgroup-environment) self_test_cgroup_environment ;;
     --self-test-cgroup) self_test_cgroup ;;
