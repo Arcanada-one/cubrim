@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cubrim Web Profile — WASM decoder demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }
+  h1 { font-size: 1.35rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: .35rem .5rem; border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
+  th:first-child, td:first-child { text-align: left; }
+  .ok { color: #157f3d; } .bad { color: #b00020; font-weight: 600; }
+  #summary { margin-top: 1rem; padding: .75rem 1rem; border-radius: .5rem;
+             background: color-mix(in srgb, currentColor 8%, transparent); }
+  figure { margin: 1.5rem 0 0; }
+  img { max-width: 100%; border-radius: .4rem; }
+  code { font-size: .92em; }
+</style>
+
+<h1>Cubrim Web Profile — decoding <code>application/cubrim</code> in the page</h1>
+
+<p>
+  This page fetches each asset as <code>application/cubrim</code>, decodes it in
+  WebAssembly with <code>cubrimDecode()</code>, and then <em>uses</em> the result:
+  the stylesheet below is applied from decoded bytes, the JSON is parsed, and the
+  font is loaded from a decoded <code>ArrayBuffer</code>. Nothing here touches the
+  browser's own content negotiation — it is an ordinary page calling an ordinary
+  function.
+</p>
+
+<div id="summary">measuring…</div>
+<table id="results">
+  <thead>
+    <tr><th>asset</th><th>served</th><th>original</th><th>saved</th>
+        <th>decode ms</th><th>MB/s</th><th>check</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<figure>
+  <figcaption id="applied-note"></figcaption>
+  <p class="decoded-css-target">This paragraph is styled by the decoded stylesheet.</p>
+</figure>
+
+<script type="module" src="./demo.js"></script>
