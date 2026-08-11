@@ -412,6 +412,24 @@ pub struct EncodeConfig {
     ///
     /// v1-default: `None` — byte-identical to the shipped encoder.
     pub cm2_max_tbits: Option<usize>,
+
+    /// Offer the web-profile table-driven container (MODE_WEB, CUBR-0076).
+    ///
+    /// The web kill gate (hypothesis 12) implies a decode budget no adaptive
+    /// per-bit model in this codebase reaches — CM2's whole-model Amdahl
+    /// ceiling is 22.52x against a 113x need — so the profile selects a value
+    /// scheme whose decode is table-driven: canonical Huffman tables
+    /// transmitted in the block header and frozen for the block, zero decode-
+    /// time adaptation. It buys decode-time architecture with density: the
+    /// charged size model measured +28.8% output against the CM2 champion
+    /// while clearing gzip-9 density parity.
+    ///
+    /// The candidate is competitively size-picked against the ordinary
+    /// encoding, so a file that does not benefit is byte-identical to today's
+    /// output.
+    ///
+    /// v1-default: `false` — shipped output is unchanged.
+    pub web_profile: bool,
 }
 
 /// Speed/ratio operating point.
@@ -505,6 +523,7 @@ impl EncodeConfig {
             min_ctx_count: None,
             cm2_column_variants: true,
             cm2_max_tbits: None,
+            web_profile: false,
         }
     }
 
@@ -695,6 +714,7 @@ mod tests {
             min_ctx_count: None,
             cm2_column_variants: true,
             cm2_max_tbits: None,
+            web_profile: false,
         };
 
         let inputs: Vec<Vec<u8>> = vec![

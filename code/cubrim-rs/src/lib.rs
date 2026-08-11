@@ -21,6 +21,7 @@ pub mod phi;
 pub(crate) mod ppmd;
 pub(crate) mod prof;
 pub mod rle;
+pub(crate) mod web;
 
 pub use codec::{decode, decode_with_limits, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
 

@@ -100,6 +100,7 @@ fn text_entropy() {
         min_ctx_count: None,
         cm2_column_variants: true,
         cm2_max_tbits: None,
+        web_profile: false,
     };
 
     // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the
@@ -152,6 +153,7 @@ fn text_entropy_context() {
         min_ctx_count: None,
         cm2_column_variants: true,
         cm2_max_tbits: None,
+        web_profile: false,
     };
 
     // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the
@@ -207,6 +209,7 @@ fn sparse_clustered_rlecodes() {
         min_ctx_count: None,
         cm2_column_variants: true,
         cm2_max_tbits: None,
+        web_profile: false,
     };
 
     // (reoriented) The value scheme still round-trips (Test 3 below); byte-equality to the

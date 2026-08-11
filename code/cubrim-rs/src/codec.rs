@@ -285,7 +285,43 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// size pick, so an input that does not benefit falls back byte-identically to the
 /// base encoding (zero regression). Single-block inputs skip the pre-pass entirely.
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    // CUBR-0076: the web profile is a DECODE-BUDGET selection, not a density
+    // selection, so it competes inside the decode-eligible class only.
+    //
+    // Selecting min(web, whole existing stack) was measured to defeat the
+    // profile's entire purpose: on 11 of the 12 census samples the adaptive CM2
+    // champion is denser (by design — the table-driven scheme spends +28.8%
+    // output to leave the adaptive decode path), so a density-only pick returns
+    // an archive whose decode is exactly the one the web gate rules out. The
+    // eligible candidates are therefore the table-driven container and
+    // raw-store, whose decode is a memcpy; every other mode's decode class is
+    // unclassified and stays out until it is measured.
+    if config.web_profile {
+        if let Some(web) = crate::prof::track(
+            "web",
+            |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
+            || crate::web::encode_web(data),
+        ) {
+            let store = raw_store_blob(data, config);
+            if web.len() < store.len() {
+                crate::prof::win("web");
+                return web;
+            }
+            return store;
+        }
+        return raw_store_blob(data, config);
+    }
     encode_with_config_inner(data, config, true, true)
+}
+
+/// Raw-store container for `data` — the always-available decode-eligible floor
+/// (decode is a bounds-checked copy). Used by the web profile as the candidate
+/// the table-driven container must beat.
+fn raw_store_blob(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    let n = compute_min_n(data.len(), config.b).max(2);
+    let mut out = serialize_raw_header(n, config.b, data.len());
+    out.extend_from_slice(data);
+    out
 }
 
 /// Inner encoder. `try_binfloat` is false when called recursively to encode one column of a
@@ -5046,6 +5082,18 @@ pub fn decode_with_limits(blob: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>,
                 let (hdr, _) = parse_header(blob)?;
                 crate::limits::validate_header(&hdr, limits)?;
             }
+            // MODE_WEB carries its declared output length in a fixed field, so
+            // the caller's output budget is enforceable before a byte is
+            // decoded rather than after the buffer has grown.
+            crate::header::MODE_WEB if blob.len() >= 10 => {
+                let declared = u32::from_be_bytes([blob[6], blob[7], blob[8], blob[9]]) as usize;
+                if declared > limits.max_output_size {
+                    return Err(CubrimError::Decode(format!(
+                        "MODE_WEB: declared output {declared} exceeds the limit {}",
+                        limits.max_output_size
+                    )));
+                }
+            }
             _ => {}
         }
     }
@@ -5103,6 +5151,9 @@ fn decode_unlimited(blob: &[u8]) -> Result<Vec<u8>, CubrimError> {
         }
         if blob[5] == MODE_GEOCM {
             return decode_geocm(blob);
+        }
+        if blob[5] == crate::header::MODE_WEB {
+            return crate::web::decode_web(blob);
         }
         if blob[5] == MODE_LARGEBWT {
             return decode_large_bwt(blob);

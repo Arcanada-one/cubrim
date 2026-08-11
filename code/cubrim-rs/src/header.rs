@@ -179,6 +179,15 @@ pub const MODE_CM2: u8 = 16;
 /// Wire: [MAGIC 4B][VERSION 1B][MODE_GEOCM 1B] then the self-contained CG2 blob.
 pub const MODE_GEOCM: u8 = 17;
 
+/// Web-profile table-driven static-entropy container (CUBR-0076, hypothesis 13).
+/// Whole-file LZ parse coded with canonical Huffman tables that are transmitted
+/// in the block header and frozen for the block, so decode is a flat table
+/// lookup per symbol with no adaptation of any kind — the architecture class the
+/// web kill gate's decode budget admits. Opt-in via `EncodeConfig::web_profile`
+/// and competitively size-picked, so default output is unchanged.
+/// Wire: [MAGIC 4B][VERSION 1B][MODE_WEB 1B][orig_len u32][checksum u32][bitstream].
+pub const MODE_WEB: u8 = 18;
+
 // Scheme identifiers (R4, R5)
 pub const MAP_SCHEME_RLE: u8 = 1;
 /// PackedNibble varint-per-gap scheme (GapScheme::PackedNibble).
