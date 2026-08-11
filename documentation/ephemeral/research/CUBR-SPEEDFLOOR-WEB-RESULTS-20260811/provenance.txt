@@ -1,0 +1,22 @@
+CUBR-SPEEDFLOOR-WEB-20260811 — provenance
+
+prereg    : CUBR-SPEEDFLOOR-WEB-20260811.md, merged to main as 73f4280 at 2026-08-11T19:12:39Z.
+            Measurement began 19:13:07Z. Prediction preceded measurement.
+bound     : 69.444x DERIVED from the G2 attribution's committed raw symbols.tsv and validated
+            against BOTH published bounds before use — run derive_bound.py, which refuses to
+            emit the derived value unless dickens/max (92.85/13.986) and xml/max (90.66/10.707)
+            both reproduce exactly.
+host      : arcana-devs, 16 cores, shared. load1 11.9-49.0 during this run.
+pin       : taskset -c 0-15, not widened.
+mem cap   : systemd-run --scope MemoryMax=64G MemorySwapMax=0. Observed cubrim decode RSS
+            119,424 KiB = 116.6 MiB, matching the preregistered ~110 MB web-preset expectation
+            and two orders below the max preset's 10.5 GiB.
+binary    : 8947ea9b155c10d33316cba60647ff4d755e7a6a3ceff3c75a9b5b3e01fa8d9c, built from the
+            attribution's frozen commit 3a13f486.
+input     : corpus-silesia/dickens, 10,192,446 B, --preset web.
+gates     : cmp AND sha256 before any timing row. 21 observations, 0 VOID.
+
+CORRECTED MID-RUN: the first launch of this harness compressed xml with --preset web because a
+sed anchor (^F=xml$) missed a shared-line assignment. Caught by reading /proc/PID/cmdline before
+trusting the run, killed (only processes whose cmdline referenced this scratchpad), out/ cleared,
+F fixed to dickens, relaunched. No data from that run reached this record.
