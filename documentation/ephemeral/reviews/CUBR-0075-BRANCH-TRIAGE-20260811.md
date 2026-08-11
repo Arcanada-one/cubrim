@@ -67,6 +67,58 @@ vanishing is a provenance hole, not a filing inconvenience.
    Deleting a branch whose contents were judged superseded is a judgement that
    should be reversible. `git fetch origin refs/tags/retired/*` brings it back.
 
+## A third branch, and what triaging it uncovered
+
+`review/CUBR-0075-main-baseline-probe` (1 commit,
+`fb6b351`, base predating PR #17) adds
+`tests/scheme_roundtrip_pr10_probe.rs`. It is **superseded by content**: the
+file on `main` at `tests/scheme_roundtrip.rs` uses the same helpers
+(`corpus_files`, `assert_scheme_roundtrips`), the same
+`config.value_scheme = scheme; config.use_square_limit = false;`, the same
+corpus, and covers seven schemes rather than the probe's subset. Retired the
+same way, tag `retired/cubr-0075-main-baseline-probe` → `fb6b351`.
+
+Checking *whether* it was superseded turned up something worth more than the
+branch:
+
+### The scheme round-trip gate is a false green
+
+`tests/scheme_roundtrip.rs` is the CI job *Lossless scheme round-trip*, the
+silent-data-loss gate. It forces `EncodeConfig::value_scheme` to each of seven
+schemes and round-trips the web corpus. But `value_scheme` selects the **cube
+path's** value coder, while `encode_with_config` runs a competitive rail across
+whole-file candidates and keeps the smallest — and on this corpus CM2 wins every
+file.
+
+Measured 2026-08-11 on `tailwind.css`, forcing six schemes through the public
+API:
+
+```
+BitpackFixed    6847 bytes   mode=16 (CM2)
+Entropy         6847 bytes   mode=16
+EntropyContext  6847 bytes   mode=16
+BwtEntropy      6847 bytes   mode=16
+BwtGeoMix       6847 bytes   mode=16
+LzRans          6847 bytes   mode=16
+DISTINCT SIZES: 1/6
+```
+
+**One encode path, seven test names.** Every BWT, rANS and entropy-context
+coder could be catastrophically broken and this gate would stay green, because
+those paths are never reached through the entry point it uses. The gate is not
+worthless — it does prove CM2 round-trips the corpus seven times — but it does
+not test what its names claim, and the CI job's title says otherwise.
+
+**Not fixed here, and deliberately so.** Making the forced scheme effective
+needs an encoder-side change (a config knob suppressing the rail, or a
+per-scheme entry point) in `codec.rs`, which the archival lane is actively
+rewriting; a rushed fix there risks weakening the encoder to satisfy a test.
+Instead `tests/scheme_gate_reality.rs` lands as a **tripwire**: it asserts the
+current undesirable reality, so the day anyone makes forcing effective the
+tripwire fails and its message says exactly what to do — delete it and
+strengthen `scheme_roundtrip.rs`. A silent false green becomes a loud red the
+moment it stops being true.
+
 ## What is deliberately not claimed
 
 This lands **evidence**, not new measurement. No number in the attribution
