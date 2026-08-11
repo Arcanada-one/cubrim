@@ -129,6 +129,43 @@ reread_count=$({ /usr/bin/grep -E "^[[:space:]]*$reread_call$" "$SELF" || true; 
     /usr/bin/wc -l)
 [[ $reread_count == 14 ]] || fail 'campaign identity reread missing after self-test'
 
+require_campaign_reread_after() {
+    local anchor=$1 anchor_count anchor_line next_statement
+    anchor_count=$(/usr/bin/grep -Fc -- "$anchor" "$SELF")
+    [[ $anchor_count == 1 ]] || fail 'campaign identity reread missing after self-test'
+    anchor_line=$(/usr/bin/grep -nF -- "$anchor" "$SELF" | /usr/bin/cut -d: -f1)
+    next_statement=$(/usr/bin/awk -v start="$anchor_line" '
+        NR <= start || /^[[:space:]]*$/ {next}
+        /^[[:space:]]*fi[[:space:]]*$/ {next}
+        {print; exit}
+    ' "$SELF")
+    [[ $next_statement =~ ^[[:space:]]*verify_admitted_campaign_identity[[:space:]]*$ ]] ||
+        fail 'campaign identity reread missing after self-test'
+}
+
+reread_runner_prefix=runner
+reread_unexpected_prefix=unexpected
+reread_live_prefix=live
+campaign_reread_anchors=(
+    "$reread_runner_prefix self-test positive control failed:"
+    "$reread_runner_prefix fake-cargo control failed:"
+    "$reread_runner_prefix durable-publish positive control output mismatch:"
+    "$reread_runner_prefix pure-mock environment observation mismatch:"
+    "$reread_runner_prefix cgroup containment output mismatch:"
+    "$reread_runner_prefix cgroup precommit counterexample output mismatch:"
+    "$reread_unexpected_prefix precommit authority failed at unrelated assertion:"
+    "$reread_runner_prefix checked publication write output mismatch:"
+    "$reread_runner_prefix publication tamper output mismatch:"
+    "$reread_runner_prefix hard-deadline positive control output mismatch:"
+    "$reread_live_prefix fixture test-output hash mismatch"
+    "$reread_runner_prefix timeout-tree positive control output mismatch:"
+    "$reread_runner_prefix publish-crash control output mismatch:"
+    "$reread_runner_prefix self-test mutation failed at unrelated assertion:"
+)
+for anchor in "${campaign_reread_anchors[@]}"; do
+    require_campaign_reread_after "$anchor"
+done
+
 runner_literals=(
     '/root/cubr-new24-full-binary-g5-src'
     '/root/cubr-new24-full-binary-g5-target'
@@ -685,6 +722,9 @@ if [[ $SELF_MUTATION_TESTS == 1 ]]; then
 
     expect_contract_source_mutant_red post_self_test_reread_removed \
         's/    verify_admitted_campaign_identity/    : # mutation removed campaign identity reread/' \
+        'campaign identity reread missing after self-test'
+    expect_contract_source_mutant_red compensated_post_self_test_reread_moved \
+        '0,/^    verify_admitted_campaign_identity$/s//    : # mutation moved campaign identity reread/; 0,/^    verify_admitted_campaign_identity$/s//    verify_admitted_campaign_identity\n    verify_admitted_campaign_identity/' \
         'campaign identity reread missing after self-test'
     expect_runner_mutant_red fixture_uses_campaign_unit \
         's/--unit="\$fixture_unit"/--unit=cubr-new24-full-binary-g5-20260810.service/' \
