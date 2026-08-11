@@ -1,7 +1,7 @@
 {
   "task":"CUBR-0028",
   "scheme":"BwtEntropy",
-  "code_sha":"422726d70086e6405187960562f02e45a6a82ae8",
+  "code_sha":"93ad7165b29f7872f0265396311c9032932d5333",
   "corpus_total":51456,
   "t4_total_bytes":30217,
   "bwt_total_bytes":25955,
