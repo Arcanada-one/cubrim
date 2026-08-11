@@ -1,0 +1,16 @@
+CUBR-SPEEDFLOOR-XRAY-20260811 — provenance
+
+prereg   : CUBR-SPEEDFLOOR-XRAY-20260811.md, merged to main as 8d6eb51 at 2026-08-11T19:42:45Z.
+           Measurement began 19:43:16Z. Prediction preceded measurement.
+host     : arcana-devs, 16 cores, shared. load1 11.9-14.4 during this run — the quietest
+           window of any cell in this series.
+pin      : taskset -c 0-15, not widened.  mem cap: MemoryMax=64G, MemorySwapMax=0.
+binary   : 8947ea9b155c10d33316cba60647ff4d755e7a6a3ceff3c75a9b5b3e01fa8d9c, from the
+           attribution's frozen commit 3a13f486.
+input    : corpus-silesia/x-ray, 8,474,240 B, --preset max.
+behaviour: archive 3,637,036 B, ratio 0.429187 — byte-exact against the landed record
+           (0.4291873) and against this lane's earlier run, so the bound applies.
+gates    : cmp AND sha256 before any timing row. 21 observations, 0 VOID.
+bounds   : run bound_bases.py — shows the published bounds use two different set
+           definitions; both are carried through the analysis.
+regenerate: python3 analyze.py
