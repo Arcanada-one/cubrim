@@ -3,6 +3,7 @@
 **Date:** 2026-08-11 UTC
 **Subject:** `code/cubrim-web-decoder` — the Web Profile reference decoder,
 built for `wasm32-unknown-unknown` and driven from a real page.
+**Specification:** [`documentation/reference/cubrim-web-profile-format.md`](../../reference/cubrim-web-profile-format.md)
 **Depends on:** CUBR-0076's frame (`MODE_WEB`, container byte 18), merged and
 measured (443.39 MB/s native decode at 0.9361 gzip-9 density).
 
@@ -145,19 +146,41 @@ Shipped policy in `web/serve.mjs`:
 | AC | state |
 |---|---|
 | 1 — real desktop browser | **met** (Chromium headless, x86-64, 12/12 byte-exact) |
-| 1 — ARM/mobile path | **NOT met**, see below |
+| 1 — ARM/mobile path | **met for correctness** on emulated aarch64; no ARM timing claimed (see below) |
 | 2 — clean JS API | **met** (`cubrimDecode`, synchronous; streaming out of scope and documented) |
 | 3 — real-site demo that uses the content | **met** (CSS applied, JSON parsed, font loaded) |
 | 4 — measurements, no fabrication | **met** (traffic, decode time, wasm memory, module size; every number verified byte-exact) |
 | 5 — fuzzing + sanitizer + limits | **met for ASan + fuzz + limits**; UBSan scoped out with reason |
 | 6 — docs and limitations | **met** (`code/cubrim-web-decoder/README.md`) |
 
-**ARM is a genuine gap, named precisely.** No `qemu-aarch64` on this host, and
-the only online ARM device on the mesh is the operator's personal Mac; the two
-Android handsets have been offline for 1 and 5 days. What would close it: an
-ARM64 Linux host with node, or an emulator package, at which point
-`web/node-check.mjs` runs unchanged — the module is architecture-independent
-bytecode, so the variable is the engine, not the build.
+### ARM — closed for correctness, deliberately not for speed
+
+The first pass recorded this as a gap: no ARM host on the mesh (every server is
+x86-64; the only ARM devices are a personal Mac and two Android handsets that
+have been offline for days). Rather than leave it, the emulation path was
+built without root: `qemu-user-static` and an aarch64 sysroot fetched with
+`apt-get download` + `dpkg -x` into a local prefix, plus the official
+`node-v22.23.1-linux-arm64` build.
+
+**Result: the same 50,110-byte module, run by a real ARM64 V8, decodes all 12
+assets byte-exactly and rejects 4/4 hostile inputs — 0 failures.**
+
+```
+qemu-aarch64-static -L <sysroot> node-arm64/bin/node web/node-check.mjs \
+    cubrim_web_decoder.wasm fixtures
+AGGREGATE served=120939 original=965410 traffic_reduction=87.47% \
+    hostile_rejected=4/4 failures=0
+```
+
+**No ARM throughput number is reported, and the one the harness printed
+(10.8 MB/s) is not a measurement of ARM.** It is user-mode emulation on an
+x86-64 host — roughly an order of magnitude of interpretation overhead — so
+quoting it as an ARM figure would be fabrication. What this run establishes is
+what an architecture check should: the wasm module's behaviour does not depend
+on the host architecture. Endianness, alignment and pointer-width assumptions
+are ruled out; performance on real ARM silicon remains unmeasured, and needs
+either an ARM64 Linux host or a phone.
+
 
 **DB:** no rows written. AC-4 says measurements land in the CUBR-0074 tables
 with the decoder hash; that write belongs to whoever owns the benchmark DB, and

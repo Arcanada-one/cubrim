@@ -24,6 +24,7 @@ blake3 = { version = "1.8.5", default-features = false }
 
 [dev-dependencies]
 cubrim = { path = "../cubrim-rs" }
+blake3 = "1.8.5"
 
 [profile.release]
 opt-level = "z"
