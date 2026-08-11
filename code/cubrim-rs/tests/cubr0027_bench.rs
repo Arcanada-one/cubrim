@@ -249,3 +249,13 @@ fn bench_option_b_summary() {
     println!("when both Option A and Option B are evaluated against T4 0.587240");
     println!("Twin predicted 0.547730 using an unserializable model — gap documented");
 }
+
+// TEMPORARY mutation probe for CUBR-0098 — proves the CI clippy job fails on a
+// violation in a TEST target. This branch is deleted after the red run is recorded.
+#[test]
+fn clippy_gate_mutation_probe() {
+    let v: Vec<u8> = Vec::new();
+    if v.len() == 0 {
+        println!("probe");
+    }
+}
