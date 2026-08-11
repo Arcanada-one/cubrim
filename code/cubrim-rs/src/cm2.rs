@@ -1458,14 +1458,14 @@ pub(crate) fn cm2_tier_env() -> Option<Cm2Tier> {
     use std::sync::OnceLock;
     static T: OnceLock<Option<Cm2Tier>> = OnceLock::new();
     *T.get_or_init(|| {
-        std::env::var("CUBR_CM2_TIER")
-            .ok()
-            .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
+        std::env::var("CUBR_CM2_TIER").ok().and_then(|v| {
+            match v.trim().to_ascii_lowercase().as_str() {
                 "f12" => Some(Cm2Tier::F12),
                 "m8" => Some(Cm2Tier::M8),
                 "m8s" => Some(Cm2Tier::M8S),
                 _ => None,
-            })
+            }
+        })
     })
 }
 
