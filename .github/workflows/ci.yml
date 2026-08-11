@@ -37,6 +37,27 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --check
 
+  clippy:
+    name: Clippy lints
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: code/cubrim-rs
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # --all-targets is load-bearing: without it the lib is linted and tests/
+      # and benches are not, which reads as a pass while covering half the crate.
+      - name: Lint with clippy (warnings are errors)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
   scheme-roundtrip:
     name: Lossless scheme round-trip
     runs-on: ubuntu-latest
