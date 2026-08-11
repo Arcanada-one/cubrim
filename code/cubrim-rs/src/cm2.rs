@@ -2235,6 +2235,30 @@ mod tests {
         }
     }
 
+    /// NEW-24: a FORCE-shipped tiered archive decodes byte-exactly through the
+    /// PUBLIC decoder path. `CUBR_CM2_TIER=<t> CUBR_CM2_TIER_FORCE=1` makes
+    /// `encode_cm2` wrap the tiered blob in the standard MODE_CM2 container
+    /// (`[MAGIC][VERSION][MODE_CM2] + blob`) — this test builds those exact
+    /// container bytes (env-race-free: `cm2_tier_env`/`cm2_tier_force` are
+    /// process-global OnceLocks, so the knob itself is exercised at the CLI
+    /// level in the lane's gate evidence) and round-trips them through
+    /// `crate::decode`, the entry the stand's decode bench uses.
+    #[test]
+    fn cm2_forced_tiered_archive_roundtrips_via_public_decode() {
+        let data = b"forced tiered archives feed the P-A decode bench. ".repeat(400);
+        for tier in TIERS {
+            let blob = cm2_encode_tiered(&data, tier, None);
+            let mut container = Vec::with_capacity(6 + blob.len());
+            container.extend_from_slice(&crate::header::MAGIC);
+            container.push(crate::header::VERSION);
+            container.push(crate::header::MODE_CM2);
+            container.extend_from_slice(&blob);
+            let out = crate::decode(&container)
+                .unwrap_or_else(|e| panic!("public decode of {tier:?} container: {e}"));
+            assert_eq!(out, data, "tier {tier:?} public-path RT cmp!=0");
+        }
+    }
+
     /// The reciprocal path must equal `/` exactly on its full declared domain:
     /// any divergence anywhere is a silent model change and therefore silent
     /// output drift. Ctr's domain is small enough to check exhaustively; the
