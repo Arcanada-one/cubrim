@@ -401,7 +401,7 @@ require_runner_named '(( $# == 2 )) || die '\''live cgroup fixture requires exac
     'live cgroup dispatch does not validate its exact second argument'
 require_runner_named 'self_test_cgroup_live "$2"' \
     'live cgroup dispatch drops its export-directory argument'
-require_runner_named 'verify_live_cgroup_fixture_result "$rc" "$fixture_result" "$fixture_unit" "$systemd_output"' \
+require_runner_named 'verify_live_cgroup_fixture_result "$rc" "$fixture_result" "$fixture_unit" "$systemd_output" "$export_dir"' \
     'live cgroup fixture does not authenticate the terminal systemd result'
 require_runner_named '(( rc == 0 )) || die '\''live fixture systemd-run status is not expected success'\''' \
     'live cgroup fixture does not accept the authenticated rc=0 success form'
@@ -409,6 +409,22 @@ require_runner_named 'terminated = "Main processes terminated with: code=killed/
     'live cgroup fixture accepts an unauthenticated terminal process form'
 require_runner_named 'if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):' \
     'live cgroup fixture does not reject an unexpected worker return'
+require_runner_named 'invocation_id=$CGROUP_EVIDENCE_INVOCATION_ID' \
+    'live cgroup worker evidence is not bound to its systemd invocation'
+live_result_source=$(function_source verify_live_cgroup_fixture_result)
+for live_result_control in \
+    'fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)' \
+    'info.st_nlink != 1' \
+    'not stat.S_ISREG(info.st_mode)' \
+    'info.st_size > MAX_BYTES' \
+    'payload.decode("utf-8", errors="strict")' \
+    'not payload.endswith(b"\n") or b"\r" in payload' \
+    'source_identity_changed' \
+    'result_invocation != invocation' \
+    'components[-1] != unit'; do
+    [[ $live_result_source == *"$live_result_control"* ]] ||
+        fail "live result verifier missing load-bearing control: $live_result_control"
+done
 reject_runner_fixed "(( rc != 0 )) || die 'live fixture unexpectedly returned success'"
 
 launch_remote_source=$(function_source verify_launch_main_matches_remote)
@@ -1172,85 +1188,220 @@ fi
 live_result_root=$(/usr/bin/mktemp -d)
 if ! /usr/bin/python3 - "$RUNNER" "$live_result_root" <<'PY'
 from pathlib import Path
-import shutil, subprocess, sys
+import hashlib, os, shutil, socket, subprocess, sys
 
 runner, root_arg = sys.argv[1:]
 root = Path(root_arg)
 unit = "current-profile-g5-cgroup-selftest-4242.service"
+other_unit = "current-profile-g5-cgroup-selftest-9999.service"
+invocation = "a" * 32
+other_invocation = "b" * 32
 control_group = "/user.slice/user-1000.slice/user@1000.service/app.slice/" + unit
 baseline_result = (
-    f"2026-08-11T00:00:00Z\tcgroup_new_pid=4243 control_group={control_group}\n"
+    f"2026-08-11T00:00:00Z\tcgroup_new_pid=4243 control_group={control_group} "
+    f"invocation_id={invocation}\n"
     f"2026-08-11T00:00:01Z\tunit_stop_request={unit} scope=user\n"
-)
+).encode()
 baseline_output = (
-    f"Running as unit: {unit}; invocation ID: {'a' * 32}\n"
+    f"Running as unit: {unit}; invocation ID: {invocation}\n"
     "Finished with result: success\n"
     "Main processes terminated with: code=killed/status=TERM\n"
     "Service runtime: 1.234s\n"
     "CPU time consumed: 10ms\n"
     "Memory peak: 1.0M\n"
     "Memory swap peak: 0B\n"
-)
+).encode()
 
-def invoke(label, rc, result_text=baseline_result, output_text=baseline_output,
-           result_path=None):
+def invoke(label, rc=0, result_bytes=baseline_result, output_bytes=baseline_output,
+           result_arg=None, prepare=None):
     case = root / label
     case.mkdir()
+    export = case / "export"
+    export.mkdir()
     result_file = case / "cgroup-live.tsv"
     output_file = case / "systemd-run.output.txt"
-    if result_text is not None:
-        result_file.write_text(result_text, encoding="utf-8")
-    output_file.write_text(output_text, encoding="utf-8")
-    return subprocess.run(
+    result_file.write_bytes(result_bytes)
+    output_file.write_bytes(output_bytes)
+    if prepare is not None:
+        prepare(result_file, output_file, export)
+    completed = subprocess.run(
         ["/usr/bin/bash", runner, "--self-test-verify-cgroup-live-result", str(rc),
-         str(result_path or result_file), unit, str(output_file)],
-        text=True, capture_output=True, check=False, timeout=2,
+         str(result_arg or result_file), unit, str(output_file), str(export)],
+        text=True, capture_output=True, check=False, timeout=3,
     )
+    return completed, result_file, output_file, export
+
+def expect_reject(label, expected_error, **kwargs):
+    completed, _, _, export = invoke(label, **kwargs)
+    if completed.returncode == 0 or expected_error not in completed.stderr:
+        raise SystemExit(f"live result negative failed elsewhere: {label} result={completed}")
+    if list(export.iterdir()):
+        raise SystemExit(f"rejected live result exported evidence: {label}")
 
 try:
-    result = invoke("positive", 0)
-    if (result.returncode != 0 or
-            result.stdout != "current_profile_g5_live_result_test=PASS\n" or result.stderr):
-        raise SystemExit(f"authenticated rc=0 live result was rejected: {result}")
+    completed, result_file, output_file, export = invoke("positive")
+    result_sha = hashlib.sha256(baseline_result).hexdigest()
+    output_sha = hashlib.sha256(baseline_output).hexdigest()
+    expected_stdout = (
+        "current_profile_g5_live_result_test=PASS "
+        f"result_sha256={result_sha} test_output_sha256={output_sha}\n"
+    )
+    if completed.returncode != 0 or completed.stdout != expected_stdout or completed.stderr:
+        raise SystemExit(f"authenticated rc=0 live result was rejected: {completed}")
+    if ((export / "cgroup-live.tsv").read_bytes() != baseline_result or
+            (export / "systemd-run.output.txt").read_bytes() != baseline_output or
+            (export / "cgroup-live.tsv").stat().st_mode & 0o777 != 0o444 or
+            (export / "systemd-run.output.txt").stat().st_mode & 0o777 != 0o444):
+        raise SystemExit("authenticated export is not the verified byte payload")
+
     cases = {
-        "nonzero-status": (1, baseline_result, baseline_output,
-                           "live fixture systemd-run status is not expected success"),
-        "false-success": (0, baseline_result,
-                          baseline_output.replace("code=killed/status=TERM", "code=exited/status=0"),
-                          "live fixture systemd-run output authentication failed"),
-        "failed-result": (0, baseline_result,
-                          baseline_output.replace("Finished with result: success", "Finished with result: failed"),
-                          "live fixture systemd-run output authentication failed"),
-        "wrong-output-unit": (0, baseline_result,
-                              baseline_output.replace(unit, "current-profile-g5-cgroup-selftest-9999.service", 1),
-                              "live fixture systemd-run output authentication failed"),
-        "wrong-stop-unit": (0, baseline_result.replace(
-                                f"unit_stop_request={unit}",
-                                "unit_stop_request=current-profile-g5-cgroup-selftest-9999.service"),
-                            baseline_output,
-                            "live fixture did not request the exact fixture unit stop"),
-        "missing-new-pid": (0, baseline_result.splitlines(keepends=True)[1], baseline_output,
-                            "live fixture did not retain a new cgroup PID"),
-        "unexpected-return": (0, baseline_result + "live_cgroup_guard_unexpected_return=125\n",
-                              baseline_output, "live cgroup guard unexpectedly returned"),
-        "duplicate-terminal": (0, baseline_result,
-                               baseline_output + "Finished with result: success\n",
-                               "live fixture systemd-run output authentication failed"),
+        "nonzero-status": dict(rc=1, expected_error=
+            "live fixture systemd-run status is not expected success"),
+        "false-success": dict(output_bytes=baseline_output.replace(
+            b"code=killed/status=TERM", b"code=exited/status=0"), expected_error=
+            "live fixture systemd-run output authentication failed"),
+        "failed-result": dict(output_bytes=baseline_output.replace(
+            b"Finished with result: success", b"Finished with result: failed"), expected_error=
+            "live fixture systemd-run output authentication failed"),
+        "wrong-output-unit": dict(output_bytes=baseline_output.replace(
+            unit.encode(), other_unit.encode(), 1), expected_error=
+            "live fixture systemd-run output authentication failed"),
+        "cross-invocation": dict(result_bytes=baseline_result.replace(
+            invocation.encode(), other_invocation.encode()), expected_error=
+            "live fixture invocation evidence does not match systemd-run"),
+        "unrelated-cgroup": dict(result_bytes=baseline_result.replace(
+            control_group.encode(), control_group.replace(unit, other_unit).encode()), expected_error=
+            "live fixture cgroup is not bound to the exact fixture unit"),
+        "parent-cgroup": dict(result_bytes=baseline_result.replace(
+            control_group.encode(), control_group.rsplit("/", 1)[0].encode()), expected_error=
+            "live fixture cgroup is not bound to the exact fixture unit"),
+        "dotdot-cgroup": dict(result_bytes=baseline_result.replace(
+            control_group.encode(), (control_group.rsplit("/", 1)[0] + "/../" + unit).encode()),
+            expected_error="live fixture cgroup path is not canonical"),
+        "backslash-cgroup": dict(result_bytes=baseline_result.replace(
+            control_group.encode(), control_group.replace("/app.slice/", "/app.slice\\").encode()),
+            expected_error="live fixture cgroup path is not canonical"),
+        "reverse-order": dict(result_bytes=b"".join(reversed(baseline_result.splitlines(keepends=True))),
+            expected_error="live fixture result row order is not canonical"),
+        "result-crlf": dict(result_bytes=baseline_result.replace(b"\n", b"\r\n"),
+            expected_error="live fixture result is not canonical LF-terminated UTF-8"),
+        "output-crlf": dict(output_bytes=baseline_output.replace(b"\n", b"\r\n"),
+            expected_error="live fixture systemd-run output is not canonical LF-terminated UTF-8"),
+        "result-no-final-lf": dict(result_bytes=baseline_result[:-1],
+            expected_error="live fixture result is not canonical LF-terminated UTF-8"),
+        "output-no-final-lf": dict(output_bytes=baseline_output[:-1],
+            expected_error="live fixture systemd-run output is not canonical LF-terminated UTF-8"),
+        "wrong-stop-unit": dict(result_bytes=baseline_result.replace(
+            f"unit_stop_request={unit}".encode(), f"unit_stop_request={other_unit}".encode()),
+            expected_error="live fixture did not request the exact fixture unit stop"),
+        "missing-new-pid": dict(result_bytes=baseline_result.splitlines(keepends=True)[1],
+            expected_error="live fixture result row order is not canonical"),
+        "unexpected-return": dict(result_bytes=baseline_result + b"live_cgroup_guard_unexpected_return=125\n",
+            expected_error="live cgroup guard unexpectedly returned"),
+        "duplicate-terminal": dict(output_bytes=baseline_output + b"Finished with result: success\n",
+            expected_error="live fixture systemd-run output authentication failed"),
+        "extra-result-line": dict(result_bytes=baseline_result + b"arbitrary=extra\n",
+            expected_error="live fixture result contains unexpected evidence"),
+        "extra-output-line": dict(output_bytes=baseline_output + b"arbitrary extra output\n",
+            expected_error="live fixture systemd-run output authentication failed"),
+        "oversize-output": dict(output_bytes=baseline_output + b"Service runtime: " +
+            b"A" * 1_048_576 + b"\n", expected_error="live fixture systemd-run output is missing or unsafe"),
+        "invalid-utf8": dict(output_bytes=baseline_output.replace(b"1.234s", b"1.\xff234s"),
+            expected_error="live fixture systemd-run output is not exact UTF-8"),
     }
-    for label, (rc, result_text, output_text, expected_error) in cases.items():
-        result = invoke(label, rc, result_text, output_text)
-        if result.returncode == 0 or expected_error not in result.stderr:
-            raise SystemExit(f"live result mutation failed elsewhere: {label} result={result}")
-    missing_path = root / "missing-evidence.tsv"
-    result = invoke("missing-evidence", 0, result_path=missing_path)
-    if result.returncode == 0 or "live fixture result is missing or unsafe" not in result.stderr:
-        raise SystemExit(f"missing live evidence survived: {result}")
+    for label, kwargs in cases.items():
+        expected_error = kwargs.pop("expected_error")
+        expect_reject(label, expected_error, **kwargs)
+
+    expect_reject("missing-evidence", "live fixture result is missing or unsafe",
+                  prepare=lambda result, _output, _export: result.unlink())
+    def make_symlink(result, _output, _export):
+        target = result.with_name("symlink-target.tsv")
+        result.replace(target)
+        result.symlink_to(target)
+    expect_reject("symlink-evidence", "live fixture result is missing or unsafe", prepare=make_symlink)
+    expect_reject("hardlink-evidence", "live fixture result is missing or unsafe",
+                  prepare=lambda result, _output, _export: os.link(result, result.with_name("second-link.tsv")))
+    expect_reject("device-evidence", "live fixture result is missing or unsafe", result_arg=Path("/dev/null"))
+    def make_fifo(result, _output, _export):
+        result.unlink()
+        os.mkfifo(result)
+    expect_reject("fifo-evidence", "live fixture result is missing or unsafe", prepare=make_fifo)
+    completed, _, _, export = invoke(
+        "existing-export",
+        prepare=lambda _result, _output, target: (target / "cgroup-live.tsv").write_bytes(b"old\n"),
+    )
+    if (completed.returncode == 0 or
+            "live fixture export destination already exists" not in completed.stderr or
+            sorted(path.name for path in export.iterdir()) != ["cgroup-live.tsv"] or
+            (export / "cgroup-live.tsv").read_bytes() != b"old\n"):
+        raise SystemExit(f"existing export destination was not preserved: {completed}")
+
+    case = root / "source-swap"
+    case.mkdir()
+    export = case / "export"
+    export.mkdir()
+    result_file = case / "cgroup-live.tsv"
+    output_file = case / "systemd-run.output.txt"
+    result_file.write_bytes(baseline_result)
+    output_file.write_bytes(baseline_output)
+    parent_sock, child_sock = socket.socketpair()
+    parent_sock.settimeout(2)
+    env = os.environ.copy()
+    env["CUBR_G5_LIVE_VERIFY_SYNC_FD"] = str(child_sock.fileno())
+    proc = subprocess.Popen(
+        ["/usr/bin/bash", runner, "--self-test-verify-cgroup-live-result", "0",
+         str(result_file), unit, str(output_file), str(export)],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+        pass_fds=(child_sock.fileno(),),
+    )
+    child_sock.close()
+    try:
+        if parent_sock.recv(16) != b"ready\n":
+            raise SystemExit("source-swap verifier did not expose its deterministic test seam")
+        result_file.replace(case / "opened-source.tsv")
+        result_file.write_bytes(baseline_result)
+        parent_sock.sendall(b"continue\n")
+        stdout, stderr = proc.communicate(timeout=2)
+    except Exception:
+        proc.kill()
+        proc.communicate()
+        raise
+    finally:
+        parent_sock.close()
+    if (proc.returncode == 0 or "live fixture source changed during verification" not in stderr or
+            stdout or list(export.iterdir())):
+        raise SystemExit(f"source swap survived live result verification: rc={proc.returncode} "
+                         f"stdout={stdout!r} stderr={stderr!r}")
 finally:
     shutil.rmtree(root)
 PY
 then
     fail 'authenticated live cgroup result matrix failed'
 fi
+
+live_result_arity_root=$(/usr/bin/mktemp -d)
+/usr/bin/mkdir -- "$live_result_arity_root/export"
+for label in missing extra; do
+    live_result_arity_output=
+    live_result_arity_rc=0
+    set +e
+    case $label in
+        missing)
+            live_result_arity_output=$(/usr/bin/bash "$RUNNER" \
+                --self-test-verify-cgroup-live-result 2>&1) ;;
+        extra)
+            live_result_arity_output=$(/usr/bin/bash "$RUNNER" \
+                --self-test-verify-cgroup-live-result 0 missing.tsv fixture.service missing.output \
+                "$live_result_arity_root/export" unexpected 2>&1) ;;
+    esac
+    live_result_arity_rc=$?
+    set -e
+    (( live_result_arity_rc != 0 )) || fail "live result dispatch arity survived: $label"
+    [[ $live_result_arity_output == *'live result self-test requires exactly rc, result, unit, systemd output, and export directory'* ]] ||
+        invalid "live result dispatch arity failed elsewhere: $label output=$live_result_arity_output"
+done
+/usr/bin/rm -rf -- "$live_result_arity_root"
 
 live_dispatch_root=$(/usr/bin/mktemp -d)
 /usr/bin/mkdir -- "$live_dispatch_root/export"
@@ -1693,6 +1844,42 @@ PY
     expect_runner_mutant_red live_result_allows_unexpected_worker_return \
         's/if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):/if False:/' \
         'live cgroup fixture does not reject an unexpected worker return'
+    expect_runner_mutant_red live_result_drops_nofollow \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK/os.O_RDONLY | os.O_NONBLOCK/' \
+        'live result verifier missing load-bearing control: fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)'
+    expect_runner_mutant_red live_result_allows_hardlinks \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/info.st_nlink != 1/False/' \
+        'live result verifier missing load-bearing control: info.st_nlink != 1'
+    expect_runner_mutant_red live_result_allows_nonregular \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/not stat.S_ISREG(info.st_mode)/False/' \
+        'live result verifier missing load-bearing control: not stat.S_ISREG(info.st_mode)'
+    expect_runner_mutant_red live_result_relaxes_size_bound \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/info.st_size > MAX_BYTES/False/' \
+        'live result verifier missing load-bearing control: info.st_size > MAX_BYTES'
+    expect_runner_mutant_red live_result_ignores_invalid_utf8 \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/payload.decode("utf-8", errors="strict")/payload.decode("utf-8", errors="ignore")/' \
+        'live result verifier missing load-bearing control: payload.decode("utf-8", errors="strict")'
+    expect_runner_mutant_red live_result_allows_noncanonical_bytes \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/not payload.endswith(b"\\n") or b"\\r" in payload/False/' \
+        'live result verifier missing load-bearing control: not payload.endswith(b"\n") or b"\r" in payload'
+    expect_runner_mutant_red live_result_drops_source_identity_recheck \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/return source_identity_changed/return False/' \
+        'authenticated live cgroup result matrix failed'
+    expect_runner_mutant_red live_result_allows_cross_invocation \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/result_invocation != invocation/False/' \
+        'live result verifier missing load-bearing control: result_invocation != invocation'
+    expect_runner_mutant_red live_result_allows_cross_cgroup \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/components\[-1\] != unit/False/' \
+        'live result verifier missing load-bearing control: components[-1] != unit'
+    expect_runner_mutant_red live_result_allows_reverse_evidence_order \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/new_match = new_pid.fullmatch(result_lines\[0\])/new_match = new_pid.fullmatch(result_lines[0]) or new_pid.fullmatch(result_lines[1])/; /^verify_live_cgroup_fixture_result()/,/^}/s/stop_match = stop.fullmatch(result_lines\[1\])/stop_match = stop.fullmatch(result_lines[1]) or stop.fullmatch(result_lines[0])/; /^verify_live_cgroup_fixture_result()/,/^}/s/if new_match is None or (stop.fullmatch(result_lines\[0\]) and new_pid.fullmatch(result_lines\[1\])):/if new_match is None:/' \
+        'authenticated live cgroup result matrix failed'
+    expect_runner_mutant_red live_result_allows_extra_result_rows \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/if len(result_lines) > 2:/if False:/; /^verify_live_cgroup_fixture_result()/,/^}/s/if len(result_lines) != 2:/if False:/' \
+        'authenticated live cgroup result matrix failed'
+    expect_runner_mutant_red live_result_allows_arbitrary_output \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/any(optional.fullmatch(line) is None for line in output_lines\[3:\])/False/' \
+        'authenticated live cgroup result matrix failed'
     expect_runner_mutant_red remote_main_accepts_local_unmerged \
         's/\[\[ \$remote_main == "\$expected" \]\]/[[ -n $remote_main ]]/' \
         'fresh remote main equality comparison is missing'

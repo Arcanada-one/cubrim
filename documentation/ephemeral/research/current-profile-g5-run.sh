@@ -116,6 +116,7 @@ CGROUP_PROCS=
 CGROUP_BASELINE_PIDS=
 CGROUP_STOP_SENTINEL=${CUBR_CGROUP_STOP_SENTINEL:-}
 CGROUP_SYSTEMCTL_USER=${CUBR_CGROUP_SYSTEMCTL_USER:-0}
+CGROUP_EVIDENCE_INVOCATION_ID=
 declare -Ag CGROUP_ALLOWED_PIDS=()
 
 now() { /usr/bin/date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -346,7 +347,7 @@ assert_cgroup_no_new_pids() {
     done <"$CGROUP_PROCS"
     if (( ${#new_pids[@]} != 0 )); then
         FAILURE_REASON="bounded call retained new PID(s) in exact systemd ControlGroup"
-        jlog "cgroup_new_pid=$(IFS=,; printf '%s' "${new_pids[*]}") control_group=$CONTROL_GROUP"
+        jlog "cgroup_new_pid=$(IFS=,; printf '%s' "${new_pids[*]}") control_group=$CONTROL_GROUP${CGROUP_EVIDENCE_INVOCATION_ID:+ invocation_id=$CGROUP_EVIDENCE_INVOCATION_ID}"
         request_bound_unit_stop || true
         return 125
     fi
@@ -2691,9 +2692,11 @@ self_test_cgroup() {
 
 self_test_cgroup_live_worker() {
     local props main_pid control_group cgroup_file rc
-    [[ $CGROUP_SYSTEMCTL_USER == 1 && -n $SYSTEMD_UNIT && -n ${CUBR_CGROUP_LIVE_RESULT:-} ]] ||
+    [[ $CGROUP_SYSTEMCTL_USER == 1 && -n $SYSTEMD_UNIT && -n ${CUBR_CGROUP_LIVE_RESULT:-} &&
+       ${INVOCATION_ID:-} =~ ^[0-9a-f]{32}$ ]] ||
         die 'live cgroup worker identity is missing'
     JOURNAL=$CUBR_CGROUP_LIVE_RESULT
+    CGROUP_EVIDENCE_INVOCATION_ID=$INVOCATION_ID
     props=$(/usr/bin/systemctl --user show "$SYSTEMD_UNIT" -p MainPID -p ControlGroup -p KillMode)
     /usr/bin/grep -qx 'KillMode=control-group' <<<"$props" || die 'live cgroup KillMode mismatch'
     main_pid=$(/usr/bin/awk -F= '$1=="MainPID" {print $2}' <<<"$props")
@@ -2718,92 +2721,271 @@ self_test_cgroup_live_worker() {
 }
 
 verify_live_cgroup_fixture_result() {
-    local rc=$1 fixture_result=$2 fixture_unit=$3 systemd_output=$4 verification_error
+    local rc=${1:-} fixture_result=${2:-} fixture_unit=${3:-} systemd_output=${4:-}
+    local export_dir=${5:-} sync_fd=${6:-} verification_error
     [[ $rc =~ ^[0-9]+$ && $fixture_unit =~ ^[A-Za-z0-9_.:@-]+[.]service$ &&
-       $fixture_unit != *'..'* ]] ||
+       $fixture_unit != *'..'* && -n $fixture_result && -n $systemd_output && -n $export_dir &&
+       ( -z $sync_fd || $sync_fd =~ ^[0-9]+$ ) ]] ||
         die 'live fixture result verifier inputs are malformed'
     (( rc == 0 )) || die 'live fixture systemd-run status is not expected success'
-    [[ -f $fixture_result && ! -L $fixture_result ]] || die 'live fixture result is missing or unsafe'
-    [[ -f $systemd_output && ! -L $systemd_output ]] ||
-        die 'live fixture systemd-run output is missing or unsafe'
-    if ! verification_error=$(/usr/bin/python3 - "$fixture_result" "$fixture_unit" "$systemd_output" 2>&1 <<'PY'
-import os, re, stat, sys
+    if ! verification_error=$(/usr/bin/python3 -I - "$fixture_result" "$fixture_unit" \
+        "$systemd_output" "$export_dir" "$sync_fd" 2>&1 <<'PY'
+import hashlib, os, re, stat, sys
 
-result_path, unit, output_path = sys.argv[1:]
+result_path, unit, output_path, export_dir, sync_fd_arg = sys.argv[1:]
+MAX_BYTES = 1_048_576
+DESTINATIONS = (
+    ("cgroup-live.tsv", result_path, "live fixture result"),
+    ("systemd-run.output.txt", output_path, "live fixture systemd-run output"),
+)
 
-def read_regular(path, label):
+class VerificationError(Exception):
+    pass
+
+def identity(info):
+    return (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode), info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+def open_regular(path, label):
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError as error:
-        raise SystemExit(f"{label} is missing or unsafe") from error
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 1_048_576:
-            raise SystemExit(f"{label} is missing or unsafe")
-        chunks, total = [], 0
-        while True:
-            try:
-                chunk = os.read(fd, min(65536, 1_048_577 - total))
-            except InterruptedError:
-                continue
-            if not chunk:
-                break
-            chunks.append(chunk)
-            total += len(chunk)
-            if total > 1_048_576:
-                raise SystemExit(f"{label} exceeds size bound")
-        payload = b"".join(chunks)
-    finally:
+        raise VerificationError(f"{label} is missing or unsafe") from error
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_BYTES:
         os.close(fd)
+        raise VerificationError(f"{label} is missing or unsafe")
+    return fd, info
+
+def read_regular(fd, initial, label):
+    chunks, total = [], 0
+    while True:
+        try:
+            chunk = os.read(fd, min(65536, MAX_BYTES + 1 - total))
+        except InterruptedError:
+            continue
+        except OSError as error:
+            raise VerificationError(f"{label} is missing or unsafe") from error
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > MAX_BYTES:
+            raise VerificationError(f"{label} is missing or unsafe")
+    if identity(os.fstat(fd)) != identity(initial):
+        raise VerificationError("live fixture source changed during verification")
+    payload = b"".join(chunks)
     try:
-        return payload.decode("utf-8", errors="strict")
+        text = payload.decode("utf-8", errors="strict")
     except UnicodeDecodeError as error:
-        raise SystemExit(f"{label} is not exact UTF-8") from error
+        raise VerificationError(f"{label} is not exact UTF-8") from error
+    if not payload.endswith(b"\n") or b"\r" in payload:
+        raise VerificationError(f"{label} is not canonical LF-terminated UTF-8")
+    return payload, text[:-1].split("\n")
 
-output_lines = read_regular(output_path, "live fixture systemd-run output").splitlines()
-running = re.compile(
-    rf"Running as unit: {re.escape(unit)}; invocation ID: [0-9a-f]{{32}}"
-)
-finished = "Finished with result: success"
-terminated = "Main processes terminated with: code=killed/status=TERM"
-optional = re.compile(
-    r"(?:Service runtime|CPU time consumed|Memory peak|Memory swap peak): [ -~]+"
-)
-if (sum(bool(running.fullmatch(line)) for line in output_lines) != 1 or
-        output_lines.count(finished) != 1 or output_lines.count(terminated) != 1 or
-        any(not (running.fullmatch(line) or line in {finished, terminated} or optional.fullmatch(line))
-            for line in output_lines)):
-    raise SystemExit("live fixture systemd-run output authentication failed")
+def source_changed(path, fd, initial):
+    try:
+        current_fd = os.fstat(fd)
+        current_path = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return True
+    source_identity_changed = identity(current_fd) != identity(initial)
+    source_identity_changed = source_identity_changed or identity(current_path) != identity(initial)
+    return source_identity_changed
 
-result_lines = read_regular(result_path, "live fixture result").splitlines()
-timestamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\t"
-new_pid = re.compile(
-    timestamp + r"cgroup_new_pid=[1-9][0-9]*(?:,[1-9][0-9]*)* "
-    r"control_group=/[A-Za-z0-9_.:@/\\x-]+"
-)
-stop = re.compile(timestamp + rf"unit_stop_request={re.escape(unit)} scope=user")
-if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):
-    raise SystemExit("live cgroup guard unexpectedly returned")
-if sum(bool(new_pid.fullmatch(line)) for line in result_lines) != 1:
-    raise SystemExit("live fixture did not retain a new cgroup PID")
-if sum(bool(stop.fullmatch(line)) for line in result_lines) != 1:
-    raise SystemExit("live fixture did not request the exact fixture unit stop")
-if len(result_lines) != 2:
-    raise SystemExit("live fixture result contains unexpected evidence")
+def write_all(fd, payload):
+    offset = 0
+    while offset < len(payload):
+        try:
+            written = os.write(fd, payload[offset:])
+        except InterruptedError:
+            continue
+        if written <= 0:
+            raise VerificationError("live fixture authenticated export write failed")
+        offset += written
+
+def read_all(fd, bound):
+    os.lseek(fd, 0, os.SEEK_SET)
+    chunks, total = [], 0
+    while True:
+        try:
+            chunk = os.read(fd, min(65536, bound + 1 - total))
+        except InterruptedError:
+            continue
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > bound:
+            raise VerificationError("live fixture authenticated export comparison exceeded bound")
+    return b"".join(chunks)
+
+source_fds = []
+destination_fds = []
+created = []
+dir_fd = -1
+success = False
+try:
+    result_fd, result_info = open_regular(result_path, "live fixture result")
+    source_fds.append(result_fd)
+    output_fd, output_info = open_regular(output_path, "live fixture systemd-run output")
+    source_fds.append(output_fd)
+    result_payload, result_lines = read_regular(result_fd, result_info, "live fixture result")
+    output_payload, output_lines = read_regular(
+        output_fd, output_info, "live fixture systemd-run output"
+    )
+
+    running = re.compile(
+        rf"Running as unit: {re.escape(unit)}; invocation ID: (?P<invocation>[0-9a-f]{{32}})"
+    )
+    finished = "Finished with result: success"
+    terminated = "Main processes terminated with: code=killed/status=TERM"
+    optional = re.compile(
+        r"(?:Service runtime|CPU time consumed|Memory peak|Memory swap peak): [ -~]+"
+    )
+    running_match = running.fullmatch(output_lines[0]) if output_lines else None
+    if (len(output_lines) < 3 or running_match is None or output_lines[1] != finished or
+            output_lines[2] != terminated or
+            any(optional.fullmatch(line) is None for line in output_lines[3:])):
+        raise VerificationError("live fixture systemd-run output authentication failed")
+    invocation = running_match.group("invocation")
+
+    if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):
+        raise VerificationError("live cgroup guard unexpectedly returned")
+    if len(result_lines) > 2:
+        raise VerificationError("live fixture result contains unexpected evidence")
+    if len(result_lines) != 2:
+        raise VerificationError("live fixture result row order is not canonical")
+    timestamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\t"
+    new_pid = re.compile(
+        timestamp + r"cgroup_new_pid=[1-9][0-9]*(?:,[1-9][0-9]*)* "
+        r"control_group=(?P<cgroup>[^ ]+) invocation_id=(?P<invocation>[0-9a-f]{32})"
+    )
+    stop = re.compile(timestamp + rf"unit_stop_request={re.escape(unit)} scope=user")
+    new_match = new_pid.fullmatch(result_lines[0])
+    stop_match = stop.fullmatch(result_lines[1])
+    if new_match is None or (stop.fullmatch(result_lines[0]) and new_pid.fullmatch(result_lines[1])):
+        raise VerificationError("live fixture result row order is not canonical")
+    if stop_match is None:
+        raise VerificationError("live fixture did not request the exact fixture unit stop")
+    result_invocation = new_match.group("invocation")
+    if result_invocation != invocation:
+        raise VerificationError("live fixture invocation evidence does not match systemd-run")
+    cgroup = new_match.group("cgroup")
+    components = cgroup[1:].split("/") if cgroup.startswith("/") else []
+    component = re.compile(r"[A-Za-z0-9_.:@-]+")
+    if (not components or "//" in cgroup or "\\" in cgroup or
+            any(part in {".", ".."} or component.fullmatch(part) is None for part in components)):
+        raise VerificationError("live fixture cgroup path is not canonical")
+    if components[-1] != unit:
+        raise VerificationError("live fixture cgroup is not bound to the exact fixture unit")
+
+    if sync_fd_arg:
+        sync_fd = int(sync_fd_arg)
+        os.write(sync_fd, b"ready\n")
+        if os.read(sync_fd, 32) != b"continue\n":
+            raise VerificationError("live fixture source-swap test synchronization failed")
+    if (source_changed(result_path, result_fd, result_info) or
+            source_changed(output_path, output_fd, output_info)):
+        raise VerificationError("live fixture source changed during verification")
+
+    try:
+        dir_fd = os.open(export_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise VerificationError("live fixture export directory is unsafe") from error
+    dir_info = os.fstat(dir_fd)
+    if not stat.S_ISDIR(dir_info.st_mode):
+        raise VerificationError("live fixture export directory is unsafe")
+    for destination, _source, _label in DESTINATIONS:
+        try:
+            os.stat(destination, dir_fd=dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise VerificationError("live fixture export destination is unsafe") from error
+        raise VerificationError("live fixture export destination already exists")
+
+    metadata = []
+    for destination, payload in (
+        (DESTINATIONS[0][0], result_payload),
+        (DESTINATIONS[1][0], output_payload),
+    ):
+        try:
+            destination_fd = os.open(
+                destination,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o444,
+                dir_fd=dir_fd,
+            )
+        except OSError as error:
+            raise VerificationError("live fixture export destination is unsafe") from error
+        destination_fds.append(destination_fd)
+        created.append((destination, destination_fd))
+        destination_info = os.fstat(destination_fd)
+        if not stat.S_ISREG(destination_info.st_mode) or destination_info.st_nlink != 1:
+            raise VerificationError("live fixture export destination is unsafe")
+        write_all(destination_fd, payload)
+        os.fsync(destination_fd)
+        if read_all(destination_fd, MAX_BYTES) != payload:
+            raise VerificationError("live fixture authenticated export comparison failed")
+        os.fchmod(destination_fd, 0o444)
+        current_entry = os.stat(destination, dir_fd=dir_fd, follow_symlinks=False)
+        current_fd = os.fstat(destination_fd)
+        if ((current_entry.st_dev, current_entry.st_ino) != (current_fd.st_dev, current_fd.st_ino) or
+                not stat.S_ISREG(current_fd.st_mode) or current_fd.st_nlink != 1):
+            raise VerificationError("live fixture export destination changed during verification")
+        metadata.extend((hashlib.sha256(payload).hexdigest(), str(len(payload))))
+
+    if (source_changed(result_path, result_fd, result_info) or
+            source_changed(output_path, output_fd, output_info)):
+        raise VerificationError("live fixture source changed during verification")
+    current_dir = os.stat(export_dir, follow_symlinks=False)
+    if (current_dir.st_dev, current_dir.st_ino) != (dir_info.st_dev, dir_info.st_ino):
+        raise VerificationError("live fixture export directory changed during verification")
+    os.fsync(dir_fd)
+    success = True
+    print("\t".join(metadata))
+except VerificationError as error:
+    raise SystemExit(str(error)) from error
+finally:
+    if not success and dir_fd >= 0:
+        for destination, destination_fd in reversed(created):
+            try:
+                current_entry = os.stat(destination, dir_fd=dir_fd, follow_symlinks=False)
+                current_fd = os.fstat(destination_fd)
+                if (current_entry.st_dev, current_entry.st_ino) == (current_fd.st_dev, current_fd.st_ino):
+                    os.unlink(destination, dir_fd=dir_fd)
+            except OSError:
+                pass
+    for fd in destination_fds:
+        os.close(fd)
+    if dir_fd >= 0:
+        os.close(dir_fd)
+    for fd in source_fds:
+        os.close(fd)
 PY
     ); then
         die "$verification_error"
     fi
+    printf '%s\n' "$verification_error"
 }
 
 self_test_verify_cgroup_live_result() {
-    (( $# == 4 )) || die 'live result self-test requires rc, result, unit, and systemd output'
-    verify_live_cgroup_fixture_result "$1" "$2" "$3" "$4"
-    printf 'current_profile_g5_live_result_test=PASS\n'
+    local verification_metadata result_sha result_size output_sha output_size extra
+    (( $# == 6 )) ||
+        die 'live result self-test internal arguments are malformed'
+    verification_metadata=$(verify_live_cgroup_fixture_result "$1" "$2" "$3" "$4" "$5" "$6")
+    IFS=$'\t' read -r result_sha result_size output_sha output_size extra <<<"$verification_metadata"
+    [[ $result_sha =~ ^[0-9a-f]{64}$ && $result_size =~ ^[1-9][0-9]*$ &&
+       $output_sha =~ ^[0-9a-f]{64}$ && $output_size =~ ^[1-9][0-9]*$ && -z ${extra:-} ]] ||
+        die 'live result verifier metadata is malformed'
+    printf 'current_profile_g5_live_result_test=PASS result_sha256=%s test_output_sha256=%s\n' \
+        "$result_sha" "$output_sha"
 }
 
 self_test_cgroup_live() {
-    local export_dir=${1:-} root fixture_result fixture_unit runner_path systemd_output rc result_sha output_sha
+    local export_dir=${1:-} root fixture_result fixture_unit runner_path systemd_output rc
+    local verification_metadata result_sha result_size output_sha output_size extra
     local -a systemd_args
     [[ -d $export_dir && ! -L $export_dir ]] || die 'live fixture export directory is unsafe'
     root=$(/usr/bin/mktemp -d)
@@ -2836,11 +3018,11 @@ self_test_cgroup_live() {
     "${systemd_args[@]}" >"$systemd_output" 2>&1
     rc=$?
     set -e
-    verify_live_cgroup_fixture_result "$rc" "$fixture_result" "$fixture_unit" "$systemd_output"
-    /usr/bin/install -m 0444 -- "$fixture_result" "$export_dir/cgroup-live.tsv"
-    /usr/bin/install -m 0444 -- "$systemd_output" "$export_dir/systemd-run.output.txt"
-    result_sha=$(sha "$export_dir/cgroup-live.tsv")
-    output_sha=$(sha "$export_dir/systemd-run.output.txt")
+    verification_metadata=$(verify_live_cgroup_fixture_result "$rc" "$fixture_result" "$fixture_unit" "$systemd_output" "$export_dir")
+    IFS=$'\t' read -r result_sha result_size output_sha output_size extra <<<"$verification_metadata"
+    [[ $result_sha =~ ^[0-9a-f]{64}$ && $result_size =~ ^[1-9][0-9]*$ &&
+       $output_sha =~ ^[0-9a-f]{64}$ && $output_size =~ ^[1-9][0-9]*$ && -z ${extra:-} ]] ||
+        die 'live result verifier metadata is malformed'
     /usr/bin/rm -rf -- "$root"
     printf 'current_profile_g5_cgroup_live_test=PASS result_sha256=%s test_output_sha256=%s\n' \
         "$result_sha" "$output_sha"
@@ -3250,7 +3432,10 @@ case ${1:-} in
         self_test_cgroup_live "$2"
         ;;
     --self-test-verify-cgroup-live-result)
-        self_test_verify_cgroup_live_result "$2" "$3" "$4" "$5"
+        (( $# == 6 )) ||
+            die 'live result self-test requires exactly rc, result, unit, systemd output, and export directory'
+        self_test_verify_cgroup_live_result \
+            "$2" "$3" "$4" "$5" "$6" "${CUBR_G5_LIVE_VERIFY_SYNC_FD:-}"
         ;;
     --self-test-cgroup-live-worker) self_test_cgroup_live_worker ;;
     --self-test-publish) self_test_publish ;;
