@@ -100,6 +100,15 @@ line_of_last() {
     printf '%s\n' "$line"
 }
 
+function_source() {
+    local signature=$1
+    /usr/bin/awk -v signature="$signature() {" '
+        $0 == signature {inside=1}
+        inside {print}
+        inside && /^}/ {exit}
+    ' "$RUNNER"
+}
+
 [[ -f $RUNNER && ! -L $RUNNER ]] || invalid "runner not found or unsafe: $RUNNER"
 [[ -f $MAPPER && ! -L $MAPPER ]] || invalid "mapper not found or unsafe: $MAPPER"
 canonical_self=$(/usr/bin/readlink -f -- "${BASH_SOURCE[0]}")
@@ -388,13 +397,39 @@ for literal in "${runner_literals[@]}"; do
     require_runner_fixed "$literal"
 done
 
-require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" runner_sha256) == "$EXPECTED_RUNNER_SHA"' \
+perf_probe_source=$(function_source discover_perf_events)
+[[ $perf_probe_source == *'run_bounded 30 "${PIN[@]}" /usr/bin/perf stat -x, -e "$event" -o "$PREFLIGHT_DIR/perf-$event.csv" -- /usr/bin/true'* &&
+   $perf_probe_source != *'$CUBRIM'* && $perf_probe_source != *'$CORPUS_ROOT'* &&
+   $perf_probe_source != *'$CORPUS_MANIFEST'* ]] ||
+    fail 'admission perf capability probe target is not literal true'
+
+launch_auth_source=$(function_source authenticate_campaign_launch_inputs)
+launch_prereg_caller_count=$({ /usr/bin/grep -Fo '$CUBR_LAUNCH_PREREG' <<<"$launch_auth_source" || true; } |
+    /usr/bin/wc -l)
+launch_identity_caller_count=$({ /usr/bin/grep -Fo '$CUBR_LAUNCH_IDENTITIES' <<<"$launch_auth_source" || true; } |
+    /usr/bin/wc -l)
+[[ $launch_prereg_caller_count == 1 && $launch_identity_caller_count == 1 &&
+   $launch_auth_source == *'snapshot_launch_inputs "$CUBR_LAUNCH_PREREG" "$CUBR_LAUNCH_IDENTITIES"'* &&
+   $launch_auth_source == *'--verify-launch-identity-files "$snapshot_prereg" "$snapshot_identities"'* ]] ||
+    fail 'campaign launch authentication reopened caller input after snapshot'
+
+main_source=$(function_source main_run)
+[[ $main_source == *'write_g5_admission_identity_set "$PARTIAL"'* &&
+   $main_source == *'        "$PARTIAL/sealed-identity-set.env"'* ]] ||
+    fail 'campaign stable identity comparison is not bound to fresh sealed identity'
+require_runner_named 'compare_g5_stable_identities "$PREFLIGHT_DIR/admission-sealed-identity-set.env"' \
+    'campaign stable identity comparison is not bound to fresh sealed identity'
+
+require_runner_named 'instrument_tree=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse "$INSTRUMENT_COMMIT^{tree}")' \
+    'instrument tree is not commit-derived'
+
+require_runner_named '--launch-identity-value "$snapshot_identities" runner_sha256) == "$EXPECTED_RUNNER_SHA"' \
     'campaign launch must compare runner SHA'
-require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" runner_test_sha256) == "$EXPECTED_TEST_SHA"' \
+require_runner_named '--launch-identity-value "$snapshot_identities" runner_test_sha256) == "$EXPECTED_TEST_SHA"' \
     'campaign launch must compare runner test SHA'
-require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" mapper_sha256) == "$EXPECTED_MAPPER_SHA"' \
+require_runner_named '--launch-identity-value "$snapshot_identities" mapper_sha256) == "$EXPECTED_MAPPER_SHA"' \
     'campaign launch must compare mapper SHA'
-require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA"' \
+require_runner_named '--launch-identity-value "$snapshot_identities" mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA"' \
     'campaign launch must compare mapper test SHA'
 require_runner_named 'sha256sum -- "${BASH_SOURCE[0]}"' \
     'campaign launch must authenticate installed runner SHA'
@@ -404,17 +439,17 @@ require_runner_named 'sha256sum -- "$MAPPER_SOURCE"' \
     'campaign launch must authenticate installed mapper SHA'
 require_runner_named 'sha256sum -- "$MAPPER_TEST_SOURCE"' \
     'campaign launch must authenticate installed mapper test SHA'
-require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256"' \
+require_runner_named '--launch-identity-value "$snapshot_identities" admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256"' \
     'campaign launch must compare admission identity SHA'
-require_runner_named '--launch-identity-value "$CUBR_LAUNCH_IDENTITIES" admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES"' \
+require_runner_named '--launch-identity-value "$snapshot_identities" admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES"' \
     'campaign launch must compare admission identity bytes'
 require_runner_named '[[ $actual_prereg_blob == "$CUBR_EXPECTED_PREREG_BLOB" ]]' \
     'campaign launch must compare expected preregistration blob'
 require_runner_named '[[ $actual_identities_blob == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]]' \
     'campaign launch must compare expected identity blob'
-require_runner_named '[[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_PREREG") == "$CUBR_EXPECTED_PREREG_BLOB" ]]' \
+require_runner_named '[[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$snapshot_prereg") == "$CUBR_EXPECTED_PREREG_BLOB" ]]' \
     'campaign launch must authenticate preregistration file blob'
-require_runner_named '[[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_IDENTITIES") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]]' \
+require_runner_named '[[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$snapshot_identities") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]]' \
     'campaign launch must authenticate identity file blob'
 require_runner_named 'sha256sum -- "$target"' \
     'campaign launch must read back persisted identity SHA'
@@ -747,6 +782,56 @@ try:
                 f"special launch input did not fail safely: {label} rc={result.returncode} "
                 f"stdout={result.stdout!r} stderr={result.stderr!r}"
             )
+
+    result = run_pair(prereg_text, identity_text)
+    if result.returncode != 0:
+        raise SystemExit(f"launch identity reset failed before snapshot control: {result}")
+    snapshot_dir = root / "private-snapshot"
+    snapshot_dir.mkdir(mode=0o700)
+    result = subprocess.run(
+        ["/usr/bin/bash", runner, "--self-test-snapshot-launch-inputs",
+         str(prereg), str(identity), str(snapshot_dir)],
+        text=True, capture_output=True, check=False, timeout=2,
+    )
+    expected_snapshot = "current_profile_g5_launch_snapshot_test=PASS\n"
+    if result.returncode != 0 or result.stdout != expected_snapshot or result.stderr:
+        raise SystemExit(
+            f"launch snapshot positive control failed: rc={result.returncode} "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+    snapshot_prereg = snapshot_dir / "launch-preregistration.snapshot.md"
+    snapshot_identity = snapshot_dir / "launch-identities.snapshot.env"
+    if snapshot_prereg.read_bytes() != prereg_text.encode() or snapshot_identity.read_bytes() != identity_text.encode():
+        raise SystemExit("launch snapshot bytes differ from caller input")
+
+    attacker_prereg = root / "attacker-prereg.md"
+    attacker_identity = root / "attacker-identity.env"
+    attacker_prereg.write_text("attacker\n", encoding="utf-8")
+    attacker_identity.write_text("runner_sha256=attacker\n", encoding="utf-8")
+    prereg.unlink()
+    identity.unlink()
+    prereg.symlink_to(attacker_prereg)
+    identity.symlink_to(attacker_identity)
+    result = run_paths(snapshot_prereg, snapshot_identity)
+    if result.returncode != 0 or result.stdout != expected or result.stderr:
+        raise SystemExit(f"post-snapshot caller swap affected parser authentication: {result}")
+    result = subprocess.run(
+        ["/usr/bin/bash", runner, "--launch-identity-value",
+         str(snapshot_identity), "runner_sha256"],
+        text=True, capture_output=True, check=False, timeout=2,
+    )
+    if result.returncode != 0 or result.stdout != rows["runner_sha256"] + "\n" or result.stderr:
+        raise SystemExit(f"post-snapshot caller swap affected identity authentication: {result}")
+
+    rejected_dir = root / "rejected-snapshot"
+    rejected_dir.mkdir(mode=0o700)
+    result = subprocess.run(
+        ["/usr/bin/bash", runner, "--self-test-snapshot-launch-inputs",
+         str(prereg), str(snapshot_identity), str(rejected_dir)],
+        text=True, capture_output=True, check=False, timeout=2,
+    )
+    if result.returncode == 0 or "unsafe launch snapshot source" not in result.stderr:
+        raise SystemExit(f"pre-snapshot caller symlink was not rejected: {result}")
 finally:
     shutil.rmtree(root)
 PY
@@ -1354,35 +1439,47 @@ PY
     expect_runner_mutant_red mode_selected_after_readonly \
         's/readonly RUN_MODE/readonly OUT=\$CAMPAIGN_OUT\nreadonly RUN_MODE/' \
         'RUN_MODE must precede every readonly output path'
+    expect_runner_mutant_red admission_perf_probe_uses_campaign_binary \
+        's#-o "\$PREFLIGHT_DIR/perf-\$event.csv" -- /usr/bin/true#-o "$PREFLIGHT_DIR/perf-$event.csv" -- "$CUBRIM"#' \
+        'admission perf capability probe target is not literal true'
+    expect_runner_mutant_red launch_auth_reopens_caller_identity \
+        '0,/--verify-launch-identity-files "\$snapshot_prereg" "\$snapshot_identities"/s//--verify-launch-identity-files "$snapshot_prereg" "$CUBR_LAUNCH_IDENTITIES"/' \
+        'campaign launch authentication reopened caller input after snapshot'
+    expect_runner_mutant_red stable_identity_self_comparison \
+        's#^[[:space:]]*"\$PARTIAL/sealed-identity-set.env"$#        "$PREFLIGHT_DIR/admission-sealed-identity-set.env"#' \
+        'campaign stable identity comparison is not bound to fresh sealed identity'
+    expect_runner_mutant_red instrument_tree_uses_head \
+        's/rev-parse "\$INSTRUMENT_COMMIT\^{tree}"/rev-parse '\''HEAD^{tree}'\''/' \
+        'instrument tree is not commit-derived'
     expect_runner_mutant_red launch_runner_sha_field \
-        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" runner_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_runner_sha256/' \
+        's/launch-identity-value "\$snapshot_identities" runner_sha256/launch-identity-value "$snapshot_identities" wrong_runner_sha256/' \
         'campaign launch must compare runner SHA'
     expect_runner_mutant_red launch_runner_test_sha_field \
-        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" runner_test_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_runner_test_sha256/' \
+        's/launch-identity-value "\$snapshot_identities" runner_test_sha256/launch-identity-value "$snapshot_identities" wrong_runner_test_sha256/' \
         'campaign launch must compare runner test SHA'
     expect_runner_mutant_red launch_mapper_sha_field \
-        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" mapper_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_mapper_sha256/' \
+        's/launch-identity-value "\$snapshot_identities" mapper_sha256/launch-identity-value "$snapshot_identities" wrong_mapper_sha256/' \
         'campaign launch must compare mapper SHA'
     expect_runner_mutant_red launch_mapper_test_sha_field \
-        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" mapper_test_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_mapper_test_sha256/' \
+        's/launch-identity-value "\$snapshot_identities" mapper_test_sha256/launch-identity-value "$snapshot_identities" wrong_mapper_test_sha256/' \
         'campaign launch must compare mapper test SHA'
     expect_runner_mutant_red installed_runner_sha_field \
-        's#sha256sum -- "${BASH_SOURCE\[0\]}"#sha256sum -- "$CUBR_LAUNCH_PREREG"#' \
+        's#sha256sum -- "${BASH_SOURCE\[0\]}"#sha256sum -- "$snapshot_prereg"#' \
         'campaign launch must authenticate installed runner SHA'
     expect_runner_mutant_red installed_runner_test_sha_field \
-        's/sha256sum -- "\$RUNNER_TEST_SOURCE"/sha256sum -- "$CUBR_LAUNCH_PREREG"/' \
+        's/sha256sum -- "\$RUNNER_TEST_SOURCE"/sha256sum -- "$snapshot_prereg"/' \
         'campaign launch must authenticate installed runner test SHA'
     expect_runner_mutant_red installed_mapper_sha_field \
-        's/sha256sum -- "\$MAPPER_SOURCE"/sha256sum -- "$CUBR_LAUNCH_PREREG"/' \
+        's/sha256sum -- "\$MAPPER_SOURCE"/sha256sum -- "$snapshot_prereg"/' \
         'campaign launch must authenticate installed mapper SHA'
     expect_runner_mutant_red installed_mapper_test_sha_field \
-        's/sha256sum -- "\$MAPPER_TEST_SOURCE"/sha256sum -- "$CUBR_LAUNCH_PREREG"/' \
+        's/sha256sum -- "\$MAPPER_TEST_SOURCE"/sha256sum -- "$snapshot_prereg"/' \
         'campaign launch must authenticate installed mapper test SHA'
     expect_runner_mutant_red launch_admission_sha_field \
-        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" admission_identity_set_sha256/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_admission_identity_set_sha256/' \
+        's/launch-identity-value "\$snapshot_identities" admission_identity_set_sha256/launch-identity-value "$snapshot_identities" wrong_admission_identity_set_sha256/' \
         'campaign launch must compare admission identity SHA'
     expect_runner_mutant_red launch_admission_bytes_field \
-        's/launch-identity-value "\$CUBR_LAUNCH_IDENTITIES" admission_identity_set_bytes/launch-identity-value "$CUBR_LAUNCH_IDENTITIES" wrong_admission_identity_set_bytes/' \
+        's/launch-identity-value "\$snapshot_identities" admission_identity_set_bytes/launch-identity-value "$snapshot_identities" wrong_admission_identity_set_bytes/' \
         'campaign launch must compare admission identity bytes'
     expect_runner_mutant_red launch_main_prereg_blob \
         's/\$actual_prereg_blob == "\$CUBR_EXPECTED_PREREG_BLOB"/\$actual_prereg_blob == "$CUBR_EXPECTED_IDENTITIES_BLOB"/' \
@@ -1391,10 +1488,10 @@ PY
         's/\$actual_identities_blob == "\$CUBR_EXPECTED_IDENTITIES_BLOB"/\$actual_identities_blob == "$CUBR_EXPECTED_PREREG_BLOB"/' \
         'campaign launch must compare expected identity blob'
     expect_runner_mutant_red launch_prereg_file_blob \
-        's/hash-object --no-filters "\$CUBR_LAUNCH_PREREG"/hash-object --no-filters "$CUBR_LAUNCH_IDENTITIES"/' \
+        's/hash-object --no-filters "\$snapshot_prereg"/hash-object --no-filters "$snapshot_identities"/' \
         'campaign launch must authenticate preregistration file blob'
     expect_runner_mutant_red launch_identity_file_blob \
-        's/hash-object --no-filters "\$CUBR_LAUNCH_IDENTITIES"/hash-object --no-filters "$CUBR_LAUNCH_PREREG"/' \
+        's/hash-object --no-filters "\$snapshot_identities"/hash-object --no-filters "$snapshot_prereg"/' \
         'campaign launch must authenticate identity file blob'
     expect_runner_mutant_red persisted_identity_sha_readback \
         's/sha256sum -- "\$target"/sha256sum -- "$source"/' \

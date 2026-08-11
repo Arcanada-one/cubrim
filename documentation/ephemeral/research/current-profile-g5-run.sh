@@ -1863,6 +1863,15 @@ self_test_mode_roots() {
     printf 'current_profile_g5_mode_root_test=PASS\n'
 }
 
+self_test_snapshot_launch_inputs() {
+    (( $# == 3 )) || die 'snapshot launch self-test requires two sources and one target directory'
+    PREFLIGHT_DIR=$3
+    snapshot_launch_inputs "$1" "$2" \
+        "$PREFLIGHT_DIR/launch-preregistration.snapshot.md" \
+        "$PREFLIGHT_DIR/launch-identities.snapshot.env"
+    printf 'current_profile_g5_launch_snapshot_test=PASS\n'
+}
+
 verify_launch_identity_files() {
     /usr/bin/python3 - "$1" "$2" <<'PY'
 import os, re, stat, sys
@@ -2021,10 +2030,29 @@ print(values[0])
 PY
 }
 
+snapshot_launch_inputs() {
+    local caller_prereg=$1 caller_identities=$2 snapshot_prereg=$3 snapshot_identities=$4
+    [[ -f $caller_prereg && ! -L $caller_prereg &&
+       -f $caller_identities && ! -L $caller_identities ]] ||
+        die 'unsafe launch snapshot source'
+    [[ -d $PREFLIGHT_DIR && ! -L $PREFLIGHT_DIR &&
+       $(/usr/bin/stat -c %a -- "$PREFLIGHT_DIR") == 700 ]] ||
+        die 'launch snapshot directory is not private'
+    [[ $(/usr/bin/dirname -- "$snapshot_prereg") == "$PREFLIGHT_DIR" &&
+       $(/usr/bin/dirname -- "$snapshot_identities") == "$PREFLIGHT_DIR" ]] ||
+        die 'launch snapshot target escaped preflight directory'
+    write_new_checked "$snapshot_prereg" "$caller_prereg"
+    write_new_checked "$snapshot_identities" "$caller_identities"
+}
+
 authenticate_campaign_launch_inputs() {
     local parser_output actual_prereg_blob actual_identities_blob
+    local snapshot_prereg=$PREFLIGHT_DIR/launch-preregistration.snapshot.md
+    local snapshot_identities=$PREFLIGHT_DIR/launch-identities.snapshot.env
     [[ $CUBR_LAUNCH_MAIN =~ ^[0-9a-f]{40}$ && $CUBR_EXPECTED_PREREG_BLOB =~ ^[0-9a-f]{40}$ &&
        $CUBR_EXPECTED_IDENTITIES_BLOB =~ ^[0-9a-f]{40}$ ]] || die 'invalid launch Git identity'
+    snapshot_launch_inputs "$CUBR_LAUNCH_PREREG" "$CUBR_LAUNCH_IDENTITIES" \
+        "$snapshot_prereg" "$snapshot_identities"
     run_bounded 30 /usr/bin/git -C "$INSTRUMENT_REPO" merge-base --is-ancestor \
         "$INSTRUMENT_COMMIT" "$CUBR_LAUNCH_MAIN" || die 'instrument is not ancestor of launch main'
     actual_prereg_blob=$(run_bounded 30 /usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
@@ -2036,28 +2064,28 @@ authenticate_campaign_launch_inputs() {
     [[ $actual_identities_blob == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]] ||
         die 'launch-main identity blob mismatch'
     parser_output=$(run_bounded 30 /usr/bin/bash "${BASH_SOURCE[0]}" \
-        --verify-launch-identity-files "$CUBR_LAUNCH_PREREG" "$CUBR_LAUNCH_IDENTITIES")
+        --verify-launch-identity-files "$snapshot_prereg" "$snapshot_identities")
     [[ $parser_output == 'current_profile_g5_launch_identity_parser=PASS schema=g5-protected-launch-identities-v1 keys=59' ]] ||
         die 'protected launch identity parser output mismatch'
-    [[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_PREREG") == "$CUBR_EXPECTED_PREREG_BLOB" ]] ||
+    [[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$snapshot_prereg") == "$CUBR_EXPECTED_PREREG_BLOB" ]] ||
         die 'launch preregistration blob mismatch'
-    [[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$CUBR_LAUNCH_IDENTITIES") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]] ||
+    [[ $(run_bounded 30 /usr/bin/git hash-object --no-filters "$snapshot_identities") == "$CUBR_EXPECTED_IDENTITIES_BLOB" ]] ||
         die 'launch identity blob mismatch'
     [[ $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value \
-        "$CUBR_LAUNCH_IDENTITIES" instrument_resulting_main) == "$INSTRUMENT_COMMIT" ]] ||
+        "$snapshot_identities" instrument_resulting_main) == "$INSTRUMENT_COMMIT" ]] ||
         die 'launch instrument commit mismatch'
-    [[ $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" runner_sha256) == "$EXPECTED_RUNNER_SHA" &&
-       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" runner_test_sha256) == "$EXPECTED_TEST_SHA" &&
-       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" mapper_sha256) == "$EXPECTED_MAPPER_SHA" &&
-       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
+    [[ $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$snapshot_identities" runner_sha256) == "$EXPECTED_RUNNER_SHA" &&
+       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$snapshot_identities" runner_test_sha256) == "$EXPECTED_TEST_SHA" &&
+       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$snapshot_identities" mapper_sha256) == "$EXPECTED_MAPPER_SHA" &&
+       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$snapshot_identities" mapper_test_sha256) == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
         die 'launch runtime asset identity mismatch'
     [[ $(run_bounded 30 /usr/bin/sha256sum -- "${BASH_SOURCE[0]}" | /usr/bin/awk '{print $1}') == "$EXPECTED_RUNNER_SHA" &&
        $(run_bounded 30 /usr/bin/sha256sum -- "$RUNNER_TEST_SOURCE" | /usr/bin/awk '{print $1}') == "$EXPECTED_TEST_SHA" &&
        $(run_bounded 30 /usr/bin/sha256sum -- "$MAPPER_SOURCE" | /usr/bin/awk '{print $1}') == "$EXPECTED_MAPPER_SHA" &&
        $(run_bounded 30 /usr/bin/sha256sum -- "$MAPPER_TEST_SOURCE" | /usr/bin/awk '{print $1}') == "$EXPECTED_MAPPER_TEST_SHA" ]] ||
         die 'installed runtime asset identity mismatch'
-    [[ $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256" &&
-       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$CUBR_LAUNCH_IDENTITIES" admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES" ]] ||
+    [[ $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$snapshot_identities" admission_identity_set_sha256) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_SHA256" &&
+       $(run_bounded 10 /usr/bin/bash "${BASH_SOURCE[0]}" --launch-identity-value "$snapshot_identities" admission_identity_set_bytes) == "$CUBR_EXPECTED_ADMISSION_IDENTITY_BYTES" ]] ||
         die 'launch admission identity expectation mismatch'
     printf '%s\n' "$parser_output" | write_new_stdin "$PREFLIGHT_DIR/launch-identity-parser.txt"
     persist_authenticated_admission_identity
@@ -2298,7 +2326,7 @@ write_g5_admission_identity_set() {
     local mapper_blob mapper_test_blob rustc_version cargo_version release_flags
     local binary_size binary_device binary_inode map_stream_sha map_manifest_sha
     local map_summary_sha map_row_count map_part_count map_seal_sha
-    instrument_tree=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse 'HEAD^{tree}')
+    instrument_tree=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse "$INSTRUMENT_COMMIT^{tree}")
     source_tree=$(/usr/bin/git -C "$CODE_DIR" rev-parse 'HEAD^{tree}')
     cubrim_rs_tree=$(/usr/bin/git -C "$CODE_DIR" rev-parse HEAD:code/cubrim-rs)
     runner_blob=$(/usr/bin/git -C "$INSTRUMENT_REPO" rev-parse \
@@ -3068,9 +3096,9 @@ main_run() {
     require_deadline before-full-map
     build_full_instruction_map
     require_deadline before-stable-identity-comparison
-    write_g5_admission_identity_set "$PARTIAL" "$PREFLIGHT_DIR/campaign-stable-identity-set.env"
+    write_g5_admission_identity_set "$PARTIAL"
     compare_g5_stable_identities "$PREFLIGHT_DIR/admission-sealed-identity-set.env" \
-        "$PREFLIGHT_DIR/campaign-stable-identity-set.env"
+        "$PARTIAL/sealed-identity-set.env"
     require_deadline before-feasibility-fixture
     verify_feasibility_fixture "$PARTIAL"
     require_deadline before-address-smoke
@@ -3093,6 +3121,7 @@ case ${1:-} in
     --admission-feasibility) admission_feasibility_run ;;
     --self-test) self_test ;;
     --self-test-mode-roots) self_test_mode_roots ;;
+    --self-test-snapshot-launch-inputs) self_test_snapshot_launch_inputs "$2" "$3" "$4" ;;
     --self-test-admission-no-performance) self_test_admission_no_performance "$2" ;;
     --self-test-write-admission-manifest) self_test_write_admission_manifest "$2" ;;
     --verify-launch-identity-files) verify_launch_identity_files "$2" "$3" ;;
