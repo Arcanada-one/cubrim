@@ -300,7 +300,7 @@ pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
         if let Some(web) = crate::prof::track(
             "web",
             |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
-            || crate::web::encode_web(data),
+            || crate::web::encode_web_blocked(data, config.web_block_size),
         ) {
             let store = raw_store_blob(data, config);
             if web.len() < store.len() {

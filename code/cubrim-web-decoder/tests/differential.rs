@@ -170,3 +170,55 @@ fn header_probes_are_honest() {
     assert!(!refdec::is_web_frame(b"not a frame at all"));
     assert_eq!(refdec::declared_len(b"short"), None);
 }
+
+/// Multi-block frames must decode identically in both implementations.
+///
+/// The frame format has always carried `BFINAL`, but until the encoder could
+/// emit more than one block the multi-block path was specified and untested in
+/// both decoders at once. This is the test that makes the specification's
+/// claim true.
+#[test]
+fn both_decoders_agree_on_multi_block_frames() {
+    let cases: Vec<Vec<u8>> = vec![
+        b"the quick brown fox jumps over the lazy dog ".repeat(200),
+        br#"{"k":"v","n":[1,2,3],"pad":"xxxxxxxxxxxxxxxx"}"#.repeat(250),
+        vec![b'M'; 30_000],
+        (0..=255u8).cycle().take(16_384).collect(),
+    ];
+    for data in &cases {
+        for block_size in [1usize, 64, 1000, 8192] {
+            let mut config = web_config();
+            config.web_block_size = Some(block_size);
+            let frame = encode_with_config(data, &config);
+            if frame[5] != 18 {
+                continue;
+            }
+            let theirs = cubrim::decode(&frame).expect("cubrim decode");
+            let ours = refdec::decode(&frame).expect("reference decode");
+            assert_eq!(&ours, data, "block_size {block_size}: lost bytes");
+            assert_eq!(ours, theirs, "block_size {block_size}: decoders disagree");
+        }
+    }
+}
+
+/// A corrupted multi-block frame must be rejected by both, identically.
+#[test]
+fn both_decoders_reject_the_same_corrupted_multi_block_frames() {
+    let data = b"multi block corruption fixture ".repeat(300);
+    let mut config = web_config();
+    config.web_block_size = Some(512);
+    let frame = encode_with_config(&data, &config);
+    assert_eq!(frame[5], 18);
+
+    let mut rng = Lcg(4242);
+    for _ in 0..2000 {
+        let mut corrupt = frame.clone();
+        let idx = (rng.next() as usize) % corrupt.len();
+        corrupt[idx] ^= 1u8 << (rng.next() % 8);
+        match (cubrim::decode(&corrupt), refdec::decode(&corrupt)) {
+            (Ok(a), Ok(b)) => assert_eq!(a, b, "different output for a mutant"),
+            (Err(_), Err(_)) => {}
+            (a, b) => panic!("validity disagreement: cubrim={a:?} reference={b:?}"),
+        }
+    }
+}

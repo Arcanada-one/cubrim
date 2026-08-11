@@ -67,6 +67,13 @@ MUST NOT exceed 19.
 `HDIST` is six bits, unlike DEFLATE's five: the distance alphabet is extended
 past 32 KiB (§6) and can exceed 32 codes.
 
+**A block boundary resets the entropy tables, not the output.** A match in a
+later block may reference bytes emitted by an earlier one, because the decoder
+retains everything it has produced; the window is bounded by the output so far,
+not by the block. This is what makes a block independently decodable *given its
+predecessors' output* — the property a streaming consumer needs — while costing
+one table descriptor per extra block.
+
 ## 4. Table descriptors
 
 Immediately after the block header:
@@ -101,6 +108,11 @@ Immediately after the block header:
 
 Maximum literal/length and distance code length: **14 bits**. (Fourteen, not
 DEFLATE's fifteen, so a decoder can use one flat 2^14-entry lookup table.)
+
+A context table an encoder never uses in a block — three-context mode over a
+block containing no digits, for instance — still MUST be transmitted as a valid
+code. Encoders emit the single-symbol form (end-of-block at length 1); an
+all-zero table is not a code and MUST be rejected.
 
 Every constructed code MUST be a complete prefix-free code — the Kraft sum over
 present symbols MUST equal exactly 1 — with one exception: an alphabet where
@@ -236,9 +248,11 @@ implementations are encouraged to reuse it.
 Stated so that a reader does not have to infer it:
 
 - **No dictionary.** Nothing is shared across frames.
-- **No streaming API in the reference decoder**, though `BFINAL` exists and the
-  format permits multiple blocks; the shipped encoder emits a single block per
-  frame, so the multi-block path is defined here but not yet exercised.
+- **No streaming API in the reference decoder**, though the format supports what
+  one needs: multi-block frames are emitted (`EncodeConfig::web_block_size`),
+  decoded and differentially tested in both implementations. What is missing is
+  an incremental *API* — today's decoders consume a whole frame and return a
+  whole buffer.
 - **No encryption or authentication.**
 - **No compressed-size field**, so a frame cannot be skipped without decoding.
 - **No self-describing window size**: the window is bounded by `ORIG_LEN`,
