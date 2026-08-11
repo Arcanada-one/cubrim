@@ -74,12 +74,86 @@ export class CubrimDecoder {
     }
   }
 
+  /**
+   * Decode a frame progressively from a byte stream — a `fetch` body, for
+   * instance — yielding each chunk of output as its block completes.
+   *
+   * Multi-block frames make progress before the response ends; a single-block
+   * frame yields everything at the end, which is the honest behaviour rather
+   * than a fake trickle.
+   *
+   * **Integrity:** bytes yielded before completion are not yet verified against
+   * the frame checksum. The generator throws if the final verification fails,
+   * so a consumer that has already rendered early bytes must be prepared to
+   * discard them. Use `cubrimDecode` when that is unacceptable.
+   *
+   * @param {ReadableStream<Uint8Array>|AsyncIterable<Uint8Array>} source
+   * @param {number} [maxOutput]
+   * @returns {AsyncGenerator<Uint8Array, Uint8Array>} chunks, then the whole
+   */
+  async *cubrimDecodeStream(source, maxOutput = 0) {
+    const {
+      cbr_alloc, cbr_free, cbr_stream_open, cbr_stream_push,
+      cbr_stream_fresh_ptr, cbr_stream_fresh_len, cbr_stream_finish,
+      cbr_stream_close, cbr_out_ptr, cbr_out_len, cbr_out_clear,
+    } = this.exports;
+
+    cbr_stream_open(maxOutput);
+    try {
+      for await (const chunk of iterate(source)) {
+        const ptr = cbr_alloc(chunk.length);
+        try {
+          new Uint8Array(this.memory.buffer, ptr, chunk.length).set(chunk);
+          if (cbr_stream_push(ptr, chunk.length) !== 1) {
+            throw new Error(`cubrim: ${this.#lastError()}`);
+          }
+        } finally {
+          cbr_free(ptr, chunk.length);
+        }
+        // Read AFTER the call: a grown heap detaches earlier views.
+        const freshLen = cbr_stream_fresh_len();
+        if (freshLen > 0) {
+          const fresh = new Uint8Array(freshLen);
+          fresh.set(new Uint8Array(this.memory.buffer, cbr_stream_fresh_ptr(), freshLen));
+          yield fresh;
+        }
+      }
+      if (cbr_stream_finish() !== 1) {
+        throw new Error(`cubrim: ${this.#lastError()}`);
+      }
+      const all = new Uint8Array(cbr_out_len());
+      all.set(new Uint8Array(this.memory.buffer, cbr_out_ptr(), all.length));
+      cbr_out_clear();
+      return all;
+    } finally {
+      cbr_stream_close();
+    }
+  }
+
   #lastError() {
     const ptr = this.exports.cbr_last_error_ptr();
     const len = this.exports.cbr_last_error_len();
     if (len === 0) return 'unknown error';
     const bytes = new Uint8Array(this.memory.buffer, ptr, len);
     return new TextDecoder().decode(bytes);
+  }
+}
+
+/** Iterate a ReadableStream or any async iterable of Uint8Array uniformly. */
+async function* iterate(source) {
+  if (source && typeof source.getReader === 'function') {
+    const reader = source.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        yield value;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } else {
+    yield* source;
   }
 }
 

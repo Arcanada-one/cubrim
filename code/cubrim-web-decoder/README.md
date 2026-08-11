@@ -53,8 +53,31 @@ the caller. `maxOutput` is a hard ceiling checked against the frame's declared
 length **before** anything is allocated; pass a real bound for known assets.
 A malformed frame throws with the decoder's message.
 
-A streaming API (`ReadableStream`) is deliberately **not** implemented — see
-*Known limitations*.
+### Streaming
+
+```js
+const response = await fetch('/asset.js.cbr');
+const generator = cubrim.cubrimDecodeStream(response.body, 8 << 20);
+
+let step = await generator.next();
+while (!step.done) {
+  render(step.value);          // bytes decoded so far, block by block
+  step = await generator.next();
+}
+const verified = step.value;   // whole output, length + checksum checked
+```
+
+Accepts a `ReadableStream` or any async iterable of `Uint8Array`. **Blocks are
+the unit of progress**: a multi-block frame yields as each block completes, a
+single-block frame yields once at the end. That is honest behaviour rather than
+a fake trickle — a Huffman symbol split across a chunk boundary cannot be
+decoded twice.
+
+**Integrity, stated plainly:** bytes yielded before completion are *not yet*
+verified against the frame checksum. The generator throws if final verification
+fails, so a consumer that has already rendered early bytes must be prepared to
+discard them. Use `cubrimDecode` when that is unacceptable. This is the real
+cost of progressive decode, not a footnote.
 
 ## Serving
 
@@ -144,10 +167,11 @@ blocks, including the raw-store fallback, at 100.5 MB/s in Node.
 
 ## Known limitations
 
-- **Synchronous whole-buffer only.** No streaming/progressive decode *API*.
-  The format's side of it is now real — multi-block frames are emitted, decoded
-  and differentially tested — but both decoders still consume a whole frame and
-  return a whole buffer.
+- **Streaming yields per block, not per byte.** A single-block frame therefore
+  yields once, at the end. Finer progress needs smaller blocks, which costs
+  bytes (see *Multi-block frames*).
+- **Early bytes are unverified** until `finish` succeeds — inherent to
+  progressive decode, and called out at the API.
 - **No encoder.** By design and by the disclosure split.
 - **Timer coarsening** makes single-shot browser measurements meaningless at
   these asset sizes; the demo amortises over repeats and says so.

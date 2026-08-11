@@ -275,11 +275,15 @@ implementations are encouraged to reuse it.
 Stated so that a reader does not have to infer it:
 
 - **No dictionary.** Nothing is shared across frames.
-- **No streaming API in the reference decoder**, though the format supports what
-  one needs: multi-block frames are emitted (`EncodeConfig::web_block_size`),
-  decoded and differentially tested in both implementations. What is missing is
-  an incremental *API* — today's decoders consume a whole frame and return a
-  whole buffer.
+- **Streaming resolution is one block.** The reference decoder decodes
+  incrementally (`StreamDecoder`, and `cubrimDecodeStream` in the browser), but
+  a block is the smallest unit of progress: a symbol split across a chunk
+  boundary cannot be decoded twice, so a partial block yields nothing. Finer
+  progress is bought with smaller blocks, at one table descriptor each.
+- **Progressive output is unverified until the frame ends.** The checksum covers
+  the whole content, so bytes handed to a consumer early are trusted-until-
+  verified. A decoder MUST still fail the frame if the final check fails; a
+  consumer that renders early MUST be prepared to discard.
 - **No encryption or authentication.**
 - **No compressed-size field**, so a frame cannot be skipped without decoding.
 - **No self-describing window size**: the window is bounded by `ORIG_LEN`,

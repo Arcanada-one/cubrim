@@ -44,9 +44,35 @@ use alloc::vec::Vec;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
+/// Why a decode stopped.
+///
+/// The distinction matters for streaming: a frame that simply has not arrived
+/// yet must not be reported as corrupt, or a streaming consumer would abort on
+/// every chunk boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// The bytes seen so far are consistent but incomplete. A streaming caller
+    /// should feed more input; a whole-buffer caller has a truncated frame.
+    NeedMoreInput,
+    /// The bytes are malformed, and no amount of further input fixes them.
+    Invalid,
+}
+
 /// Decode failure. Every variant is fail-closed: no partial output escapes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DecodeError(pub String);
+pub struct DecodeError(pub String, pub ErrorKind);
+
+impl DecodeError {
+    /// True when more input could still complete this decode.
+    pub fn needs_more_input(&self) -> bool {
+        self.1 == ErrorKind::NeedMoreInput
+    }
+
+    /// The failure message.
+    pub fn message(&self) -> &str {
+        &self.0
+    }
+}
 
 impl core::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -56,7 +82,14 @@ impl core::fmt::Display for DecodeError {
 
 macro_rules! fail {
     ($($arg:tt)*) => {
-        return Err(DecodeError(format!($($arg)*)))
+        return Err(DecodeError(format!($($arg)*), ErrorKind::Invalid))
+    };
+}
+
+/// Stop because the input ran out, not because it was wrong.
+macro_rules! need_more {
+    ($($arg:tt)*) => {
+        return Err(DecodeError(format!($($arg)*), ErrorKind::NeedMoreInput))
     };
 }
 
@@ -236,6 +269,26 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// Start reading at an absolute bit offset — how a streaming decoder
+    /// resumes at the block boundary it last completed.
+    fn at(data: &'a [u8], bit_offset: usize) -> Self {
+        let mut reader = Self::new(data);
+        reader.pos = (bit_offset / 8).min(data.len());
+        let skew = bit_offset % 8;
+        if skew > 0 {
+            reader.refill();
+            // Discard the bits before the offset; `count` cannot be short here
+            // unless the buffer ends mid-byte, which `bit_pos` never reports.
+            reader.count = reader.count.saturating_sub(skew as u32);
+        }
+        reader
+    }
+
+    /// Absolute bit position: bits consumed from the start of `data`.
+    fn bit_pos(&self) -> usize {
+        self.pos * 8 - self.count as usize
+    }
+
     fn remaining(&self) -> usize {
         (self.data.len() - self.pos) * 8 + self.count as usize
     }
@@ -255,7 +308,7 @@ impl<'a> BitReader<'a> {
         }
         self.refill();
         if self.count < len {
-            fail!(
+            need_more!(
                 "bitstream truncated (want {len} bits, {} remain)",
                 self.remaining()
             );
@@ -273,7 +326,7 @@ impl<'a> BitReader<'a> {
     fn read_symbol(&mut self, table: &HuffTable) -> Result<usize, DecodeError> {
         self.refill();
         if self.count == 0 {
-            fail!("bitstream exhausted mid-block");
+            need_more!("bitstream exhausted mid-block");
         }
         let want = table.bits as u32;
         let take = want.min(self.count);
@@ -284,7 +337,7 @@ impl<'a> BitReader<'a> {
             fail!("no codeword at this position (corrupt stream)");
         }
         if len as u32 > self.count {
-            fail!("codeword runs past end of stream");
+            need_more!("codeword runs past end of stream");
         }
         self.count -= len as u32;
         Ok(symbol as usize)
@@ -306,7 +359,7 @@ pub fn decode(frame: &[u8]) -> Result<Vec<u8>, DecodeError> {
 /// output is never returned as success.
 pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, DecodeError> {
     if frame.len() < FRAME_HEADER_SIZE {
-        fail!("frame too short: {} < {FRAME_HEADER_SIZE}", frame.len());
+        need_more!("frame too short: {} < {FRAME_HEADER_SIZE}", frame.len());
     }
     if frame[0..4] != MAGIC {
         fail!("bad magic");
@@ -335,92 +388,8 @@ pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>
     let mut out: Vec<u8> = Vec::with_capacity(orig_len);
 
     loop {
-        let final_block = reader.read(1)? == 1;
-        let contexts = match reader.read(2)? {
-            1 => 1usize,
-            2 => 3usize,
-            other => fail!("unknown block type {other}"),
-        };
-        let hlit = reader.read(5)? as usize + 257;
-        let hdist = reader.read(6)? as usize + 1;
-        let hclen = reader.read(4)? as usize + 4;
-        if hlit > LITLEN_ALPHABET || hdist > MAX_DIST_CODES || hclen > CL_ALPHABET {
-            fail!("alphabet size out of range");
-        }
-
-        let mut cl_lengths = vec![0u8; CL_ALPHABET];
-        for &symbol in CL_ORDER.iter().take(hclen) {
-            cl_lengths[symbol] = reader.read(3)? as u8;
-        }
-        let cl_table = match HuffTable::build(&cl_lengths, MAX_CL_CODE_LEN) {
-            Some(t) => t,
-            None => fail!("invalid code-length table"),
-        };
-
-        let wanted = contexts * hlit + hdist;
-        let sequence = read_code_lengths(&mut reader, &cl_table, wanted)?;
-
-        let mut tables = Vec::with_capacity(contexts);
-        for ctx in 0..contexts {
-            match HuffTable::build(&sequence[ctx * hlit..(ctx + 1) * hlit], MAX_CODE_LEN) {
-                Some(t) => tables.push(t),
-                None => fail!("invalid literal/length table for context {ctx}"),
-            }
-        }
-        let dist_table = match HuffTable::build(&sequence[contexts * hlit..], MAX_CODE_LEN) {
-            Some(t) => t,
-            None => fail!("invalid distance table"),
-        };
-
-        loop {
-            let ctx = if out.is_empty() {
-                context_class(b' ', contexts)
-            } else {
-                context_class(out[out.len() - 1], contexts)
-            };
-            let symbol = reader.read_symbol(&tables[ctx])?;
-            if symbol == EOB_SYMBOL {
-                break;
-            }
-            if symbol < EOB_SYMBOL {
-                if out.len() >= orig_len {
-                    fail!("output longer than the declared length");
-                }
-                out.push(symbol as u8);
-                continue;
-            }
-            let lc = symbol - EOB_SYMBOL - 1;
-            if lc >= N_LENGTH_CODES {
-                fail!("length code {lc} out of range");
-            }
-            let length = LENGTH_BASE[lc] + reader.read(LENGTH_EXTRA[lc])? as usize;
-            if !(MIN_MATCH..=MAX_MATCH).contains(&length) {
-                fail!("match length {length} out of range");
-            }
-            let dc = reader.read_symbol(&dist_table)?;
-            if dc >= dist_base.len() {
-                fail!("distance code {dc} out of range");
-            }
-            let distance = dist_base[dc] + reader.read(dist_extra[dc])? as usize;
-            if distance == 0 || distance > out.len() {
-                fail!("invalid distance {distance} (output length {})", out.len());
-            }
-            if out.len() + length > orig_len {
-                fail!("match overruns the declared length");
-            }
-            let start = out.len() - distance;
-            if distance >= length {
-                out.extend_from_within(start..start + length);
-            } else {
-                // Overlapping run: later bytes read what this loop just wrote,
-                // so the copy must stay byte-wise.
-                for k in 0..length {
-                    let byte = out[start + k];
-                    out.push(byte);
-                }
-            }
-        }
-
+        let final_block =
+            decode_one_block(&mut reader, &mut out, orig_len, &dist_base, &dist_extra)?;
         if final_block {
             break;
         }
@@ -440,6 +409,107 @@ pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>
     Ok(out)
 }
 
+/// Decode one block from `reader`, appending to `out`. Returns whether it was
+/// the final block.
+///
+/// Factored out so the whole-buffer decoder and the streaming decoder run the
+/// same code: a streaming caller retries this at the last completed block
+/// boundary when more input arrives.
+fn decode_one_block(
+    reader: &mut BitReader,
+    out: &mut Vec<u8>,
+    orig_len: usize,
+    dist_base: &[usize],
+    dist_extra: &[u32],
+) -> Result<bool, DecodeError> {
+    let final_block = reader.read(1)? == 1;
+    let contexts = match reader.read(2)? {
+        1 => 1usize,
+        2 => 3usize,
+        other => fail!("unknown block type {other}"),
+    };
+    let hlit = reader.read(5)? as usize + 257;
+    let hdist = reader.read(6)? as usize + 1;
+    let hclen = reader.read(4)? as usize + 4;
+    if hlit > LITLEN_ALPHABET || hdist > MAX_DIST_CODES || hclen > CL_ALPHABET {
+        fail!("alphabet size out of range");
+    }
+
+    let mut cl_lengths = vec![0u8; CL_ALPHABET];
+    for &symbol in CL_ORDER.iter().take(hclen) {
+        cl_lengths[symbol] = reader.read(3)? as u8;
+    }
+    let cl_table = match HuffTable::build(&cl_lengths, MAX_CL_CODE_LEN) {
+        Some(t) => t,
+        None => fail!("invalid code-length table"),
+    };
+
+    let wanted = contexts * hlit + hdist;
+    let sequence = read_code_lengths(reader, &cl_table, wanted)?;
+
+    let mut tables = Vec::with_capacity(contexts);
+    for ctx in 0..contexts {
+        match HuffTable::build(&sequence[ctx * hlit..(ctx + 1) * hlit], MAX_CODE_LEN) {
+            Some(t) => tables.push(t),
+            None => fail!("invalid literal/length table for context {ctx}"),
+        }
+    }
+    let dist_table = match HuffTable::build(&sequence[contexts * hlit..], MAX_CODE_LEN) {
+        Some(t) => t,
+        None => fail!("invalid distance table"),
+    };
+
+    loop {
+        let ctx = if out.is_empty() {
+            context_class(b' ', contexts)
+        } else {
+            context_class(out[out.len() - 1], contexts)
+        };
+        let symbol = reader.read_symbol(&tables[ctx])?;
+        if symbol == EOB_SYMBOL {
+            break;
+        }
+        if symbol < EOB_SYMBOL {
+            if out.len() >= orig_len {
+                fail!("output longer than the declared length");
+            }
+            out.push(symbol as u8);
+            continue;
+        }
+        let lc = symbol - EOB_SYMBOL - 1;
+        if lc >= N_LENGTH_CODES {
+            fail!("length code {lc} out of range");
+        }
+        let length = LENGTH_BASE[lc] + reader.read(LENGTH_EXTRA[lc])? as usize;
+        if !(MIN_MATCH..=MAX_MATCH).contains(&length) {
+            fail!("match length {length} out of range");
+        }
+        let dc = reader.read_symbol(&dist_table)?;
+        if dc >= dist_base.len() {
+            fail!("distance code {dc} out of range");
+        }
+        let distance = dist_base[dc] + reader.read(dist_extra[dc])? as usize;
+        if distance == 0 || distance > out.len() {
+            fail!("invalid distance {distance} (output length {})", out.len());
+        }
+        if out.len() + length > orig_len {
+            fail!("match overruns the declared length");
+        }
+        let start = out.len() - distance;
+        if distance >= length {
+            out.extend_from_within(start..start + length);
+        } else {
+            // Overlapping run: later bytes read what this loop just wrote,
+            // so the copy must stay byte-wise.
+            for k in 0..length {
+                let byte = out[start + k];
+                out.push(byte);
+            }
+        }
+    }
+
+    Ok(final_block)
+}
 /// Decode a raw-store frame: the encoder's verbatim-copy container.
 ///
 /// The web profile competes against raw-store per file, so an
@@ -452,7 +522,7 @@ pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>
 /// There is no checksum in this container; the bytes are the payload.
 fn decode_raw(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, DecodeError> {
     if frame.len() < RAW_HEADER_SIZE {
-        fail!("raw frame too short: {} < {RAW_HEADER_SIZE}", frame.len());
+        need_more!("raw frame too short: {} < {RAW_HEADER_SIZE}", frame.len());
     }
     let length = u32::from_be_bytes([frame[9], frame[10], frame[11], frame[12]]) as usize;
     if length > limits.max_output_size {
@@ -463,7 +533,7 @@ fn decode_raw(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, DecodeErro
     }
     let payload = &frame[RAW_HEADER_SIZE..];
     if payload.len() < length {
-        fail!(
+        need_more!(
             "raw payload truncated: {} bytes for a declared {length}",
             payload.len()
         );
@@ -537,4 +607,233 @@ pub fn declared_len(frame: &[u8]) -> Option<usize> {
         return Some(u32::from_be_bytes([frame[9], frame[10], frame[11], frame[12]]) as usize);
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Streaming
+// ---------------------------------------------------------------------------
+
+/// Incremental decoder: feed it a frame in pieces, take output as it becomes
+/// available.
+///
+/// This is what multi-block frames are for. A block is decodable as soon as its
+/// predecessors' output exists, so a consumer can render or parse the head of a
+/// document while the tail is still arriving. Blocks are the unit of progress —
+/// a half-arrived block yields nothing, because a Huffman symbol split across a
+/// chunk boundary cannot be decoded twice.
+///
+/// The integrity contract is unchanged and is **not** weakened by streaming:
+/// bytes handed out early are not yet verified against the frame checksum, so
+/// [`finish`](Self::finish) must be called and must succeed before the output
+/// is treated as authentic. A consumer that renders progressively is trusting
+/// the transport until `finish` returns `Ok`; one that cannot accept that
+/// should use [`decode`] instead. This is stated rather than hidden because it
+/// is the real cost of progressive decode.
+///
+/// ```no_run
+/// # use cubrim_web_decoder::{StreamDecoder, DecodeLimits};
+/// let mut stream = StreamDecoder::new(DecodeLimits::default());
+/// for chunk in [&b"..."[..]] {
+///     let fresh = stream.push(chunk)?;   // newly decoded bytes, may be empty
+///     let _ = fresh;
+/// }
+/// let all = stream.finish()?;            // verifies length and checksum
+/// # Ok::<(), cubrim_web_decoder::DecodeError>(())
+/// ```
+pub struct StreamDecoder {
+    limits: DecodeLimits,
+    input: Vec<u8>,
+    output: Vec<u8>,
+    /// Bits consumed from the bitstream, i.e. the start of the next block.
+    bit_offset: usize,
+    /// How much of `output` the caller has already been shown.
+    delivered: usize,
+    header: Option<FrameHeader>,
+    finished: bool,
+    dist_base: Vec<usize>,
+    dist_extra: Vec<u32>,
+}
+
+#[derive(Clone, Copy)]
+struct FrameHeader {
+    orig_len: usize,
+    checksum: [u8; 4],
+    raw: bool,
+}
+
+impl StreamDecoder {
+    pub fn new(limits: DecodeLimits) -> Self {
+        let (dist_base, dist_extra) = distance_tables();
+        Self {
+            limits,
+            input: Vec::new(),
+            output: Vec::new(),
+            bit_offset: 0,
+            delivered: 0,
+            header: None,
+            finished: false,
+            dist_base,
+            dist_extra,
+        }
+    }
+
+    /// Feed the next piece of the frame; returns the bytes newly decoded by
+    /// this call, which is empty whenever the chunk did not complete a block.
+    ///
+    /// A malformed frame fails here and the decoder must not be used again.
+    /// Truncation is not a failure — it is the normal state between chunks.
+    pub fn push(&mut self, chunk: &[u8]) -> Result<&[u8], DecodeError> {
+        if self.finished {
+            fail!("push after finish");
+        }
+        self.input.extend_from_slice(chunk);
+        self.parse_header()?;
+        let Some(header) = self.header else {
+            return Ok(&[]);
+        };
+
+        if header.raw {
+            let available = self.input.len().saturating_sub(RAW_HEADER_SIZE);
+            let wanted = header.orig_len.min(available);
+            if wanted > self.output.len() {
+                self.output.extend_from_slice(
+                    &self.input[RAW_HEADER_SIZE + self.output.len()..RAW_HEADER_SIZE + wanted],
+                );
+            }
+        } else {
+            self.decode_ready_blocks(header)?;
+        }
+
+        let fresh = self.delivered;
+        self.delivered = self.output.len();
+        Ok(&self.output[fresh..])
+    }
+
+    /// Finish the frame: verify the decoded length and the checksum, then hand
+    /// back everything decoded. Fails if the frame is incomplete.
+    pub fn finish(mut self) -> Result<Vec<u8>, DecodeError> {
+        let Some(header) = self.header else {
+            need_more!("frame header never completed");
+        };
+        if self.output.len() != header.orig_len {
+            need_more!(
+                "decoded {} bytes of a declared {}",
+                self.output.len(),
+                header.orig_len
+            );
+        }
+        if !header.raw {
+            let digest = blake3::hash(&self.output);
+            let bytes = digest.as_bytes();
+            if [bytes[0], bytes[1], bytes[2], bytes[3]] != header.checksum {
+                fail!("checksum mismatch — refusing to return corrupt output");
+            }
+        }
+        self.finished = true;
+        Ok(core::mem::take(&mut self.output))
+    }
+
+    /// Bytes decoded so far. Not yet checksum-verified; see the type comment.
+    pub fn decoded_len(&self) -> usize {
+        self.output.len()
+    }
+
+    /// The frame's declared output length, once the header has arrived.
+    pub fn declared_len(&self) -> Option<usize> {
+        self.header.map(|h| h.orig_len)
+    }
+
+    fn parse_header(&mut self) -> Result<(), DecodeError> {
+        if self.header.is_some() {
+            return Ok(());
+        }
+        if self.input.len() < 6 {
+            return Ok(());
+        }
+        if self.input[0..4] != MAGIC {
+            fail!("bad magic");
+        }
+        if self.input[4] != VERSION {
+            fail!("unsupported version {}", self.input[4]);
+        }
+        let raw = match self.input[5] {
+            MODE_WEB => false,
+            MODE_RAW => true,
+            other => fail!("not a decodable frame (mode {other})"),
+        };
+        let need = if raw {
+            RAW_HEADER_SIZE
+        } else {
+            FRAME_HEADER_SIZE
+        };
+        if self.input.len() < need {
+            return Ok(());
+        }
+        let orig_len = if raw {
+            u32::from_be_bytes([
+                self.input[9],
+                self.input[10],
+                self.input[11],
+                self.input[12],
+            ])
+        } else {
+            u32::from_be_bytes([self.input[6], self.input[7], self.input[8], self.input[9]])
+        } as usize;
+        if orig_len > self.limits.max_output_size {
+            fail!(
+                "declared output {orig_len} exceeds the limit {}",
+                self.limits.max_output_size
+            );
+        }
+        let checksum = if raw {
+            [0u8; 4]
+        } else {
+            [
+                self.input[10],
+                self.input[11],
+                self.input[12],
+                self.input[13],
+            ]
+        };
+        self.output.reserve(orig_len);
+        self.header = Some(FrameHeader {
+            orig_len,
+            checksum,
+            raw,
+        });
+        Ok(())
+    }
+
+    /// Decode every block whose bytes have fully arrived, leaving `bit_offset`
+    /// at the start of the first block that has not.
+    fn decode_ready_blocks(&mut self, header: FrameHeader) -> Result<(), DecodeError> {
+        if self.output.len() == header.orig_len {
+            return Ok(());
+        }
+        let body = &self.input[FRAME_HEADER_SIZE..];
+        loop {
+            let mut reader = BitReader::at(body, self.bit_offset);
+            let mut speculative = self.output.clone();
+            match decode_one_block(
+                &mut reader,
+                &mut speculative,
+                header.orig_len,
+                &self.dist_base,
+                &self.dist_extra,
+            ) {
+                Ok(final_block) => {
+                    self.bit_offset = reader.bit_pos();
+                    self.output = speculative;
+                    if final_block {
+                        return Ok(());
+                    }
+                }
+                // Out of input: keep the offset where it was and wait. The
+                // partial block's output is discarded with `speculative`, so a
+                // retry re-decodes it from the same boundary.
+                Err(err) if err.needs_more_input() => return Ok(()),
+                Err(err) => return Err(err),
+            }
+        }
+    }
 }
