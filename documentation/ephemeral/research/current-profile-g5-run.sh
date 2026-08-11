@@ -2967,65 +2967,124 @@ PY
     ); then
         die "$verification_error"
     fi
-    printf '%s\n' "$verification_error"
+    if [[ -n ${CUBR_G5_TEST_VERIFIER_METADATA_SUFFIX:-} ]]; then
+        printf '%s\n%s\n' "$verification_error" "$CUBR_G5_TEST_VERIFIER_METADATA_SUFFIX"
+    else
+        printf '%s\n' "$verification_error"
+    fi
+}
+
+parse_live_verifier_metadata() {
+    local metadata=${1:-} pattern
+    (( $# == 5 )) || die 'live result verifier metadata parser arguments are malformed'
+    if [[ $metadata == *$'\n'* || $metadata == *$'\r'* ]]; then
+        die 'live result verifier metadata is not exactly one canonical record'
+    fi
+    pattern=$'^([0-9a-f]{64})\t([1-9][0-9]*)\t([0-9a-f]{64})\t([1-9][0-9]*)$'
+    [[ $metadata =~ $pattern ]] || die 'live result verifier metadata is malformed'
+    printf -v "$2" '%s' "${BASH_REMATCH[1]}"
+    printf -v "$3" '%s' "${BASH_REMATCH[2]}"
+    printf -v "$4" '%s' "${BASH_REMATCH[3]}"
+    printf -v "$5" '%s' "${BASH_REMATCH[4]}"
 }
 
 self_test_verify_cgroup_live_result() {
-    local verification_metadata result_sha result_size output_sha output_size extra
+    local verification_metadata result_sha _result_size output_sha _output_size
     (( $# == 6 )) ||
         die 'live result self-test internal arguments are malformed'
     verification_metadata=$(verify_live_cgroup_fixture_result "$1" "$2" "$3" "$4" "$5" "$6")
-    IFS=$'\t' read -r result_sha result_size output_sha output_size extra <<<"$verification_metadata"
-    [[ $result_sha =~ ^[0-9a-f]{64}$ && $result_size =~ ^[1-9][0-9]*$ &&
-       $output_sha =~ ^[0-9a-f]{64}$ && $output_size =~ ^[1-9][0-9]*$ && -z ${extra:-} ]] ||
-        die 'live result verifier metadata is malformed'
+    parse_live_verifier_metadata "$verification_metadata" \
+        result_sha _result_size output_sha _output_size
     printf 'current_profile_g5_live_result_test=PASS result_sha256=%s test_output_sha256=%s\n' \
         "$result_sha" "$output_sha"
 }
 
-self_test_cgroup_live() {
-    local export_dir=${1:-} root fixture_result fixture_unit runner_path systemd_output rc
-    local verification_metadata result_sha result_size output_sha output_size extra
-    local -a systemd_args
-    [[ -d $export_dir && ! -L $export_dir ]] || die 'live fixture export directory is unsafe'
-    root=$(/usr/bin/mktemp -d)
-    fixture_result=$root/cgroup-live.tsv
-    fixture_unit=current-profile-g5-cgroup-selftest-$$.service
-    runner_path=$(/usr/bin/readlink -f -- "${BASH_SOURCE[0]}")
-    systemd_output=$root/systemd-run.output.txt
-    systemd_args=(
-        /usr/bin/systemd-run --user --wait --collect
-        --unit="$fixture_unit" --service-type=exec
-        --property=Restart=no --property=KillMode=control-group
-        --setenv=CUBR_SYSTEMD_UNIT="$fixture_unit"
-        --setenv=CUBR_CGROUP_SYSTEMCTL_USER=1
-        --setenv=CUBR_CGROUP_LIVE_RESULT="$fixture_result"
-        /usr/bin/bash "$runner_path" --self-test-cgroup-live-worker
-    )
-    printf '%q ' "${systemd_args[@]}" >"$root/systemd-run.argv"
-    printf '\n' >>"$root/systemd-run.argv"
-    /usr/bin/grep -qF -- "--unit=$fixture_unit" "$root/systemd-run.argv" ||
-        die 'live fixture argument vector is missing fresh unit authority'
-    /usr/bin/grep -qF -- "--setenv=CUBR_CGROUP_LIVE_RESULT=$fixture_result" "$root/systemd-run.argv" ||
-        die 'live fixture argument vector is missing fixture result authority'
-    ! /usr/bin/grep -qF 'g4-live-authority-must-not-be-used.service' "$root/systemd-run.argv" ||
-        die 'live fixture argument vector contains poisoned parent unit'
-    ! /usr/bin/grep -qF 'cubr-new24-full-binary-g5-20260810.service' "$root/systemd-run.argv" ||
-        die 'live fixture argument vector contains campaign unit'
-    ! /usr/bin/grep -Eq 'CUBR_ADMITTED_|INVOCATION_ID' "$root/systemd-run.argv" ||
-        die 'live fixture argument vector contains admitted campaign authority'
-    set +e
-    "${systemd_args[@]}" >"$systemd_output" 2>&1
-    rc=$?
-    set -e
-    verification_metadata=$(verify_live_cgroup_fixture_result "$rc" "$fixture_result" "$fixture_unit" "$systemd_output" "$export_dir")
-    IFS=$'\t' read -r result_sha result_size output_sha output_size extra <<<"$verification_metadata"
-    [[ $result_sha =~ ^[0-9a-f]{64}$ && $result_size =~ ^[1-9][0-9]*$ &&
-       $output_sha =~ ^[0-9a-f]{64}$ && $output_size =~ ^[1-9][0-9]*$ && -z ${extra:-} ]] ||
-        die 'live result verifier metadata is malformed'
+cleanup_live_cgroup_fixture_root() {
+    local root=${1:-} owner=${2:-} marker root_uid root_mode marker_uid marker_links
+    marker=$root/.current-profile-g5-live-owned
+    [[ $root =~ ^/tmp/current-profile-g5-cgroup-live[.][A-Za-z0-9]+$ &&
+       $owner =~ ^[1-9][0-9]*$ && -d $root && ! -L $root &&
+       -f $marker && ! -L $marker ]] || return 1
+    root_uid=$(/usr/bin/stat -Lc '%u' -- "$root")
+    root_mode=$(/usr/bin/stat -Lc '%a' -- "$root")
+    marker_uid=$(/usr/bin/stat -Lc '%u' -- "$marker")
+    marker_links=$(/usr/bin/stat -Lc '%h' -- "$marker")
+    [[ $root_uid == "$EUID" && $root_mode == 700 && $marker_uid == "$EUID" &&
+       $marker_links == 1 && $(<"$marker") == "$owner" ]] || return 1
+    /usr/bin/chmod -R u+w -- "$root" 2>/dev/null || return 1
     /usr/bin/rm -rf -- "$root"
-    printf 'current_profile_g5_cgroup_live_test=PASS result_sha256=%s test_output_sha256=%s\n' \
-        "$result_sha" "$output_sha"
+    [[ ! -e $root && ! -L $root ]]
+}
+
+live_cgroup_fixture_cleanup_on_exit() {
+    local rc=$?
+    trap - EXIT
+    if ! cleanup_live_cgroup_fixture_root \
+        "$LIVE_CGROUP_FIXTURE_ROOT" "$LIVE_CGROUP_FIXTURE_OWNER"; then
+        printf 'current_profile_g5=VOID reason=live fixture raw-root cleanup failed\n' >&2
+        (( rc != 0 )) || rc=1
+    fi
+    exit "$rc"
+}
+
+self_test_cgroup_live() {
+    local export_dir=${1:-}
+    [[ -d $export_dir && ! -L $export_dir ]] || die 'live fixture export directory is unsafe'
+    (
+        local root fixture_owner owned_marker fixture_result fixture_unit runner_path systemd_output rc
+        local verification_metadata result_sha _result_size output_sha _output_size
+        local -a systemd_args
+        root=$(/usr/bin/mktemp -d /tmp/current-profile-g5-cgroup-live.XXXXXXXXXX)
+        fixture_owner=$BASHPID
+        owned_marker=$root/.current-profile-g5-live-owned
+        printf '%s\n' "$fixture_owner" >"$owned_marker"
+        /usr/bin/chmod 0400 -- "$owned_marker"
+        LIVE_CGROUP_FIXTURE_ROOT=$root
+        LIVE_CGROUP_FIXTURE_OWNER=$fixture_owner
+        trap live_cgroup_fixture_cleanup_on_exit EXIT
+        if [[ ${CUBR_G5_TEST_FAIL_AFTER_ROOT:-0} == 1 ]]; then
+            die "live fixture injected post-root failure root=$root marker=$owned_marker"
+        fi
+        [[ ${CUBR_G5_TEST_FAIL_AFTER_ROOT:-0} == 0 ]] ||
+            die 'live fixture post-root failure selector is malformed'
+        fixture_result=$root/cgroup-live.tsv
+        fixture_unit=current-profile-g5-cgroup-selftest-$$.service
+        runner_path=$(/usr/bin/readlink -f -- "${BASH_SOURCE[0]}")
+        systemd_output=$root/systemd-run.output.txt
+        systemd_args=(
+            /usr/bin/systemd-run --user --wait --collect
+            --unit="$fixture_unit" --service-type=exec
+            --property=Restart=no --property=KillMode=control-group
+            --setenv=CUBR_SYSTEMD_UNIT="$fixture_unit"
+            --setenv=CUBR_CGROUP_SYSTEMCTL_USER=1
+            --setenv=CUBR_CGROUP_LIVE_RESULT="$fixture_result"
+            /usr/bin/bash "$runner_path" --self-test-cgroup-live-worker
+        )
+        printf '%q ' "${systemd_args[@]}" >"$root/systemd-run.argv"
+        printf '\n' >>"$root/systemd-run.argv"
+        /usr/bin/grep -qF -- "--unit=$fixture_unit" "$root/systemd-run.argv" ||
+            die 'live fixture argument vector is missing fresh unit authority'
+        /usr/bin/grep -qF -- "--setenv=CUBR_CGROUP_LIVE_RESULT=$fixture_result" "$root/systemd-run.argv" ||
+            die 'live fixture argument vector is missing fixture result authority'
+        ! /usr/bin/grep -qF 'g4-live-authority-must-not-be-used.service' "$root/systemd-run.argv" ||
+            die 'live fixture argument vector contains poisoned parent unit'
+        ! /usr/bin/grep -qF 'cubr-new24-full-binary-g5-20260810.service' "$root/systemd-run.argv" ||
+            die 'live fixture argument vector contains campaign unit'
+        ! /usr/bin/grep -Eq 'CUBR_ADMITTED_|INVOCATION_ID' "$root/systemd-run.argv" ||
+            die 'live fixture argument vector contains admitted campaign authority'
+        set +e
+        "${systemd_args[@]}" >"$systemd_output" 2>&1
+        rc=$?
+        set -e
+        verification_metadata=$(verify_live_cgroup_fixture_result "$rc" "$fixture_result" "$fixture_unit" "$systemd_output" "$export_dir")
+        parse_live_verifier_metadata "$verification_metadata" \
+            result_sha _result_size output_sha _output_size
+        cleanup_live_cgroup_fixture_root "$root" "$fixture_owner" ||
+            die 'live fixture raw-root cleanup failed'
+        trap - EXIT
+        printf 'current_profile_g5_cgroup_live_test=PASS result_sha256=%s test_output_sha256=%s\n' \
+            "$result_sha" "$output_sha"
+    )
 }
 
 self_test_cgroup_precommit() {

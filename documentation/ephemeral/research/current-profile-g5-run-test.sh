@@ -12,6 +12,7 @@ readonly SELF
 RUNNER=${RUNNER:-$TEST_DIR/current-profile-g5-run.sh}
 MAPPER=${MAPPER:-$TEST_DIR/current_profile_g5_map.py}
 SELF_MUTATION_TESTS=${SELF_MUTATION_TESTS:-1}
+LIVE_BEHAVIOR_MUTATION_LANE=${CUBR_G5_LIVE_BEHAVIOR_MUTATION_LANE:-0}
 readonly POISONED_PARENT_UNIT=g4-live-authority-must-not-be-used.service
 readonly LIVE_G5_CAMPAIGN_UNIT=cubr-new24-full-binary-g5-20260810.service
 readonly PURE_MOCK_PATH=/usr/bin:/bin
@@ -32,6 +33,14 @@ invalid() {
     printf 'current_profile_g5_contract=HARNESS_INVALID reason=%s\n' "$1" >&2
     exit 2
 }
+
+[[ $LIVE_BEHAVIOR_MUTATION_LANE =~ ^[01]$ ]] ||
+    invalid 'live behavior mutation lane selector is malformed'
+if [[ $LIVE_BEHAVIOR_MUTATION_LANE == 1 ]]; then
+    [[ $SELF_MUTATION_TESTS == 0 && $RUNNER == /tmp/* &&
+       $RUNNER != "$TEST_DIR/current-profile-g5-run.sh" ]] ||
+        invalid 'live behavior mutation lane escaped its nested mutant scope'
+fi
 
 assert_mock_output_isolated() {
     local output=$1 expected_unit=$2
@@ -409,22 +418,24 @@ require_runner_named 'terminated = "Main processes terminated with: code=killed/
     'live cgroup fixture accepts an unauthenticated terminal process form'
 require_runner_named 'if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):' \
     'live cgroup fixture does not reject an unexpected worker return'
-require_runner_named 'invocation_id=$CGROUP_EVIDENCE_INVOCATION_ID' \
-    'live cgroup worker evidence is not bound to its systemd invocation'
-live_result_source=$(function_source verify_live_cgroup_fixture_result)
-for live_result_control in \
-    'fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)' \
-    'info.st_nlink != 1' \
-    'not stat.S_ISREG(info.st_mode)' \
-    'info.st_size > MAX_BYTES' \
-    'payload.decode("utf-8", errors="strict")' \
-    'not payload.endswith(b"\n") or b"\r" in payload' \
-    'source_identity_changed' \
-    'result_invocation != invocation' \
-    'components[-1] != unit'; do
-    [[ $live_result_source == *"$live_result_control"* ]] ||
-        fail "live result verifier missing load-bearing control: $live_result_control"
-done
+if [[ $LIVE_BEHAVIOR_MUTATION_LANE == 0 ]]; then
+    require_runner_named 'invocation_id=$CGROUP_EVIDENCE_INVOCATION_ID' \
+        'live cgroup worker evidence is not bound to its systemd invocation'
+    live_result_source=$(function_source verify_live_cgroup_fixture_result)
+    for live_result_control in \
+        'fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)' \
+        'info.st_nlink != 1' \
+        'not stat.S_ISREG(info.st_mode)' \
+        'info.st_size > MAX_BYTES' \
+        'payload.decode("utf-8", errors="strict")' \
+        'not payload.endswith(b"\n") or b"\r" in payload' \
+        'source_identity_changed' \
+        'result_invocation != invocation' \
+        'components[-1] != unit'; do
+        [[ $live_result_source == *"$live_result_control"* ]] ||
+            fail "live result verifier missing load-bearing control: $live_result_control"
+    done
+fi
 reject_runner_fixed "(( rc != 0 )) || die 'live fixture unexpectedly returned success'"
 
 launch_remote_source=$(function_source verify_launch_main_matches_remote)
@@ -1213,7 +1224,7 @@ baseline_output = (
 ).encode()
 
 def invoke(label, rc=0, result_bytes=baseline_result, output_bytes=baseline_output,
-           result_arg=None, prepare=None):
+           result_arg=None, prepare=None, env_extra=None):
     case = root / label
     case.mkdir()
     export = case / "export"
@@ -1224,10 +1235,12 @@ def invoke(label, rc=0, result_bytes=baseline_result, output_bytes=baseline_outp
     output_file.write_bytes(output_bytes)
     if prepare is not None:
         prepare(result_file, output_file, export)
+    env = os.environ.copy()
+    env.update(env_extra or {})
     completed = subprocess.run(
         ["/usr/bin/bash", runner, "--self-test-verify-cgroup-live-result", str(rc),
          str(result_arg or result_file), unit, str(output_file), str(export)],
-        text=True, capture_output=True, check=False, timeout=3,
+        text=True, capture_output=True, check=False, timeout=3, env=env,
     )
     return completed, result_file, output_file, export
 
@@ -1253,6 +1266,15 @@ try:
             (export / "cgroup-live.tsv").stat().st_mode & 0o777 != 0o444 or
             (export / "systemd-run.output.txt").stat().st_mode & 0o777 != 0o444):
         raise SystemExit("authenticated export is not the verified byte payload")
+
+    completed, _, _, _ = invoke(
+        "metadata-extra-record",
+        env_extra={"CUBR_G5_TEST_VERIFIER_METADATA_SUFFIX": "unexpected"},
+    )
+    if (completed.returncode == 0 or
+            "live result verifier metadata is not exactly one canonical record" not in completed.stderr or
+            "current_profile_g5_live_result_test=PASS" in completed.stdout):
+        raise SystemExit(f"newline-delimited verifier metadata survived: {completed}")
 
     cases = {
         "nonzero-status": dict(rc=1, expected_error=
@@ -1402,6 +1424,36 @@ for label in missing extra; do
         invalid "live result dispatch arity failed elsewhere: $label output=$live_result_arity_output"
 done
 /usr/bin/rm -rf -- "$live_result_arity_root"
+
+live_cleanup_root=$(/usr/bin/mktemp -d)
+/usr/bin/mkdir -- "$live_cleanup_root/export"
+/usr/bin/printf 'preserve\n' >"$live_cleanup_root/unrelated.txt"
+live_cleanup_output=
+live_cleanup_rc=0
+set +e
+live_cleanup_output=$(/usr/bin/env CUBR_G5_TEST_FAIL_AFTER_ROOT=1 \
+    /usr/bin/bash "$RUNNER" --self-test-cgroup-live "$live_cleanup_root/export" 2>&1)
+live_cleanup_rc=$?
+set -e
+(( live_cleanup_rc != 0 )) || fail 'injected live cgroup failure unexpectedly passed'
+[[ $live_cleanup_output =~ live\ fixture\ injected\ post-root\ failure\ root=([^[:space:]]+)\ marker=([^[:space:]]+) ]] ||
+    invalid "injected live cgroup failure failed elsewhere: output=$live_cleanup_output"
+leaked_live_root=${BASH_REMATCH[1]}
+leaked_live_marker=${BASH_REMATCH[2]}
+[[ $leaked_live_root =~ ^/tmp/current-profile-g5-cgroup-live[.][A-Za-z0-9]+$ &&
+   $leaked_live_marker == "$leaked_live_root/.current-profile-g5-live-owned" ]] ||
+    invalid 'injected live cgroup failure reported an unsafe cleanup target'
+live_cleanup_leaked=0
+if [[ -e $leaked_live_root || -L $leaked_live_root || -e $leaked_live_marker || -L $leaked_live_marker ]]; then
+    live_cleanup_leaked=1
+    /usr/bin/chmod -R u+w -- "$leaked_live_root" 2>/dev/null || true
+    /usr/bin/rm -rf -- "$leaked_live_root"
+fi
+(( live_cleanup_leaked == 0 )) || fail 'live cgroup failure path leaked raw temp root'
+[[ $(<"$live_cleanup_root/unrelated.txt") == preserve &&
+   -z $(/usr/bin/find "$live_cleanup_root/export" -mindepth 1 -print -quit) ]] ||
+    fail 'live cgroup raw-root cleanup touched caller-owned paths'
+/usr/bin/rm -rf -- "$live_cleanup_root"
 
 live_dispatch_root=$(/usr/bin/mktemp -d)
 /usr/bin/mkdir -- "$live_dispatch_root/export"
@@ -1727,18 +1779,23 @@ PY
     fi
 
     expect_runner_mutant_red() {
-        local label=$1 expression=$2 expected_reason=$3 mutant
+        local label=$1 expression=$2 expected_reason=$3 behavior_lane=${4:-0} mutant
         mutant=$mutation_root/$label.sh
         /usr/bin/cp -- "$RUNNER" "$mutant"
         /usr/bin/sed -i "$expression" "$mutant"
         ! /usr/bin/cmp -s -- "$RUNNER" "$mutant" || fail "mutation did not change runner: $label"
         capture_child /usr/bin/env CUBR_REMOTE_LIVE_FIXTURE=0 SELF_MUTATION_TESTS=0 \
+            CUBR_G5_LIVE_BEHAVIOR_MUTATION_LANE="$behavior_lane" \
             RUNNER="$mutant" MAPPER="$MAPPER" /usr/bin/bash "$SELF"
         (( CHILD_RC != 0 )) || fail "mutation survived: $label"
         ! /usr/bin/grep -qF 'current_profile_g5_contract=PASS' <<<"$CHILD_OUTPUT" ||
             invalid "mutation emitted PASS: $label"
         /usr/bin/grep -qF "current_profile_g5_contract=FAIL reason=$expected_reason" <<<"$CHILD_OUTPUT" ||
             invalid "mutation failed at unrelated assertion: $label rc=$CHILD_RC output=$CHILD_OUTPUT"
+    }
+
+    expect_live_behavior_mutant_red() {
+        expect_runner_mutant_red "$1" "$2" "$3" 1
     }
 
     expect_self_test_mutant_red() {
@@ -1844,33 +1901,39 @@ PY
     expect_runner_mutant_red live_result_allows_unexpected_worker_return \
         's/if any("live_cgroup_guard_unexpected_return=" in line for line in result_lines):/if False:/' \
         'live cgroup fixture does not reject an unexpected worker return'
-    expect_runner_mutant_red live_result_drops_nofollow \
+    expect_live_behavior_mutant_red live_result_drops_nofollow \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK/os.O_RDONLY | os.O_NONBLOCK/' \
-        'live result verifier missing load-bearing control: fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)'
-    expect_runner_mutant_red live_result_allows_hardlinks \
+        'authenticated live cgroup result matrix failed'
+    expect_live_behavior_mutant_red live_result_allows_hardlinks \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/info.st_nlink != 1/False/' \
-        'live result verifier missing load-bearing control: info.st_nlink != 1'
-    expect_runner_mutant_red live_result_allows_nonregular \
+        'authenticated live cgroup result matrix failed'
+    expect_live_behavior_mutant_red live_result_allows_nonregular \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/not stat.S_ISREG(info.st_mode)/False/' \
-        'live result verifier missing load-bearing control: not stat.S_ISREG(info.st_mode)'
-    expect_runner_mutant_red live_result_relaxes_size_bound \
-        '/^verify_live_cgroup_fixture_result()/,/^}/s/info.st_size > MAX_BYTES/False/' \
-        'live result verifier missing load-bearing control: info.st_size > MAX_BYTES'
-    expect_runner_mutant_red live_result_ignores_invalid_utf8 \
+        'authenticated live cgroup result matrix failed'
+    expect_live_behavior_mutant_red live_result_relaxes_size_bound \
+        '/^verify_live_cgroup_fixture_result()/,/^}/s/MAX_BYTES = 1_048_576/MAX_BYTES = 2_048_576/' \
+        'authenticated live cgroup result matrix failed'
+    expect_live_behavior_mutant_red live_result_ignores_invalid_utf8 \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/payload.decode("utf-8", errors="strict")/payload.decode("utf-8", errors="ignore")/' \
-        'live result verifier missing load-bearing control: payload.decode("utf-8", errors="strict")'
-    expect_runner_mutant_red live_result_allows_noncanonical_bytes \
+        'authenticated live cgroup result matrix failed'
+    expect_live_behavior_mutant_red live_result_allows_noncanonical_bytes \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/not payload.endswith(b"\\n") or b"\\r" in payload/False/' \
-        'live result verifier missing load-bearing control: not payload.endswith(b"\n") or b"\r" in payload'
-    expect_runner_mutant_red live_result_drops_source_identity_recheck \
+        'authenticated live cgroup result matrix failed'
+    expect_live_behavior_mutant_red live_result_drops_source_identity_recheck \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/return source_identity_changed/return False/' \
         'authenticated live cgroup result matrix failed'
-    expect_runner_mutant_red live_result_allows_cross_invocation \
+    expect_live_behavior_mutant_red live_result_allows_cross_invocation \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/result_invocation != invocation/False/' \
-        'live result verifier missing load-bearing control: result_invocation != invocation'
-    expect_runner_mutant_red live_result_allows_cross_cgroup \
+        'authenticated live cgroup result matrix failed'
+    expect_live_behavior_mutant_red live_result_allows_cross_cgroup \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/components\[-1\] != unit/False/' \
-        'live result verifier missing load-bearing control: components[-1] != unit'
+        'authenticated live cgroup result matrix failed'
+    expect_live_behavior_mutant_red live_result_accepts_multiline_metadata \
+        '/^parse_live_verifier_metadata()/,/^}/s/if \[\[ \$metadata == .*; then/if false; then/' \
+        'authenticated live cgroup result matrix failed'
+    expect_runner_mutant_red live_result_failure_drops_raw_cleanup \
+        's/trap live_cgroup_fixture_cleanup_on_exit EXIT/: # mutation removed raw-root cleanup/' \
+        'live cgroup failure path leaked raw temp root'
     expect_runner_mutant_red live_result_allows_reverse_evidence_order \
         '/^verify_live_cgroup_fixture_result()/,/^}/s/new_match = new_pid.fullmatch(result_lines\[0\])/new_match = new_pid.fullmatch(result_lines[0]) or new_pid.fullmatch(result_lines[1])/; /^verify_live_cgroup_fixture_result()/,/^}/s/stop_match = stop.fullmatch(result_lines\[1\])/stop_match = stop.fullmatch(result_lines[1]) or stop.fullmatch(result_lines[0])/; /^verify_live_cgroup_fixture_result()/,/^}/s/if new_match is None or (stop.fullmatch(result_lines\[0\]) and new_pid.fullmatch(result_lines\[1\])):/if new_match is None:/' \
         'authenticated live cgroup result matrix failed'
