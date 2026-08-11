@@ -576,14 +576,12 @@ fn optimal_parse(
                 let dc = dist_code(dist_base, distance as usize);
                 let dist_price = prices.dist[dc] as u64 + dist_extra[dc] as u64;
                 let upper = length.min(EXPLORE_LENGTHS);
-                for probe in (floor_len + 1..=upper).chain(
-                    if length > EXPLORE_LENGTHS {
-                        Some(length)
-                    } else {
-                        None
-                    }
-                    .into_iter(),
-                ) {
+                let long_probe = if length > EXPLORE_LENGTHS {
+                    Some(length)
+                } else {
+                    None
+                };
+                for probe in (floor_len + 1..=upper).chain(long_probe) {
                     let lc = length_code(probe);
                     let price = prices.litlen[ctx][EOB_SYMBOL + 1 + lc] as u64
                         + LENGTH_EXTRA[lc] as u64
@@ -966,9 +964,7 @@ fn read_code_lengths(
                         "MODE_WEB: code-length repeat overruns the table".into(),
                     ));
                 }
-                for _ in 0..run {
-                    lengths.push(last);
-                }
+                lengths.resize(lengths.len() + run, last);
             }
             17 | 18 => {
                 let run = if symbol == 17 {
@@ -981,9 +977,7 @@ fn read_code_lengths(
                         "MODE_WEB: zero-run overruns the table".into(),
                     ));
                 }
-                for _ in 0..run {
-                    lengths.push(0);
-                }
+                lengths.resize(lengths.len() + run, 0);
             }
             other => {
                 return Err(CubrimError::Decode(format!(
@@ -1083,9 +1077,8 @@ mod tests {
                 corrupt[byte_index] ^= mask;
                 // Either an error, or a decode that no longer matches — never a
                 // panic, and never silent corruption presented as success.
-                match decode_web(&corrupt) {
-                    Ok(out) => assert_eq!(out, data, "checksum must catch corruption"),
-                    Err(_) => {}
+                if let Ok(out) = decode_web(&corrupt) {
+                    assert_eq!(out, data, "checksum must catch corruption");
                 }
             }
         }
@@ -1158,20 +1151,10 @@ mod tests {
                     0..=15 => rebuilt.push(symbol as u8),
                     16 => {
                         let last = *rebuilt.last().unwrap();
-                        for _ in 0..(extra + 3) {
-                            rebuilt.push(last);
-                        }
+                        rebuilt.resize(rebuilt.len() + (extra as usize + 3), last);
                     }
-                    17 => {
-                        for _ in 0..(extra + 3) {
-                            rebuilt.push(0);
-                        }
-                    }
-                    _ => {
-                        for _ in 0..(extra + 11) {
-                            rebuilt.push(0);
-                        }
-                    }
+                    17 => rebuilt.resize(rebuilt.len() + (extra as usize + 3), 0),
+                    _ => rebuilt.resize(rebuilt.len() + (extra as usize + 11), 0),
                 }
             }
             assert_eq!(rebuilt, case);

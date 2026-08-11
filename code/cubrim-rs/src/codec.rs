@@ -285,24 +285,43 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
 /// size pick, so an input that does not benefit falls back byte-identically to the
 /// base encoding (zero regression). Single-block inputs skip the pre-pass entirely.
 pub fn encode_with_config(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
-    let incumbent = encode_with_config_inner(data, config, true, true);
-    // CUBR-0076: the web profile offers one more candidate — a table-driven
-    // static-entropy container (MODE_WEB) whose decode adapts nothing. It is
-    // opt-in and kept only when strictly smaller, so the default path and every
-    // file that does not benefit are byte-identical to before.
+    // CUBR-0076: the web profile is a DECODE-BUDGET selection, not a density
+    // selection, so it competes inside the decode-eligible class only.
+    //
+    // Selecting min(web, whole existing stack) was measured to defeat the
+    // profile's entire purpose: on 11 of the 12 census samples the adaptive CM2
+    // champion is denser (by design — the table-driven scheme spends +28.8%
+    // output to leave the adaptive decode path), so a density-only pick returns
+    // an archive whose decode is exactly the one the web gate rules out. The
+    // eligible candidates are therefore the table-driven container and
+    // raw-store, whose decode is a memcpy; every other mode's decode class is
+    // unclassified and stays out until it is measured.
     if config.web_profile {
         if let Some(web) = crate::prof::track(
             "web",
             |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
             || crate::web::encode_web(data),
         ) {
-            if web.len() < incumbent.len() {
+            let store = raw_store_blob(data, config);
+            if web.len() < store.len() {
                 crate::prof::win("web");
                 return web;
             }
+            return store;
         }
+        return raw_store_blob(data, config);
     }
-    incumbent
+    encode_with_config_inner(data, config, true, true)
+}
+
+/// Raw-store container for `data` — the always-available decode-eligible floor
+/// (decode is a bounds-checked copy). Used by the web profile as the candidate
+/// the table-driven container must beat.
+fn raw_store_blob(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+    let n = compute_min_n(data.len(), config.b).max(2);
+    let mut out = serialize_raw_header(n, config.b, data.len());
+    out.extend_from_slice(data);
+    out
 }
 
 /// Inner encoder. `try_binfloat` is false when called recursively to encode one column of a
