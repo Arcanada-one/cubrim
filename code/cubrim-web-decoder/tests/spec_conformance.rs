@@ -193,3 +193,46 @@ fn trailing_bytes_after_the_final_block_are_ignored() {
         "§2: trailing bytes must not change the result"
     );
 }
+
+/// §3 Block — a block boundary resets the tables, not the output window.
+///
+/// The specification promises a match may reach across a boundary. If that
+/// stopped being true, streaming consumers built on the promise would break.
+#[test]
+fn matches_may_reach_across_a_block_boundary() {
+    let marker = b"UNIQUE-CROSS-BLOCK-MARKER-abcdefghijklmnopqrstuvwxyz";
+    let mut data = marker.to_vec();
+    data.extend(vec![b'.'; 4000]);
+    data.extend_from_slice(marker);
+
+    let mut config = web_config();
+    config.web_block_size = Some(256);
+    let frame = encode_with_config(&data, &config);
+    assert_eq!(frame[5], 18, "expected a MODE_WEB frame");
+    assert_eq!(
+        refdec::decode(&frame).unwrap(),
+        data,
+        "§3: cross-boundary match mis-decoded"
+    );
+}
+
+/// §4 — an unused context table is transmitted in single-symbol form, not as
+/// an all-zero table, so every block's tables are valid codes.
+#[test]
+fn unused_context_tables_are_still_valid_codes() {
+    // Tiny blocks over digit-free text leave the digit context empty.
+    let data = b"letters and spaces only, no digits at all here ".repeat(200);
+    for block_size in [1usize, 3, 16, 64] {
+        let mut config = web_config();
+        config.web_block_size = Some(block_size);
+        let frame = encode_with_config(&data, &config);
+        if frame[5] != 18 {
+            continue;
+        }
+        assert_eq!(
+            refdec::decode(&frame).unwrap(),
+            data,
+            "§4: block_size {block_size} produced an invalid table"
+        );
+    }
+}

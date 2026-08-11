@@ -430,6 +430,21 @@ pub struct EncodeConfig {
     ///
     /// v1-default: `false` — shipped output is unchanged.
     pub web_profile: bool,
+
+    /// Cut a web-profile frame into blocks of roughly this many output bytes.
+    ///
+    /// A block boundary resets the entropy tables, **not** the output window:
+    /// a match may still reach back across a boundary, because the decoder
+    /// keeps everything it has emitted. So blocking costs one table descriptor
+    /// per extra block and buys per-region tables — and, more usefully, it is
+    /// what a streaming decoder needs, since a block can be handed to the
+    /// consumer as soon as it is decoded.
+    ///
+    /// Only consulted when `web_profile` is set.
+    ///
+    /// v1-default: `None` — one block per frame, byte-identical to the shipped
+    /// encoder.
+    pub web_block_size: Option<usize>,
 }
 
 /// Speed/ratio operating point.
@@ -524,6 +539,7 @@ impl EncodeConfig {
             cm2_column_variants: true,
             cm2_max_tbits: None,
             web_profile: false,
+            web_block_size: None,
         }
     }
 
@@ -715,6 +731,7 @@ mod tests {
             cm2_column_variants: true,
             cm2_max_tbits: None,
             web_profile: false,
+            web_block_size: None,
         };
 
         let inputs: Vec<Vec<u8>> = vec![

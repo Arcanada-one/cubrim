@@ -650,9 +650,23 @@ fn histograms(
     contexts: usize,
     dist_base: &[usize],
 ) -> (Vec<Vec<usize>>, Vec<usize>) {
+    histograms_at(tokens, data, 0, contexts, dist_base)
+}
+
+/// Histograms for one block's tokens, which begin at output offset
+/// `out_start`. The context of the first token comes from the byte before the
+/// block — a block boundary resets the entropy tables, not the output — so a
+/// multi-block frame and a single-block frame agree on context selection.
+fn histograms_at(
+    tokens: &[Token],
+    data: &[u8],
+    out_start: usize,
+    contexts: usize,
+    dist_base: &[usize],
+) -> (Vec<Vec<usize>>, Vec<usize>) {
     let mut litlen = vec![vec![0usize; LITLEN_ALPHABET]; contexts];
     let mut dist = vec![0usize; MAX_DIST_CODES];
-    let mut pos = 0usize;
+    let mut pos = out_start;
     for token in tokens {
         let ctx = if pos == 0 {
             context_class(b' ', contexts)
@@ -669,10 +683,12 @@ fn histograms(
             pos += token.length;
         }
     }
-    let final_ctx = if data.is_empty() {
+    // End-of-block is decoded in the context of the last byte this block
+    // emitted, which is where the decoder will be standing.
+    let final_ctx = if pos == 0 {
         context_class(b' ', contexts)
     } else {
-        context_class(data[data.len() - 1], contexts)
+        context_class(data[pos - 1], contexts)
     };
     litlen[final_ctx][EOB_SYMBOL] += 1;
     (litlen, dist)
@@ -688,7 +704,27 @@ fn histograms(
 ///
 /// The caller keeps the result only when it is strictly smaller than the
 /// incumbent candidate, so this can never regress a file.
+/// The default single-block path, kept as a named entry point for tests that
+/// assert the blocked encoder and the default agree. Production callers go
+/// through [`encode_web_blocked`] with the caller's block size.
+#[cfg(test)]
 pub(crate) fn encode_web(data: &[u8]) -> Option<Vec<u8>> {
+    encode_web_blocked(data, None)
+}
+
+/// As [`encode_web`], but cutting the frame into blocks of roughly
+/// `block_size` output bytes each.
+///
+/// A block boundary resets the **entropy tables, not the output**: matches may
+/// still reach back across a boundary, because the decoder keeps everything it
+/// has emitted. So blocking costs one table descriptor per extra block and buys
+/// per-region tables — and, more importantly, it is what a streaming decoder
+/// needs, since each block is independently decodable once its predecessors
+/// have been emitted.
+///
+/// `None` keeps the whole frame in one block, which is the shipped default and
+/// the byte-identical path.
+pub(crate) fn encode_web_blocked(data: &[u8], block_size: Option<usize>) -> Option<Vec<u8>> {
     if data.is_empty() {
         return None;
     }
@@ -696,7 +732,8 @@ pub(crate) fn encode_web(data: &[u8]) -> Option<Vec<u8>> {
     let mut best: Option<Vec<u8>> = None;
     for contexts in [1usize, 3] {
         let tokens = optimal_parse(data, contexts, &dist_base, &dist_extra);
-        let candidate = emit_block(data, &tokens, contexts, &dist_base, &dist_extra)?;
+        let groups = plan_blocks(&tokens, block_size);
+        let candidate = emit_frame(data, &tokens, &groups, contexts, &dist_base, &dist_extra)?;
         if best.as_ref().is_none_or(|b| candidate.len() < b.len()) {
             best = Some(candidate);
         }
@@ -704,18 +741,111 @@ pub(crate) fn encode_web(data: &[u8]) -> Option<Vec<u8>> {
     best
 }
 
-fn emit_block(
+/// One block: a token range and the output range it produces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BlockPlan {
+    tokens: (usize, usize),
+    out_start: usize,
+}
+
+/// Cut the token stream into blocks of roughly `block_size` output bytes.
+///
+/// Cuts fall between tokens, never inside a match, so every block decodes to a
+/// whole number of tokens. `None` yields exactly one block, which is why the
+/// single-block default and the multi-block path are the same code.
+fn plan_blocks(tokens: &[Token], block_size: Option<usize>) -> Vec<BlockPlan> {
+    let limit = match block_size {
+        None => {
+            return vec![BlockPlan {
+                tokens: (0, tokens.len()),
+                out_start: 0,
+            }]
+        }
+        Some(size) => size.max(1),
+    };
+    let mut plans = Vec::new();
+    let mut start_token = 0usize;
+    let mut out_start = 0usize;
+    let mut produced = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        produced += if token.length == 0 { 1 } else { token.length };
+        if produced >= limit && index + 1 < tokens.len() {
+            plans.push(BlockPlan {
+                tokens: (start_token, index + 1),
+                out_start,
+            });
+            start_token = index + 1;
+            out_start += produced;
+            produced = 0;
+        }
+    }
+    plans.push(BlockPlan {
+        tokens: (start_token, tokens.len()),
+        out_start,
+    });
+    plans
+}
+
+/// Assemble the frame: header, then every block, then the checksum trailer is
+/// already in the header — nothing follows the final block but its padding.
+fn emit_frame(
     data: &[u8],
     tokens: &[Token],
+    groups: &[BlockPlan],
     contexts: usize,
     dist_base: &[usize],
     dist_extra: &[u32],
 ) -> Option<Vec<u8>> {
-    let (litlen_freqs, dist_freqs) = histograms(tokens, data, contexts, dist_base);
-    let litlen_lengths: Vec<Vec<u8>> = litlen_freqs
+    let mut writer = BitWriter::new(data.len() / 2 + 64);
+    for (index, plan) in groups.iter().enumerate() {
+        let slice = &tokens[plan.tokens.0..plan.tokens.1];
+        write_block(
+            &mut writer,
+            data,
+            slice,
+            plan.out_start,
+            contexts,
+            index + 1 == groups.len(),
+            dist_base,
+            dist_extra,
+        )?;
+    }
+    let payload = writer.finish();
+    let mut out = Vec::with_capacity(WEB_HEADER_SIZE + payload.len());
+    out.extend_from_slice(&MAGIC);
+    out.push(VERSION);
+    out.push(MODE_WEB);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(&checksum(data));
+    out.extend_from_slice(&payload);
+    Some(out)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_block(
+    writer: &mut BitWriter,
+    data: &[u8],
+    tokens: &[Token],
+    out_start: usize,
+    contexts: usize,
+    final_block: bool,
+    dist_base: &[usize],
+    dist_extra: &[u32],
+) -> Option<()> {
+    let (litlen_freqs, dist_freqs) = histograms_at(tokens, data, out_start, contexts, dist_base);
+    let mut litlen_lengths: Vec<Vec<u8>> = litlen_freqs
         .iter()
         .map(|f| limited_code_lengths(f, MAX_CODE_LEN))
         .collect();
+    // A short block may never enter some context at all — three-context mode on
+    // a block with no digits, say. An all-zero table is not a code, so give the
+    // unused table the single-symbol form the format allows (end-of-block at
+    // length 1). The decoder never reads from it; it just has to be valid.
+    for lengths in litlen_lengths.iter_mut() {
+        if lengths.iter().all(|&l| l == 0) {
+            lengths[EOB_SYMBOL] = 1;
+        }
+    }
     let mut dist_lengths = limited_code_lengths(&dist_freqs, MAX_CODE_LEN);
 
     // A block with no matches still needs a one-symbol distance alphabet, so
@@ -761,8 +891,7 @@ fn emit_block(
         .collect();
     let dist_codes = crate::huffman::assign_canonical_codes(&dist_lengths);
 
-    let mut writer = BitWriter::new(data.len() / 2 + 64);
-    writer.write(1, 1); // BFINAL
+    writer.write(u32::from(final_block), 1); // BFINAL
     writer.write(if contexts == 1 { 1 } else { 2 }, 2); // BTYPE
     writer.write((hlit - 257) as u32, 5);
     writer.write((hdist - 1) as u32, 6);
@@ -778,7 +907,7 @@ fn emit_block(
         }
     }
 
-    let mut pos = 0usize;
+    let mut pos = out_start;
     for token in tokens {
         let ctx = if pos == 0 {
             context_class(b' ', contexts)
@@ -805,19 +934,14 @@ fn emit_block(
             pos += token.length;
         }
     }
-    let final_ctx = context_class(data[data.len() - 1], contexts);
+    let final_ctx = if pos == 0 {
+        context_class(b' ', contexts)
+    } else {
+        context_class(data[pos - 1], contexts)
+    };
     let (code, len) = litlen_codes[final_ctx][EOB_SYMBOL];
     writer.write(code, len as u32);
-
-    let payload = writer.finish();
-    let mut out = Vec::with_capacity(WEB_HEADER_SIZE + payload.len());
-    out.extend_from_slice(&MAGIC);
-    out.push(VERSION);
-    out.push(MODE_WEB);
-    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-    out.extend_from_slice(&checksum(data));
-    out.extend_from_slice(&payload);
-    Some(out)
+    Some(())
 }
 
 fn trimmed_len(lengths: &[u8], minimum: usize) -> usize {
@@ -1086,6 +1210,88 @@ mod tests {
         for len in 1..64usize {
             let data: Vec<u8> = (0..len).map(|i| (i % 7) as u8 + b'a').collect();
             round_trip(&data);
+        }
+    }
+
+    /// Multi-block frames: the path the format has always specified (BFINAL)
+    /// and nothing exercised until now.
+    #[test]
+    fn round_trip_multi_block() {
+        let cases: Vec<Vec<u8>> = vec![
+            b"the quick brown fox jumps over the lazy dog ".repeat(200),
+            br#"{"a":1,"b":[2,3],"c":"ccccccccccccc"}"#.repeat(300),
+            vec![b'Q'; 40_000],
+            (0..=255u8).cycle().take(20_000).collect(),
+        ];
+        for data in cases {
+            for block_size in [1usize, 7, 64, 1000, 4096, 65_536] {
+                let blob = encode_web_blocked(&data, Some(block_size)).expect("multi-block encode");
+                assert_eq!(blob[5], MODE_WEB);
+                let decoded = decode_web(&blob).expect("multi-block decode");
+                assert_eq!(
+                    decoded,
+                    data,
+                    "block_size {block_size} on {}-byte input",
+                    data.len()
+                );
+            }
+        }
+    }
+
+    /// A block boundary resets the tables, not the window: a match in block N
+    /// may still reach into block N-1's output.
+    #[test]
+    fn matches_reach_across_block_boundaries() {
+        // The repeated tail can only be coded as a match into the head, which
+        // lands in an earlier block at this block size.
+        let mut data = b"UNIQUE-HEADER-PAYLOAD-abcdefghijklmnop".to_vec();
+        data.extend(vec![b'.'; 4000]);
+        data.extend_from_slice(b"UNIQUE-HEADER-PAYLOAD-abcdefghijklmnop");
+        let blob = encode_web_blocked(&data, Some(256)).expect("encode");
+        assert_eq!(decode_web(&blob).unwrap(), data);
+        // Prove it really is multi-block: one block would not fit 4 KiB at 256.
+        let single = encode_web_blocked(&data, None).unwrap();
+        assert!(
+            blob.len() > single.len(),
+            "blocking should cost table descriptors: {} vs {}",
+            blob.len(),
+            single.len()
+        );
+    }
+
+    /// Blocking costs bytes and must never be the default.
+    #[test]
+    fn default_encode_is_single_block_and_unchanged() {
+        let data = b"default path fixture ".repeat(500);
+        assert_eq!(
+            encode_web(&data),
+            encode_web_blocked(&data, None),
+            "encode_web must be exactly the one-block path"
+        );
+    }
+
+    #[test]
+    fn block_planner_covers_every_token_exactly_once() {
+        let data = b"planner fixture ".repeat(400);
+        let (dist_base, dist_extra) = distance_tables();
+        let tokens = optimal_parse(&data, 1, &dist_base, &dist_extra);
+        for block_size in [None, Some(1), Some(13), Some(512)] {
+            let plans = plan_blocks(&tokens, block_size);
+            assert_eq!(plans[0].tokens.0, 0);
+            assert_eq!(plans[plans.len() - 1].tokens.1, tokens.len());
+            let mut expected_out = 0usize;
+            for (i, plan) in plans.iter().enumerate() {
+                assert_eq!(plan.out_start, expected_out, "plan {i} output offset");
+                if i > 0 {
+                    assert_eq!(plans[i - 1].tokens.1, plan.tokens.0, "token gap at {i}");
+                }
+                assert!(plan.tokens.0 < plan.tokens.1, "empty block at {i}");
+                expected_out += tokens[plan.tokens.0..plan.tokens.1]
+                    .iter()
+                    .map(|t| if t.length == 0 { 1 } else { t.length })
+                    .sum::<usize>();
+            }
+            assert_eq!(expected_out, data.len(), "blocks must cover the input");
         }
     }
 

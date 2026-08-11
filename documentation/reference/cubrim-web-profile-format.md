@@ -67,6 +67,13 @@ MUST NOT exceed 19.
 `HDIST` is six bits, unlike DEFLATE's five: the distance alphabet is extended
 past 32 KiB (§6) and can exceed 32 codes.
 
+**A block boundary resets the entropy tables, not the output.** A match in a
+later block may reference bytes emitted by an earlier one, because the decoder
+retains everything it has produced; the window is bounded by the output so far,
+not by the block. This is what makes a block independently decodable *given its
+predecessors' output* — the property a streaming consumer needs — while costing
+one table descriptor per extra block.
+
 ## 4. Table descriptors
 
 Immediately after the block header:
@@ -101,6 +108,11 @@ Immediately after the block header:
 
 Maximum literal/length and distance code length: **14 bits**. (Fourteen, not
 DEFLATE's fifteen, so a decoder can use one flat 2^14-entry lookup table.)
+
+A context table an encoder never uses in a block — three-context mode over a
+block containing no digits, for instance — still MUST be transmitted as a valid
+code. Encoders emit the single-symbol form (end-of-block at length 1); an
+all-zero table is not a code and MUST be rejected.
 
 Every constructed code MUST be a complete prefix-free code — the Kraft sum over
 present symbols MUST equal exactly 1 — with one exception: an alphabet where
@@ -219,6 +231,33 @@ Untrusted input reaches every field. A conformant decoder:
 
 The reference decoder's default output ceiling is 64 MiB.
 
+## 10a. Raw-store frames on the same media type
+
+An encoder offering the Web Profile competes it against a verbatim copy per
+file and emits whichever is smaller. For an already-compressed asset — WOFF2,
+PNG, a pre-gzipped bundle — the copy wins, so a response labelled
+`application/cubrim` is legitimately **not** a `MODE_WEB` frame:
+
+```
+ offset  size  field
+      0     4  MAGIC      = CB 52 49 4D
+      4     1  VERSION    = 1
+      5     1  MODE       = 1            (MODE_RAW)
+      6     1  N          dimension count (unused by this container)
+      7     2  B          edge bound (unused by this container)
+      9     4  LEN        payload length, u32 BE
+     13     …  PAYLOAD    the original bytes, verbatim
+```
+
+There is no checksum: the payload *is* the content. `LEN` is untrusted and MUST
+be checked against the caller's output budget and against the bytes actually
+present.
+
+**A decoder for `application/cubrim` SHOULD accept both containers.** One that
+handles only `MODE_WEB` fails precisely on the payloads where compression was
+correctly declined, which makes the media type undeployable for real sites. The
+reference decoder accepts both and exposes `is_decodable_frame()` to say so.
+
 ## 11. Conformance
 
 A decoder is conformant if, for every frame this specification calls valid, it
@@ -236,9 +275,11 @@ implementations are encouraged to reuse it.
 Stated so that a reader does not have to infer it:
 
 - **No dictionary.** Nothing is shared across frames.
-- **No streaming API in the reference decoder**, though `BFINAL` exists and the
-  format permits multiple blocks; the shipped encoder emits a single block per
-  frame, so the multi-block path is defined here but not yet exercised.
+- **No streaming API in the reference decoder**, though the format supports what
+  one needs: multi-block frames are emitted (`EncodeConfig::web_block_size`),
+  decoded and differentially tested in both implementations. What is missing is
+  an incremental *API* — today's decoders consume a whole frame and return a
+  whole buffer.
 - **No encryption or authentication.**
 - **No compressed-size field**, so a frame cannot be skipped without decoding.
 - **No self-describing window size**: the window is bounded by `ORIG_LEN`,

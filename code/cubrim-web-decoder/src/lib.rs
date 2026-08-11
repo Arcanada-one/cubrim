@@ -63,8 +63,13 @@ macro_rules! fail {
 pub const MAGIC: [u8; 4] = [0xCB, b'R', b'I', b'M'];
 pub const VERSION: u8 = 1;
 pub const MODE_WEB: u8 = 18;
+/// Raw-store frame: the encoder emits this when no compressed form beats a
+/// verbatim copy, so a page fetching `application/cubrim` must handle it.
+pub const MODE_RAW: u8 = 1;
 /// Fixed frame prefix: magic, version, mode, original length, checksum.
 pub const FRAME_HEADER_SIZE: usize = 14;
+/// Raw-store header: magic, version, mode, dimension count, edge bound, length.
+pub const RAW_HEADER_SIZE: usize = 13;
 
 const MIN_MATCH: usize = 3;
 const MAX_MATCH: usize = 258;
@@ -309,6 +314,9 @@ pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>
     if frame[4] != VERSION {
         fail!("unsupported version {}", frame[4]);
     }
+    if frame[5] == MODE_RAW {
+        return decode_raw(frame, limits);
+    }
     if frame[5] != MODE_WEB {
         fail!("not a Web Profile frame (mode {})", frame[5]);
     }
@@ -432,6 +440,37 @@ pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>
     Ok(out)
 }
 
+/// Decode a raw-store frame: the encoder's verbatim-copy container.
+///
+/// The web profile competes against raw-store per file, so an
+/// `application/cubrim` response for an already-compressed asset — a WOFF2, a
+/// PNG — is legitimately a raw-store frame. A decoder that only understood
+/// MODE_WEB would fail on exactly the payloads where compression was correctly
+/// declined, which is why this lives here rather than in the caller.
+///
+/// Layout: `[MAGIC 4][VERSION 1][MODE_RAW 1][N 1][B u16][LEN u32][payload]`.
+/// There is no checksum in this container; the bytes are the payload.
+fn decode_raw(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, DecodeError> {
+    if frame.len() < RAW_HEADER_SIZE {
+        fail!("raw frame too short: {} < {RAW_HEADER_SIZE}", frame.len());
+    }
+    let length = u32::from_be_bytes([frame[9], frame[10], frame[11], frame[12]]) as usize;
+    if length > limits.max_output_size {
+        fail!(
+            "declared output {length} exceeds the limit {}",
+            limits.max_output_size
+        );
+    }
+    let payload = &frame[RAW_HEADER_SIZE..];
+    if payload.len() < length {
+        fail!(
+            "raw payload truncated: {} bytes for a declared {length}",
+            payload.len()
+        );
+    }
+    Ok(payload[..length].to_vec())
+}
+
 fn read_code_lengths(
     reader: &mut BitReader,
     table: &HuffTable,
@@ -479,10 +518,23 @@ pub fn is_web_frame(frame: &[u8]) -> bool {
         && frame[5] == MODE_WEB
 }
 
+/// True when `frame` is a container this decoder can handle — a Web Profile
+/// frame or a raw-store frame. Both are valid `application/cubrim` responses.
+pub fn is_decodable_frame(frame: &[u8]) -> bool {
+    is_web_frame(frame)
+        || (frame.len() >= RAW_HEADER_SIZE
+            && frame[0..4] == MAGIC
+            && frame[4] == VERSION
+            && frame[5] == MODE_RAW)
+}
+
 /// Original length declared by a frame header, without decoding it.
 pub fn declared_len(frame: &[u8]) -> Option<usize> {
-    if !is_web_frame(frame) {
-        return None;
+    if is_web_frame(frame) {
+        return Some(u32::from_be_bytes([frame[6], frame[7], frame[8], frame[9]]) as usize);
     }
-    Some(u32::from_be_bytes([frame[6], frame[7], frame[8], frame[9]]) as usize)
+    if is_decodable_frame(frame) {
+        return Some(u32::from_be_bytes([frame[9], frame[10], frame[11], frame[12]]) as usize);
+    }
+    None
 }

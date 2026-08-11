@@ -121,14 +121,36 @@ WASM linear memory after decoding all 12: 1.6 MiB. Module: 50,110 B.
   that stamps a valid header on random bytes so the budget is spent inside the
   bitstream logic rather than at the magic check.
 
+## Two containers, one media type
+
+An `application/cubrim` response is not always a `MODE_WEB` frame. The encoder
+competes the profile against a verbatim copy per file, so an already-compressed
+asset (WOFF2, PNG) arrives as a **raw-store** frame. This decoder accepts both,
+and `is_decodable_frame()` reports it — a decoder that handled only `MODE_WEB`
+would fail on exactly the assets where compression was correctly declined.
+
+## Multi-block frames
+
+`EncodeConfig::web_block_size` cuts a frame into blocks of roughly N output
+bytes. A boundary resets the **entropy tables, not the output window**: a match
+in a later block may still reach into an earlier one. That is what a streaming
+consumer needs — a block is decodable as soon as its predecessors have been
+emitted — and it costs one table descriptor per extra block (measured: 120,939 B
+single-block vs 126,378 B at 4 KiB blocks over the 12-sample census, 86.91%
+traffic reduction against 87.47%).
+
+Verified end to end through the WASM module: 12/12 assets byte-exact at 4 KiB
+blocks, including the raw-store fallback, at 100.5 MB/s in Node.
+
 ## Known limitations
 
-- **Synchronous whole-buffer only.** No streaming/progressive decode. The frame
-  is single-block by construction today, so a streaming API would need the
-  multi-block path exercised first; the format already carries a `BFINAL` bit
-  for it.
+- **Synchronous whole-buffer only.** No streaming/progressive decode *API*.
+  The format's side of it is now real — multi-block frames are emitted, decoded
+  and differentially tested — but both decoders still consume a whole frame and
+  return a whole buffer.
 - **No encoder.** By design and by the disclosure split.
 - **Timer coarsening** makes single-shot browser measurements meaningless at
   these asset sizes; the demo amortises over repeats and says so.
-- **Untested on ARM.** See the results document — the machine available here is
-  x86-64, and the honest scope is recorded rather than papered over.
+- **ARM correctness only.** The module decodes byte-exactly on ARM64 V8 under
+  emulation; performance on real ARM silicon is unmeasured and no emulated
+  number is quoted. See the results document.
