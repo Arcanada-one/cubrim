@@ -1,0 +1,29 @@
+# host: arcana-kb | Model name:                              AMD Ryzen 5 3600 6-Core Processor
+# kernel: 6.8.0-134-generic | governor(cpu11): schedutil
+# ratio-binary sha256: 964f9792d0a9419d3da046de9282e0b309285ecf03eac956d062c862bd939f5a
+# payload-set sha256: c6d893a7cbc2088608cfcb126d50d5994f776f159ea878b9fde0ca65a9e36cd1
+# top process:  0.9 curl
+# pin: taskset -c 11
+# admission-before loadavg: 0.07 0.04 0.00
+# rounds=101 warmups=5 seed=20260811 brotli_quality=5 lgwin=22
+sample                                       orig cbr_bytes  br_bytes    cbr_MB_s     br_MB_s   ratio
+tailwind.css                                65257     10361     10238      172.63      378.89  0.4556
+html-large-web-codec-v2.html               227968     14428     13863      349.34      971.30  0.3597
+html-medium-home-v2.html                    25031      5563      5377      131.93      282.13  0.4676
+magic-string.umd.js                         42936      9375      9769      136.65      312.03  0.4380
+sourcemap-codec.umd.js                      14590      3522      3564      119.33      254.89  0.4682
+resolve-uri.umd.js                           9866      2797      2737      112.61      203.50  0.5534
+json-api-large-world-benchmark-v2.json     320976     18590     18820      328.97     1048.20  0.3138
+json-api-medium-web-benchmark-v2.json       98948      9630      9980      258.29      605.73  0.4264
+json-api-small-hypotheses-v2.json           13880      1558      1522      202.54      416.82  0.4859
+magic-string.umd.js.map                    112594     19058     21142      169.39      386.23  0.4386
+sourcemap-codec.umd.js.map                   9700      2407      2510      128.02      209.59  0.6108
+inter-latin.medium.woff2                    23664     23650     23649       55.57      150.29  0.3698
+AGGREGATE bytes=965410 cubrim_MB_s=222.55 brotli5_MB_s=555.76 decode_throughput_vs_brotli5=0.4004
+# bar: >= 0.50 (hypothesis 11, criterion 57)
+# admission-after loadavg: 0.07 0.04 0.00
+# --- absolute cross-check on this second identical-CPU host ---
+inter-latin.medium.woff2                      23664     23650        55.73        54.90
+AGGREGATE bytes=965410 best_total_s=0.004342 corpus_best_MB_s=222.35
+# admission-after loadavg: 0.15 0.05 0.01
+# date: 2026-08-11T17:38:10Z

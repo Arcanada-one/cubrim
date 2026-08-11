@@ -1,0 +1,16 @@
+[package]
+name = "cubr0076-brotli5-ratio"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone research harness. Deliberately NOT part of code/cubrim-rs: the
+# brotli baseline is needed to evaluate hypothesis 11's ratio criterion, and
+# the shipped crate must not gain a dependency for a measurement.
+
+[dependencies]
+cubrim = { path = "../../../../../code/cubrim-rs" }
+brotli = "8"
+
+[profile.release]
+opt-level = 3
