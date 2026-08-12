@@ -15,6 +15,13 @@ from typing import Iterable, Mapping
 # ratio it has to beat, which is the bias CUBR-0068 warned about.
 PHASE_A_CODECS = ("gzip-9", "brotli-11", "brotli-5", "zstd-19", "zstd-3")
 
+# The candidate channel is deliberately a separate tuple. Cubrim-Web is our own
+# codec measured against the five above; folding it into PHASE_A_CODECS would
+# silently redefine what every existing bundle, canonical fingerprint and
+# database row means, and would let a self-comparison inherit the incumbents'
+# provenance contract, which it cannot satisfy — it has no distro package.
+CANDIDATE_CODECS = ("cubrim-web",)
+
 
 def validate_codec_attribution(codec_name: str, capabilities: Mapping[str, object]) -> None:
     normalized = codec_name.casefold().replace("_", "-")
@@ -36,6 +43,15 @@ def validate_codec_attribution(codec_name: str, capabilities: Mapping[str, objec
 def require_phase_a_codec(codec_name: str) -> None:
     if codec_name not in PHASE_A_CODECS:
         raise ValueError(f"Phase A codec is not allowlisted: {codec_name}")
+
+
+def require_candidate_codec(codec_name: str) -> None:
+    if codec_name in PHASE_A_CODECS:
+        raise ValueError(
+            f"{codec_name} is a published Phase A incumbent, not a candidate"
+        )
+    if codec_name not in CANDIDATE_CODECS:
+        raise ValueError(f"candidate codec is not allowlisted: {codec_name}")
 
 
 def first_decoded_byte_ms(
