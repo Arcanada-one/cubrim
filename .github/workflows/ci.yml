@@ -7,6 +7,7 @@ on:
       - 'code/cubrim-rs/**'
       - 'code/cubrim-web-decoder/**'
       - 'code/cubrim-web-cli/**'
+      - 'bench/web-benchmark/**'
       - 'bench/web-corpus/payloads-v2/**'
       - 'reproducibility/**'
       - '.github/workflows/ci.yml'
@@ -15,6 +16,7 @@ on:
       - 'code/cubrim-rs/**'
       - 'code/cubrim-web-decoder/**'
       - 'code/cubrim-web-cli/**'
+      - 'bench/web-benchmark/**'
       - 'bench/web-corpus/payloads-v2/**'
       - 'reproducibility/**'
       - '.github/workflows/ci.yml'
@@ -156,3 +158,48 @@ jobs:
       # fixtures went through the real artefact.
       - name: Round-trip the web census through the binary
         run: cargo test --locked --release
+
+  web-benchmark-harness:
+    name: Web benchmark harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: bench/web-benchmark
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # This suite decides what may be published as a measurement — which codec
+      # is allowlisted, which metric is attributable, what provenance a result
+      # must carry. It had never run in CI: ci.yml enumerates paths and jobs by
+      # name, and bench/web-benchmark was in neither list, so six test modules
+      # sat green by never executing. Discovered while adding a seventh.
+      #
+      # `unittest discover` is not used: it cannot import this package (the
+      # modules sys.path-insert their parent) and would report success having
+      # collected nothing.
+      # Globbed, never hand-listed. Enumerating by name is exactly the defect
+      # above one level down: the seventh module would be added and silently not
+      # run. The floor check exists because a glob that matches nothing would
+      # otherwise loop zero times and exit 0.
+      - name: Harness tests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          modules=(tests/test_*.py)
+          echo "discovered ${#modules[@]} test modules"
+          if [ "${#modules[@]}" -lt 6 ]; then
+            echo "expected at least 6 harness test modules, found ${#modules[@]}" >&2
+            exit 1
+          fi
+          for path in "${modules[@]}"; do
+            module="tests.$(basename "$path" .py)"
+            echo "== $module"
+            python -m unittest "$module"
+          done

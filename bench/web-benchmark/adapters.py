@@ -14,7 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from capabilities import PHASE_A_CODECS, require_phase_a_codec
+from capabilities import (
+    CANDIDATE_CODECS,
+    PHASE_A_CODECS,
+    require_candidate_codec,
+    require_phase_a_codec,
+)
 from model import CODE_SHA_RE, SHA256_RE, hash_file, stable_fingerprint
 
 
@@ -32,6 +37,9 @@ SYSTEMD_ENV = {
     },
 }
 INNER_HELPER = Path(__file__).with_name("sandbox_exec.py").resolve()
+# Same expression as run.REPO_ROOT, defined here rather than imported because
+# run.py imports this module.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -49,7 +57,7 @@ class ToolIdentity:
     upstream_source_reference: str
     codec_build_provenance_sha256: str
 
-    def as_json(self, capabilities: dict[str, bool]) -> dict[str, object]:
+    def as_json(self, capabilities: dict[str, object]) -> dict[str, object]:
         return {
             "name": self.name,
             "version": self.version,
@@ -130,9 +138,13 @@ class CodecAdapter:
     name: str
     binary_name: str
     flags: tuple[str, ...]
-    capabilities: dict[str, bool]
+    capabilities: dict[str, object]
     _compress: Callable[[Path], tuple[str, ...]]
     _decompress: Callable[[Path], tuple[str, ...]]
+    # Codecs we build ourselves have no distro package to be pinned against, so
+    # they supply their own provenance instead of going through RELEASE_PINS.
+    # Defaulted to None so every installed-release adapter is unchanged.
+    _identity_factory: Callable[[], ToolIdentity] | None = None
 
     def compress_argv(self, path: Path) -> tuple[str, ...]:
         return self._compress(path)
@@ -141,6 +153,8 @@ class CodecAdapter:
         return self._decompress(path)
 
     def identity(self) -> ToolIdentity:
+        if self._identity_factory is not None:
+            return self._identity_factory()
         binary = shutil.which(self.binary_name)
         if binary is None:
             raise FileNotFoundError(
@@ -288,6 +302,151 @@ def adapter_for(name: str) -> CodecAdapter:
 
 def phase_a_adapters() -> tuple[CodecAdapter, ...]:
     return tuple(adapter_for(name) for name in PHASE_A_CODECS)
+
+
+# ---------------------------------------------------------------------------
+# Candidate channel
+#
+# The five Phase A codecs are the published comparison. The candidate is our
+# own codec and lives in a separate channel on purpose: adding it to
+# PHASE_A_CODECS would silently redefine what every existing bundle, fingerprint
+# and DB row means. Nothing above this line changes.
+# ---------------------------------------------------------------------------
+
+CUBRIM_WEB_CRATE = REPO_ROOT / "code" / "cubrim-web-cli"
+CUBRIM_WEB_BUILD = "cargo build --locked --release"
+
+
+def _cubrim_web_binary() -> Path:
+    """Locate the candidate binary: explicit override, PATH, then the build dir."""
+    override = os.environ.get("CUBRIM_WEB_BINARY")
+    if override:
+        return Path(override).resolve(strict=True)
+    found = shutil.which("cubrim-web")
+    if found:
+        return Path(found).resolve(strict=True)
+    built = CUBRIM_WEB_CRATE / "target" / "release" / "cubrim-web"
+    if built.is_file():
+        return built.resolve(strict=True)
+    raise FileNotFoundError(
+        "cubrim-web is not built: run "
+        f"`{CUBRIM_WEB_BUILD}` in {CUBRIM_WEB_CRATE}, or set CUBRIM_WEB_BINARY"
+    )
+
+
+def _crate_version(manifest: Path) -> str:
+    """The `version` of the first [package] table in a Cargo manifest."""
+    in_package = False
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            if in_package:
+                break
+            in_package = stripped == "[package]"
+            continue
+        if in_package and stripped.startswith("version"):
+            _, _, raw = stripped.partition("=")
+            return raw.strip().strip('"')
+    raise ValueError(f"no [package] version in {manifest}")
+
+
+def _cubrim_web_identity() -> ToolIdentity:
+    """Provenance for a binary we build rather than install.
+
+    An installed release is pinned by distro package plus upstream release SHA,
+    which is what lets a third party reconstruct the exact tool. A first-party
+    binary has no such package, so the reconstructible triple here is instead:
+    the commit, the build command, and the resulting binary hash — all three
+    recorded below.
+
+    What this proves and what it does not: `binary_sha256` is the authoritative
+    identity of the artefact actually measured, and the clean-tree requirement
+    means the recorded commit is fetchable. It does not by itself prove the
+    binary was produced by that commit — that is what a rebuild-and-compare
+    establishes, and recording the exact build command is what makes such a
+    rebuild possible. The version cross-check below is a cheap partial binding:
+    a binary built from a different crate version is refused outright.
+    """
+    from run import _git_code_sha  # local import: run.py imports this module
+
+    binary = _cubrim_web_binary()
+    if binary.name != "cubrim-web":
+        raise ValueError(f"candidate binary must be named cubrim-web, got {binary.name}")
+
+    code_sha = _git_code_sha(require_clean=True)
+    crate_version = _crate_version(CUBRIM_WEB_CRATE / "Cargo.toml")
+    cubrim_version = _crate_version(REPO_ROOT / "code" / "cubrim-rs" / "Cargo.toml")
+
+    version = _tool_version("cubrim-web", binary)
+    if version != f"cubrim-web {crate_version}":
+        raise ValueError(
+            f"cubrim-web reports {version!r} but the tree at {code_sha} "
+            f"declares {crate_version!r} — the binary is stale, rebuild it"
+        )
+
+    binary_sha256 = hash_file(binary)
+    package = ("cubrim-web-cli", crate_version, "cubrim", cubrim_version)
+    source_reference = (
+        f"https://github.com/Arcanada-one/cubrim@{code_sha} :: "
+        f"{CUBRIM_WEB_BUILD} (cwd code/cubrim-web-cli)"
+    )
+    identity_without_digest = {
+        "name": "cubrim-web",
+        "version": version,
+        "binary_sha256": binary_sha256,
+        "flags": [],
+        "binary_package": package[0],
+        "binary_package_version": package[1],
+        "source_package": package[2],
+        "source_package_version": package[3],
+        "upstream_release_sha": code_sha,
+        "upstream_source_reference": source_reference,
+    }
+    return ToolIdentity(
+        name="cubrim-web",
+        version=version,
+        binary_path=str(binary),
+        binary_sha256=binary_sha256,
+        flags=(),
+        binary_package=package[0],
+        binary_package_version=package[1],
+        source_package=package[2],
+        source_package_version=package[3],
+        upstream_release_sha=code_sha,
+        upstream_source_reference=source_reference,
+        codec_build_provenance_sha256=stable_fingerprint(identity_without_digest),
+    )
+
+
+def _cubrim_web() -> CodecAdapter:
+    return CodecAdapter(
+        "cubrim-web",
+        "cubrim-web",
+        (),
+        {
+            # Decoding goes through the reference decoder the WASM artefact
+            # wraps, and that decoder is genuinely incremental — so
+            # first-decoded-byte is measurable here, unlike for any incumbent.
+            "whole_buffer_decode": True,
+            "incremental_decode": True,
+            "web_profile": True,
+            "encode": True,
+            "decode": True,
+            "web_profile_version": "1",
+        },
+        lambda path: ("cubrim-web", "encode", str(path)),
+        lambda path: ("cubrim-web", "decode", str(path)),
+        _identity_factory=_cubrim_web_identity,
+    )
+
+
+def candidate_adapter_for(name: str) -> CodecAdapter:
+    require_candidate_codec(name)
+    return {"cubrim-web": _cubrim_web}[name]()
+
+
+def candidate_adapters() -> tuple[CodecAdapter, ...]:
+    return tuple(candidate_adapter_for(name) for name in CANDIDATE_CODECS)
 
 
 class SubprocessExecutor:
