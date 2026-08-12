@@ -19,8 +19,9 @@ Measured 2026-08-12 on `dev-ai`. Companion to
 > with the full table the question *why these files and not those* has a mechanical
 > answer. It is neither class nor size: the competition runs **iff `MODE_MED16`'s raster
 > detector fires**, and that detector — documented as skipping "text, exe, random" — in
-> fact fires on two executables and two binary files, which carry **77.5% of all
-> competition work in the corpus**. See § *The gate*.
+> fact fires on two executables, two binary files **and the larger of the two database
+> files**, which together carry **83.9% of all competition work measured so far**. See
+> § *The gate*.
 
 ## How this lane arrived here, in one paragraph
 
@@ -88,7 +89,7 @@ Full files from the 24-file world corpus, `CUBRIM_PROFILE=1`, `CUBR_THREADS=64`,
 | `kennedy.xls` | binary | 1,029,744 | 192 | `geomix` 129, `lz_rans` 63 | no — 32.8% |
 | `samba` | exe | 21,606,400 | 0 | — | competition never runs |
 | `osdb` | database | 10,085,684 | 0 | — | competition never runs |
-| `nci` | database | 33,553,445 | *running* | *not yet measured* | *pending* |
+| `nci` | database | 33,553,445 | 6144 | `geomix` 4449, `lz_rans` 1695 | no — 27.6% |
 | `webster` | text | 41,458,703 | *running* | *not yet measured* | *pending* |
 | `enwik8` | text | 100,000,000 | *running* | *not yet measured* | *pending* |
 | `dickens` | text | 10,192,446 | 0 | — | competition never runs |
@@ -106,11 +107,12 @@ Full files from the 24-file world corpus, `CUBRIM_PROFILE=1`, `CUBR_THREADS=64`,
 
 **All 24 corpus files, sorted by competed blocks then size.** The first version of
 this document measured 14 and listed the ten it had not reached; this scan closes that
-gap. Seven files compete; fourteen are measured at zero; **three rows (`nci`, `webster`,
-`enwik8`) are still encoding at the time of this commit and are marked pending rather
-than assumed.** They are predicted zero (see § *The gate*), and a prediction is not a
-measurement — this commit is pushed early because the fleet was killed twice tonight,
-not because those three are finished.
+gap. Of the 22 rows measured so far, **eight compete and fourteen are zero**; `webster`
+and `enwik8` are still encoding and are marked pending rather than assumed.
+
+`nci` is the row that matters most, and it went **against the prediction recorded before
+it ran**: it competes 6144 blocks. See § *The prediction `nci` falsified* — the database
+negative the earlier draft warned about is not merely unsupported, it is **false**.
 
 Every row above is a **completed** encode (`exit 0`). This matters more than it looks:
 a still-running encode has an empty `FINAL:` section that is textually identical to
@@ -149,7 +151,7 @@ Two guards stand in front of it, and they carve the corpus into three tiers:
 |---|---|---|---|---|
 | 1 | input ≤ 65,536 B | **absent** | no | `grammar.lsp`, `xargs.1`, `fields.c`, `cp.html`, `sum` |
 | 2 | larger, raster detector declines | calls=1, wall ≈ 0.01–0.03 s | no | `asyoulik.txt`, `alice29.txt`, `lcet10.txt`, `plrabn12.txt`, `xml`, `reymont`, `dickens`, `osdb`, `samba` |
-| 3 | raster detector fires | calls=1, wall 8.5–242.7 s | **yes** | `ptt5`, `kennedy.xls`, `ooffice`, `sao`, `x-ray`, `mr`, `mozilla` |
+| 3 | detector fires | calls=1, wall 8.5–242.7 s | **yes** | `ptt5`, `kennedy.xls`, `ooffice`, `sao`, `x-ray`, `mr`, `nci`, `mozilla` |
 
 **Tier 1** is the caller-side guard at `codec.rs:391`, `if data.len() >
 config.cube_size_limit()`, which encloses the whole type-gated heavy-transform block
@@ -166,7 +168,9 @@ returns `None` immediately and the file costs ~0.02 s of detection.
 
 The tiers are not fitted to the outcome — they are separated by a column, and the
 separation is absolute. Tier 2 spends at most **0.033 s** in `med16`; tier 3 spends at
-least **8.502 s**. That is a factor of 258 with nothing in the gap.
+least **8.502 s**. That is a factor of 258 with nothing in the gap. `nci`, the file that
+broke my prediction, lands squarely in tier 3 by this column too (**116.524 s**) — the
+gate classified it correctly; I guessed its content wrongly.
 
 ### Size is not the gate, and the corpus contains the controlled pair that proves it
 
@@ -179,16 +183,23 @@ predicts nothing.
 ### The detector's documented selectivity is wrong, and that is where the work goes
 
 The comment says the detector skips text, exe and random input. Measured, it fires on
-`ooffice` and `mozilla` (exe) and on `sao` and `kennedy.xls` (binary): **four of the seven
-competing files are not images**, and they carry 12,036 of the 15,528 competed blocks —
-**77.5% of all value-stream competition in the corpus happens on input the gate was
-written to skip.**
+`ooffice` and `mozilla` (exe), on `sao` and `kennedy.xls` (binary), and on `nci`
+(database): **five of the eight competing files are not images**, and they carry 18,180 of
+the 21,672 competed blocks measured so far — **83.9% of all value-stream competition in
+the corpus happens on input the gate was written to skip.**
+
+`nci` also shows what the detector is really keyed on. It is chemical-structure data in
+fixed-width records, and a fixed-width record IS a vertical period — precisely the signal
+`med16_detect_width` searches for. So this is not an *image* detector that misfires; it is
+a **fixed-period record-structure detector**, and images are one source of that structure
+among several. Stating it that way predicts the corpus better than "image vs not".
 
 This is the mechanical reason the per-file discipline in point 2 below is not pedantry.
 Class is the wrong unit because the gate never looks at class; it looks for vertical
 periodicity in the bytes, and it finds it in some executables and some spreadsheets and
-not in others. `exe` splits (`ooffice`, `mozilla` compete; `samba` does not) exactly as
-`binary` splits (`sao`, `kennedy.xls` compete; `sum` does not).
+not in others. **Three of the four classes are now measured heterogeneous:** `exe`
+(`ooffice` 1128, `mozilla` 9384 vs `samba` 0), `binary` (`sao` 1332, `kennedy.xls` 192 vs
+`sum` 0) and `database` (`nci` 6144 vs `osdb` 0).
 
 ### A second file where the competition is provably discarded
 
@@ -236,11 +247,11 @@ CUBR-0096 brief both scope the mechanism to image and exe. `sao` and `kennedy.xl
 in the scope statement.
 
 **4. Where the competition does not run at all, it is not a small effect — it is zero
-blocks.** Fourteen of the twenty-one files measured so far never reach the competition
-(three rows still pending). For those, no value-stream lever of any design can save
+blocks.** Fourteen of the twenty-two files measured so far never reach the competition
+(two rows still pending). For those, no value-stream lever of any design can save
 anything, because there is nothing to save. **The corpus-wide shape is now known: the
-value-stream competition is a minority path.** At most seven of 24 files reach it, and
-the entire lever — the one the gate killed — could only ever have applied to those seven.
+value-stream competition is a minority path.** Eight of 24 files reach it, and the entire
+lever — the one the gate killed — could only ever have applied to those eight.
 
 **5. The per-file discipline in point 2 cuts both ways — including in this document.**
 Point 2 says constancy is a per-file property, not a per-class one. The identical caution
@@ -253,18 +264,44 @@ and `nci` had never been measured. It is tempting to write "database never reach
 competition", and earlier drafts of the surrounding bookkeeping did exactly that. Read the
 zero rows as **specific named files**, never as classes.
 
-**Update from the completing scan.** The caution was the right one to have written, and
-the closing corpus vindicates it on a class the earlier draft did *not* flag: `samba` is
-`exe`, 21,606,400 B, and competes **zero** blocks — while `ooffice` and `mozilla`, the two
-other `exe` files, compete 1128 and 9384. So `exe` splits exactly as `binary` splits, and
-a reader of the first table who had generalised "exe competes" from n = 2 would have been
-wrong. Two of the four classes that looked homogeneous are not.
+**Update from the completing scan — the caution was not just correct, the negative it
+guarded against was FALSE.** `nci` has now been measured and it competes **6144 blocks**
+(`geomix` 4449, `lz_rans` 1695), against `osdb`'s zero. Both are `database`. Had "database
+never reaches the competition" been left standing on `osdb` alone, it would have told
+every future lane that database files are out of scope for any value-stream lever — while
+the larger of the corpus's two database files runs the competition 6144 times.
 
-The `database` question itself is being answered by measurement rather than left at n = 1:
-`nci` is encoding as this is written and its row is marked pending above. It is predicted
-to land in tier 2 — above the 64 KiB floor, no raster periodicity — but that prediction is
-recorded here precisely so it can be checked against the row when it lands, not so it can
-substitute for it.
+`samba` makes the same point from the other direction, on a class the earlier draft did
+*not* flag: it is `exe`, 21,606,400 B, and competes **zero**, while `ooffice` and
+`mozilla` compete 1128 and 9384. **Three of the four classes are measured heterogeneous**
+— `exe`, `binary` and `database` — and the only class not shown to split is the one
+(`image`) where every member happens to compete.
+
+## The prediction `nci` falsified
+
+Before the large files ran, this lane wrote down what it expected, twice, and the second
+one named `nci`:
+
+> "Predicted: reymont, dickens, samba, nci, webster and enwik8 all return ZERO competed
+> blocks" — `winners2/PREDICTION-REVISED.md`, 06:59, when 4 of 10 rows were done.
+
+Five of the six were right. `nci` was wrong, and it is the one that mattered.
+
+**What survives.** The three-tier gate model is not damaged by this. `nci` sits in tier 3
+by every column the model uses — `med16` row present, wall 116.524 s (three orders above
+the 0.013–0.033 s tier-2 band), non-zero competition — and the tier boundary is still
+absolute. The gate classified `nci` correctly.
+
+**What was wrong.** The input I fed the model: "database, not a 2-D raster, so the
+detector declines". `nci` is fixed-width chemical records, and fixed-width records are a
+vertical period. The detector did exactly what it is written to do; I mis-predicted which
+side of a correct gate a file would fall on, by reasoning about its *class name* instead of
+its *byte structure* — the precise error this document spends its length warning about.
+Writing the warning is evidently not the same as being immune to it.
+
+**Kept, not deleted.** Both prediction files remain on the host with their mtimes, and
+`winners2/OUTCOME-NCI.md` records the falsification, written before `webster` and `enwik8`
+completed so it could not be retrofitted.
 
 The temptation is worth naming because it is asymmetric: a *positive* result ("this file
 competes 1128 times") is self-evidently about one file, while a *negative* one ("zero
@@ -280,10 +317,11 @@ blocks") reads like a property of the kind of data. It is not.
   *corpus* figure and one file is not a corpus. What the table bounds is where a ratio cost
   could come from at all: only the seven files that compete, and on `x-ray` and `mr` a
   sticky choice costs zero because there is only ever one winner to be sticky about.
-- It now measures **21 of the 24 corpus files**, with `nci`, `webster` and `enwik8` still
+- It now measures **22 of the 24 corpus files**, with `webster` and `enwik8` still
   encoding at the time of this commit and marked pending in the table. The first version
-  of this document measured 14; the seven added are `asyoulik.txt`, `lcet10.txt`,
-  `plrabn12.txt`, `xml`, `reymont`, `dickens` and `samba`, all at zero competed blocks.
+  of this document measured 14; the eight added are `asyoulik.txt`, `lcet10.txt`,
+  `plrabn12.txt`, `xml`, `reymont`, `dickens` and `samba` at zero competed blocks, and
+  `nci` at **6144**.
 - **Requirement 4 is still not established and this scan does not attempt it.** Knowing
   which files compete bounds where a ratio cost could come from — at most seven files —
   but it measures no candidate arm and produces no ratio figure.
@@ -395,8 +433,10 @@ this explicitly because this lane has already paid once for re-deriving a settle
   three-tier MED16 gate from source, and predicted zero for all six files then still
   running, flagging `samba` as the case most likely to break it. `samba` came back zero.
   `winners2/CORRECTION-1.md` (07:04, 5 of 10 done) fixed the line number attributed to the
-  tier-1 guard. The `.done` mtimes date every row against these files. The first
-  prediction is kept, wrong, rather than quietly deleted.
+  tier-1 guard. `winners2/OUTCOME-NCI.md` (07:25, 8 of 10 done, before `webster` and
+  `enwik8` finished) records that `nci` **falsified** the revised prediction and restates
+  the figures it invalidated. The `.done` mtimes date every row against these files. Both
+  wrong predictions are kept rather than quietly deleted.
 - Superseded re-implementation: `cubr-0096-sticky-vs` @ `ed8bc3f` — built, 12 tests green
   including a control proving `recheck=1` reproduces competitive output byte-for-byte.
   Not for merge. It is, however, the binary that produced the `ooffice` resolution above.
