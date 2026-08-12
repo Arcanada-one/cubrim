@@ -18,10 +18,10 @@ boundary (`sao/f12` 01:25Z, `webster/full` 02:10Z).
 
 | | |
 |---|---|
-| cells complete | 21 |
-| files with both arms | 9 of 24 |
+| cells complete | 22 |
+| files with both arms | 10 of 24 |
 | voids / gate failures | **0** |
-| remaining | `webster/f12` (running), `x-ray`, `xml`, `enwik8`, 11 canterbury |
+| remaining | `x-ray` (running), `xml`, `enwik8`, 11 canterbury |
 
 Every `full`-arm archive passed the canonical identity gate against the Phase C
 journal canonicals, and every decode in every cell passed round-trip (`cmp` +
@@ -44,6 +44,7 @@ archive bytes vs control. Decode figures are the median of three reps.
 | ooffice | exe | no | **+8.79** | 57.1 | 26.3 | 2.17× | 5242 M | 2296 M | 44% |
 | nci | database | no | +2.68 | 229.6 | 103.5 | 2.22× | 7127 M | 3116 M | 44% |
 | osdb | database | no | +8.85 | 109.3 | 47.6 | 2.30× | 9982 M | 4572 M | 46% |
+| webster | text | no | +3.31 | 391.6 | 158.7 | 2.47× | 8224 M | 3859 M | 47% |
 
 ### A cross-check the prereg did not ask for, and what it caught
 
@@ -116,9 +117,10 @@ file survives when the F12 ratio still beats every other archiver.
 | mr | image | +0.00 | 0.20776 | 0.20776 | ppmd 0.23079 | holds |
 | dickens | text | +3.58 | 0.20726 | 0.21468 | ppmd 0.22534 | holds |
 | reymont | text | +4.08 | 0.13884 | 0.14450 | ppmd 0.17224 | holds |
+| webster | text | +3.31 | 0.13974 | 0.14437 | ppmd 0.15785 | holds |
 
-**8 of 8 measured led-files survive (100%).** But 14 of the 22 led files are not yet
-measured, so the corpus figure is bounded at worst 36.4% / best 100.0% against an
+**9 of 9 measured led-files survive (100%).** But 13 of the 22 led files are not yet
+measured, so the corpus figure is bounded at worst 40.9% / best 100.0% against an
 80% bar — **undecided**, and it must stay undecided rather than be reported as
 "100% so far, therefore passing".
 
@@ -133,10 +135,10 @@ point would erase. The 80% bar has margin; those two individual cells do not.
 > ≥ 8 MB with `tbits ≥ 26`.
 
 nci 2.22×, osdb 2.30×, mozilla 2.15×, ooffice 2.17×, samba 2.21×, dickens 2.26×,
-reymont 2.34×.
+reymont 2.34×, webster 2.47×.
 
 **Median 2.22× against a 1.5× bar — holds, and not marginally.** The spread is
-remarkably tight (2.15–2.34× across four classes and a 6–51 MB size range), which is
+remarkably tight (2.15–2.47× across four classes and a 6–51 MB size range), which is
 itself evidence the effect is structural rather than file-specific. The ≥ 8 MB /
 `tbits ≥ 26` sub-clause also holds on every qualifying file measured so far.
 
@@ -145,9 +147,9 @@ itself evidence the effect is structural rather than file-specific. The ≥ 8 MB
 > Predicts: F12 decode peak RSS ≤ 60% of full on CM2-won files ≥ 16 MB.
 
 43.7% (nci), 45.8% (osdb), 45.8% (mozilla), 43.8% (ooffice), 45.5% (samba),
-44.6% (dickens), 42.6% (reymont).
+44.6% (dickens), 42.6% (reymont), 46.9% (webster).
 
-**Holds on every CM2-won file, with wide margin — 42.6–45.8% against a 60% ceiling.**
+**Holds on every CM2-won file, with wide margin — 42.6–46.9% against a 60% ceiling.**
 The prereg predicted ≈56% from table arithmetic (12+3 of 27 tables); the measured
 value is consistently *better* than that estimate, clustering near 45%. The
 mechanism claim behind the above-map P-A speedups is closed: the working set really
@@ -251,3 +253,26 @@ the next campaign author reads.
 FINDINGS F6 already documented that this encoder oversubscribes the machine and
 that the damage shows up as collateral. This is the multi-lane version of the same
 problem, and it is the second time it has cost something.
+
+
+## Two corrections to this record and its tooling
+
+**The other lane's collision is closed, and it published its own result.** The
+CUBR-0096 `ooffice-decide.sh` run completed while this campaign continued: `base`
+and `sticky` archives are byte-identical (`f4709c0a…`, 1,763,460 B), so forcing one
+value-stream winner everywhere changes nothing in the output on that file. That
+sha is also exactly this campaign's canonical `ooffice` archive, an unplanned
+cross-check that both lanes are encoding the same thing. Their write-up is
+`research(CUBR-0096): the ooffice tension is resolved` (PR #171). The claim made
+above — that their byte comparison was unaffected by the load while their WALL/RSS
+lines were — stands as stated, and is now settled rather than predicted.
+
+**`adjudicate.py` hand-typed the file classes and got one wrong.** Its first version
+carried its own `CLASS` dict, in which `samba` was `exe`; meta-36 says `code`. The
+published tables above were right because they were written against the dataset, but
+the script that will generate every future update was not. It now loads classes from
+`meta36.psv` and has no hand-typed table at all. The wrong class would have applied a
++6% ceiling where +5% belongs — no verdict changes at `samba`'s +1.82%, but the next
+file it mis-classified might not be so forgiving. A hand-typed table beside a
+machine-readable one drifts from it; that is what happened here, and the fix is to
+delete the table rather than correct it.
