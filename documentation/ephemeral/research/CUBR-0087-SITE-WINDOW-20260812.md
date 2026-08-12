@@ -85,11 +85,40 @@ Consequences worth stating plainly:
   and a red tick that is red for billing trains readers to ignore it — the exact
   habit the workflow was created to break.
 - Fixing it is an account action (billing / spending limit), not a code change.
-  The alternative, moving the job to a self-hosted label, is available — the org
-  has `ci-general`, and `arcana-www` already serves this repo — but the runner
-  must provide PHP ≥ 8.3, which the workflow asserts and which was not verified
-  here. That belongs to whoever owns the runner fleet, with the header's original
-  reasoning re-read rather than overwritten.
+
+### The self-hosted alternative, now measured rather than assumed
+
+An earlier revision of this note left the runner question open ("was not verified
+here"). It is cheap to answer, so it is answered:
+
+| runner (label) | host | PHP | notes |
+|---|---|---|---|
+| `arcana-www-arcanada` (`arcana-www`, `sites`) | arcana-www | **8.4.19** | the only runner carrying `sites` |
+| `arcana-kb-general` (`ci-general`) | arcana-kb | **none** | passwordless sudo available |
+| — | dev-ai | n/a | **hosts no Actions runner at all** |
+
+Three conclusions follow, and they argue *against* a runner move rather than for
+one:
+
+1. **dev-ai is not in the runner fleet.** The `arcana-ai` label on
+   `arcana-ci-general` had raised the worry that CI work could land on the
+   measurement stand and break quiet-host discipline. It cannot: dev-ai carries
+   no runner installation. That concern is closed.
+2. **`arcana-www` satisfies the PHP assertion but is the wrong slot.** It is the
+   only runner labelled `sites`, and it is what `deploy.yml` waits on — this
+   lane's own deploy queued roughly fifteen minutes behind it. Adding a
+   four-minute browser suite to that single slot serialises testing against
+   deployment, which is exactly the failure the `cubrim-api` CIBLOCK decision
+   moved a job *away* from.
+3. **`ci-general` is the right slot but lacks PHP.** It could be installed —
+   passwordless sudo is available — but that mutates a shared CI host used by
+   other repositories, and it cuts against this workflow's own supply-chain
+   reasoning for taking PHP from the runner image rather than a setup action.
+
+So the runner move is *feasible* and *not obviously desirable*. Restoring billing
+restores the design the workflow's author chose and documented. That remains a
+fleet/account decision; what has changed is that it can now be taken on evidence
+instead of on an open question.
 
 ## Verification
 
