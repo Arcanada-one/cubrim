@@ -1,0 +1,17 @@
+# Copyright 2026 The Cubrim Authors (demo fork, CUBR-0079).
+#
+# INTEGRATION-CHECK target only. It provides the cbm_stream_* symbols as
+# stubs so //net links and the CbmSourceStream integration compiles against
+# the real tree. The REAL decoder is the vendored Rust crate
+# (code/cubrim-web-decoder), which needs blake3 vendored via gnrt — the one
+# isolated remaining sub-task of CUBR-0079 P2. Swap `stub_ffi.cc` for the
+# rust_static_library once blake3 is vendored.
+import("//build/buildflag_header.gni")
+
+static_library("cubrim") {
+  sources = [
+    "ffi/cubrim_web_decoder.h",
+    "ffi/stub_ffi.cc",
+  ]
+  public = [ "ffi/cubrim_web_decoder.h" ]
+}

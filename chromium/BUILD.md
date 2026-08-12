@@ -103,6 +103,43 @@ heap object per stream, any number interleaved. Proven by
 raw-store passthrough. `cbm_stream_declared_len` lets CbmSourceStream check
 its output budget before decoding a block.
 
+## P2 environment — provisioned on arcana-kb 2026-08-12 (facts, not plan)
+
+The synced tree needed setup the recipe above understated; recorded so the
+next run does not rediscover it:
+
+1. **depot_tools cpython3.** `gn`/`autoninja` use the depot_tools `python3`
+   wrapper, which reads `python3_bin_reldir.txt`. On this host the wrapper
+   pointed at an unpopulated path. Fix that worked:
+   `python3 depot_tools/bootstrap/bootstrap.py --bootstrap-name python3` to
+   write the reldir, then fetch the interpreter itself with the bundled cipd
+   client — `depot_tools/.cipd_client ensure -ensure-file <cpython3.ensure>
+   -root depot_tools/python3` (package
+   `infra/3pp/tools/cpython3/${platform} version:2@3.11.8.chromium.35`, taken
+   from `depot_tools/bootstrap/manifest.txt`) — and set
+   `python3_bin_reldir.txt` to the actual layout (`python3/bin`). `vpython3`
+   already worked and is what proves cipd is healthy.
+2. **System build deps.** `gn gen` fails on missing `pkg-config`/`file`, then
+   the GTK/atk stack. `apt-get install -y pkg-config file`, then
+   `build/install-build-deps.sh --no-prompt --no-arm --no-nacl
+   --no-chromeos-fonts`.
+3. **Result:** with the apply.sh edits + `//third_party/cubrim`, **`gn gen`
+   is GREEN** (31626 targets resolved) — the whole gn wiring is verified
+   against the real tree. `net_unittests` compile/link is the remaining gate.
+
+## blake3 — the one isolated sub-task for the REAL decoder
+
+`third_party/rust/` vendors `cfg_if` but NOT blake3, which the decoder needs
+for its frame checksum. The gn-integrated build therefore uses
+`third_party/cubrim/ffi/stub_ffi.cc` (linker-satisfying no-op stubs) to verify
+the C++ integration compiles+links. The real decoder needs blake3 + its deps
+(`arrayref`, `arrayvec`, `constant_time_eq`) vendored via Chromium's crate
+tooling (`tools/crates`, gnrt), then `third_party/cubrim/BUILD.gn` swapped from
+the stub `static_library` to a `rust_static_library` over
+`code/cubrim-web-decoder`. Until then the golden-frame V-AC1 test cannot run
+in-tree; the decoder itself is already proven byte-exact natively
+(`chromium/ffi-check.c`, and the handle ABI's own `ffi_handles` suite).
+
 ## Hard gate
 
 This is a demo fork. **No upstream CL, no chromium.org interaction, no public

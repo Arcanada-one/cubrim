@@ -77,12 +77,14 @@ edit('net/base/features.cc',
      [('BASE_FEATURE(kAlpsForHttp2, base::FEATURE_ENABLED_BY_DEFAULT);',
        'BASE_FEATURE(kAlpsForHttp2, base::FEATURE_ENABLED_BY_DEFAULT);\nBASE_FEATURE(kCbmContentEncoding, base::FEATURE_DISABLED_BY_DEFAULT);')])
 
-# 5. advertisement in http_request_headers.cc, gated + HTTPS/localhost like zstd
+# 5. advertisement in http_request_headers.cc, gated + HTTPS/localhost like zstd.
+#    The includes are added separately below (this file does not yet include
+#    features.h / feature_list.h at the pinned tag — VERIFIED on the synced
+#    tree, where the bogus no-op include anchor this edit used to carry made
+#    the whole script abort).
 edit('net/http/http_request_headers.cc',
      ['kCbmContentEncoding'],
-     [('#include "net/base/features.h"',  # add include if missing handled below
-       '#include "net/base/features.h"'),
-      ('constexpr char kEncodingZstd[] = "zstd";',
+     [('constexpr char kEncodingZstd[] = "zstd";',
        'constexpr char kEncodingZstd[] = "zstd";\nconstexpr char kEncodingCbm[] = "cbm";'),
       ('  if (!advertised_encoding_names.empty()) {',
        '  // CUBR-0079 demo coding, same secure/localhost guard as br/zstd.\n'
@@ -92,13 +94,25 @@ edit('net/http/http_request_headers.cc',
        '    advertised_encoding_names.emplace_back(kEncodingCbm);\n'
        '  }\n'
        '  if (!advertised_encoding_names.empty()) {')])
-PY
 
-# http_request_headers.cc may not include features.h / feature_list.h yet.
-grep -q '#include "net/base/features.h"' net/http/http_request_headers.cc || \
-  sed -i 's##include "net/base/net_export.h"#include "base/feature_list.h"\n#include "net/base/features.h"\n#include "net/base/net_export.h"#' net/http/http_request_headers.cc || true
-grep -q '#include "base/feature_list.h"' net/http/http_request_headers.cc || \
-  sed -i '0,/#include/{s##include "base/feature_list.h"\n#include#}' net/http/http_request_headers.cc || true
+# 5b. the two includes http_request_headers.cc needs for the feature check.
+#     Anchored on base/logging.h (present at the tag) — a sed with a '#'
+#     delimiter fails on the '#include' text, so this is done in Python.
+def add_includes(path, anchor, includes):
+    s = io.open(path).read()
+    add = ''.join(inc + '\n' for inc in includes if inc.split('"')[1] not in s)
+    if add:
+        assert s.count(anchor) >= 1, f"{path}: include anchor missing"
+        s = s.replace(anchor, add + anchor, 1)
+        io.open(path, 'w').write(s)
+        print(f"  {path}: includes added")
+    else:
+        print(f"  {path}: includes already present")
+
+add_includes('net/http/http_request_headers.cc',
+             '#include "base/logging.h"',
+             ['#include "base/feature_list.h"', '#include "net/base/features.h"'])
+PY
 
 echo "== BUILD.gn: add cbm_source_stream sources + third_party/cubrim dep"
 python3 - <<'PY'
@@ -108,12 +122,28 @@ if 'cbm_source_stream.cc' not in s:
     anchor='      "filter/brotli_source_stream.cc",\n      "filter/brotli_source_stream.h",'
     assert s.count(anchor)==1
     s=s.replace(anchor, anchor+'\n      "filter/cbm_source_stream.cc",\n      "filter/cbm_source_stream.h",')
-    io.open(f,'w').write(s); print('  net/BUILD.gn: patched')
+    io.open(f,'w').write(s); print('  net/BUILD.gn: sources patched')
 else:
-    print('  net/BUILD.gn: already patched')
+    print('  net/BUILD.gn: sources already patched')
+# //third_party/cubrim dep on the net component (VERIFIED anchor on the tree).
+if '//third_party/cubrim' not in s:
+    dep_anchor='  deps = [\n    ":cronet_buildflags",\n    ":net_deps",'
+    assert s.count(dep_anchor)==1, 'net component deps anchor'
+    s=s.replace(dep_anchor, dep_anchor+'\n    "//third_party/cubrim",')
+    io.open(f,'w').write(s); print('  net/BUILD.gn: //third_party/cubrim dep added')
+else:
+    print('  net/BUILD.gn: dep already present')
 PY
 
-echo "== DONE (apply). Next: add third_party/cubrim/BUILD.gn dep to //net, then"
-echo "   gn gen out/cbm && autoninja -C out/cbm net_unittests"
-echo "   NOTE: a services/network mojom-traits switch over SourceStreamType may"
-echo "   still need a kCbm case — the build will name it if so."
+echo "== third_party/cubrim: vendored decoder target"
+echo "   BUILD.gn + the crate live under third_party/cubrim/. Two states:"
+echo "   - integration-check: ffi/stub_ffi.cc satisfies the linker so //net"
+echo "     compiles+links WITHOUT the real decoder (blake3 not yet vendored)."
+echo "   - real decoder: rust_static_library over code/cubrim-web-decoder once"
+echo "     blake3 + deps are vendored via tools/crates (gnrt). See BUILD.md."
+
+echo "== DONE (apply). Next: gn gen out/cbm && autoninja -C out/cbm net_unittests"
+echo "   Env prereqs proven on the tree (see BUILD.md): depot_tools cpython3"
+echo "   bootstrap + build/install-build-deps.sh. gn gen is GREEN with these edits."
+echo "   A services/network mojom-traits switch over SourceStreamType may still"
+echo "   need a kCbm case — the net_unittests compile names it if so."
