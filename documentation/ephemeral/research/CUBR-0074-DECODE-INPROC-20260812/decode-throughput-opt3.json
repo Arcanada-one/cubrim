@@ -1,0 +1,731 @@
+{
+  "admission_after": {
+    "cpus": 16,
+    "load_1m": 28.98486328125,
+    "load_per_cpu": 1.811553955078125,
+    "max_temperature_c": 85.0,
+    "quiet_ceiling_load_per_cpu": 1.0,
+    "within_quiet_ceiling": false
+  },
+  "admission_before": {
+    "cpus": 16,
+    "load_1m": 28.98486328125,
+    "load_per_cpu": 1.811553955078125,
+    "max_temperature_c": 83.0,
+    "quiet_ceiling_load_per_cpu": 1.0,
+    "within_quiet_ceiling": false
+  },
+  "codecs": {
+    "brotli-11": {
+      "library": {
+        "bytes": 51512,
+        "path": "/usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.1.0",
+        "sha256": "64d8a5019d4c294b89fde1193343ea324bbd8603652554e5545f0a01595fa2c5"
+      },
+      "mb_per_s_median": 469.7336940554248,
+      "mb_per_s_min": 684.9884318904062,
+      "samples": [
+        {
+          "compressed_bytes": 9161,
+          "median_ns": 196273.0,
+          "min_ns": 144232,
+          "observations": 60,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 11746,
+          "median_ns": 253511.5,
+          "min_ns": 179800,
+          "observations": 60,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 4763,
+          "median_ns": 100501.5,
+          "min_ns": 63259,
+          "observations": 60,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 8672,
+          "median_ns": 153886.5,
+          "min_ns": 101952,
+          "observations": 60,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3280,
+          "median_ns": 58345.0,
+          "min_ns": 37279,
+          "observations": 60,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2467,
+          "median_ns": 42609.0,
+          "min_ns": 29214,
+          "observations": 60,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 14910,
+          "median_ns": 330030.0,
+          "min_ns": 243187,
+          "observations": 60,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 8344,
+          "median_ns": 180232.0,
+          "min_ns": 120990,
+          "observations": 60,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1383,
+          "median_ns": 26971.5,
+          "min_ns": 14873,
+          "observations": 60,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 17827,
+          "median_ns": 320811.5,
+          "min_ns": 208948,
+          "observations": 60,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2319,
+          "median_ns": 39808.0,
+          "min_ns": 26654,
+          "observations": 60,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 18250,
+          "median_ns": 364395.0,
+          "min_ns": 255836,
+          "observations": 60,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23623,
+          "median_ns": 105859.0,
+          "min_ns": 64080,
+          "observations": 60,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "brotli-5": {
+      "library": {
+        "bytes": 51512,
+        "path": "/usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.1.0",
+        "sha256": "64d8a5019d4c294b89fde1193343ea324bbd8603652554e5545f0a01595fa2c5"
+      },
+      "mb_per_s_median": 510.9205635015271,
+      "mb_per_s_min": 783.4868060533591,
+      "samples": [
+        {
+          "compressed_bytes": 10233,
+          "median_ns": 186792.5,
+          "min_ns": 113031,
+          "observations": 60,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 13863,
+          "median_ns": 228700.5,
+          "min_ns": 158500,
+          "observations": 60,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 5367,
+          "median_ns": 87359.5,
+          "min_ns": 52306,
+          "observations": 60,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 9748,
+          "median_ns": 144940.5,
+          "min_ns": 91465,
+          "observations": 60,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3565,
+          "median_ns": 45449.5,
+          "min_ns": 29296,
+          "observations": 60,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2738,
+          "median_ns": 41615.5,
+          "min_ns": 32318,
+          "observations": 60,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 18820,
+          "median_ns": 299036.5,
+          "min_ns": 199650,
+          "observations": 60,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 9980,
+          "median_ns": 158851.5,
+          "min_ns": 112141,
+          "observations": 60,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1522,
+          "median_ns": 22529.0,
+          "min_ns": 19486,
+          "observations": 60,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 21142,
+          "median_ns": 311219.0,
+          "min_ns": 199619,
+          "observations": 60,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2507,
+          "median_ns": 38794.0,
+          "min_ns": 21535,
+          "observations": 60,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 20405,
+          "median_ns": 313783.5,
+          "min_ns": 209131,
+          "observations": 60,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23649,
+          "median_ns": 118971.0,
+          "min_ns": 64468,
+          "observations": 60,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "cubrim-web": {
+      "library": {
+        "bytes": 423904,
+        "path": "/tmp/dec-o3/release/libcubrim_web_decoder.so",
+        "sha256": "a98b12327c871e76aa38bd9e1e29f3e3fc940a7e52c62db6e097cc2bd895279a"
+      },
+      "mb_per_s_median": 213.20849608416384,
+      "mb_per_s_min": 321.3656104756952,
+      "samples": [
+        {
+          "compressed_bytes": 10361,
+          "median_ns": 406496.5,
+          "min_ns": 294535,
+          "observations": 60,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 14428,
+          "median_ns": 560222.5,
+          "min_ns": 375208,
+          "observations": 60,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 5563,
+          "median_ns": 194159.5,
+          "min_ns": 140407,
+          "observations": 60,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 9375,
+          "median_ns": 349846.0,
+          "min_ns": 216493,
+          "observations": 60,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3522,
+          "median_ns": 138958.5,
+          "min_ns": 94608,
+          "observations": 60,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2797,
+          "median_ns": 102339.5,
+          "min_ns": 74238,
+          "observations": 60,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 18590,
+          "median_ns": 808616.5,
+          "min_ns": 536339,
+          "observations": 60,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 9630,
+          "median_ns": 368783.5,
+          "min_ns": 235967,
+          "observations": 60,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1558,
+          "median_ns": 68653.5,
+          "min_ns": 41530,
+          "observations": 60,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 19058,
+          "median_ns": 666447.0,
+          "min_ns": 468672,
+          "observations": 60,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2407,
+          "median_ns": 89481.5,
+          "min_ns": 52902,
+          "observations": 60,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 20551,
+          "median_ns": 701123.0,
+          "min_ns": 450994,
+          "observations": 60,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23650,
+          "median_ns": 332866.5,
+          "min_ns": 194679,
+          "observations": 60,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "gzip-9": {
+      "library": null,
+      "mb_per_s_median": 414.80200176186247,
+      "mb_per_s_min": 584.992742324141,
+      "samples": [
+        {
+          "compressed_bytes": 11278,
+          "median_ns": 200632.5,
+          "min_ns": 142777,
+          "observations": 60,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 15804,
+          "median_ns": 381711.5,
+          "min_ns": 249673,
+          "observations": 60,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 5801,
+          "median_ns": 92706.0,
+          "min_ns": 61641,
+          "observations": 60,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 9896,
+          "median_ns": 164348.0,
+          "min_ns": 119866,
+          "observations": 60,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3705,
+          "median_ns": 50850.5,
+          "min_ns": 37513,
+          "observations": 60,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2895,
+          "median_ns": 41041.0,
+          "min_ns": 32313,
+          "observations": 60,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 21196,
+          "median_ns": 451603.0,
+          "min_ns": 319564,
+          "observations": 60,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 10516,
+          "median_ns": 219705.5,
+          "min_ns": 144394,
+          "observations": 60,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1674,
+          "median_ns": 27342.0,
+          "min_ns": 23329,
+          "observations": 60,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 20194,
+          "median_ns": 349125.0,
+          "min_ns": 246357,
+          "observations": 60,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2546,
+          "median_ns": 37735.5,
+          "min_ns": 29975,
+          "observations": 60,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 21483,
+          "median_ns": 313870.5,
+          "min_ns": 235139,
+          "observations": 60,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23688,
+          "median_ns": 130361.0,
+          "min_ns": 102508,
+          "observations": 60,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "zstd-19": {
+      "library": {
+        "bytes": 755864,
+        "path": "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5",
+        "sha256": "0a2128bc10841fb29e76d08d945864dfb0b6a66da5df6df5d8299197439e54bb"
+      },
+      "mb_per_s_median": 928.006479784989,
+      "mb_per_s_min": 1371.0569258560367,
+      "samples": [
+        {
+          "compressed_bytes": 10131,
+          "median_ns": 104056.5,
+          "min_ns": 64883,
+          "observations": 60,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 13543,
+          "median_ns": 162568.5,
+          "min_ns": 140666,
+          "observations": 60,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 5573,
+          "median_ns": 36559.5,
+          "min_ns": 23834,
+          "observations": 60,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 9293,
+          "median_ns": 87189.5,
+          "min_ns": 54008,
+          "observations": 60,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3525,
+          "median_ns": 34224.0,
+          "min_ns": 28489,
+          "observations": 60,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2802,
+          "median_ns": 24892.0,
+          "min_ns": 13879,
+          "observations": 60,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 16664,
+          "median_ns": 167520.0,
+          "min_ns": 100842,
+          "observations": 60,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 8980,
+          "median_ns": 89392.0,
+          "min_ns": 57367,
+          "observations": 60,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1599,
+          "median_ns": 17654.0,
+          "min_ns": 14701,
+          "observations": 60,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 18484,
+          "median_ns": 195007.0,
+          "min_ns": 136347,
+          "observations": 60,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2390,
+          "median_ns": 27352.5,
+          "min_ns": 14836,
+          "observations": 60,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 19810,
+          "median_ns": 146434.5,
+          "min_ns": 88498,
+          "observations": 60,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23678,
+          "median_ns": 7186.5,
+          "min_ns": 6215,
+          "observations": 60,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "zstd-3": {
+      "library": {
+        "bytes": 755864,
+        "path": "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5",
+        "sha256": "0a2128bc10841fb29e76d08d945864dfb0b6a66da5df6df5d8299197439e54bb"
+      },
+      "mb_per_s_median": 931.7932465958235,
+      "mb_per_s_min": 1472.766881388454,
+      "samples": [
+        {
+          "compressed_bytes": 11691,
+          "median_ns": 105218.5,
+          "min_ns": 87086,
+          "observations": 60,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 17066,
+          "median_ns": 167452.0,
+          "min_ns": 91796,
+          "observations": 60,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 6224,
+          "median_ns": 36170.0,
+          "min_ns": 31538,
+          "observations": 60,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 10975,
+          "median_ns": 76198.0,
+          "min_ns": 61936,
+          "observations": 60,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3982,
+          "median_ns": 34683.0,
+          "min_ns": 19849,
+          "observations": 60,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 3112,
+          "median_ns": 20075.0,
+          "min_ns": 14984,
+          "observations": 60,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 20235,
+          "median_ns": 166503.5,
+          "min_ns": 96367,
+          "observations": 60,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 11802,
+          "median_ns": 109313.0,
+          "min_ns": 80536,
+          "observations": 60,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1827,
+          "median_ns": 14958.5,
+          "min_ns": 10282,
+          "observations": 60,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 23955,
+          "median_ns": 211186.0,
+          "min_ns": 111182,
+          "observations": 60,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2770,
+          "median_ns": 26017.5,
+          "min_ns": 14888,
+          "observations": 60,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 22290,
+          "median_ns": 120987.0,
+          "min_ns": 68447,
+          "observations": 60,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23678,
+          "median_ns": 6804.0,
+          "min_ns": 4254,
+          "observations": 60,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    }
+  },
+  "corpus": {
+    "manifest_name": "manifest.v3.json",
+    "manifest_sha256": "43474bfc8fafe7cba96b4843a1700141c49b29f0cda5711861a11f654923f9d5",
+    "sample_count": 13
+  },
+  "gate": {
+    "bar": 0.5,
+    "criterion": "decode_throughput_vs_brotli5",
+    "passes": false,
+    "value_from_median": 0.4173026323758969,
+    "value_from_min": 0.4101736085314609
+  },
+  "method": "in-process decode; compress once, then N rounds over a seeded randomized cell order, warm-up plus R repeats per visit, output verified byte-exact on every timed iteration; per-cell minimum kept",
+  "repeats_per_visit": 20,
+  "rounds": 3,
+  "schema_version": 1,
+  "scope": "decode_throughput_in_process",
+  "seed": 74074,
+  "warmups_per_visit": 4
+}
