@@ -100,6 +100,26 @@ fabricated timings — because the point was to exercise the write path, not to
 publish a measurement. Nothing here is a benchmark result and none of it went
 anywhere near production.
 
+Both scratch databases were dropped afterwards and the writer role's scratch
+password cleared, so `cubr0074-gate1-pg18` is back to the state it is documented
+in: schema present, every table empty. To reproduce, from a `cubrim-api`
+checkout carrying the fix:
+
+```sh
+docker exec cubr0074-gate1-pg18 psql -U postgres \
+  -c 'CREATE DATABASE cubr0074_control TEMPLATE arcanada_cubrim'
+# control arm: hypothesis grants only -> writer refuses
+psql -d cubr0074_control -f migrations/20260727_web_benchmark_hypothesis.sql
+# treatment: the role migration alone flips it
+psql -d cubr0074_control -f migrations/20260812_web_benchmark_writer_role.sql
+```
+
+then run `scripts/web-benchmark-guarded-write.sh --dry-run` against each arm
+with `PGSERVICE` pointed at it. The role needs a login password set for the
+duration, and `pg_dump`/`pg_restore` must be the server's major version — the
+container's own `/usr/lib/postgresql/18/bin` binaries work with `libpq.so.5.18`
+on `LD_LIBRARY_PATH`.
+
 ## The harness is ready; only the host is not
 
 `run.py --phase-a --check --preflight` passes on corpus v3: all 13 payloads
