@@ -26,6 +26,24 @@ and reports the winning container mode per prefix. On `x-ray`:
 | 106,496 B | 17 `GEOCM` | 49,256 B | OK |
 | 131,072 B | 17 `GEOCM` | 60,459 B | OK |
 
+**This table is two invocations, not one**, and the distinction matters to anyone
+reproducing it. With no sizes given, `geocm_floor` walks powers of two — so the bare
+usage line above yields 32,768 / 65,536 / 131,072 and brackets the floor to one octave,
+never to 4 KiB. The intermediate rows come from a second run with explicit sizes, which
+is where the actual narrowing happened:
+
+<!-- gate:literal -->
+```
+cargo run --release --example geocm_floor -- <corpus>/silesia/x-ray
+cargo run --release --example geocm_floor -- <corpus>/silesia/x-ray \
+    65536 69632 73728 81920 106496
+```
+<!-- /gate:literal -->
+
+The tool sweeps a ladder; it does not bisect by itself. Both runs were re-executed
+from a clean tree when CUBR-0101 was closed and every overlapping cell reproduced to
+the byte — `31,046` at 65,536 and `32,315` at 69,632 among them.
+
 **The floor sits between 65,536 and 69,632 bytes** — immediately above the
 single-block cube ceiling, which `header.rs` documents as ≤ 65,536. GeoCM only becomes
 competitive once the input clears that ceiling and the chunked path engages. Below it,

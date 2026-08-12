@@ -8,13 +8,24 @@
 //! wins above some size — and the answer decides whether a committable fixture is
 //! plausible at all.
 //!
-//! This bisects prefixes of a real GeoCM winner. Give it a file whose full encoding
+//! This sweeps prefixes of a real GeoCM winner. Give it a file whose full encoding
 //! is known to be mode 17 (the NEW-24 campaign's control archives show `x-ray` and
 //! `mr` are) and it reports, per prefix size, which container mode wins. The
 //! smallest prefix that still yields 17 is the floor being looked for.
 //!
+//! It does *not* bisect on its own: with no sizes given it walks powers of two from
+//! 32 KiB up, plus the whole file, so the tightest floor it can report by itself is
+//! "somewhere in the octave below the first winner". Narrowing that is a second
+//! invocation with explicit sizes — the bisection is the caller's, not the tool's.
+//!
 //! ```text
+//! # coarse ladder: brackets the floor to one octave
 //! cargo run --release --example geocm_floor -- /path/to/x-ray
+//!
+//! # refinement inside that octave; this is the run that produced the
+//! # 65,536 -> CM2 / 69,632 -> GEOCM pair quoted in CUBR-0101's record
+//! cargo run --release --example geocm_floor -- /path/to/x-ray \
+//!     65536 69632 73728 81920 106496
 //! ```
 //!
 //! Prefixes are used rather than downscaled images on purpose: a prefix of a real
