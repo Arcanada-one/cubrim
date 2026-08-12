@@ -328,3 +328,61 @@ the rule fails on the strength of three tiny canterbury files, the honest outcom
 weighting flaw filed as a lesson for the next prereg — not a redefinition of
 lead-survival invented once the answer was inconvenient. The whole value of
 pre-committing is that it binds in the direction you did not want.
+
+## First void: `enwik8/full` was OOM-killed, and the F12 arm is surviving the same cap
+
+`{"cell":"enwik8/full","event":"void","reason":"encode rc=137"}` at 03:05:45Z. `137`
+is `128+9` — SIGKILL. The kernel names the cause exactly:
+
+<!-- gate:literal -->
+```
+oom-kill:constraint=CONSTRAINT_MEMCG ... task=cubrim-main,pid=1579630
+Memory cgroup out of memory: Killed process 1579630 (cubrim-main)
+total-vm:20717112kB, anon-rss:14639908kB
+```
+<!-- /gate:literal -->
+
+`anon-rss` at kill is **14,639,908 KiB = 13.96 GB** — the runner's `MemoryMax=14G`
+encode cap, to three significant figures. This is a cgroup kill, not host exhaustion:
+`dev-ai` has 125 GB with 104 GB available at the time.
+
+**It was predicted before it happened, from the process itself.** Sampling the
+encode's RSS gave 9.90 → 10.27 GB over 90 seconds with roughly 2,500 s of encode
+remaining; extrapolating the observed 0.004 GB/s reached the cap well before
+completion. That is recorded because it makes the next point measurable rather than
+anecdotal: at enwik8 scale the `max` working set does not plateau where it does on
+the 6–51 MB files, all of which peaked between 4.46 and 9.93 GB.
+
+**The F12 arm is passing the same cap with an order of magnitude to spare.**
+`enwik8/f12` encode at t=112 s sits at **1.79 GB** and is growing ~0.001 GB/s. On the
+6–51 MB files F12 cut the decode working set to ~45%; here, at encode, the ratio is
+far larger than that.
+
+**What this licenses, and what it does not.** It licenses one precisely-scoped
+statement: *under this campaign's declared 14 GB cap, `max` cannot encode `enwik8`
+and F12 can.* It does **not** license "F12 makes enwik8 possible" as a product claim
+— the cap is a campaign control, not a product limit, and the host had 104 GB free.
+A real memory-ceiling claim needs a run designed to find the true `max` requirement,
+which this campaign is not.
+
+### Consequences for the adjudication, stated before the remaining cells land
+
+- **C-3 and C-4 get nothing from `enwik8`.** Both are ratios against a control that
+  does not exist on this host. Void, and not recoverable within this campaign.
+- **C-2 is arguable but treated strictly.** The control's *byte count* is knowable
+  from meta-36 (ratio `0.19553` on 100,000,000 bytes), which is the very figure the
+  canonical identity gate exists to check against — so a density delta could be
+  computed against it. That would be a **documented deviation**, and the stop rules
+  say a failed cell is "reported failed, never substituted". **The strict reading
+  governs: `enwik8` is unmeasured.** The deviation is recorded as available, not
+  taken.
+- **The bar tightens, and lands exactly where the pre-registration warned.** 18 of 22
+  led files must survive; 10 do; `enwik8` can no longer be one of them. **At most 3
+  of the remaining 11 may now fail** — and the three thinnest-margin files in the
+  corpus are `grammar.lsp` (0.1%), `sum` (1.6%) and `cp.html` (1.8%), all still
+  pending. The headroom table was committed while 12 files were outstanding precisely
+  so this could not be argued about afterwards; it is now the difference between a
+  rule that passes and one that fails.
+
+The campaign is otherwise unaffected: the void is confined to one cell, the runner
+continued straight into `enwik8/f12`, and no other cell's gates are touched.
