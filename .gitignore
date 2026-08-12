@@ -12,6 +12,10 @@ Cargo.lock
 # ...except the shipped CLI's lock: builds must resolve one graph, not re-resolve
 # live crates.io on every job (the negation must follow the Cargo.lock line).
 !code/cubrim-rs/Cargo.lock
+# ...and the web-profile CLI's, for a sharper reason: the benchmark harness
+# attributes a measurement to a binary by sha256, so a build whose dependency
+# graph can drift under it cannot carry provenance.
+!code/cubrim-web-cli/Cargo.lock
 
 # Python prototyping
 __pycache__/
