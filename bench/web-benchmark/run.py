@@ -15,8 +15,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from adapters import CodecAdapter, SubprocessExecutor, ToolIdentity, phase_a_adapters
-from capabilities import PHASE_A_CODECS, energy_capability
+from adapters import (
+    CodecAdapter,
+    SubprocessExecutor,
+    ToolIdentity,
+    candidate_adapters,
+    phase_a_adapters,
+)
+from capabilities import PHASE_A_CODECS, energy_capability, validate_codec_attribution
 from model import (
     CODE_SHA_RE,
     BenchmarkSample,
@@ -99,8 +105,12 @@ class PhaseARunner:
         self.executor = executor
         self.manifest_path = manifest_path
         self._samples: tuple[BenchmarkSample, ...] = ()
-        self._identities: dict[str, tuple[ToolIdentity, dict[str, bool]]] = {}
+        self._identities: dict[str, tuple[ToolIdentity, dict[str, object]]] = {}
         self._run_timing: dict[str, str] | None = None
+        # The adapters a run actually executed. The bundle describes itself
+        # from this rather than from PHASE_A_CODECS, so a candidate run
+        # cannot be emitted wearing the published Phase A label.
+        self._adapters: tuple[CodecAdapter, ...] = ()
 
     @classmethod
     def for_bundle_only(
@@ -246,10 +256,19 @@ class PhaseARunner:
             if self.manifest_path is not None
             else 1
         )
+        ran = tuple(a.name for a in self._adapters) or PHASE_A_CODECS
+        # Phase A is the published five-codec comparison and nothing else. Any
+        # other adapter set is a candidate run and must say so: a bundle that
+        # claimed "A" while containing our own codec would be indistinguishable
+        # from the real thing downstream.
+        is_phase_a = ran == PHASE_A_CODECS
+        incremental = any(
+            bool(a.capabilities.get("incremental_decode")) for a in self._adapters
+        )
         return {
             "schema_version": 1,
             "scope": "resource_codec",
-            "phase": "A",
+            "phase": "A" if is_phase_a else "B",
             "run_timing": self._run_timing,
             "corpus": {
                 "manifest_name": (
@@ -269,7 +288,7 @@ class PhaseARunner:
                 )
             ],
             "protocol": {
-                "codecs": list(PHASE_A_CODECS),
+                "codecs": list(ran),
                 "warmups": self.config.warmups,
                 "trials_per_cell": self.config.trials,
                 "randomized_order_seed": self.config.random_seed,
@@ -286,8 +305,12 @@ class PhaseARunner:
             "environment": self.environment,
             "applicability": {
                 "time_to_first_decoded_byte": {
-                    "available": False,
-                    "reason": "phase_a_codecs_do_not_offer_incremental_decode",
+                    "available": incremental,
+                    "reason": (
+                        "an_incremental_decoder_is_present"
+                        if incremental
+                        else "phase_a_codecs_do_not_offer_incremental_decode"
+                    ),
                 },
                 "energy": {
                     "available": False,
@@ -314,9 +337,15 @@ class PhaseARunner:
             raise RuntimeError("host admission rejected the benchmark run")
         self.output_root.mkdir(parents=True, exist_ok=True)
         self._samples = samples
+        self._adapters = tuple(adapters)
         self._identities = {}
         for adapter in adapters:
             try:
+                # The attribution gate existed, was tested, and was invoked by
+                # nothing: a Cubrim-Web row could have been produced by an
+                # adapter with no Web Profile capability and the gate would
+                # never have run. It guards the run from here.
+                validate_codec_attribution(adapter.name, adapter.capabilities)
                 self._identities[adapter.name] = (
                     adapter.identity(),
                     dict(adapter.capabilities),
@@ -601,12 +630,21 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v2.json",
+        default=Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v3.json",
     )
     parser.add_argument("--out", type=Path, default=Path(__file__).parent / "out")
     parser.add_argument("--journal", type=Path, default=Path(__file__).parent / "journal")
     parser.add_argument("--trials", type=int, default=30)
     parser.add_argument("--warmups", type=int, default=3)
+    parser.add_argument(
+        "--candidate",
+        action="store_true",
+        help=(
+            "measure the candidate channel alongside the five incumbents in one "
+            "randomized schedule, and write candidate.json. The published "
+            "phase-a.json is never written by this path."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -629,9 +667,18 @@ def main() -> int:
         executor=SubprocessExecutor(config.timeout_seconds, config.max_output_bytes),
         manifest_path=args.manifest,
     )
-    bundle = runner.execute(samples, phase_a_adapters())
+    # A candidate is compared within a single run, not against numbers measured
+    # on another day: the incumbents are re-measured in the same randomized
+    # schedule so both sides see the same host. Those incumbent numbers land in
+    # candidate.json and never overwrite the published Phase A bundle.
+    adapters_to_run = (
+        phase_a_adapters() + candidate_adapters()
+        if args.candidate
+        else phase_a_adapters()
+    )
+    bundle = runner.execute(samples, adapters_to_run)
     args.out.mkdir(parents=True, exist_ok=True)
-    output_path = args.out / "phase-a.json"
+    output_path = args.out / ("candidate.json" if args.candidate else "phase-a.json")
     atomic_write_json(output_path, bundle)
     print(json.dumps({"bundle": str(output_path), "trials": len(bundle["resource_results"])}))
     return 0

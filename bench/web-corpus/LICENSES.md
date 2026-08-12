@@ -171,3 +171,30 @@ WebAssembly waits on CUBR-0077; SVG waits on an operator sourcing decision,
 because our own production SVGs are ~300-byte inline icons and the third-party
 SVGs available locally are vendor logos that carry trademark considerations a
 shipped corpus should not take on.
+
+## Web corpus v3 (`cubr0074-web-real-v3`)
+
+Corpus v3 is corpus v2 plus one sample, and closes the WebAssembly gap that v2
+recorded. Every v2 payload is carried over byte-for-byte and keeps its licence
+and attribution; `manifest.v2.json` is left untouched so that measurements
+already cited against its hash keep their exact referent.
+
+| Source | Licence | Samples |
+|---|---|---|
+| `code/cubrim-web-decoder` built for `wasm32-unknown-unknown` — the module the CUBR-0077 browser demo loads | proprietary, redistributable by the copyright holder | WASM ×1 |
+
+The v2 gap entry said WebAssembly waited on CUBR-0077 because "Cubrim itself
+does not yet build for wasm32-unknown-unknown (getrandom requires a JS
+feature)". That was true of the whole `cubrim` crate and never of a decoder:
+`ureq`, `dirs`, `rpassword`, `walkdir` and `rand` are CLI and archive
+dependencies that a decoder does not use. `cubrim-web-decoder` builds for
+wasm32 today and CI builds it on every change, so the sample is our own real
+artefact rather than a generated fixture — which is what the corpus policy
+requires.
+
+The payload is a pinned snapshot identified by its SHA-256, not a live build.
+Rebuilding the decoder does not change the corpus; adding a newer module would
+be a new sample with a new digest.
+
+**SVG remains an open gap** and is still recorded as one in `manifest.v3.json`.
+It waits on a sourcing decision, not on a dissolved technical claim.
