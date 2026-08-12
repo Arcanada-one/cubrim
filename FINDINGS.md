@@ -877,6 +877,13 @@ and will report nothing rather than something wrong. Consequence: the derived
 claim that the 2.27–3.30× translates into an end-to-end corpus speedup is
 **unmeasured**, and `--preset balanced` therefore carries slice numbers only.
 
+**Amendment (2026-08-12) — this void is now closed; see F22.** The Phase C
+same-host campaign measured encode and decode wall for all 24 corpus files at
+each preset (metas 36/37/38). The end-to-end corpus speedup is no longer derived
+from the 2.27–3.30× variant multipliers, and `--preset balanced` no longer
+carries slice numbers. What the corpus shows is *not* a single speedup: it is
+three bands, and the aggregate describes none of them.
+
 **Status wording corrected (2026-07-31).** An earlier revision called the presets
 "shipped". That was wrong twice over, and both ways are worth recording because
 they are different failure modes:
@@ -1066,9 +1073,16 @@ repeatedly and was still wrong by 3–5× once the corpus spoke.
 | cubrim `balanced` | 0.189891 | yes, by 16.9% |
 | cubrim `web` | 0.206627 | **yes, by 9.6%** |
 
-So the 13.5× decoder-memory cut does **not** cost the lead — it narrows it from
+So the 56.7× decoder-memory cut does **not** cost the lead — it narrows it from
 17.3% to 9.6%. That is the honest headline for the web profile, and it is a
 corpus number, not a slice.
+
+**Corrected 2026-08-12.** This sentence originally read *13.5×* — the 2 MB slice
+figure — inside the very finding whose thesis is that slice figures mislead. The
+corpus number is **56.7×** (12,561.0 MiB → 221.5 MiB peak decode RSS, metas
+36/38). The published *56.8×* was itself a rounding artefact of truncating
+221.5 MiB to 221; `12862464 / 226816 KiB = 56.709`. Fixed in the same pass in
+`cli.rs`, `config.rs` and `PRESETS.md`.
 
 One caution for whoever publishes it: `web` at 0.206627 sits close to the
 consilium's refusal threshold of ~0.21. That threshold was set for `--max` and
@@ -1222,6 +1236,103 @@ by **15.3×** rather than the cross-meta 1.09×. But **every "ninth place" / "ei
 F21 must be read as "against the cross-meta leaderboard"**, never as a same-host claim. Stated
 same-host, a perfected geocm rail at the 28.1 MiB/s floor ranks **5th of the 8 tools measured on
 x-ray** — behind lz4/zstd/gzip/brotli, ahead of xz/bzip2/current cubrim.
+
+## F22 — the end-to-end corpus speedup is measured, and `balanced` is FREE on the largest file in the corpus
+
+F16 recorded the end-to-end corpus speedup as **unmeasured**. The Phase C
+same-host campaign supplied it. Provenance: `world_benchmark_timing_file` and
+`world_benchmark_cell`, metas 36 (`max`) / 37 (`balanced`) / 38
+(`lowmem-decode`), `code_sha` `3a13f48`, 24 files x 3 samples per cell, `cmp`
+round-trip clean on all 24 in every cell, unpinned quiet host. Mean per-file
+sample spread (stddev/mean) 0.64% / 0.95% / 0.65% — small enough that the
+structure below is signal, not noise.
+
+**Ratio cost and speed gain are independent axes.** Reading them as one number
+is what produced every wrong statement about this preset, mine included.
+
+| file | bytes | encode speedup | output vs `max` |
+|---|---|---|---|
+| cp.html* | 24,603 | 3.08x | +0.426% |
+| reymont | 6,627,202 | 3.01x | +0.167% |
+| xml | 5,345,280 | 2.99x | +0.353% |
+| plrabn12.txt | 481,861 | 2.83x | +1.892% |
+| lcet10.txt | 426,754 | 2.81x | +1.249% |
+| webster | 41,458,703 | 2.81x | +1.697% |
+| dickens | 10,192,446 | 2.77x | +2.076% |
+| fields.c* | 11,150 | 2.63x | +0.545% |
+| alice29.txt | 152,089 | 2.54x | +1.019% |
+| osdb | 10,085,684 | 2.50x | +3.908% |
+| **enwik8** | **100,000,000** | **2.48x** | **byte-identical** |
+| xargs.1* | 4,227 | 2.38x | +0.062% |
+| asyoulik.txt | 125,179 | 2.20x | +0.623% |
+| **sao** | **7,251,944** | **1.56x** | **byte-identical** |
+| nci | 33,553,445 | 1.48x | +2.805% |
+| kennedy.xls | 1,029,744 | 1.20x | +1.407% |
+| ptt5 | 513,216 | 1.01x | byte-identical |
+| sum* | 38,240 | 1.01x | byte-identical |
+| x-ray | 8,474,240 | 1.00x | byte-identical |
+| mozilla | 51,220,480 | 1.00x | byte-identical |
+| mr | 9,970,564 | 1.00x | byte-identical |
+| ooffice | 6,152,192 | 1.00x | byte-identical |
+| samba | 21,606,400 | 0.99x | byte-identical |
+| grammar.lsp* | 3,721 | 0.98x | byte-identical |
+
+`*` = under 64 KiB, where per-byte cost is dominated by fixed overhead; reported
+as measured, excluded from class statements. "byte-identical" = `archive_sha256`
+equal between metas 36 and 37, so the ratio cost is exactly zero, not merely
+small.
+
+### The finding: on 10 of 24 files `balanced` costs nothing at all
+
+`balanced` produces a **byte-identical archive** to `max` on 10 files, and on two
+of those it is still dramatically faster:
+
+- **`enwik8` — 2.48x faster encode, identical output.** This is the largest file
+  in the corpus (100 MB). There is no trade here to weigh: `balanced` strictly
+  dominates `max` on it. Nobody had reported this, because the corpus cost
+  (+0.47%) and the corpus speedup were only ever quoted as single aggregates,
+  and an aggregate cannot express "free on the biggest file".
+- **`sao` — 1.56x faster, identical output.** Same structure.
+
+The other eight byte-identical files (mozilla, ooffice, x-ray, mr, samba, ptt5,
+sum*, grammar.lsp*) sit at 0.98-1.01x: `balanced` is simply a **no-op** there.
+This is F14's prediction, made from one 2 MB exe slice before the corpus ran,
+confirmed at corpus scale — a type transform wins, the CM2 column sweep never
+fires, so there is neither cost nor gain.
+
+### Where the +0.47% actually comes from
+
+All of it comes from the **14 files whose output differs**. They pay +0.062% to
++3.908% and receive 1.20-3.08x in return; the dearest are `osdb` (+3.908% for
+2.50x) and `nci` (+2.805% for 1.48x). The 10 identical files contribute exactly
+zero to the corpus cost. A per-file decision therefore beats the preset: the
+files that pay are identifiable, and two of the files that gain pay nothing.
+
+### The corpus aggregate is 1.65x and it is the wrong number to quote
+
+Summed compress wall is 13,076 s (`max`) against 7,934 s (`balanced`). No file
+sits at 1.65x. Only two gate-passing files come within 0.3x of it (`sao` 1.56x,
+`nci` 1.48x); the other 17 do not. The mean describes none of them, which is why
+`--preset` help quotes per-file figures and names the files.
+
+### `balanced` is an encode-side lever only
+
+Summed decompress wall is 3,464 s (`max`) against 3,426 s (`balanced`) — 1.01x,
+i.e. unchanged. Any claim that `balanced` speeds up decoding is unsupported.
+`lowmem-decode` is the preset that moves decode: 2,546 s, **1.36x** faster than
+`max`, alongside its 56.7x peak decode RSS cut.
+
+### Defects this found in my own `--preset` help, fixed in the same pass
+
+- The high band was quoted as *2.5-3.0x* while listing `enwik8 2.48x` as one of
+  its own examples — a band that excluded its own member.
+- The 1.20-1.56x middle band was omitted entirely.
+- *code* was grouped with the no-change class, which the corpus supports in
+  neither direction: `fields.c` speeds up 2.63x (but is 11 KB, below the gate)
+  while `samba` does not move (0.99x). The axis is **which scheme wins**, not the
+  nominal data class.
+- Worst of the four: byte-identity was implied to coincide with no-speedup, so
+  the strictly-dominant `enwik8` case was invisible in the help.
 
 ## Status of the pre-registered measurements
 

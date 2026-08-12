@@ -177,25 +177,40 @@ pub enum PresetArg {
     /// 0.189007 on the full 24-file world corpus.
     Max,
     /// Faster encode for a small ratio cost: +0.47% output on the full 24-file
-    /// world corpus.
+    /// world corpus. On 10 of those 24 files it emits BYTE-IDENTICAL bytes to
+    /// `max`, so it costs nothing there — and is still 2.48x faster on enwik8
+    /// and 1.56x on sao.
     ///
-    /// The speedup is concentrated by data class, not spread across the corpus,
-    /// so it is quoted by class rather than as an average — a mean would
-    /// describe none of these files. Measured per file, max vs balanced:
-    /// 2.5-3.0x on text/xml/database (xml 2.99x, webster 2.81x, dickens 2.77x,
-    /// osdb 2.50x, enwik8 2.48x) and NO CHANGE on executables, images and code
-    /// (mozilla, ooffice, x-ray, mr 1.00x, samba 0.99x), where the dropped CM2
-    /// column-variant passes never run and the output is byte-identical.
-    /// Corpus-wide encode throughput 0.0230 -> 0.0378 MiB/s.
+    /// Cost and speed are independent, so both are quoted per file — a mean
+    /// would describe none of these files. Corpus-wide encode throughput
+    /// 0.0230 -> 0.0378 MiB/s.
+    ///
+    /// On 10 of the 24 corpus files the archive is BYTE-IDENTICAL to `max`, so
+    /// the ratio cost there is exactly zero — and on two of them the encode is
+    /// still much faster: enwik8 2.48x and sao 1.56x. On those two `balanced`
+    /// strictly dominates `max`: same bytes, less time. The other eight
+    /// byte-identical files are unaffected (0.98-1.01x: mozilla, ooffice,
+    /// x-ray, mr, samba, ptt5), where a type transform wins and the dropped
+    /// CM2 column-variant passes never run.
+    ///
+    /// On the remaining 14 files the output does differ, buying 1.20-3.08x for
+    /// +0.06% to +3.91%: xml 2.99x/+0.35%, webster 2.81x/+1.70%, dickens
+    /// 2.77x/+2.08%, osdb 2.50x/+3.91%, nci 1.48x/+2.81%. The entire +0.47%
+    /// corpus cost comes from these 14; the other 10 contribute zero.
+    ///
+    /// Decode is unchanged (1.01x corpus-wide) — this is an encode-side lever.
+    /// Per-file figures are from files >= 64 KiB; smaller corpus members are
+    /// dominated by fixed overhead and carry no class claim.
     ///
     /// Archives stay readable by every decoder.
     Balanced,
-    /// Bounded decoder memory, for wasm32 and other hard-ceiling environments.
+    /// Bounded decoder memory, for wasm32 and other hard-ceiling environments:
+    /// corpus peak decode RSS 12,561 -> 221.5 MiB, a 56.7x cut, for +9.32%
+    /// output. Also decodes 1.36x faster than `max`.
     ///
-    /// On the full 24-file world corpus, peak decode RSS falls from 12,561 MiB
-    /// to 221 MiB — a 56.8x cut, and the figure that decides whether a browser
-    /// decoder is possible at all, since wasm32 caps the address space at 4 GiB.
-    /// Peak encode RSS falls 18,603 -> 7,007 MiB. Costs +9.32% output
+    /// 221.5 MiB is the figure that decides whether a browser decoder is
+    /// possible at all, since wasm32 caps the address space at 4 GiB.
+    /// Peak encode RSS falls 18,603 -> 7,008 MiB. Costs +9.32% output
     /// (0.206627 against max 0.189007), still ahead of ppmd 0.228592.
     ///
     /// NOTE: a decoder that predates the table-exponent field CANNOT read these

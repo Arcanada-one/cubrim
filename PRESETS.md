@@ -163,7 +163,7 @@ two independent ways, so the ladder is now explicit:
 |---|---|---|---|---|
 | implemented | ✅ | ✅ | ✅ | ❌ |
 | measured (ratio + RSS, full corpus) | ✅ meta 36 — reproduces the meta-35 headline bit-exactly | ✅ meta 37 | ✅ meta 38 | ❌ |
-| measured (speed, full corpus) | in progress (timing pass on dev-ai) | in progress | in progress | ❌ |
+| measured (speed, full corpus) | ✅ meta 36 | ✅ meta 37 | ✅ meta 38 | ❌ |
 | **reachable from the CLI** (`compress` **and** `a`) | ✅ | ✅ | ✅ | — |
 | merged to `main` | ✅ PR #13, 2026-07-31 | ✅ | ✅ | — |
 | in a released binary | ❌ | ❌ | ❌ | — |
@@ -196,6 +196,38 @@ every run**:
 
 (ppmd 0.228592, xz 0.234411 on the same corpus.)
 
+## Corpus speed (2026-08-12) — and why `balanced` is free on `enwik8`
+
+Same campaign, metas 36/37/38, `code_sha` `3a13f48`, 24 files x 3 samples,
+`cmp` round-trip clean throughout. Full per-file table and derivation: FINDINGS
+**F22**.
+
+| preset | total encode | total decode | peak decode RSS |
+|---|---|---|---|
+| `max` | 13,076 s | 3,464 s | 12,561.0 MiB |
+| `balanced` | 7,934 s | 3,426 s (1.01x) | 12,368.5 MiB |
+| `lowmem-decode` | 7,481 s | 2,546 s (**1.36x**) | **221.5 MiB** |
+
+**Ratio cost and speed gain are independent, and the aggregate hides it.** On
+**10 of the 24 files `balanced` emits a byte-identical archive** — zero ratio
+cost, proven by equal `archive_sha256`, not merely a small delta. Two of those
+ten are still much faster:
+
+- **`enwik8`: 2.48x faster encode, identical bytes.** The largest file in the
+  corpus. There is no trade to weigh — `balanced` strictly dominates `max` here.
+- **`sao`: 1.56x faster, identical bytes.**
+
+The other eight identical files (mozilla, ooffice, x-ray, mr, samba, ptt5, and
+two sub-64 KiB members) sit at 0.98-1.01x: `balanced` is a no-op there.
+
+**The whole +0.47% comes from the 14 files whose output differs**, which pay
++0.062% to +3.908% for 1.20-3.08x. The dearest are `osdb` (+3.908% for 2.50x)
+and `nci` (+2.805% for 1.48x).
+
+Do not quote the 1.65x corpus-aggregate encode speedup as a product figure: no
+file sits at it, and only `sao` and `nci` come within 0.3x. `balanced` does not
+speed up decoding (1.01x) — it is an encode-side lever.
+
 `max` reproduces `meta_id=35`'s `0.18900658684095069371` to six decimals on a
 different host — the strongest available evidence the harness is sound.
 
@@ -207,7 +239,7 @@ no-op wherever CM2 does not win, and most of the corpus is in that position.
 derives 27 and the same cap costs **seven**. The slice structurally could not show
 the real price.
 
-**The headline this licenses:** the corpus-measured **56.8×** decoder-memory cut
+**The headline this licenses:** the corpus-measured **56.7×** decoder-memory cut
 (12.27 GiB → 0.216 GiB, `world_benchmark_cell` metas 36/38) does not cost the
 ratio lead, it narrows it from 17.3% to 9.6%. Publish it that way — as a corpus
 number, per operating point, never as a single "Cubrim is X" figure.
