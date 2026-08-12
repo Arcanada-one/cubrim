@@ -36,7 +36,16 @@ from model import (
 )
 
 
-SAFE_JOURNAL_FIELDS = ("sample_id", "codec_key", "trial_no", "randomized_order")
+SAFE_JOURNAL_FIELDS = (
+    "sample_id",
+    "codec_key",
+    "trial_no",
+    "randomized_order",
+    # Load is carried in milli-units because the journal admits ints and str
+    # only; a float would be silently dropped and the record would say a run
+    # was refused without saying how loaded the host was.
+    "load_per_cpu_milli",
+)
 SAFE_REASON_RE = re.compile(r"^[a-z0-9_]+$")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_SAMPLE_FIELDS = {
@@ -82,6 +91,11 @@ class RedactedJournal:
 
 
 class PhaseARunner:
+    # One sample every 25 trials: ~78 reads across a 1950-trial Phase A run,
+    # frequent enough that a load ramp is caught within seconds of the
+    # 1-minute average reflecting it.
+    ADMISSION_RECHECK_EVERY = 25
+
     def __init__(
         self,
         *,
@@ -325,6 +339,37 @@ class PhaseARunner:
             },
         }
 
+
+    def _reassert_admission(self, order: int) -> None:
+        """Refuse to keep measuring on a host that stopped being quiet.
+
+        Sampled rather than measured every trial: reading /proc/loadavg 1950
+        times would itself be work, and the 1-minute average cannot move
+        meaningfully between neighbouring trials anyway.
+        """
+        if order % self.ADMISSION_RECHECK_EVERY != 1:
+            return
+        load_per_cpu = _current_load_per_cpu()
+        if load_per_cpu is None:
+            return
+        if (
+            self.observed_max_load_per_cpu is None
+            or load_per_cpu > self.observed_max_load_per_cpu
+        ):
+            self.observed_max_load_per_cpu = load_per_cpu
+        if self._load_ceiling is not None and load_per_cpu > self._load_ceiling:
+            self.journal.write(
+                "failed_admission_midrun",
+                {
+                    "randomized_order": order,
+                    "load_per_cpu_milli": int(round(load_per_cpu * 1000)),
+                },
+            )
+            raise RuntimeError(
+                "host admission lapsed during the run; timings after this point "
+                "would not be comparable to the ones before it"
+            )
+
     def execute(
         self,
         samples: tuple[BenchmarkSample, ...],
@@ -335,6 +380,12 @@ class PhaseARunner:
         if not isinstance(admission, dict) or admission.get("accepted") is not True:
             self.journal.write("failed_admission", {})
             raise RuntimeError("host admission rejected the benchmark run")
+        ceiling = admission.get("max_load_per_cpu")
+        self._load_ceiling = ceiling if isinstance(ceiling, (int, float)) else None
+        start_load = admission.get("load_per_cpu")
+        self.observed_max_load_per_cpu = (
+            start_load if isinstance(start_load, (int, float)) else None
+        )
         self.output_root.mkdir(parents=True, exist_ok=True)
         self._samples = samples
         self._adapters = tuple(adapters)
@@ -376,19 +427,23 @@ class PhaseARunner:
             for adapter in adapters
         ]
         random.Random(self.config.random_seed).shuffle(schedule)
-        results = [
-            trial
-            for order, (sample, adapter, trial_no) in enumerate(schedule, start=1)
-            if (
-                trial := self.try_trial(
-                    sample,
-                    adapter,
-                    trial_no=trial_no,
-                    randomized_order=order,
-                )
+        results = []
+        for order, (sample, adapter, trial_no) in enumerate(schedule, start=1):
+            # Admission is a property of the whole measurement window, not of
+            # its first instant. Checking it once and trusting it for the rest
+            # of the run lets a host that was quiet at the start contaminate
+            # every timing taken after it stopped being quiet, and the bundle
+            # would still carry `accepted: true` beside the load figure from
+            # before the ramp.
+            self._reassert_admission(order)
+            trial = self.try_trial(
+                sample,
+                adapter,
+                trial_no=trial_no,
+                randomized_order=order,
             )
-            is not None
-        ]
+            if trial is not None:
+                results.append(trial)
         _require_complete_cells(results, samples, adapters, self.config.trials)
         self._run_timing["completed_at"] = utc_now()
         from summarize import finalize_bundle
@@ -437,6 +492,14 @@ def load_samples(manifest_path: Path) -> tuple[BenchmarkSample, ...]:
     if len(set(ids)) != len(ids) or len(set(paths)) != len(paths):
         raise ValueError("manifest contains duplicate sample IDs or paths")
     return samples
+
+
+def _current_load_per_cpu() -> float | None:
+    affinity = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else []
+    load_1m = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
+    if load_1m is None or not affinity:
+        return None
+    return load_1m / len(affinity)
 
 
 def capture_environment(code_sha: str) -> dict[str, object]:
@@ -680,7 +743,21 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     output_path = args.out / ("candidate.json" if args.candidate else "phase-a.json")
     atomic_write_json(output_path, bundle)
-    print(json.dumps({"bundle": str(output_path), "trials": len(bundle["resource_results"])}))
+    observed = runner.observed_max_load_per_cpu
+    print(
+        json.dumps(
+            {
+                "bundle": str(output_path),
+                "trials": len(bundle["resource_results"]),
+                # Reported beside the run, not folded into the bundle: the
+                # bundle records the host as admitted, and the reader deserves
+                # to know how far the host moved while it was being measured.
+                "max_load_per_cpu_observed": (
+                    round(observed, 3) if observed is not None else None
+                ),
+            }
+        )
+    )
     return 0
 
 
