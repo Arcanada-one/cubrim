@@ -1,7 +1,8 @@
 # The operating-point speed contract was merged but never applied
 
-Date: 2026-08-12. Task: CUBR-0087 (Phase C). Scope: one production DDL apply, no
-measurement, no DB row written.
+Date: 2026-08-12. Task: CUBR-0087 (Phase C). Scope: one production DDL apply plus
+one additive prose addendum on four rows. No measurement was created and no
+verdict prose was edited.
 
 ## The gap
 
@@ -107,6 +108,39 @@ comparison, because the reference view has no outcome field to read.
 - `cubrim.com/en/evolution/benchmark` 200, `/en/download` 200, `/` 302 (language
   redirect, expected).
 
-No DB row was written, no measurement was created, and no prose verdict was
-edited. The only change is that measurements taken on 2026-07-31 and imported on
-2026-08-04 are now visible where they were already supposed to be.
+No DB row was written by the migration, no measurement was created, and no
+verdict prose was edited. The only change is that measurements taken on
+2026-07-31 and imported on 2026-08-04 are now visible where they were already
+supposed to be. (A separate, additive prose addendum did touch four rows — see
+the follow-up below.)
+
+## Follow-up: the campaign prose contradicted the data beside it
+
+Applying the contract created a second-order problem. `/api/operating-points`
+renders `world_benchmark_meta.method`, and that prose still read *"Size and
+round-trip only; NO timings were taken, because a sibling session shared the host
+and a timing on a contended host is not a measurement."* — now sitting in the
+same JSON response as three measured throughput figures.
+
+The sentence was **true of what it described**: the size-and-round-trip campaign
+published 2026-07-31 11:03 UTC. It was the *scope* that had gone unstated once a
+separate timing pass landed. Deleting or rewriting it would have destroyed a
+correct historical record and an honest refusal.
+
+So the claim was **preserved and an addendum appended** — a labelling decision
+with a recorded rationale, never a new measurement — naming the separate pass,
+its three run ids, its protocol (24 files, 3 samples + 1 warmup, `cmp` clean per
+cell), its 2026-08-04 import, and the fact that this campaign record itself still
+carries no timing. Applied to `world_benchmark_meta` rows 36/37/38 (3 rows) and
+`world_benchmark_campaign` `phaseC-devai-20260730` (1 row).
+
+The update was idempotent (guarded on the marker string) and ran with two
+assertions inside the same transaction: that `btrim(method) <> ''` still holds —
+the speed-contract base view filters on it, so emptying `method` would have
+silently un-published all three operating points — and that
+`..._cubrim_speed_measurement` still returns exactly 3 `overall` rows afterwards.
+Both passed.
+
+Live check after: the original sentence and the addendum are both present,
+`speed_contract_status` is still `available`, and all three points still report
+`measured`.
