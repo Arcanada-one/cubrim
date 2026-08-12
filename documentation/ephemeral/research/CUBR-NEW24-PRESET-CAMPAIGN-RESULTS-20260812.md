@@ -276,3 +276,55 @@ the script that will generate every future update was not. It now loads classes 
 file it mis-classified might not be so forgiving. A hand-typed table beside a
 machine-readable one drifts from it; that is what happened here, and the fix is to
 delete the table rather than correct it.
+
+## Pre-registered before the remaining data lands: which files can still flip the rule
+
+Written now, with 10 of 22 led files measured and 12 outstanding, so that nothing
+below can be mistaken for reasoning constructed after the answer arrived.
+
+**The arithmetic of the bar.** 80% of 22 led files is 17.6, so **18 survivals are
+required**. Ten already survive. **At most 4 of the 12 pending files may fail.**
+
+**Headroom per pending file** — how much density increase each can absorb before its
+lead is gone, computed from meta-36 as `runner_up / cubrim − 1`:
+
+| file | class | size | cubrim | runner-up | headroom |
+|---|---|---:|---:|---|---:|
+| `grammar.lsp` | code | 3,721 | 0.30207 | brotli 0.30234 | **0.1%** |
+| `sum` | binary | 38,240 | 0.24459 | xz 0.24843 | **1.6%** |
+| `cp.html` | text | 24,603 | 0.26720 | ppmd 0.27200 | **1.8%** |
+| `plrabn12.txt` | text | 481,861 | 0.26141 | ppmd 0.27504 | 5.2% |
+| `asyoulik.txt` | text | 125,179 | 0.27584 | ppmd 0.29034 | 5.3% |
+| `alice29.txt` | text | 152,089 | 0.24270 | ppmd 0.25634 | 5.6% |
+| `fields.c` | code | 11,150 | 0.23049 | brotli 0.24368 | 5.7% |
+| `lcet10.txt` | text | 426,754 | 0.20859 | ppmd 0.22625 | 8.5% |
+| `enwik8` | text | 100,000,000 | 0.19553 | ppmd 0.22404 | 14.6% |
+| `xml` | text | 5,345,280 | 0.06328 | brotli 0.08055 | 27.3% |
+| `ptt5` | image | 513,216 | 0.05740 | xz 0.07767 | 35.3% |
+| `kennedy.xls` | binary | 1,029,744 | 0.02339 | rar 0.03454 | 47.6% |
+
+**Eight of the twelve have under 10% headroom, and three have under 2%.** Measured F12
+text cost so far is +3.31% to +4.08% (webster, dickens, reymont). Applied to that
+column, `grammar.lsp`, `sum` and `cp.html` all lose their leads — exactly three, one
+short of the four the bar can absorb.
+
+**The mitigating factor, and why this is a risk rather than a prediction.** A file
+only pays the F12 cost if CM2 wins its competitive pick. Every byte-identical file
+survives trivially — that is C-1's mechanism, and it is why `mr`, `sao` and `x-ray`
+cost nothing. These are small files where fixed overhead may well hand the pick to a
+cheaper rail, in which case most of the thin-headroom column never moves at all.
+`CM2_MIN_LEN` is 2,048 bytes, so none of them are excluded by size alone; whether CM2
+*wins* is the open question, and it is decided per file by measurement, not by me.
+
+**The interpretive point that has to be settled now, not later.** The prereg excludes
+canterbury files from *class-level claims* — "fixed-overhead-dominated, per protocol".
+It does **not** exclude them from lead-survival, which is a per-file count and not a
+class-level claim. Read as written, `grammar.lsp` — 3.7 KB, leading brotli by 0.1% —
+counts exactly as much toward the 80% bar as `enwik8` at 100 MB.
+
+That is arguably a flaw in the prereg. It is **not** a licence to reinterpret it. If
+the rule fails on the strength of three tiny canterbury files, the honest outcome is
+"no preset change, and the failing condition recorded as the reason", with the
+weighting flaw filed as a lesson for the next prereg — not a redefinition of
+lead-survival invented once the answer was inconvenient. The whole value of
+pre-committing is that it binds in the direction you did not want.
