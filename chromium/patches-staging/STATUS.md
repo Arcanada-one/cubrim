@@ -53,3 +53,13 @@ build on a single host. These drafts + `apply.sh` are the exact input P2
 consumes; landing them means the build phase resumes from a reviewed artefact
 rather than from a scratch directory. The backlog row stays `in_progress` and
 says precisely this.
+
+## Both P1 unknowns resolved by real builds
+
+1. `net_unittests` named the first: three hardening lints in
+   `cbm_source_stream.cc` (fixed, PR #205).
+2. `content_shell` named the second: the `services/network` mojom-traits
+   switch over `net::SourceStreamType` needs a `kCbm` case — invisible to
+   `net_unittests` (it does not compile services/network) and surfaced the
+   moment a browser target was built. `apply.sh` now adds the mojom enum
+   value and both traits switches. No third unknown remained at this layer.
