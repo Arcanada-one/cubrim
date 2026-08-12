@@ -31,7 +31,7 @@ pub use codec::{decode, decode_with_limits, encode, encode_with_config, ORDER2_D
 pub fn report_encode_profile(total_nanos: u128) {
     prof::report(total_nanos);
 }
-pub use config::{EncodeConfig, GapScheme, Preset, ValueScheme};
+pub use config::{EncodeConfig, GapScheme, Preset, StickyParams, ValueScheme};
 pub use error::CubrimError;
 pub use limits::DecodeLimits;
 

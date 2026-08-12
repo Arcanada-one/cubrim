@@ -20,7 +20,7 @@
 
 use crate::bitpack::{bitpack_decode, bitpack_encode, build_value_dict, compute_width};
 use crate::cm2::{cm2_decode, cm2_encode_with};
-use crate::config::{EncodeConfig, GapScheme, ValueScheme};
+use crate::config::{EncodeConfig, GapScheme, StickyParams, ValueScheme};
 use crate::cube::build_cube_with_params;
 use crate::distance_map::{decode_axis_gaps, encode_axis_gaps};
 use crate::error::CubrimError;
@@ -619,10 +619,29 @@ fn encode_with_config_inner(
 ///
 /// Called exactly once per block: `encode_base` reuses the result for both the raw-vs-cube
 /// size decision and the emitted output (previously the competition ran twice per block).
+///
+/// Under sticky selection (CUBR-0096) a dependent block sets `FORCED_VALUE_SCHEME` first;
+/// this function then encodes that one scheme instead of all eight. The winner of whatever
+/// path ran is published in `LAST_VALUE_WINNER` so the caller can record an anchor's choice.
 fn encode_rans_family_value_stream(
     seq_codes: &[usize],
     n_distinct: usize,
 ) -> (ValueScheme, Vec<u8>) {
+    // Sticky fast path: encode only the scheme the anchor chose.
+    //
+    // A forced scheme may still DECLINE — the BWT family returns None when the block is
+    // too long for the v1 two-byte primary index. There is no candidate to emit then, so
+    // the block falls back to the full competition rather than shipping nothing. The
+    // fallback is a function of the block's own bytes, so it stays deterministic.
+    if let Some(forced) = FORCED_VALUE_SCHEME.with(|f| f.get()) {
+        if let Some(bytes) = encode_one_value_scheme(forced, seq_codes, n_distinct) {
+            LAST_VALUE_WINNER.with(|w| w.set(Some(forced)));
+            crate::prof::win("STICKY:reused");
+            return (forced, bytes);
+        }
+        crate::prof::win("STICKY:declined_fallback");
+    }
+
     let rans_bytes = crate::prof::track(
         "vs_bwt_rans",
         |o: &Option<Vec<u8>>| o.as_ref().map_or(0, |v| v.len()),
@@ -735,6 +754,7 @@ fn encode_rans_family_value_stream(
         ValueScheme::LzRans => "FINAL:lz_rans",
         _ => "FINAL:other",
     });
+    LAST_VALUE_WINNER.with(|w| w.set(Some(winner_scheme)));
 
     (winner_scheme, encoded_values)
 }
@@ -1184,12 +1204,184 @@ fn encode_chunked_bounded(data: &[u8], config: &EncodeConfig, bound: EncBound) -
     Some(out)
 }
 
+/// Encode one block, optionally forcing the value-stream scheme, and report which scheme
+/// the value stream actually settled on.
+///
+/// The forced scheme and the observed winner both travel through thread-locals rather than
+/// through the encode signature: the value-stream competition sits several frames below
+/// `encode_base`, and threading a parameter through every intermediate would touch the
+/// whole encode path for a development-time operating point.
+///
+/// `LAST_VALUE_WINNER` is cleared first, so a block that never reaches the rANS-family
+/// competition (raw-store, or a non-family value scheme) reports `None` rather than
+/// inheriting the previous block's winner from this worker thread.
+fn encode_block_observing_winner(
+    block: &[u8],
+    config: &EncodeConfig,
+    forced: Option<ValueScheme>,
+) -> (Vec<u8>, Option<ValueScheme>) {
+    LAST_VALUE_WINNER.with(|w| w.set(None));
+    FORCED_VALUE_SCHEME.with(|f| f.set(forced));
+    let blob = encode_base(block, config);
+    FORCED_VALUE_SCHEME.with(|f| f.set(None));
+    let winner = LAST_VALUE_WINNER.with(|w| w.get());
+    (blob, winner)
+}
+
+/// Run one wave of blocks in parallel. `forced_for(i)` supplies the scheme block `i` must
+/// use, or `None` to compete.
+///
+/// Returns `None` if the accumulated output passed `bound` — the same abandonment contract
+/// the competitive path uses, so a sticky candidate can still lose the outer competition
+/// early instead of encoding a container that cannot win.
+#[allow(clippy::too_many_arguments)]
+fn encode_wave(
+    ids: &[usize],
+    blocks: &[&[u8]],
+    config: &EncodeConfig,
+    bound: EncBound,
+    allow_abort: bool,
+    n_threads: usize,
+    emitted: &std::sync::atomic::AtomicUsize,
+    forced_for: &(dyn Fn(usize) -> Option<ValueScheme> + Sync),
+) -> Option<Vec<(usize, Vec<u8>, Option<ValueScheme>)>> {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    if ids.is_empty() {
+        return Some(Vec::new());
+    }
+    let cursor = AtomicUsize::new(0);
+    let abandoned = AtomicBool::new(false);
+    let (cursor_ref, abandoned_ref) = (&cursor, &abandoned);
+    let threads = n_threads.min(ids.len()).max(1);
+
+    let mut collected: Vec<(usize, Vec<u8>, Option<ValueScheme>)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(move || {
+                    GEOMIX_FAST_SWEEP.with(|f| f.set(true));
+                    let mut local = Vec::new();
+                    loop {
+                        if allow_abort && abandoned_ref.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let slot = cursor_ref.fetch_add(1, Ordering::Relaxed);
+                        if slot >= ids.len() {
+                            break;
+                        }
+                        let i = ids[slot];
+                        let (blob, winner) =
+                            encode_block_observing_winner(blocks[i], config, forced_for(i));
+                        if allow_abort {
+                            let total =
+                                emitted.fetch_add(blob.len() + 4, Ordering::Relaxed) + blob.len() + 4;
+                            if bound_exceeded(total, bound) {
+                                abandoned_ref.store(true, Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                        local.push((i, blob, winner));
+                    }
+                    local
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("sticky block-encode thread panicked"))
+            .collect()
+    });
+
+    if allow_abort && abandoned.load(Ordering::Relaxed) {
+        return None;
+    }
+    collected.sort_by_key(|(i, _, _)| *i);
+    Some(collected)
+}
+
+/// Encode blocks with sticky value-stream selection (CUBR-0096).
+///
+/// Two waves, and the split is the whole point. Wave 1 encodes every anchor block with the
+/// full eight-way competition and records what each anchor chose. Wave 2 encodes the
+/// dependent blocks, each forced to its anchor's winner.
+///
+/// A one-wave version — "reuse whatever the last finished block chose" — would be cheaper
+/// to write and wrong: blocks are handed out by an atomic cursor, so the winner in scope
+/// when a given block starts would depend on thread scheduling and the emitted bytes would
+/// stop being a function of the input. Compression output that varies run to run is not a
+/// compressor. The wave barrier buys determinism, and it is the reason this costs a
+/// synchronisation point that the competitive path does not pay.
+fn encode_blocks_sticky(
+    blocks: &[&[u8]],
+    config: &EncodeConfig,
+    bound: EncBound,
+    sticky: StickyParams,
+) -> Option<Vec<Vec<u8>>> {
+    use std::sync::atomic::AtomicUsize;
+    let allow_abort = bound != usize::MAX;
+    let n_blocks = blocks.len();
+    let n_threads = std::env::var("CUBR_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n >= 1)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        });
+    let emitted = AtomicUsize::new(0);
+
+    let anchors: Vec<usize> = (0..n_blocks).filter(|&i| sticky.is_anchor(i)).collect();
+    let anchor_results = encode_wave(
+        &anchors,
+        blocks,
+        config,
+        bound,
+        allow_abort,
+        n_threads,
+        &emitted,
+        &|_| None,
+    )?;
+
+    // Anchor index -> the scheme it chose. An anchor that never reached the competition
+    // contributes nothing, and its dependents simply compete.
+    let mut winner_of: std::collections::HashMap<usize, ValueScheme> = std::collections::HashMap::new();
+    for (i, _, w) in &anchor_results {
+        if let Some(w) = w {
+            winner_of.insert(*i, *w);
+        }
+    }
+
+    let dependents: Vec<usize> = (0..n_blocks).filter(|&i| !sticky.is_anchor(i)).collect();
+    let dependent_results = encode_wave(
+        &dependents,
+        blocks,
+        config,
+        bound,
+        allow_abort,
+        n_threads,
+        &emitted,
+        &|i| winner_of.get(&sticky.anchor_of(i)).copied(),
+    )?;
+
+    let mut out: Vec<Option<Vec<u8>>> = (0..n_blocks).map(|_| None).collect();
+    for (i, blob, _) in anchor_results.into_iter().chain(dependent_results) {
+        out[i] = Some(blob);
+    }
+    out.into_iter()
+        .collect::<Option<Vec<Vec<u8>>>>()
+        .filter(|v| v.len() == n_blocks)
+}
+
 /// Encode independent blocks in parallel, returning the sub-blobs in block order.
 ///
 /// Uses scoped OS threads (std-only, no external runtime) with an `AtomicUsize`
 /// work-stealing cursor so faster threads pick up more blocks when block costs are
 /// uneven. Determinism is preserved: each block's sub-blob depends only on that block's
 /// bytes + `config`, and results are re-sorted into block order before return.
+///
+/// Under sticky selection (`config.value_stream_sticky`) a block's sub-blob additionally
+/// depends on the bytes of its *anchor* block — but still never on completion order, which
+/// is why `encode_blocks_sticky` runs anchors and dependents as two separate waves.
 fn encode_blocks_parallel(
     blocks: &[&[u8]],
     config: &EncodeConfig,
@@ -1199,6 +1391,11 @@ fn encode_blocks_parallel(
     let n_blocks = blocks.len();
     if n_blocks == 0 {
         return Some(Vec::new());
+    }
+    // Sticky selection is a separate path: the competitive code below is left exactly as
+    // it was, so `--max` cannot change bytes by construction rather than by assertion.
+    if let Some(sticky) = config.value_stream_sticky {
+        return encode_blocks_sticky(blocks, config, bound, sticky);
     }
     // Single block, or parallelism disabled: encode serially (avoids thread setup cost
     // and keeps nested candidate encodes — which already saturate the pool — cheap).
@@ -9467,6 +9664,49 @@ thread_local! {
     /// frozen leaderboard) leave it false and keep the exhaustive sweep for byte-identical
     /// output.
     static GEOMIX_FAST_SWEEP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+
+    /// Sticky value-stream selection (CUBR-0096), encoder-side only.
+    ///
+    /// When set, `encode_rans_family_value_stream` encodes this one scheme instead of
+    /// competing all eight. The parallel block encoder sets it around a single
+    /// `encode_base` call and clears it afterwards, so it never leaks into unrelated
+    /// work on the same worker thread.
+    static FORCED_VALUE_SCHEME: std::cell::Cell<Option<ValueScheme>> =
+        const { std::cell::Cell::new(None) };
+
+    /// The scheme the most recent value-stream build settled on, competed or forced.
+    /// The parallel block encoder reads it after an anchor block to learn that anchor's
+    /// winner without threading a return value through the whole encode path.
+    static LAST_VALUE_WINNER: std::cell::Cell<Option<ValueScheme>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Encode the value stream with exactly one scheme, for sticky selection.
+///
+/// Returns `None` when that scheme declines the block — the BWT family cannot represent
+/// a block too long for the v1 two-byte primary index. The caller then re-competes.
+///
+/// Every arm calls the same encoder the competition would have called, so a forced
+/// scheme produces byte-identical bytes to the case where that scheme won outright.
+/// Schemes outside the rANS family are not reachable here: `encode_rans_family_value_stream`
+/// is only entered for family members, and the sticky winner is always one of them.
+fn encode_one_value_scheme(
+    scheme: ValueScheme,
+    seq_codes: &[usize],
+    n_distinct: usize,
+) -> Option<Vec<u8>> {
+    match scheme {
+        ValueScheme::BwtRans => bwt_rans_encode(seq_codes, n_distinct),
+        ValueScheme::BwtEntropy => bwt_entropy_encode(seq_codes, n_distinct),
+        ValueScheme::EntropyContext => Some(context_huffman_encode(seq_codes, n_distinct)),
+        ValueScheme::Order2Rans => bwt_order2_rans_encode(seq_codes, n_distinct),
+        ValueScheme::BwtAdaptive => bwt_adaptive_encode(seq_codes, n_distinct),
+        ValueScheme::BwtContextMix => bwt_ctxmix_encode(seq_codes, n_distinct),
+        ValueScheme::BwtGeoMix => bwt_geomix_encode(seq_codes, n_distinct),
+        ValueScheme::LzRans => Some(lz_rans_encode(seq_codes, n_distinct)),
+        // Not a competition member; re-compete rather than guess.
+        _ => None,
+    }
 }
 
 /// The single geomix combo used by the trimmed (fast) sweep. Empirically the dominant

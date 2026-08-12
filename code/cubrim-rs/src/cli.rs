@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use cubrim::{EncodeConfig, GapScheme, Preset, ValueScheme};
+use cubrim::{EncodeConfig, GapScheme, Preset, StickyParams, ValueScheme};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -61,6 +61,20 @@ pub struct CompressArgs {
     pub min_ctx_count: Option<u16>,
     #[arg(long, value_enum, help = "Speed/ratio operating point (default: max)")]
     pub preset: Option<PresetArg>,
+    /// Sticky value-stream selection: how many leading blocks run the full eight-way
+    /// competition before later blocks start reusing a winner (CUBR-0096).
+    ///
+    /// NOT byte-exact wherever the per-block winner varies. Setting either sticky flag
+    /// opts in; leaving both unset keeps the full competition and v0.3.2 output.
+    #[arg(
+        long,
+        help = "Sticky value-stream: leading blocks that compete (CUBR-0096; not byte-exact)"
+    )]
+    pub sticky_window: Option<usize>,
+    /// Re-run the full competition every this many blocks after the window. Unset means
+    /// never re-check.
+    #[arg(long, help = "Sticky value-stream: re-compete every N blocks (default: never)")]
+    pub sticky_recheck: Option<usize>,
     #[arg(short, long)]
     pub quiet: bool,
 }
@@ -89,6 +103,14 @@ impl CompressArgs {
         }
         if let Some(value) = self.min_ctx_count {
             config.min_ctx_count = Some(value);
+        }
+        // Either sticky flag opts in. `recheck` unset means "never re-compete", expressed
+        // as an interval nothing after the window can land on again.
+        if self.sticky_window.is_some() || self.sticky_recheck.is_some() {
+            config.value_stream_sticky = Some(StickyParams::new(
+                self.sticky_window.unwrap_or(1),
+                self.sticky_recheck.unwrap_or(usize::MAX),
+            ));
         }
         config
     }

@@ -445,6 +445,76 @@ pub struct EncodeConfig {
     /// v1-default: `None` — one block per frame, byte-identical to the shipped
     /// encoder.
     pub web_block_size: Option<usize>,
+
+    /// Sticky value-stream selection (CUBR-0096).
+    ///
+    /// Each chunked block normally runs an eight-way value-stream competition
+    /// and keeps the smallest candidate. Measured on this revision, seven of
+    /// those eight candidates are pure overhead wherever the winner does not
+    /// change: on a 2 MB `x-ray` slice `geomix` wins 384/384 blocks, and the
+    /// seven losers cost ~194 CPU-seconds against the winner's ~106.
+    ///
+    /// When `Some`, only *anchor* blocks run the full competition; every other
+    /// block reuses its anchor's winner. See `StickyParams` for the anchor rule.
+    ///
+    /// **This is not byte-exact.** Where the winner varies between blocks — and
+    /// it does vary: `ptt5` splits geomix 81 / lz_rans 15, `kennedy.xls` 129/63
+    /// — a reused choice is worse than the per-block minimum, so output grows.
+    /// Where the winner is constant the output is byte-identical and the saving
+    /// is free. Both cases are real, which is why this ships as an explicit
+    /// operating point and never as a default.
+    ///
+    /// v1-default: `None` — full competition, byte-identical to v0.3.2.
+    pub value_stream_sticky: Option<StickyParams>,
+}
+
+/// Anchor rule for sticky value-stream selection (CUBR-0096).
+///
+/// Block `i` is an **anchor** iff `i < compete_window` or
+/// `(i - compete_window) % recheck_interval == 0`. Anchors run the full
+/// eight-way competition; every other block reuses the winner of the nearest
+/// preceding anchor.
+///
+/// The rule is deliberately a pure function of the block **index**, never of
+/// completion order. Blocks are encoded in parallel by a work-stealing cursor,
+/// so a "first N blocks to finish" rule would make the emitted bytes depend on
+/// thread scheduling. Anchors are therefore encoded in a first wave and the
+/// dependent blocks in a second, which keeps output a function of the input
+/// bytes and the config alone.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct StickyParams {
+    /// Number of leading blocks that always compete. Minimum 1 — with 0 there
+    /// would be no winner to reuse for block 0.
+    pub compete_window: usize,
+    /// Re-compete every this many blocks after the window. Minimum 1, where 1
+    /// means "every block is an anchor", i.e. behaviourally the full
+    /// competition and byte-identical to `None`.
+    pub recheck_interval: usize,
+}
+
+impl StickyParams {
+    /// Build a sticky rule, clamping both parameters to their valid minimum.
+    pub fn new(compete_window: usize, recheck_interval: usize) -> Self {
+        Self {
+            compete_window: compete_window.max(1),
+            recheck_interval: recheck_interval.max(1),
+        }
+    }
+
+    /// True when block `i` runs the full competition.
+    pub fn is_anchor(self, i: usize) -> bool {
+        i < self.compete_window || (i - self.compete_window) % self.recheck_interval == 0
+    }
+
+    /// The anchor whose winner block `i` reuses: the nearest anchor at or below
+    /// `i`. For an anchor this is `i` itself.
+    pub fn anchor_of(self, i: usize) -> usize {
+        if self.is_anchor(i) {
+            return i;
+        }
+        let past = i - self.compete_window;
+        self.compete_window + (past / self.recheck_interval) * self.recheck_interval
+    }
 }
 
 /// Speed/ratio operating point.
@@ -540,6 +610,7 @@ impl EncodeConfig {
             cm2_max_tbits: None,
             web_profile: false,
             web_block_size: None,
+            value_stream_sticky: None,
         }
     }
 
@@ -551,6 +622,88 @@ impl EncodeConfig {
         } else {
             usize::MAX
         }
+    }
+}
+
+#[cfg(test)]
+mod sticky_tests {
+    use super::*;
+
+    #[test]
+    fn sticky_is_off_by_default() {
+        assert_eq!(
+            EncodeConfig::v1_default().value_stream_sticky,
+            None,
+            "sticky selection is not byte-exact, so it must never be the default"
+        );
+    }
+
+    #[test]
+    fn window_blocks_are_all_anchors() {
+        let s = StickyParams::new(4, 100);
+        for i in 0..4 {
+            assert!(s.is_anchor(i), "block {i} is inside the compete window");
+            assert_eq!(s.anchor_of(i), i, "an anchor is its own anchor");
+        }
+    }
+
+    #[test]
+    fn recheck_reanchors_on_the_interval() {
+        let s = StickyParams::new(2, 3);
+        // anchors: 0,1 (window) then 2, 5, 8, ...
+        assert!(s.is_anchor(2) && s.is_anchor(5) && s.is_anchor(8));
+        assert!(!s.is_anchor(3) && !s.is_anchor(4));
+        assert_eq!(s.anchor_of(3), 2);
+        assert_eq!(s.anchor_of(4), 2);
+        assert_eq!(s.anchor_of(6), 5);
+        assert_eq!(s.anchor_of(7), 5);
+    }
+
+    #[test]
+    fn anchor_of_never_looks_forward() {
+        // A dependent block must reuse a winner computed from an EARLIER block —
+        // reaching forward would make wave 2 depend on itself.
+        let s = StickyParams::new(3, 7);
+        for i in 0..200 {
+            assert!(
+                s.anchor_of(i) <= i,
+                "block {i} resolved to a later anchor {}",
+                s.anchor_of(i)
+            );
+            assert!(s.is_anchor(s.anchor_of(i)), "resolved anchor must be one");
+        }
+    }
+
+    #[test]
+    fn recheck_of_one_makes_every_block_an_anchor() {
+        // Degenerate case: K=1 is the full competition, so it must be byte-identical
+        // to sticky-off. Every block being an anchor is what makes that true.
+        let s = StickyParams::new(1, 1);
+        for i in 0..50 {
+            assert!(s.is_anchor(i));
+        }
+    }
+
+    #[test]
+    fn parameters_clamp_to_their_minimum() {
+        // window 0 would leave block 0 with no winner to inherit; interval 0 would
+        // divide by zero in anchor_of.
+        let s = StickyParams::new(0, 0);
+        assert_eq!(s.compete_window, 1);
+        assert_eq!(s.recheck_interval, 1);
+        assert!(s.is_anchor(0));
+        assert_eq!(s.anchor_of(9), 9);
+    }
+
+    #[test]
+    fn never_recheck_still_terminates() {
+        // `--sticky-window N` with no `--sticky-recheck` uses usize::MAX as "never".
+        // anchor_of must stay in range rather than overflow.
+        let s = StickyParams::new(2, usize::MAX);
+        assert!(s.is_anchor(0) && s.is_anchor(1));
+        assert!(s.is_anchor(2), "i == window lands on the interval exactly once");
+        assert!(!s.is_anchor(3) && !s.is_anchor(1_000_000));
+        assert_eq!(s.anchor_of(1_000_000), 2);
     }
 }
 
@@ -732,6 +885,7 @@ mod tests {
             cm2_max_tbits: None,
             web_profile: false,
             web_block_size: None,
+            value_stream_sticky: None,
         };
 
         let inputs: Vec<Vec<u8>> = vec![
