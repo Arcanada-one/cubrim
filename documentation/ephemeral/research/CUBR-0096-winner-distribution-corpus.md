@@ -90,7 +90,7 @@ Full files from the 24-file world corpus, `CUBRIM_PROFILE=1`, `CUBR_THREADS=64`,
 | `samba` | exe | 21,606,400 | 0 | — | competition never runs |
 | `osdb` | database | 10,085,684 | 0 | — | competition never runs |
 | `nci` | database | 33,553,445 | 6144 | `geomix` 4449, `lz_rans` 1695 | no — 27.6% |
-| `webster` | text | 41,458,703 | *running* | *not yet measured* | *pending* |
+| `webster` | text | 41,458,703 | 0 | — | competition never runs |
 | `enwik8` | text | 100,000,000 | *running* | *not yet measured* | *pending* |
 | `dickens` | text | 10,192,446 | 0 | — | competition never runs |
 | `reymont` | text | 6,627,202 | 0 | — | competition never runs |
@@ -107,8 +107,8 @@ Full files from the 24-file world corpus, `CUBRIM_PROFILE=1`, `CUBR_THREADS=64`,
 
 **All 24 corpus files, sorted by competed blocks then size.** The first version of
 this document measured 14 and listed the ten it had not reached; this scan closes that
-gap. Of the 22 rows measured so far, **eight compete and fourteen are zero**; `webster`
-and `enwik8` are still encoding and are marked pending rather than assumed.
+gap. Of the 23 rows measured so far, **eight compete and fifteen are zero**; only
+`enwik8` is still encoding, and it is marked pending rather than assumed.
 
 `nci` is the row that matters most, and it went **against the prediction recorded before
 it ran**: it competes 6144 blocks. See § *The prediction `nci` falsified* — the database
@@ -150,7 +150,7 @@ Two guards stand in front of it, and they carve the corpus into three tiers:
 | tier | condition | `med16` prof row | competes | files |
 |---|---|---|---|---|
 | 1 | input ≤ 65,536 B | **absent** | no | `grammar.lsp`, `xargs.1`, `fields.c`, `cp.html`, `sum` |
-| 2 | larger, raster detector declines | calls=1, wall ≈ 0.01–0.03 s | no | `asyoulik.txt`, `alice29.txt`, `lcet10.txt`, `plrabn12.txt`, `xml`, `reymont`, `dickens`, `osdb`, `samba` |
+| 2 | larger, detector declines | calls=1, wall 0.013–0.052 s | no | `asyoulik.txt`, `alice29.txt`, `lcet10.txt`, `plrabn12.txt`, `xml`, `reymont`, `dickens`, `osdb`, `samba`, `webster` |
 | 3 | detector fires | calls=1, wall 8.5–242.7 s | **yes** | `ptt5`, `kennedy.xls`, `ooffice`, `sao`, `x-ray`, `mr`, `nci`, `mozilla` |
 
 **Tier 1** is the caller-side guard at `codec.rs:391`, `if data.len() >
@@ -167,10 +167,11 @@ random) has a flat cost curve, so we skip it here"*. When it declines, `encode_m
 returns `None` immediately and the file costs ~0.02 s of detection.
 
 The tiers are not fitted to the outcome — they are separated by a column, and the
-separation is absolute. Tier 2 spends at most **0.033 s** in `med16`; tier 3 spends at
-least **8.502 s**. That is a factor of 258 with nothing in the gap. `nci`, the file that
-broke my prediction, lands squarely in tier 3 by this column too (**116.524 s**) — the
-gate classified it correctly; I guessed its content wrongly.
+separation is absolute. Tier 2 spends at most **0.052 s** in `med16` (`webster`, the
+largest tier-2 file); tier 3 spends at least **8.502 s**. That is a factor of 163 with
+nothing in the gap. `nci`, the file that broke my prediction, lands squarely in tier 3 by
+this column too (**116.524 s**) — the gate classified it correctly; I guessed its content
+wrongly.
 
 ### Size is not the gate, and the corpus contains the controlled pair that proves it
 
@@ -247,8 +248,8 @@ CUBR-0096 brief both scope the mechanism to image and exe. `sao` and `kennedy.xl
 in the scope statement.
 
 **4. Where the competition does not run at all, it is not a small effect — it is zero
-blocks.** Fourteen of the twenty-two files measured so far never reach the competition
-(two rows still pending). For those, no value-stream lever of any design can save
+blocks.** Fifteen of the twenty-three files measured so far never reach the competition
+(one row still pending). For those, no value-stream lever of any design can save
 anything, because there is nothing to save. **The corpus-wide shape is now known: the
 value-stream competition is a minority path.** Eight of 24 files reach it, and the entire
 lever — the one the gate killed — could only ever have applied to those eight.
@@ -317,11 +318,11 @@ blocks") reads like a property of the kind of data. It is not.
   *corpus* figure and one file is not a corpus. What the table bounds is where a ratio cost
   could come from at all: only the seven files that compete, and on `x-ray` and `mr` a
   sticky choice costs zero because there is only ever one winner to be sticky about.
-- It now measures **22 of the 24 corpus files**, with `webster` and `enwik8` still
-  encoding at the time of this commit and marked pending in the table. The first version
-  of this document measured 14; the eight added are `asyoulik.txt`, `lcet10.txt`,
-  `plrabn12.txt`, `xml`, `reymont`, `dickens` and `samba` at zero competed blocks, and
-  `nci` at **6144**.
+- It now measures **23 of the 24 corpus files**, with only `enwik8` still encoding at the
+  time of this commit and marked pending in the table. The first version of this document
+  measured 14; the nine added are `asyoulik.txt`, `lcet10.txt`, `plrabn12.txt`, `xml`,
+  `reymont`, `dickens`, `samba` and `webster` at zero competed blocks, and `nci` at
+  **6144**.
 - **Requirement 4 is still not established and this scan does not attempt it.** Knowing
   which files compete bounds where a ratio cost could come from — at most seven files —
   but it measures no candidate arm and produces no ratio figure.
