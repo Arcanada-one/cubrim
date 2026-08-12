@@ -135,6 +135,32 @@ else:
     print('  net/BUILD.gn: dep already present')
 PY
 
+echo "== services/network mojom SourceType + traits: add the kCbm case"
+# net_unittests does NOT compile these, so this is invisible until a target
+# that does (content_shell) is built — exactly the second unknown flagged at
+# P1. The net::SourceStreamType enum's LINT.ThenChange points here.
+python3 - <<'PY'
+import io
+f='services/network/public/mojom/source_type.mojom'; s=io.open(f).read()
+if 'kCbm' not in s:
+    s=s.replace('  kZstd,\n', '  kZstd,\n  kCbm,\n', 1)
+    io.open(f,'w').write(s); print('  mojom SourceType: kCbm added')
+else:
+    print('  mojom SourceType: already present')
+
+f='services/network/public/cpp/source_type_mojom_traits.cc'; s=io.open(f).read()
+if 'kCbm' not in s:
+    s=s.replace(
+      '    case net::SourceStreamType::kZstd:\n      return network::mojom::SourceType::kZstd;\n',
+      '    case net::SourceStreamType::kZstd:\n      return network::mojom::SourceType::kZstd;\n    case net::SourceStreamType::kCbm:\n      return network::mojom::SourceType::kCbm;\n', 1)
+    s=s.replace(
+      '    case network::mojom::SourceType::kZstd:\n      return net::SourceStreamType::kZstd;\n',
+      '    case network::mojom::SourceType::kZstd:\n      return net::SourceStreamType::kZstd;\n    case network::mojom::SourceType::kCbm:\n      return net::SourceStreamType::kCbm;\n', 1)
+    io.open(f,'w').write(s); print('  mojom traits: both switches patched')
+else:
+    print('  mojom traits: already present')
+PY
+
 echo "== third_party/cubrim: vendored decoder target"
 echo "   BUILD.gn + the crate live under third_party/cubrim/. Two states:"
 echo "   - integration-check: ffi/stub_ffi.cc satisfies the linker so //net"
