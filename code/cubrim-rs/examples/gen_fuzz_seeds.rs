@@ -74,7 +74,15 @@ fn payloads() -> Vec<(&'static str, Vec<u8>)> {
 
     // Image-shaped: a smooth 2D field with mild noise. The geometric models are
     // built for exactly this correlation structure.
-    let (w, h) = (256usize, 256usize);
+    //
+    // 256x512 = 131,072 bytes, and the second dimension is load-bearing (CUBR-0101).
+    // At 256x256 = 65,536 these lost the competitive pick to CM2 and mode 17 was
+    // unreachable from the whole corpus. That is the single-block cube ceiling: a
+    // 65,536-byte prefix of real `x-ray` also loses, while 69,632 bytes of the same
+    // data wins GeoCM. The geometric rail only becomes competitive once the input
+    // clears that ceiling, so an image payload at or below it can never seed mode 17
+    // however image-like its content.
+    let (w, h) = (256usize, 512usize);
     let mut img = Vec::with_capacity(w * h);
     for y in 0..h {
         for x in 0..w {
@@ -86,7 +94,8 @@ fn payloads() -> Vec<(&'static str, Vec<u8>)> {
     v.push(("image-smooth", img));
 
     // A steeper gradient with a horizontal structure, a second shot at the
-    // geometric rail in case the first is too smooth to beat CM2.
+    // geometric rail in case the first is too smooth to beat CM2. Same dimensions,
+    // and for the same ceiling reason.
     let mut img2 = Vec::with_capacity(w * h);
     for y in 0..h {
         for x in 0..w {
