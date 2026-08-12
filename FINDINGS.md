@@ -1336,16 +1336,29 @@ i.e. unchanged. Any claim that `balanced` speeds up decoding is unsupported.
 
 ## Status of the pre-registered measurements
 
+**All four are answered.** Nothing on this list is outstanding; it is a record of
+how each question was settled, not a queue. M1, M3 and M4 stood open here long
+after F12, F10 and F4 had closed them — the table is the first thing a reader
+checks for what is still open, so a stale row in it misreports the state of the
+whole track.
+
 | ID | question | state |
 |---|---|---|
-| M1 | null-coder ablation; kill rule: coder share < 25% ⇒ NEW-22 cancelled on the CM path | **superseded in part.** The coder cannot exceed CM2's 98.8%, and F1/M3 test the same question from the footprint side with a cheaper instrument. Ablation still to run to put a number on the coder itself. |
+| M1 | null-coder ablation; kill rule: coder share < 25% ⇒ NEW-22 cancelled on the CM path | **ANSWERED — F12. Coder share 2.0%**, an order of magnitude below the kill threshold, so the kill rule fires and NEW-22 is cancelled on the CM path. The ablation itself is deliberately **not** owed: a null coder emits no bytes and so changes every downstream competitive comparison, measuring a different encoder. F12 times `predict_bit`/`update_bit` against `RangeEncoder::encode` in place instead, on the real path and with byte-identical output. |
 | M2 | encode/decode asymmetry attribution | **ANSWERED — F2.** Internal CM2 variant sweep, not the outer rail. Kill rule on the outer rail: disabling it cannot cost ratio because it never wins, and it cannot buy speed because it is already hidden. |
-| M3 | memory-bound vs compute-bound | sweep built and pending a quiet host; F1 gives the footprint arithmetic it tests |
-| M4 | the `code` 0.0850 outlier | reframed by F3 into a per-scope attribution run |
+| M3 | memory-bound vs compute-bound | **ANSWERED — F10.** The quiet host was found (dev-ai, 64 cores, load 0.36); the sweep ran pinned to one fixed 8-core set with byte-exact round-trip on every row. **Compute-bound in the mixer, not memory-latency-bound:** cutting the tables 24→18 bits shrinks decode peak RSS 45× (1.47 → 0.0327 GiB) while decode time moves only 27.0 → 19.2 s. |
+| M4 | the `code` 0.0850 outlier | **ANSWERED — F4.** The scope is three files and `silesia/samba` is 99.9% of its bytes, so the scope figure *is* that one file. The per-scope attribution run F3 reframed it into then landed on the prediction: `cm2` 97.44% of encode wall, with `cm2_variant_col` **absent** rather than small. |
 
-Held back deliberately: the sweep was **not** started while the attribution loop
-still had the CPU. Running it under falling background load, with the
-full-footprint row first, would have made every small-table row look faster for
-a reason that has nothing to do with the tables — manufacturing support for my
-own hypothesis. The rows are pinned to one fixed core set, the pin is never
-widened for a row, and no row is re-run to improve its number.
+None of the four was answered by the instrument it was pre-registered with — M1's
+ablation was declined for a byte-neutral in-place timer, M3's sweep waited for a
+different host, and M4 became an attribution run. The pre-registration still did its work: it fixed the kill rule
+and the threshold **before** the numbers existed, which is what made M1's 2.0%
+decisive rather than arguable.
+
+The M3 sweep was held back deliberately while the attribution loop still had the
+CPU, and that hold is why its rows are usable. Running it under falling
+background load, with the full-footprint row first, would have made every
+small-table row look faster for a reason that has nothing to do with the tables
+— manufacturing support for my own hypothesis. As run: every row pinned to one
+fixed core set, the pin never widened for a row, no row re-run to improve its
+number, and byte-exact round-trip on each.
