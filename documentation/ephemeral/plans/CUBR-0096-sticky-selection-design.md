@@ -1,28 +1,40 @@
 # CUBR-0096 — sticky value-scheme selection: design sketch (2026-07-31, Fable session)
 
-Status: **design only — NOT implemented.** Per PRESETS.md rule, NO preset name exists until
-the corpus numbers do — the mechanism ships behind an internal config field first.
+Status: **design sketch — the mechanism below is not yet on `main`.** Per PRESETS.md rule, NO
+preset name exists until the corpus numbers do — the mechanism ships behind an internal
+config field first.
 
-## Status check (2026-08-12, verified against `origin/main` @ `29d3d42`)
+## Status check (2026-08-12, verified against `origin/main` @ `ad4650a`)
 
-This document is the only record of the lever; it is landed here so the design is not lost.
+This document is the durable record of the design; the lever is now in active implementation
+on a separate branch.
 
-- Not implemented: no `vs_pin`, `vs_sticky`, or `VsSticky` anywhere in `code/cubrim-rs/src/`.
-- Not tracked: `CUBR-0096` appears nowhere else in `documentation/` or `consilium/`.
+- **Live lane:** branch `cubr-0096-sticky-vs` (pushed, no PR yet) carries `a44555f`
+  "instrument(CUBR-0096): record the FINAL per-block value-stream winner" — method step 1,
+  instrument-before-deciding. It records the winner of each block itself, because
+  `prof::win()` fires on every new running minimum and so cannot answer whether the winner is
+  CONSTANT across blocks, which is what this lever turns on. Profile-gated
+  (`CUBRIM_PROFILE=1`), emitted bytes unchanged. That branch notes the port from CUBR-0087
+  F18 had to be adapted for the candidates-array refactor, where a BWT-family candidate may
+  decline (`None`) and is never scored — so the winner is an `Option` unwrapped after the loop.
+- **Not yet on `main`:** no `vs_pin`, `vs_sticky`, or `VsSticky` in `code/cubrim-rs/src/` on
+  `origin/main`; the sticky mechanism proper (§ Mechanism below) is still unbuilt.
 - The original blocker line ("corpus measurement BLOCKED until the timing campaign releases
   dev-ai, ~Aug 2") is **stale**. That Phase C campaign has since become a fixed baseline —
   later work cites its operating point (metas 36/37/38) and compares against "the Phase C
-  journal canonicals" (`../research/CUBR-NEW24-PRESET-CAMPAIGN-20260811.md`). The lever is
-  therefore unblocked and simply unstarted; the programme's encode-side attention went to
-  the decode-tier ladder instead.
+  journal canonicals" (`../research/CUBR-NEW24-PRESET-CAMPAIGN-20260811.md`). The corpus
+  measurement is unblocked.
 - Code anchors below have drifted. Current line numbers on `origin/main`:
   `encode_rans_family_value_stream` at `codec.rs:622` (design cites ~513), `encode_base` at
   `codec.rs:736`, `encode_blocks_parallel` at `codec.rs:1171` (design cites ~1032). The
   structural claims — that the eight-way competition takes no config and that the nested
   competition flows through `encode_blocks_parallel` — still hold; re-verify before coding.
 
-Anyone picking this up should re-confirm the F17/F18 evidence base against current FINDINGS
-before implementing, then follow the measurement plan at the foot of this document.
+Anyone picking this up should coordinate with the live branch rather than restarting, and
+re-confirm the F17/F18 evidence base against current FINDINGS before implementing. Note the
+design's own warning: stickiness is **not** byte-exact — the winners are the expensive
+candidates, so it costs ratio and must be measured per class on the full 24-file corpus
+(slice figures forbidden, F19).
 
 ## Evidence base (FINDINGS.md F17/F18 — do not re-derive)
 
