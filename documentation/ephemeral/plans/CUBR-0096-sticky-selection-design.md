@@ -4,10 +4,32 @@ Status: **design sketch — the mechanism below is not yet on `main`.** Per PRES
 preset name exists until the corpus numbers do — the mechanism ships behind an internal
 config field first.
 
+> ## ⚠ THIS LEVER HAS ALREADY BEEN BUILT AND MEASURED — AND IT FAILED ITS GATE
+>
+> **Read `../research/CUBR-0096-inner-sticky-gate-result.md` before writing any code against
+> this design.** The § Mechanism below was implemented in full on 2026-08-02 (under the
+> then-current label `CUBR-0092`) and **KILLED by its pre-registered gate**: 1.33× on x-ray and
+> 1.05× on ooffice against a 1.50× bar, with byte-exact round-trip and *identical* compressed
+> bytes on both. The candidate source is on `rescue/INFRA-0394/codex/cubr-0092-inner-sticky` @
+> `cfea5da8`; the measurement evidence is on `dev-ai` and in `hypotheses` row `NEW-29`.
+>
+> That result never reached `main`, which is why the status note below — correctly reading
+> `origin/main` and finding no `vs_pin` / `vs_sticky` / `VsSticky` — concluded the mechanism was
+> unbuilt. It was not unbuilt; it was unrecorded.
+>
+> **The single most important number for anyone continuing:** tuning `compete_blocks` /
+> `recheck_every` cannot rescue this. The killed candidate already probed only ~6–8% of blocks,
+> so a *perfect oracle* with no probing at all is bounded at **≈1.37× on x-ray and ≈1.06× on
+> ooffice** — still under the gate. The gate result derives that bound from the measured cells.
+> The corpus arm, by contrast, genuinely never ran, and neither did anything at enwik8 scale.
+
 ## Status check (2026-08-12, verified against `origin/main` @ `ad4650a`)
 
 This document is the durable record of the design; the lever is now in active implementation
 on a separate branch.
+
+> **Superseded in part, same day:** the two bullets below stating the mechanism is "still
+> unbuilt" describe `origin/main` accurately but not the world — see the box above.
 
 - **Live lane:** branch `cubr-0096-sticky-vs` (pushed, no PR yet) carries `a44555f`
   "instrument(CUBR-0096): record the FINAL per-block value-stream winner" — method step 1,
