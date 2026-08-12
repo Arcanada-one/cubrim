@@ -6,6 +6,7 @@ on:
     paths:
       - 'code/cubrim-rs/**'
       - 'code/cubrim-web-decoder/**'
+      - 'code/cubrim-web-cli/**'
       - 'bench/web-corpus/payloads-v2/**'
       - 'reproducibility/**'
       - '.github/workflows/ci.yml'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'code/cubrim-rs/**'
       - 'code/cubrim-web-decoder/**'
+      - 'code/cubrim-web-cli/**'
       - 'bench/web-corpus/payloads-v2/**'
       - 'reproducibility/**'
       - '.github/workflows/ci.yml'
@@ -123,3 +125,34 @@ jobs:
 
       - name: Differential tests against the cubrim decoder
         run: cargo test --release
+
+  web-cli:
+    name: Web Profile CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: code/cubrim-web-cli
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --locked --release --all-targets -- -D warnings
+
+      # --locked throughout: the benchmark harness attributes a measurement to
+      # a binary by sha256, so a build whose dependency graph can drift under
+      # it cannot carry provenance. Same reason cubrim-rs commits its lock.
+      #
+      # The tests run the built binary as a subprocess against the pinned
+      # census, which is the point of the crate: the two-container defect was
+      # invisible to every in-process test and appeared the moment real
+      # fixtures went through the real artefact.
+      - name: Round-trip the web census through the binary
+        run: cargo test --locked --release
