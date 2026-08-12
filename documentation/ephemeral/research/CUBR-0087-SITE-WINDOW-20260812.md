@@ -89,31 +89,61 @@ Consequences worth stating plainly:
 ### The self-hosted alternative, now measured rather than assumed
 
 An earlier revision of this note left the runner question open ("was not verified
-here"). It is cheap to answer, so it is answered:
+here"). It is cheap to answer, so it is answered — and the first pass at
+answering it got one of the three conclusions wrong. The correction is below,
+because a wrong fact stated confidently is worse than the open question it
+replaced.
 
-| runner (label) | host | PHP | notes |
+The requirement is not "PHP" in the abstract but the assertion the job runs on
+itself: `php -r 'version_compare(PHP_VERSION, "8.3", ">=")'`. Measured against
+that, by label rather than by host:
+
+| runner (labels) | host | PHP | meets `>= 8.3` |
 |---|---|---|---|
-| `arcana-www-arcanada` (`arcana-www`, `sites`) | arcana-www | **8.4.19** | the only runner carrying `sites` |
-| `arcana-kb-general` (`ci-general`) | arcana-kb | **none** | passwordless sudo available |
+| `arcana-www-arcanada` (`arcana-www`, `sites`) | arcana-www | 8.4.19 | yes |
+| `arcana-ci-general` (`arcana-ai`, `docker`, `ci-general`) | **arcana-devs** | 8.3.6 | yes |
+| `arcana-kb-general` (`docker`, `ci-general`) | arcana-kb | **none** | no |
 | — | dev-ai | n/a | **hosts no Actions runner at all** |
 
-Three conclusions follow, and they argue *against* a runner move rather than for
-one:
+**What the previous revision got wrong.** It listed `ci-general` as a single slot
+on arcana-kb and concluded the label "lacks PHP". `ci-general` is carried by
+*two* runners on two different hosts, and one of them — `arcana-ci-general`,
+which lives on **arcana-devs**, not on any AI host its `arcana-ai` label implies
+— already carries PHP 8.3.6 and would pass the job's own assertion today. The
+"install PHP on a shared host" objection therefore does not apply as written.
 
-1. **dev-ai is not in the runner fleet.** The `arcana-ai` label on
-   `arcana-ci-general` had raised the worry that CI work could land on the
-   measurement stand and break quiet-host discipline. It cannot: dev-ai carries
-   no runner installation. That concern is closed.
-2. **`arcana-www` satisfies the PHP assertion but is the wrong slot.** It is the
+Three conclusions follow. They still argue *against* a runner move, but the third
+argues it for a different and stronger reason than before:
+
+1. **dev-ai is not in the runner fleet.** The `arcana-ai` label had raised the
+   worry that CI work could land on the measurement stand and break quiet-host
+   discipline. It cannot, and the label is simply a misnomer: the runner carrying
+   it is installed on arcana-devs. dev-ai has no runner directory and no
+   `actions.runner` service at all, while the measurement harnesses hard-assert
+   `hostname == dev-ai` before they will run. The two never meet; that concern is
+   closed.
+2. **`arcana-www` satisfies the assertion but is the wrong slot.** It is the
    only runner labelled `sites`, and it is what `deploy.yml` waits on — this
    lane's own deploy queued roughly fifteen minutes behind it. Adding a
    four-minute browser suite to that single slot serialises testing against
    deployment, which is exactly the failure the `cubrim-api` CIBLOCK decision
    moved a job *away* from.
-3. **`ci-general` is the right slot but lacks PHP.** It could be installed —
-   passwordless sudo is available — but that mutates a shared CI host used by
-   other repositories, and it cuts against this workflow's own supply-chain
-   reasoning for taking PHP from the runner image rather than a setup action.
+3. **`ci-general` is not one slot, and that is the real objection.** A job pinned
+   to that label lands on whichever of the two runners is idle: on arcana-devs it
+   finds PHP 8.3.6 and runs; on arcana-kb it finds no interpreter and the
+   assertion fails by design. The same commit would pass or fail on runner
+   availability alone — a gate that is red for a reason unrelated to the code,
+   which is the habit this whole note is about. It is fixable (install PHP on
+   arcana-kb, or pin a narrower label), but each fix mutates shared CI
+   infrastructure other repositories depend on, and pinning a narrower label
+   reintroduces precisely the single-label-disappears risk the workflow header
+   rejects.
+
+There is a further cost the header names in advance: it takes PHP from the runner
+image so a version move goes "red loudly instead of silently testing something
+else". On GitHub-hosted that image is uniform and disposable. Self-hosted, "the
+image" becomes per-host machine-local state that already differs three ways
+across this fleet — 8.4.19, 8.3.6, absent.
 
 So the runner move is *feasible* and *not obviously desirable*. Restoring billing
 restores the design the workflow's author chose and documented. That remains a
@@ -125,3 +155,13 @@ instead of on an open question.
 `php -l` clean on all four PHP files. Both new tests checked fail-without /
 pass-with. Merged as `4053bba`; the deploy runs through `push → main → CI` on the
 self-hosted runner, never manual rsync.
+
+Runner facts (2026-08-12), re-verified rather than carried over from the previous
+revision. Labels from `gh api orgs/Arcanada-one/actions/runners`; host identity
+from each runner's own `.runner` file (`agentName`), which is what resolves the
+`arcana-ci-general` → arcana-devs mapping the label name obscures; PHP by `php
+--version` on each host over Tailscale. dev-ai checked for both a runner
+directory and an `actions.runner` service — neither exists. The billing block was
+re-confirmed still live on the newest `test` run (`31558596957`, `main`,
+2026-08-12T02:58Z) by reading the check-run annotation, not the red tick: the job
+has no steps and no runner name because it never started.
