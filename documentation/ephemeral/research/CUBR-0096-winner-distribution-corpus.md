@@ -1,6 +1,6 @@
 # CUBR-0096 — per-block value-stream winner distribution across the corpus
 
-**Status: measurement only. This does NOT reopen the sticky lever.**
+**Status: measurement, plus one decisive candidate run. Does NOT reopen the kill.**
 Measured 2026-08-12 on `dev-ai`. Companion to
 `CUBR-0096-inner-sticky-gate-result.md`, which killed the lever.
 
@@ -74,7 +74,9 @@ block is a property of the input, not of how busy the host was.
 
 **No timing figure is reported from this scan.** The runs shared the host with builds and
 with each other, so the wall and CPU columns collected alongside are contaminated. They
-are deliberately omitted rather than quoted with a caveat.
+are deliberately omitted rather than quoted with a caveat. The one timing pair that *is*
+quoted in this document comes from the paired `ooffice` run below, whose two arms ran
+back to back on the same host at the same thread count.
 
 ## What this corrects
 
@@ -110,7 +112,7 @@ CUBR-0096 brief both scope the mechanism to image and exe. `sao` and `kennedy.xl
 in the scope statement.
 
 **4. Where the competition does not run at all, it is not a small effect — it is zero
-blocks.** Six of the twelve files measured never reach the competition. For those, no
+blocks.** Seven of the fourteen files measured never reach the competition. For those, no
 value-stream lever of any design can save anything, because there is nothing to save.
 
 ## What this does NOT do
@@ -118,36 +120,76 @@ value-stream lever of any design can save anything, because there is nothing to 
 - **It does not reopen the kill.** The gate fired on end-to-end speedup (1.33× / 1.05×
   against a 1.50× bar) with an oracle ceiling of ~1.37× / ~1.06×. That arithmetic is
   independent of how often the winner changes, and nothing here moves it.
-- **It does not establish requirement 4** (≤ +0.50% corpus ratio cost). That needs a
-  candidate arm — an encode under sticky — and no such arm was run here. What the table
-  gives is the *upper bound on where a ratio cost could come from at all*: only the six
-  files that compete, and on `x-ray` and `mr` a sticky choice would cost exactly zero
-  because there is only ever one winner to be sticky about.
-- **It says nothing about `nci`, `dickens`, `webster`, `reymont`, `xml`, `samba`,
-  `enwik8` or the remaining canterbury files.** They were not measured.
-- It measures **13 of the 24 corpus files**. The eleven not measured are `nci`, `dickens`,
-  `webster`, `reymont`, `xml`, `samba`, `enwik8` and four canterbury files.
+- **It does not establish requirement 4** (≤ +0.50% corpus ratio cost). One candidate arm
+  now exists — `ooffice`, measured below at **exactly zero** cost — but requirement 4 is a
+  *corpus* figure and one file is not a corpus. What the table bounds is where a ratio cost
+  could come from at all: only the seven files that compete, and on `x-ray` and `mr` a
+  sticky choice costs zero because there is only ever one winner to be sticky about.
+- It measures **14 of the 24 corpus files**. The ten not measured are `dickens`, `nci`,
+  `reymont`, `samba`, `webster`, `xml`, `enwik8`, `asyoulik.txt`, `lcet10.txt` and
+  `plrabn12.txt`.
 
-## Open question left on the record
+## The open question, RESOLVED — the winner never reaches the output on `ooffice`
 
-On `ooffice` the gate result measured **byte-identical** output between its baseline and
-its sticky candidate, yet this scan shows 128 blocks where `lz_rans` beats `geomix`.
-Sticky selection that re-pinned those blocks to `geomix` should have cost bytes there.
+The first version of this document left a tension on the record: the gate result measured
+**byte-identical** `ooffice` output between its baseline and its sticky candidate, yet this
+scan shows 128 of 1128 blocks where `lz_rans` beats `geomix`. Two explanations were offered
+and neither was verified. It is now measured, because it needed one run rather than a
+campaign.
 
-Both observations reproduce — this lane's independent `--max` run of `ooffice` produces
-**1,763,460 bytes**, matching the gate result's baseline cell exactly — so this is a real
-tension, not a discrepancy between runs. Two candidate explanations, neither verified:
+**Test.** Encode `ooffice` twice on the same host, `CUBR_THREADS=64`, binaries pinned by
+hash — baseline `sha256:e2917ca1…` (full competition) against candidate
+`sha256:19ebfe14…` run with `--sticky-window 1`, which competes only the anchor of each
+chunked container and forces every other block to that anchor's winner. If the 128
+`lz_rans` choices reach the output, overriding them must change bytes.
 
-1. The gate's `MED16_STICKY_PLAN` was scoped to MED16 as its only authorized caller, so
-   blocks competing under a different caller would keep competing and keep their winner.
-2. The blocks where `lz_rans` wins may sit inside a container that loses the outer
-   competition and is discarded whole, in which case their value-stream winner never
-   reaches the output. `ooffice`'s attribution shows `bcj_cm2`, `cm2`, `med16` and `base`
-   all taking outer wins, which is consistent with this but does not establish it.
+**Result.**
 
-Resolving it needs one run, not a campaign: encode `ooffice` under the rescued candidate
-and diff the per-block winners. Recorded rather than guessed at, so the next lane starts
-from the question instead of rediscovering the tension.
+| arm | sha256 of output | bytes | round-trip |
+|---|---|---:|---|
+| baseline `--max` | `f4709c0a8eb6a787b577c0c5865ff654d30d6c6acfc2b12c67681c7f6a0a0be6` | 1,763,460 | PASS |
+| `--sticky-window 1` | `f4709c0a8eb6a787b577c0c5865ff654d30d6c6acfc2b12c67681c7f6a0a0be6` | 1,763,460 | PASS |
+
+**Byte-identical.** Both arms decode back to the original `ooffice`
+(`sha256:e7ee0138…`, 6,152,192 bytes) exactly. The candidate's own counters confirm the
+mechanism fired rather than silently no-opping: `STICKY:reused = 1104`, `FINAL:geomix = 24`
+— 1104 of 1128 blocks were forced, 24 remained anchors, and no forced scheme declined.
+
+**Hypothesis 2 is confirmed and hypothesis 1 is not needed.** On `ooffice` the per-block
+value-stream winner does not reach the output at all. The container those blocks belong to
+loses the *outer* competition and is discarded whole, so which scheme won inside it is
+invisible in the emitted bytes. The `ooffice` attribution is consistent with this —
+`bcj_cm2`, `cm2`, `med16` and `base` all take outer wins.
+
+This **corrects the gate result's explanation without touching its verdict.** The gate
+explained its identical-bytes cell as "consistent with F18's finding that the competition
+computes a constant where it runs". That is not why: the winner is *not* constant on
+`ooffice` (1000/128). The bytes are identical because the work is thrown away.
+
+That is a **stronger** statement about the waste than "it recomputes a constant". On this
+file the eight-way competition is not merely rediscovering a known answer — it is computing
+an answer that nothing reads.
+
+### And the kill is robust to scoping
+
+The gate's candidate scoped sticky to `MED16` as its only authorized caller and measured
+**1.05×** on `ooffice`. This candidate forces at *every* chunked caller — a strictly wider
+attack on the same waste — and measures **168.77 s → 143.64 s, 1.175×**.
+
+Both arms here are same-host, same-thread-count, single-run each, so 1.175× is internally
+valid but is **not** a repeatability estimate and is **not** comparable to the gate's
+figure in absolute terms (that ran pinned to CPUs 0-15 at `CUBR_THREADS=16`).
+
+The point is the direction, not the decimal: widening the scope from MED16-only to every
+caller still lands far below the **1.50×** bar. The kill was not an artefact of the gate
+candidate's narrow scoping — a second, independently written implementation with a wider
+reach fails the same gate. **The verdict stands, now from two implementations.**
+
+What remains genuinely un-refuted is what the gate result already named: a mechanism that
+removes the losers *without probing*, or one that makes the winner itself cheaper. On
+`ooffice` specifically there is a larger prize visible from here — not running the
+discarded container at all — but that is an outer-rail question, not a value-stream one,
+and nothing here measures it.
 
 ## Provenance
 
@@ -157,4 +199,7 @@ from the question instead of rediscovering the tension.
 - Scan driver: `dev-ai:/root/cubr0096/winner-scan.sh`.
 - Superseded re-implementation: `cubr-0096-sticky-vs` @ `ed8bc3f` — built, 12 tests green
   including a control proving `recheck=1` reproduces competitive output byte-for-byte.
-  Not for merge.
+  Not for merge. It is, however, the binary that produced the `ooffice` resolution above.
+- `ooffice` decision run: `dev-ai:/root/cubr0096/decide/` — `hashes.txt`, `base.log`,
+  `sticky.log`; driver `dev-ai:/root/cubr0096/ooffice-decide.sh`. Binaries pinned by
+  sha256 in the section above and kept at `dev-ai:/root/cubr0096/cubrim-{baseline,sticky}`.
