@@ -80,19 +80,18 @@ Full files from the 24-file world corpus, `CUBRIM_PROFILE=1`, `CUBR_THREADS=64`,
 
 | file | class | bytes | blocks competed | winner distribution | winner constant? |
 |---|---|---:|---:|---|---|
-| `x-ray` | image | 8,474,240 | 1560 | `geomix` 1560 | **yes** |
-| `mr` | image | 9,970,564 | 1836 | `geomix` 1836 | **yes** |
-| `ptt5` | image | 513,216 | 96 | `geomix` 81, `lz_rans` 15 | no — 15.6% |
-| `ooffice` | exe | 6,152,192 | 1128 | `geomix` 1000, `lz_rans` 128 | no — 11.3% |
 | `mozilla` | exe | 51,220,480 | 9384 | **`lz_rans` 5141, `geomix` 4215, `ctxmix` 28** | **no — geomix loses** |
-| `sao` | binary | 7,251,944 | 1332 | `geomix` 1331, `ctxmix` 1 | no — 0.08% |
-| `kennedy.xls` | binary | 1,029,744 | 192 | `geomix` 129, `lz_rans` 63 | no — 32.8% |
-| `samba` | exe | 21,606,400 | 0 | — | competition never runs |
-| `osdb` | database | 10,085,684 | 0 | — | competition never runs |
 | `nci` | database | 33,553,445 | 6144 | `geomix` 4449, `lz_rans` 1695 | no — 27.6% |
+| `mr` | image | 9,970,564 | 1836 | `geomix` 1836 | **yes** |
+| `x-ray` | image | 8,474,240 | 1560 | `geomix` 1560 | **yes** |
+| `sao` | binary | 7,251,944 | 1332 | `geomix` 1331, `ctxmix` 1 | no — 0.08% |
+| `ooffice` | exe | 6,152,192 | 1128 | `geomix` 1000, `lz_rans` 128 | no — 11.3% |
+| `kennedy.xls` | binary | 1,029,744 | 192 | `geomix` 129, `lz_rans` 63 | no — 32.8% |
+| `ptt5` | image | 513,216 | 96 | `geomix` 81, `lz_rans` 15 | no — 15.6% |
 | `webster` | text | 41,458,703 | 0 | — | competition never runs |
-| `enwik8` | text | 100,000,000 | *running* | *not yet measured* | *pending* |
+| `samba` | exe | 21,606,400 | 0 | — | competition never runs |
 | `dickens` | text | 10,192,446 | 0 | — | competition never runs |
+| `osdb` | database | 10,085,684 | 0 | — | competition never runs |
 | `reymont` | text | 6,627,202 | 0 | — | competition never runs |
 | `xml` | xml | 5,345,280 | 0 | — | competition never runs |
 | `plrabn12.txt` | text | 481,861 | 0 | — | competition never runs |
@@ -104,8 +103,10 @@ Full files from the 24-file world corpus, `CUBRIM_PROFILE=1`, `CUBR_THREADS=64`,
 | `fields.c` | code | 11,150 | 0 | — | competition never runs |
 | `xargs.1` | text | 4,227 | 0 | — | competition never runs |
 | `grammar.lsp` | code | 3,721 | 0 | — | competition never runs |
+| `enwik8` | text | 100,000,000 | *running* | *not yet measured* | *pending* |
 
-**All 24 corpus files, sorted by competed blocks then size.** The first version of
+**All 24 corpus files: the eight that compete first, by block count; then the fifteen
+measured at zero, by size; then the one row still pending.** The first version of
 this document measured 14 and listed the ten it had not reached; this scan closes that
 gap. Of the 23 rows measured so far, **eight compete and fifteen are zero**; only
 `enwik8` is still encoding, and it is marked pending rather than assumed.
@@ -290,7 +291,7 @@ Five of the six were right. `nci` was wrong, and it is the one that mattered.
 
 **What survives.** The three-tier gate model is not damaged by this. `nci` sits in tier 3
 by every column the model uses — `med16` row present, wall 116.524 s (three orders above
-the 0.013–0.033 s tier-2 band), non-zero competition — and the tier boundary is still
+the 0.013–0.052 s tier-2 band), non-zero competition — and the tier boundary is still
 absolute. The gate classified `nci` correctly.
 
 **What was wrong.** The input I fed the model: "database, not a 2-D raster, so the
@@ -316,7 +317,7 @@ blocks") reads like a property of the kind of data. It is not.
 - **It does not establish requirement 4** (≤ +0.50% corpus ratio cost). One candidate arm
   now exists — `ooffice`, measured below at **exactly zero** cost — but requirement 4 is a
   *corpus* figure and one file is not a corpus. What the table bounds is where a ratio cost
-  could come from at all: only the seven files that compete, and on `x-ray` and `mr` a
+  could come from at all: only the eight files that compete, and on `x-ray` and `mr` a
   sticky choice costs zero because there is only ever one winner to be sticky about.
 - It now measures **23 of the 24 corpus files**, with only `enwik8` still encoding at the
   time of this commit and marked pending in the table. The first version of this document
@@ -324,8 +325,8 @@ blocks") reads like a property of the kind of data. It is not.
   `reymont`, `dickens`, `samba` and `webster` at zero competed blocks, and `nci` at
   **6144**.
 - **Requirement 4 is still not established and this scan does not attempt it.** Knowing
-  which files compete bounds where a ratio cost could come from — at most seven files —
-  but it measures no candidate arm and produces no ratio figure.
+  which files compete bounds where a ratio cost could come from — eight files — but it
+  measures no candidate arm and produces no ratio figure.
 
 ## The open question, RESOLVED — the winner never reaches the output on `ooffice`
 
