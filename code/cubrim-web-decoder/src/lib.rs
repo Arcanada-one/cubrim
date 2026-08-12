@@ -41,7 +41,15 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-#[cfg(target_arch = "wasm32")]
+// The C ABI is not wasm-specific — wasm was simply its first consumer. Built
+// natively it produces a cdylib the benchmark can call in-process, which is the
+// only way to time a decoder at web-asset sizes: a subprocess per decode puts a
+// 3.5-4 ms spawn floor under a sub-millisecond operation and stops
+// discriminating entirely (CUBR-0074 Phase B, 2026-08-12).
+//
+// Measuring through this ABI rather than through `decode_with_limits` directly
+// is deliberate: it is the same entry point the browser calls, so a number
+// measured here describes the artefact that actually ships.
 pub mod wasm;
 
 /// Why a decode stopped.
