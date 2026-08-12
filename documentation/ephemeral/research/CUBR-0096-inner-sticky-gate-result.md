@@ -166,3 +166,35 @@ twice.
 - FINDINGS F17 / F18 — the evidence base: the eight-way per-block competition, and its
   `FINAL:` counter showing geomix winning 384/384 blocks on both x-ray and ooffice.
 - F19 — why per-class corpus measurement is mandatory and slice figures are forbidden.
+
+## Addendum (2026-08-12): the bound applies to the live re-implementation exactly
+
+Branch `cubr-0096-sticky-vs` now carries `ed8bc3f` "feat(CUBR-0096): sticky value-stream
+selection behind an explicit flag" — a second, independent implementation written without
+knowledge of the run above. It is worth being precise about how much of this document
+transfers to it, rather than leaving that as an exercise.
+
+**The anchor rule is the same rule.** `StickyParams::is_anchor` is
+`i < compete_window || (i - compete_window) % recheck_interval == 0`, which is
+`sticky_probe_indices` from the killed candidate under different names
+(`compete_window` = `compete_blocks`, `recheck_interval` = `recheck_every`). The probe-rate
+arithmetic above therefore applies to this implementation without adjustment.
+
+**Its most aggressive reachable setting is the perfect oracle, and the oracle is already
+priced.** `--sticky-window` defaults to 1 and `--sticky-recheck` unset means `usize::MAX`,
+i.e. never re-compete — one probe block in the whole file. That is a *lower* probe rate than
+the killed candidate's 6–8%, and it converges on the no-probing oracle, which the table above
+bounds at **≈1.37× on x-ray and ≈1.06× on ooffice**. Being more aggressive than the run that
+failed the gate does not clear the gate; it approaches a ceiling that already sits under it.
+
+**What could still move the number, stated so this is not read as a blanket veto.** The bound
+is derived from the *killed candidate's* measured cells. If this implementation's pinned path
+is meaningfully cheaper per block than that one's — not merely skipping the losers, but doing
+the winner's work faster — the ceiling moves and the arithmetic here has to be redone against
+fresh baseline/candidate cells. That is a real possibility and the way to settle it is one
+cheap x-ray pair, not a 24-file corpus sweep. Run the pair first: if it lands near 1.3–1.4×,
+the corpus arm will not rescue it and the dev-ai hours are better spent elsewhere.
+
+Also inherited unchanged: byte-exactness. `--max` must stay byte-identical to v0.3.2, and any
+sticky setting is *not* byte-exact wherever the per-block winner varies — the CLI help on that
+branch already says so, which is the right call.
