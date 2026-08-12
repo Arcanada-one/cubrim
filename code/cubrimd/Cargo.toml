@@ -1,0 +1,27 @@
+[package]
+name = "cubrimd"
+version = "0.1.0"
+edition = "2021"
+description = "Reverse proxy that serves Content-Encoding: cbm to clients that ask for it (CUBR-0078)"
+license-file = "../cubrim-rs/LICENSE"
+publish = false
+
+# Browser -> cubrimd -> origin (canon stage 3: the fastest server-side route is
+# a standalone proxy, not an nginx module). The proxy owns exactly one coding —
+# `cbm` — and delegates every other one: a client that never claimed `cbm` has
+# its request forwarded with the `cbm` token stripped, and whatever the origin
+# negotiates (brotli, zstd, gzip, identity) passes through untouched.
+#
+# Dependency policy matches the sibling crates: small and pinned. There is
+# deliberately NO HTTP client dependency: the obvious one (ureq) transparently
+# decompresses any Content-Encoding its compiled features recognise and
+# deletes the header while doing so, and feature unification with the cubrim
+# crate compiles those features in whether this crate asks or not — measured,
+# a gzip origin response came back header-stripped. The origin client is
+# ~200 lines of std::net in src/origin.rs instead (see its module docs).
+
+[dependencies]
+cubrim = { path = "../cubrim-rs" }
+tiny_http = "0.12"
+
+[dev-dependencies]
