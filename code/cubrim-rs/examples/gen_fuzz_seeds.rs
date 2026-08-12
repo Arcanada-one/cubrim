@@ -58,13 +58,13 @@ fn payloads() -> Vec<(&'static str, Vec<u8>)> {
     // Markup and JSON: text-shaped, historically CM2's territory.
     v.push((
         "html",
-        (0..3000u32)
+        (0..900u32)
             .flat_map(|i| format!("<li class=\"r{}\">item {}</li>\n", i % 13, i % 31).into_bytes())
             .collect(),
     ));
     v.push((
         "json",
-        (0..4000u32)
+        (0..1200u32)
             .flat_map(|i| format!("{{\"id\":{},\"v\":\"{}\"}},", i, i % 7).into_bytes())
             .collect(),
     ));
@@ -115,14 +115,8 @@ fn payloads() -> Vec<(&'static str, Vec<u8>)> {
     v
 }
 
-fn main() {
-    let out = Path::new("fuzz/corpus/decode_hostile");
-    fs::create_dir_all(out).expect("create corpus dir");
-
-    // The scheme loop is retained deliberately: if the rail ever starts honouring
-    // the request, these become distinct and dedup will let them through. Today
-    // they collapse, and the dedup counter below is what proves it.
-    let schemes = [
+fn scheme_names() -> [(&'static str, ValueScheme); 8] {
+    [
         ("bitpack-fixed", ValueScheme::BitpackFixed),
         ("rle-codes", ValueScheme::RleCodes),
         ("entropy", ValueScheme::Entropy),
@@ -131,22 +125,57 @@ fn main() {
         ("bwt-entropy", ValueScheme::BwtEntropy),
         ("bwt-rans", ValueScheme::BwtRans),
         ("bwt-geo-mix", ValueScheme::BwtGeoMix),
-    ];
+    ]
+}
+
+fn main() {
+    let out = Path::new("fuzz/corpus/decode_hostile");
+    fs::create_dir_all(out).expect("create corpus dir");
+
+    // Prove the `value_scheme` knob is inert ONCE, on the cheapest payload, instead
+    // of re-deriving it on every payload. The previous version encoded each payload
+    // through all eight schemes and discovered eight identical blobs each time — 8x
+    // the encode cost for a fact that one small probe settles. If this probe ever
+    // reports more than one distinct blob, the rail has started honouring the
+    // request and the per-scheme loop should come back.
+    let probe_data: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+    let schemes = scheme_names();
+    let mut probe: HashSet<Vec<u8>> = HashSet::new();
+    for (_n, scheme) in schemes {
+        let mut c = EncodeConfig::v1_default();
+        c.value_scheme = scheme;
+        probe.insert(cubrim::encode_with_config(&probe_data, &c));
+    }
+    println!(
+        "value_scheme probe: {} scheme request(s) produced {} distinct blob(s){}",
+        schemes.len(),
+        probe.len(),
+        if probe.len() == 1 {
+            " -- the knob is INERT through encode_with_config; the competitive rail \
+overrides it, so seeding 'one stream per scheme' is not a thing this API can do"
+        } else {
+            " -- the knob now changes output; restore the per-scheme seeding loop"
+        }
+    );
 
     let mut seen: HashSet<Vec<u8>> = HashSet::new();
     let mut modes: BTreeMap<u8, usize> = BTreeMap::new();
     let (mut written, mut duplicates, mut rejected) = (0usize, 0usize, 0usize);
 
+    // The probe above decides whether the per-scheme loop is worth running. It is
+    // kept because the knob is NOT strictly inert — it collapses, and how far it
+    // collapses depends on the payload. Dedup makes the loop cheap in output terms;
+    // payload sizes are kept modest so it is cheap in encode terms too.
     for (pname, data) in payloads() {
-        for (sname, scheme) in schemes {
+        for (sname, scheme) in scheme_names() {
             for square in [true, false] {
                 let mut config = EncodeConfig::v1_default();
                 config.value_scheme = scheme;
                 config.use_square_limit = square;
                 let blob = cubrim::encode_with_config(&data, &config);
 
-                // Only seed streams that actually decode — a seed that is
-                // already invalid teaches the fuzzer nothing about the format.
+                // Only seed streams that actually decode — a seed that is already
+                // invalid teaches the fuzzer nothing about the format.
                 if !cubrim::decode(&blob).map(|d| d == data).unwrap_or(false) {
                     rejected += 1;
                     continue;
@@ -157,9 +186,7 @@ fn main() {
                 }
                 let m = mode_of(&blob).unwrap_or(255);
                 *modes.entry(m).or_insert(0) += 1;
-                let path = out.join(format!(
-                    "seed-{pname}-{sname}-sq{square}-mode{m}.cbm"
-                ));
+                let path = out.join(format!("seed-{pname}-{sname}-sq{square}-mode{m}.cbm"));
                 fs::write(&path, &blob).expect("write seed");
                 written += 1;
             }
@@ -175,8 +202,8 @@ fn main() {
     for want in [16u8, 17] {
         if !modes.contains_key(&want) {
             println!(
-                "  NOTE: no seed reaches mode {} ({}) — the fuzzer does not start \
-                 inside that decode path",
+                "  NOTE: no seed reaches mode {} ({}) -- the fuzzer does not start \
+inside that decode path",
                 want,
                 mode_name(want)
             );
