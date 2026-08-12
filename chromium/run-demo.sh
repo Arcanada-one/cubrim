@@ -31,7 +31,7 @@ echo "== patched content_shell, cbm feature on, headless via xvfb, netlog captur
 # the rendered DOM, proving the decoded bytes reached Blink.
 timeout 60 xvfb-run -a "$CS" \
   --enable-features=CbmContentEncoding --no-sandbox --disable-gpu \
-  --log-net-log="$NETLOG" --dump-dom "http://127.0.0.1:8078/$DOC" > "$DUMP" 2>/dev/null || true
+  --log-net-log="$NETLOG" --net-log-capture-mode=Everything --dump-dom "http://127.0.0.1:8078/$DOC" > "$DUMP" 2>/dev/null || true
 
 echo "== EVIDENCE"
 echo "-- netlog mentions of cbm content-encoding:"
