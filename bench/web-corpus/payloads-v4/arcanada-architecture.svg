@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1320" role="img" aria-labelledby="title desc">
+  <title id="title">Arcanada architecture layers</title>
+  <desc id="desc">The architecture has five layers: task intake, a Knowledge Contract with parallel fields, orchestration, execution adapters, and validation. Role, skills, constraints, and capabilities are fields of the contract rather than sequential reasoning stages.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1728"/>
+      <stop offset="1" stop-color="#111d32"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1 L11 6 L1 11 Z" fill="#7e91ad"/>
+    </marker>
+    <marker id="arrowBoth" markerWidth="12" markerHeight="12" refX="6" refY="6" orient="auto-start-reverse">
+      <path d="M1 1 L11 6 L1 11 Z" fill="#d6b463"/>
+    </marker>
+    <style>
+      .title { font: 700 34px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f8fafc; }
+      .subtitle { font: 400 20px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #9fb0c8; }
+      .layer { font: 700 17px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 2px; fill: #f6c453; }
+      .node { font: 700 24px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f8fafc; }
+      .field { font: 600 19px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f8fafc; }
+      .detail { font: 400 18px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #b9c7da; }
+      .note { font: 500 18px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #d6b463; }
+    </style>
+  </defs>
+  <rect width="1440" height="1320" rx="28" fill="url(#bg)"/>
+  <text x="72" y="72" class="title">Arcanada architecture</text>
+  <text x="72" y="108" class="subtitle">Meaning is structured before protocols enter the execution layer.</text>
+
+  <rect x="160" y="155" width="1120" height="130" rx="18" fill="#253a57" stroke="#55718f" stroke-width="2"/>
+  <text x="205" y="198" class="layer">01 · TASK INTAKE</text>
+  <text x="205" y="246" class="node">Task</text>
+  <text x="700" y="246" class="node">Semantic Analysis</text>
+  <line x1="390" y1="235" x2="650" y2="235" stroke="#7e91ad" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="720" y1="285" x2="720" y2="330" stroke="#7e91ad" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="120" y="330" width="1200" height="280" rx="18" fill="#3a3152" stroke="#8b79c7" stroke-width="2"/>
+  <text x="165" y="375" class="layer">02 · KNOWLEDGE CONTRACT</text>
+  <text x="165" y="420" class="detail">Parallel fields define what the task requires.</text>
+  <rect x="165" y="450" width="300" height="62" rx="12" fill="#514574"/>
+  <rect x="490" y="450" width="300" height="62" rx="12" fill="#514574"/>
+  <rect x="805" y="450" width="300" height="62" rx="12" fill="#514574"/>
+  <rect x="165" y="530" width="300" height="62" rx="12" fill="#514574"/>
+  <rect x="490" y="530" width="300" height="62" rx="12" fill="#514574"/>
+  <rect x="805" y="530" width="300" height="62" rx="12" fill="#514574"/>
+  <text x="315" y="489" text-anchor="middle" class="field">Role</text>
+  <text x="640" y="489" text-anchor="middle" class="field">Skills</text>
+  <text x="955" y="489" text-anchor="middle" class="field">Blueprints</text>
+  <text x="315" y="569" text-anchor="middle" class="field">Constraints</text>
+  <text x="640" y="569" text-anchor="middle" class="field">Success Criteria</text>
+  <text x="955" y="569" text-anchor="middle" class="field">Required Capabilities</text>
+  <line x1="720" y1="610" x2="720" y2="655" stroke="#7e91ad" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="180" y="655" width="1080" height="130" rx="18" fill="#4b3045" stroke="#d3748c" stroke-width="2"/>
+  <text x="225" y="700" class="layer">03 · ORCHESTRATION</text>
+  <rect x="225" y="720" width="360" height="52" rx="12" fill="#633f53"/>
+  <rect x="855" y="720" width="360" height="52" rx="12" fill="#633f53"/>
+  <text x="405" y="754" text-anchor="middle" class="field">Capability Resolver</text>
+  <text x="1035" y="754" text-anchor="middle" class="field">Planning</text>
+  <line x1="595" y1="746" x2="845" y2="746" stroke="#d6b463" stroke-width="3" marker-start="url(#arrowBoth)" marker-end="url(#arrowBoth)"/>
+  <text x="720" y="708" text-anchor="middle" class="detail">refine</text>
+  <line x1="720" y1="785" x2="720" y2="830" stroke="#7e91ad" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="100" y="830" width="1240" height="200" rx="18" fill="#142b31" stroke="#73d7c3" stroke-width="2"/>
+  <text x="145" y="875" class="layer" fill="#73d7c3">04 · EXECUTION</text>
+  <text x="145" y="918" class="node">Execution Runtime</text>
+  <rect x="500" y="875" width="130" height="68" rx="12" fill="#1f4650"/>
+  <rect x="650" y="875" width="130" height="68" rx="12" fill="#1f4650"/>
+  <rect x="800" y="875" width="130" height="68" rx="12" fill="#1f4650"/>
+  <rect x="950" y="875" width="130" height="68" rx="12" fill="#1f4650"/>
+  <rect x="1100" y="875" width="130" height="68" rx="12" fill="#1f4650"/>
+  <text x="565" y="917" text-anchor="middle" class="field">CLI</text>
+  <text x="715" y="917" text-anchor="middle" class="field">MCP</text>
+  <text x="865" y="917" text-anchor="middle" class="field">API</text>
+  <text x="1015" y="917" text-anchor="middle" class="field">Code</text>
+  <text x="1165" y="917" text-anchor="middle" class="field">A2A</text>
+  <text x="500" y="990" class="detail">Adapters are replaceable ways to execute the selected bindings.</text>
+  <line x1="720" y1="1030" x2="720" y2="1075" stroke="#7e91ad" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="220" y="1075" width="1000" height="130" rx="18" fill="#2d3049" stroke="#8494d0" stroke-width="2"/>
+  <text x="265" y="1120" class="layer">05 · VALIDATION</text>
+  <text x="265" y="1170" class="node">Observations</text>
+  <line x1="535" y1="1157" x2="675" y2="1157" stroke="#7e91ad" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="720" y="1170" text-anchor="middle" class="node">Validation</text>
+  <line x1="765" y1="1157" x2="905" y2="1157" stroke="#7e91ad" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="1015" y="1170" text-anchor="middle" class="node">Result</text>
+  <text x="720" y="1270" text-anchor="middle" class="note">Contract fields are not sequential reasoning stages.</text>
+</svg>
