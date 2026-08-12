@@ -203,6 +203,8 @@ jobs:
       # half the proxy's contract is which Accept-Encoding the origin sees.
       - name: Unit + end-to-end suite
         run: cargo test --locked --release
+
+  web-benchmark-harness:
     name: Web benchmark harness
     runs-on: ubuntu-latest
     timeout-minutes: 15
