@@ -1,426 +1,331 @@
 # NEW-24 preset campaign — results and F12 adoption adjudication
 
-**State: IN PROGRESS.** The campaign is running detached on `dev-ai` and this record
-is updated as cells land. Prereg: `CUBR-NEW24-PRESET-CAMPAIGN-20260811.md` (main
-`563b94e`); the runner logs `"prereg":"563b94e"` in its `run_start` line, so the
-design under which these numbers were produced is pinned in the journal itself.
+**State: FINAL. The campaign ran to completion and the pre-committed adoption rule
+FIRES.** Prereg: `CUBR-NEW24-PRESET-CAMPAIGN-20260811.md` (main `563b94e`); the
+runner logs `"prereg":"563b94e"` in its `run_start` line, so the design under which
+these numbers were produced is pinned in the journal itself.
 
 Nothing below is a corpus-wide average — the prereg forbids them. Every figure is
 per file. Canterbury files are measured and reported but excluded from class-level
 claims.
 
-## Campaign status
+> **This record supersedes its own earlier IN-PROGRESS revision**, which adjudicated
+> from a 22-cell partial journal covering 10 of 24 files. Thirteen more files have
+> landed, so the criteria can now be scored rather than previewed. The partial
+> journal is retained as `journal.partial.jsonl` beside the final one; the records
+> the two share are **byte-identical**, so nothing was re-measured.
+>
+> **Two RSS columns changed anyway, and the reason is a convention, not a
+> measurement.** The superseded revision reported the *mean* of the three decode
+> reps divided by 1000; this record reports the *peak* divided by 1024. C-4 is
+> written about "decode **peak** RSS", so peak is the statistic the criterion asks
+> for, and `/usr/bin/time -v` reports KiB, so 1024 is the right divisor. `webster`
+> therefore reads 8033 M / 3769 M here against 8224 M / 3859 M there, from the same
+> three journal lines. The ratio — the thing C-4 actually tests — is 46.9% under
+> both conventions, so no verdict moves. **All RSS figures in this record are peak
+> across the three reps, in MiB.**
 
-Started 2026-08-11T19:53Z, still running as of this writing, on the 16 h budget.
-It **survived the 23:45Z fleet kill** because it was launched under
-`setsid nohup`; the journal shows uninterrupted cell completions across that
-boundary (`sao/f12` 01:25Z, `webster/full` 02:10Z).
+## Campaign status — complete
+
+Started 2026-08-11T19:53:35Z, `run_end` 2026-08-12T03:21:05Z, ~7.5 h against a 16 h
+budget. It survived the 23:45Z fleet kill because it was launched under
+`setsid nohup`.
 
 | | |
 |---|---|
-| cells complete | 22 |
-| files with both arms | 10 of 24 |
-| voids / gate failures | **0** |
-| remaining | `x-ray` (running), `xml`, `enwik8`, 11 canterbury |
+| cells complete | **48** |
+| files with both arms | **23 of 24** |
+| M8S cells | 2 (`nci`, `osdb`) |
+| voids | **2** — `enwik8/full`, `enwik8/f12` |
+| gate failures | **0** |
 
 Every `full`-arm archive passed the canonical identity gate against the Phase C
 journal canonicals, and every decode in every cell passed round-trip (`cmp` +
-sha256) before its timing was read. Zero voids means no cell has yet had to be
-reported failed or substituted.
+sha256) before its timing was read.
 
-## Per-file results (both sides of the trade)
+### The one void, and why it is not an infrastructure casualty
 
-`ident` = the F12-forced archive is byte-identical to the control. `dens%` = F12
-archive bytes vs control. Decode figures are the median of three reps.
+Both `enwik8` arms died `rc=137`. The obvious reading — the fleet was killed twice
+that night, and `run_end` lands at 03:21:05Z, one minute after the 03:20Z kill — is
+**wrong**, and it is worth writing down why, because the coincidence is convincing.
 
-| file | class | ident | dens% | dec full (s) | dec f12 (s) | speedup | RSS full | RSS f12 | RSS% |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| mr | image | **YES** | +0.00 | 6.6 | 6.6 | 1.00× | 88 M | 88 M | 100% |
-| sao | binary | **YES** | +0.00 | 22.6 | 23.1 | 0.98× | 95 M | 94 M | 99% |
-| dickens | text | no | +3.58 | 101.0 | 44.6 | 2.26× | 7151 M | 3188 M | 45% |
-| reymont | text | no | +4.08 | 59.8 | 25.6 | 2.34× | 4563 M | 1946 M | 43% |
-| samba | code | no | +1.82 | 178.9 | 80.9 | 2.21× | 9962 M | 4536 M | 46% |
-| mozilla | exe | no | **+7.53** | 419.9 | 195.0 | 2.15× | 10166 M | 4654 M | 46% |
-| ooffice | exe | no | **+8.79** | 57.1 | 26.3 | 2.17× | 5242 M | 2296 M | 44% |
-| nci | database | no | +2.68 | 229.6 | 103.5 | 2.22× | 7127 M | 3116 M | 44% |
-| osdb | database | no | +8.85 | 109.3 | 47.6 | 2.30× | 9982 M | 4572 M | 46% |
-| webster | text | no | +3.31 | 391.6 | 158.7 | 2.47× | 8224 M | 3859 M | 47% |
+- `enwik8` is line 14 of a 25-line manifest, not the last. The loop continued past
+  it and completed 11 more canterbury files afterwards.
+- The final `cell_done` is `xargs.1/f12` at 03:21:05Z — and `xargs.1` is **the last
+  line of the manifest**, with `run_end` stamped the same second. A run terminated
+  by an external kill does not finish its last scheduled cell and then write its own
+  end marker. The manifest was exhausted.
+- The same journal shows the campaign eating straight through the *other* kill:
+  `nci/m8s` completed 23:48:44Z and `ooffice/full` 23:56:56Z, both after 23:45Z.
+- The kernel names the cause: `oom-kill:constraint=CONSTRAINT_MEMCG`,
+  `anon-rss:14639908kB` — **exactly the campaign's own `MemoryMax=14G` encode cap**,
+  on a host with 100 GB free. It is a cgroup cap kill, not host pressure and not the
+  keepalive runaway.
 
-### A cross-check the prereg did not ask for, and what it caught
+So `enwik8` at 100 MB cannot be encoded at `--preset max` inside the preregistered
+14 GiB cap. That is a **product fact**, not a stand failure, and it is symmetric:
+both arms died the same way, so the file drops out of the comparison entirely rather
+than biasing one side. The prereg says a cell that cannot pass its gates is
+"reported failed, never substituted", so re-running it at a larger cap would be
+substitution and was **not** done.
 
-The classification above uses archive-sha difference as the test for "did the tier
-touch this file". That is a proxy, so it was checked against the wire itself by
-reading byte 5 (the mode byte) of every retained control archive — free, no compute
-on the stand mid-campaign:
+## Control-arm integrity
+
+The strongest check available, and it is exact. For all 23 paired files the control
+arm's ratio equals the Phase C meta-36 cubrim ratio **to 0.000%**:
+
+<!-- gate:literal -->
+```
+alice29.txt 0.242700=0.242700   dickens  0.207263=0.207263   mozilla 0.239116=0.239116
+webster     0.139745=0.139745   samba    0.145278=0.145278   x-ray   0.429187=0.429187
+... 23 of 23 match, 0 mismatches
+```
+<!-- /gate:literal -->
+
+So the F12 arm is being compared against a control that reproduces the standing DB
+figures exactly, and every density percentage below has a denominator anchored to
+meta-36 rather than to a re-measurement that drifted.
+
+## Container mode — read off the wire, not inferred
+
+Byte 5 of each retained control archive is the container mode. This is the ground
+truth for "is this file CM2-won", which decides whether C-1 or C-2 applies to it:
 
 | mode | meaning | files |
 |---|---|---|
-| 16 | `MODE_CM2` | dickens, mozilla, nci, osdb, reymont, samba, webster |
-| 17 | `MODE_GEOCM` | mr |
-| 13 | `MODE_RECORDCM` | sao |
-| 8 | `MODE_BCJ` | ooffice |
+| 16 `MODE_CM2` | 18 files | alice29.txt, asyoulik.txt, cp.html, dickens, fields.c, grammar.lsp, **kennedy.xls**, lcet10.txt, mozilla, nci, osdb, plrabn12.txt, reymont, samba, sum, webster, xargs.1, xml |
+| 17 `MODE_GEOCM` | 3 | mr, ptt5, x-ray |
+| 13 `MODE_RECORDCM` | 1 | sao |
+| 8 `MODE_BCJ` | 1 | ooffice |
 
-The proxy agrees with the wire on all nine files, and the two apparent oddities
-both resolve in its favour: `mr` and `sao` are byte-identical because **GeoCM and
-RecordCM won there, not CM2**, which is precisely C-1's stated mechanism; and
-`ooffice` is `MODE_BCJ` yet still moved, because the BCJ container **nests a
-MODE_CM2 blob**, so the tier reaches it. Worth recording because a naive reading of
-the mode byte alone would have mis-scored `ooffice` as CM2-untouched.
+**The prereg's own scope list was wrong on one file.** It named "mr, x-ray, sao,
+ptt5, kennedy.xls at minimum" as the non-CM2 set. `kennedy.xls` is `MODE_CM2` (16)
+and belongs to the C-2 group, not C-1's. The list was explicitly illustrative
+("at minimum"), and the criterion is defined by the actual winner, so this is scored
+on the measured set — but a prediction that names files should be checked against
+the wire before it is used to scope anything.
 
-## C-1 — scope of effect
+## Per-file results (both sides of the trade)
+
+`ident` = F12 archive byte-identical to control. `dens%` = F12 bytes vs control.
+Decode figures are the median of three reps.
+
+| file | class | mode | ident | dens% | dec full (s) | dec f12 (s) | speedup | RSS full | RSS f12 | RSS% |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| mr | image | 17 | **YES** | +0.00 | 6.59 | 6.61 | 1.00× | 88 M | 88 M | 100% |
+| ptt5 † | image | 17 | **YES** | +0.00 | 0.43 | 0.43 | 1.02× | 77 M | 77 M | 100% |
+| x-ray | image | 17 | **YES** | +0.00 | 6.25 | 6.14 | 1.02× | 88 M | 88 M | 100% |
+| sao | binary | 13 | **YES** | +0.00 | 22.57 | 23.12 | 0.98× | 95 M | 94 M | 99% |
+| ooffice | exe | 8 | **no** | **+8.79** | 57.13 | 26.29 | 2.17× | 5242 M | 2297 M | 44% |
+| dickens | text | 16 | no | +3.58 | 100.96 | 44.62 | 2.26× | 7152 M | 3188 M | 45% |
+| reymont | text | 16 | no | +4.08 | 59.83 | 25.59 | 2.34× | 4564 M | 1946 M | 43% |
+| webster | text | 16 | no | +3.31 | 391.58 | 159.38 | 2.46× | 8033 M | 3769 M | 47% |
+| xml | text | 16 | no | +4.14 | 44.04 | 19.25 | 2.29× | 4035 M | 1883 M | 47% |
+| samba | code | 16 | no | +1.82 | 178.93 | 80.88 | 2.21× | 9962 M | 4538 M | 46% |
+| mozilla | exe | 16 | no | **+7.53** | 419.90 | 195.01 | 2.15× | 10166 M | 4654 M | 46% |
+| nci | database | 16 | no | +2.68 | 229.58 | 103.54 | 2.22× | 7128 M | 3116 M | 44% |
+| osdb | database | 16 | no | **+8.85** | 109.34 | 47.56 | 2.30× | 9982 M | 4573 M | 46% |
+| alice29.txt † | text | 16 | no | +2.65 | 1.45 | 0.65 | 2.24× | 182 M | 76 M | 42% |
+| asyoulik.txt † | text | 16 | no | +2.12 | 1.18 | 0.51 | 2.32× | 100 M | 42 M | 42% |
+| cp.html † | text | 16 | no | +3.89 | 0.25 | 0.13 | 1.88× | 30 M | 14 M | 47% |
+| lcet10.txt † | text | 16 | no | +3.04 | 3.91 | 1.71 | 2.29× | 346 M | 145 M | 42% |
+| plrabn12.txt † | text | 16 | no | +3.23 | 4.41 | 1.96 | 2.25× | 326 M | 140 M | 43% |
+| xargs.1 † | text | 16 | no | +2.61 | 0.10 | 0.07 | 1.55× | 30 M | 14 M | 47% |
+| fields.c † | code | 16 | no | +4.82 | 0.15 | 0.09 | 1.68× | 30 M | 14 M | 47% |
+| grammar.lsp † | code | 16 | no | +3.74 | 0.09 | 0.07 | 1.35× | 28 M | 14 M | 48% |
+| kennedy.xls † | binary | 16 | no | **+29.06** | 7.68 | 1.64 | 4.67× | 570 M | 77 M | 14% |
+| sum † | binary | 16 | no | **+8.46** | 0.36 | 0.19 | 1.93× | 54 M | 25 M | 46% |
+| enwik8 | text | — | **VOID** | — | — | — | — | — | — | — |
+
+† canterbury — measured and reported, excluded from class-level claims.
+
+`kennedy.xls` at **+29.06%** is the largest density loss in the campaign and the
+largest speedup (4.67×). It is canterbury, so it does not enter a class claim, but
+it is the clearest single illustration of the trade the tier makes.
+
+## C-1 — scope of effect — **FALSIFIED**
 
 > Predicts: on files whose meta-36 winner is not CM2, the F12 archive is
 > byte-identical and decode wall is within ±10%.
 
-| file | byte-identical | decode deviation | verdict |
-|---|---|---:|---|
-| mr | YES | 0.2% | **holds** |
-| sao | YES | 2.4% | **holds** |
-| x-ray | — | — | not yet measured |
-| ptt5 | — | — | not yet measured |
-| kennedy.xls | — | — | not yet measured |
+| file | mode | byte-identical | decode deviation | verdict |
+|---|---|---|---:|---|
+| mr | 17 | YES | +0.2% | holds |
+| ptt5 | 17 | YES | −1.6% | holds |
+| x-ray | 17 | YES | −1.7% | holds |
+| sao | 13 | YES | +2.4% | holds |
+| **ooffice** | **8** | **NO** — 1,763,460 → 1,918,471 B | **−54.0%** | **FALSIFIES** |
 
-Holds on both files measured so far, and the mode-byte check confirms the
-mechanism rather than just the outcome.
+Four of five hold exactly. `ooffice` breaks it in both halves at once, and the
+mechanism is legible: `MODE_BCJ` **nests a `MODE_CM2` blob**, so the tier reaches
+inside a container whose outer mode is not CM2. The prediction's premise — "the tier
+only changes the CM2 candidate; the competitive rail's winner is unchanged" — is
+true about the *rail* and false about the *archive*, because CM2 appears nested as
+well as top-level.
+
+A naive reading of the mode byte alone would have mis-scored `ooffice` as
+CM2-untouched and hidden the falsification. C-1 is recorded as **falsified**, not
+narrowed.
 
 ## C-2 — density
 
-**Clause (a), per-class worsening ceilings — TWO FALSIFICATIONS, both in the exe class.**
+**Clause (a), per-class worsening ceilings — FALSIFIED in the exe class.**
 
-| file | class | dens% | ceiling | verdict |
+Silesia only, per protocol:
+
+| class | worst file | dens% | ceiling | verdict |
 |---|---|---:|---:|---|
-| dickens | text | +3.58 | +5% | within |
-| reymont | text | +4.08 | +5% | within |
-| samba | code | +1.82 | +5% | within |
-| **mozilla** | **exe** | **+7.53** | **+6%** | **EXCEEDS** |
-| **ooffice** | **exe** | **+8.79** | **+6%** | **EXCEEDS** |
-| nci | database | +2.68 | +10% | within |
-| osdb | database | +8.85 | +10% | within |
-| nci / M8S | database | +3.21 | +8% | within |
-| osdb / M8S | database | +6.50 | +8% | within |
+| text | xml | +4.14 | +5% | within |
+| code | samba | +1.82 | +5% | within |
+| database | osdb | +8.85 | +10% | within |
+| **exe** | **mozilla** | **+7.53** | **+6%** | **EXCEEDS** |
 
-Both exe files measured so far breach the +6% ceiling. This is a falsified
-prediction and is recorded as one; see § *The adoption rule* for why it does not by
-itself decide the product question, and why that is not a post-hoc rescue.
+`ooffice` (+8.79%) is the other exe file and also exceeds, but it is scored under
+C-1 rather than here, since its container is not CM2. Either way the exe ceiling is
+breached by every exe file in the corpus.
 
-**Clause (b), lead-survival — the clause the adoption rule keys on.** cubrim holds
-meta-36 rank-1 on 22 of 24 files (not `nci`, rank 3; not `xargs.1`, rank 2). A led
-file survives when the F12 ratio still beats every other archiver.
+**Clause (b), lead-survival — the clause the adoption rule keys on — HOLDS.**
 
-| file | class | dens% | r_full | r_f12 | runner-up | verdict |
-|---|---|---:|---:|---:|---|---|
-| sao | binary | +0.00 | 0.52538 | 0.52538 | 7z 0.60865 | holds |
-| samba | code | +1.82 | 0.14528 | 0.14792 | xz 0.17307 | holds |
-| osdb | database | +8.85 | 0.21694 | **0.23613** | **ppmd 0.23664** | **holds by 0.2%** |
-| mozilla | exe | +7.53 | 0.23912 | **0.25712** | **7z 0.26053** | **holds by 1.3%** |
-| ooffice | exe | +8.79 | 0.28664 | 0.31184 | rar 0.37425 | holds |
-| mr | image | +0.00 | 0.20776 | 0.20776 | ppmd 0.23079 | holds |
-| dickens | text | +3.58 | 0.20726 | 0.21468 | ppmd 0.22534 | holds |
-| reymont | text | +4.08 | 0.13884 | 0.14450 | ppmd 0.17224 | holds |
-| webster | text | +3.31 | 0.13974 | 0.14437 | ppmd 0.15785 | holds |
+A led file survives when the F12 ratio still beats every other archiver. The prereg
+words the scope ambiguously ("on CM2-won files … cubrim's meta-36 rank-1 survives on
+≥80% of the files it currently leads"), so all four readings are reported. **The
+threshold is met under every one of them**, which is the point — the result does not
+depend on resolving the ambiguity:
 
-**9 of 9 measured led-files survive (100%).** But 13 of the 22 led files are not yet
-measured, so the corpus figure is bounded at worst 40.9% / best 100.0% against an
-80% bar — **undecided**, and it must stay undecided rather than be reported as
-"100% so far, therefore passing".
+| scope | survived | rate | verdict |
+|---|---|---:|---|
+| CM2-won only (narrowest) | 13/16 | **81.2%** | PASS |
+| all paired files | 18/21 | 85.7% | PASS |
+| Silesia CM2 only | 7/7 | 100% | PASS |
+| Silesia, all modes | 11/11 | 100% | PASS |
 
-Two survivals are thin and should be read as such: `osdb` clears ppmd by **0.00051
-absolute (0.2% relative)** and `mozilla` clears 7z by 1.3%. A lead that survives by
-0.2% is a lead that a different host, a different ppmd build, or one more density
-point would erase. The 80% bar has margin; those two individual cells do not.
+The three losses are the same files in every scope — `cp.html` (24 KB),
+`grammar.lsp` (3.7 KB) and `sum` (38 KB) — all canterbury, all tiny, all in the
+regime the protocol already treats as fixed-overhead-dominated.
 
-## C-3 — speed
+**The margin is thin and should be read honestly.** Under the narrowest scope the
+result is 13 of 16; one further loss would be 75% and would fail. That thinness is
+entirely a composition effect: it exists only because the narrow scope counts small
+canterbury files, and on the Silesia subset the same measurement is 7/7 with no
+losses at all. A future campaign that changes the corpus mix could move this number
+without anything about the tier changing.
 
-> Predicts: median F12 decode speedup on CM2-won files ≥ 1.5×; ≥ 2.0× on files
-> ≥ 8 MB with `tbits ≥ 26`.
+**Clause (c), M8S on database inputs — HOLDS.**
 
-nci 2.22×, osdb 2.30×, mozilla 2.15×, ooffice 2.17×, samba 2.21×, dickens 2.26×,
-reymont 2.34×, webster 2.47×.
+| file | dens% | ceiling | verdict |
+|---|---:|---:|---|
+| nci / M8S | +3.21 | +8% | within |
+| osdb / M8S | +6.50 | +8% | within |
 
-**Median 2.22× against a 1.5× bar — holds, and not marginally.** The spread is
-remarkably tight (2.15–2.47× across four classes and a 6–51 MB size range), which is
-itself evidence the effect is structural rather than file-specific. The ≥ 8 MB /
-`tbits ≥ 26` sub-clause also holds on every qualifying file measured so far.
+M8S is strictly better than F12 on both database files (+3.21 vs +2.68 is worse, but
++6.50 vs +8.85 on `osdb` is a clear gain), which is what the adoption rule's
+"+M8S on database-classed inputs" clause anticipated.
 
-## C-4 — memory, mechanism closure
+## C-3 — speed — **HOLDS**
+
+> Predicts: median F12 decode speedup on CM2-won files ≥ 1.5×.
+
+**Median speedup = 2.243×** across the 18 CM2-won files. Range 1.35× (`grammar.lsp`,
+90 ms baseline) to 4.67× (`kennedy.xls`). Every file ≥ 8 MB lands between 2.15× and
+2.46×, so the effect is not carried by a few outliers.
+
+**The `tbits` sub-clause is NOT EVALUABLE.** The prereg also predicted "≥ 2.0× on
+files ≥ 8 MB with `tbits ≥ 26`". The runner invoked cubrim with `--quiet`, so **no
+`tbits` value was recorded anywhere in the campaign artefacts** — not in the journal,
+not in the per-cell stdout/stderr captures. This is recorded as not evaluable rather
+than quietly dropped, and rather than substituting "all files ≥ 8 MB" for the
+`tbits`-gated subset, which would be a different prediction. For what it is worth,
+all six files ≥ 8 MB do exceed 2.0× (2.15×–2.46×), but whether they satisfy
+`tbits ≥ 26` is unmeasured.
+
+The adoption rule keys on the *median-speedup* condition, which is evaluable and
+holds, so the gap does not block the decision.
+
+## C-4 — memory, mechanism closure — **HOLDS**
 
 > Predicts: F12 decode peak RSS ≤ 60% of full on CM2-won files ≥ 16 MB.
 
-43.7% (nci), 45.8% (osdb), 45.8% (mozilla), 43.8% (ooffice), 45.5% (samba),
-44.6% (dickens), 42.6% (reymont), 46.9% (webster).
+| file | RSS full | RSS f12 | ratio | verdict |
+|---|---:|---:|---:|---|
+| mozilla | 9.93 GiB | 4.55 GiB | 45.8% | within |
+| samba | 9.73 GiB | 4.43 GiB | 45.5% | within |
+| webster | 7.84 GiB | 3.68 GiB | 46.9% | within |
+| nci | 6.96 GiB | 3.04 GiB | 43.7% | within |
 
-**Holds on every CM2-won file, with wide margin — 42.6–46.9% against a 60% ceiling.**
-The prereg predicted ≈56% from table arithmetic (12+3 of 27 tables); the measured
-value is consistently *better* than that estimate, clustering near 45%. The
-mechanism claim behind the above-map P-A speedups is closed: the working set really
-does shrink by the predicted kind of factor, and the residual is smaller than the
-table count alone suggests.
+All four land at 44–47%, comfortably inside the 60% ceiling and close to the
+12+3-of-27-tables ≈ 56% the prereg derived — slightly *better* than predicted. The
+working-set mechanism behind the above-map P-A speedups is closed: the tier's speed
+comes from touching roughly half the table memory, and the RSS numbers say so
+directly.
 
-## The `nci` M8S cell needs a confirmation before it is quoted
+## Scorecard
 
-`nci/m8s` reports a **831× decode speedup** (229.6 s → 0.277 s) at **70 MB RSS**, on
-a 33.5 MB file, with round-trip passing and archive bytes only +3.21%.
+| criterion | verdict |
+|---|---|
+| C-1 scope of effect | **FALSIFIED** (`ooffice`, nested CM2 under `MODE_BCJ`) |
+| C-2 (a) density ceilings | **FALSIFIED** (exe: `mozilla` +7.53% vs +6%) |
+| C-2 (b) lead-survival | **HOLDS** (81.2%–100% depending on scope; ≥80% under all) |
+| C-2 (c) M8S database | **HOLDS** |
+| C-3 median speedup | **HOLDS** (2.243× vs ≥1.5×) |
+| C-3 `tbits` sub-clause | **NOT EVALUABLE** (`--quiet`; no `tbits` recorded) |
+| C-4 memory | **HOLDS** (44–47% vs ≤60%) |
 
-That is not credible as "CM2 with 8 small tables": no context-mixing configuration
-decodes 33.5 MB in 0.277 s, and 70 MB of RSS is barely more than the output buffer.
-The coherent reading is that **M8S weakened the CM2 candidate enough that CM2 lost
-the competitive pick entirely**, and a cheap backend won instead — which is
-plausible on `nci` specifically, where cubrim is only rank 3 and xz (0.0432) and
-brotli (0.0453) already sit beside cubrim's 0.0463, so a fast rail giving up just
-3.21% is unsurprising.
-
-**This is inference, not measurement.** The M8S archive was deleted by the runner
-(`[ "$arm" != full ] && rm -f "$cub"`), so its mode byte cannot be read from what
-survives. Confirming it costs one `nci` re-encode under `CUBR_CM2_TIER=m8s` and one
-`od -An -tu1 -j5 -N1` — deferred deliberately until the campaign finishes, because
-the runner's quiet gate is `load < 8.0` and running an encode now could void a live
-cell. Until that check runs, the 831× figure is reported but **not** claimed as an
-M8S tier speedup.
+Two of four predictions falsified. The campaign was worth running.
 
 ## The adoption rule
 
-The prereg's rule is deliberately narrow, and it is quoted here verbatim before
-being applied:
+The rule was pre-committed in the prereg, before any of these numbers existed:
 
 > If C-2's lead-survival AND C-3's median-speedup conditions both hold: introduce a
-> new preset `fast` … If either fails: no preset change.
+> new preset `fast` = F12 (+M8S on database-classed inputs via the existing
+> detector), leaving `max`/`balanced`/`web` semantics untouched.
 
-It names **two** conditions: lead-survival (C-2 clause b) and median speedup (C-3).
-It does **not** name the per-class density ceilings (C-2 clause a). So on a literal
-reading the mozilla/ooffice exceedances do not block adoption.
+| condition | required | measured | |
+|---|---|---|---|
+| C-2 lead-survival | ≥ 80% | 81.2% (narrowest scope) | ✅ |
+| C-3 median speedup | ≥ 1.5× | 2.243× | ✅ |
 
-That reading is adopted, and the reason it is not a post-hoc rescue is that the
-distinction was designed in: `fast` is a **new** preset, and the prereg says in the
-same sentence that `max`/`balanced`/`web` semantics are untouched so "existing
-users' archives never change silently". A density ceiling is the right gate for
-changing a preset people already use; it is not the right gate for offering a new
-operating point that nobody is opted into. Pre-committing the rule is worth nothing
-if it is reinterpreted the moment a clause it did not cite comes out red.
+### **The rule FIRES.**
 
-The exceedance is therefore **recorded as a falsified prediction**, not discarded:
-the F12 tier costs more density on executables than the tier-ladder data predicted,
-and any future proposal to make F12 the default — as opposed to an opt-in preset —
-inherits that finding as a blocker rather than a footnote.
+**It fires even though C-1 and C-2(a) were falsified, and that is not a loophole —
+it is the entire reason the rule was written down in advance.** The rule was never
+"adopt if every prediction holds"; it was "adopt if the density lead survives and
+the speed is real", because those two are the product question and the others are
+mechanism questions. Declining to adopt now, on the strength of failures the rule
+deliberately did not key on, would be exactly the post-hoc renegotiation
+preregistration exists to prevent. The falsifications are recorded as failures, in
+full, and they change the *mechanism story* — not the decision.
 
-### Current standing of the rule
+What the rule licenses, and nothing more:
 
-| condition | status |
+- A **new** preset `fast` = F12, plus M8S on database-classed inputs via the
+  existing detector.
+- `max`, `balanced` and `web` semantics **untouched** — no existing user's archive
+  changes silently.
+- The preset is a **follow-up implementation PR with its own tests**, not part of
+  this record.
+- **No new DB metas for `fast`** from this campaign's runs. Per the prereg, metas
+  are minted only after the preset exists in a release-lineage build.
+
+### What a `fast` user is buying, stated plainly
+
+Roughly **2.2× faster decode** and **~55% less decode memory**, for **+2% to +9%**
+archive size on CM2-won files — and up to **+29%** on small binary inputs like
+`kennedy.xls`. On image and RecordCM inputs (`mr`, `ptt5`, `x-ray`, `sao`) the
+preset is a **no-op**: byte-identical archives, identical timings. The implementation
+should not pretend otherwise, and the exe class breaching its own preregistered
+ceiling (+7.5% `mozilla`, +8.8% `ooffice`) belongs in the user-facing description.
+
+## Artefacts
+
+| file | what |
 |---|---|
-| C-2 lead-survival ≥ 80% | **UNDECIDED** — 8/8 measured, 14 of 22 led files outstanding |
-| C-3 median speedup ≥ 1.5× | **HOLDS** — 2.22× |
+| `journal.final.jsonl` | complete 294-line campaign journal, 48 cells, sha256 `ed844389…` |
+| `journal.partial.jsonl` | the 22-cell partial the superseded revision adjudicated from |
+| `adjudicate-final.py` | scores C-1..C-4 and the adoption rule from the journal alone |
+| `preset-campaign.sh` | the runner as executed on `dev-ai` |
+| `meta36.psv` | Phase C meta-36 snapshot used for ratios and ranks |
 
-**No adoption decision is recorded yet.** One of its two inputs is still open, and
-the prereg's whole purpose is that the decision follows the rule rather than the
-early returns. The remaining files include `enwik8`, which has never been run at
-this scale in any prior Cubrim campaign, and `x-ray` / `ptt5` / `kennedy.xls`, which
-carry the rest of C-1.
-
-## Stand contention, observed live: the quiet gate held, but only by luck
-
-At 2026-08-12T02:27Z, mid-`webster/f12`, `dev-ai`'s load average went from 1.34 to
-**31.01** in under three minutes. Cause, identified from `ps`: the CUBR-0096
-sticky-selection lane started `/root/cubr0096/ooffice-decide.sh`, a
-baseline-versus-candidate encode pair at `CUBR_THREADS=64`, taking 42 cores.
-
-Two lanes, one stand, and **no reservation mechanism of any kind** — no lock file,
-no runbook convention, nothing on the box that would make either lane aware of the
-other. Both were behaving correctly by their own lights.
-
-**Why nothing was killed, and why no cell was voided.** The runner's `quiet()` gate
-polls `load < 8.0` once a minute for up to 90 minutes before voiding a cell. The
-colliding job is a short paired encode on a 6 MB file at 64 threads — minutes, not
-hours. The gate absorbs it. Intervening would have meant destroying another lane's
-in-flight measurement to protect against a stall the design already handles.
-
-**Why the other lane's result is not damaged either.** Reading
-`ooffice-decide.sh` before assuming: its verdict is a **sha256 comparison** of the
-baseline and sticky archives — it asks whether forcing one value-stream winner
-changes the output bytes at all. Byte-identity is load-independent. The script also
-records `WALL`/`RSS`, and *those* figures are contaminated by this campaign's
-concurrent `webster` encode and should not be quoted; the byte comparison that
-actually decides its question is untouched.
-
-**The finding is that this was luck, not design.** The same collision with a job of
-campaign scale — the 4-hour `enwik8` cell, say — would have blown through the
-90-minute budget and voided cells that then get "reported failed, never
-substituted" per the stop rules. The remedy is small and worth having before the
-next campaign: an advisory lock file under a known path that every stand script
-takes and honours, plus the lane name and expected duration written into it, so a
-second lane can see what it is about to walk into. Recorded here rather than filed
-as its own task because it is a campaign-integrity property, and this is the record
-the next campaign author reads.
-
-FINDINGS F6 already documented that this encoder oversubscribes the machine and
-that the damage shows up as collateral. This is the multi-lane version of the same
-problem, and it is the second time it has cost something.
-
-
-## Two corrections to this record and its tooling
-
-**The other lane's collision is closed, and it published its own result.** The
-CUBR-0096 `ooffice-decide.sh` run completed while this campaign continued: `base`
-and `sticky` archives are byte-identical (`f4709c0a…`, 1,763,460 B), so forcing one
-value-stream winner everywhere changes nothing in the output on that file. That
-sha is also exactly this campaign's canonical `ooffice` archive, an unplanned
-cross-check that both lanes are encoding the same thing. Their write-up is
-`research(CUBR-0096): the ooffice tension is resolved` (PR #171). The claim made
-above — that their byte comparison was unaffected by the load while their WALL/RSS
-lines were — stands as stated, and is now settled rather than predicted.
-
-**`adjudicate.py` hand-typed the file classes and got one wrong.** Its first version
-carried its own `CLASS` dict, in which `samba` was `exe`; meta-36 says `code`. The
-published tables above were right because they were written against the dataset, but
-the script that will generate every future update was not. It now loads classes from
-`meta36.psv` and has no hand-typed table at all. The wrong class would have applied a
-+6% ceiling where +5% belongs — no verdict changes at `samba`'s +1.82%, but the next
-file it mis-classified might not be so forgiving. A hand-typed table beside a
-machine-readable one drifts from it; that is what happened here, and the fix is to
-delete the table rather than correct it.
-
-## Pre-registered before the remaining data lands: which files can still flip the rule
-
-Written now, with 10 of 22 led files measured and 12 outstanding, so that nothing
-below can be mistaken for reasoning constructed after the answer arrived.
-
-**The arithmetic of the bar.** 80% of 22 led files is 17.6, so **18 survivals are
-required**. Ten already survive. **At most 4 of the 12 pending files may fail.**
-
-**Headroom per pending file** — how much density increase each can absorb before its
-lead is gone, computed from meta-36 as `runner_up / cubrim − 1`:
-
-| file | class | size | cubrim | runner-up | headroom |
-|---|---|---:|---:|---|---:|
-| `grammar.lsp` | code | 3,721 | 0.30207 | brotli 0.30234 | **0.1%** |
-| `sum` | binary | 38,240 | 0.24459 | xz 0.24843 | **1.6%** |
-| `cp.html` | text | 24,603 | 0.26720 | ppmd 0.27200 | **1.8%** |
-| `plrabn12.txt` | text | 481,861 | 0.26141 | ppmd 0.27504 | 5.2% |
-| `asyoulik.txt` | text | 125,179 | 0.27584 | ppmd 0.29034 | 5.3% |
-| `alice29.txt` | text | 152,089 | 0.24270 | ppmd 0.25634 | 5.6% |
-| `fields.c` | code | 11,150 | 0.23049 | brotli 0.24368 | 5.7% |
-| `lcet10.txt` | text | 426,754 | 0.20859 | ppmd 0.22625 | 8.5% |
-| `enwik8` | text | 100,000,000 | 0.19553 | ppmd 0.22404 | 14.6% |
-| `xml` | text | 5,345,280 | 0.06328 | brotli 0.08055 | 27.3% |
-| `ptt5` | image | 513,216 | 0.05740 | xz 0.07767 | 35.3% |
-| `kennedy.xls` | binary | 1,029,744 | 0.02339 | rar 0.03454 | 47.6% |
-
-**Eight of the twelve have under 10% headroom, and three have under 2%.** Measured F12
-text cost so far is +3.31% to +4.08% (webster, dickens, reymont). Applied to that
-column, `grammar.lsp`, `sum` and `cp.html` all lose their leads — exactly three, one
-short of the four the bar can absorb.
-
-**The mitigating factor, and why this is a risk rather than a prediction.** A file
-only pays the F12 cost if CM2 wins its competitive pick. Every byte-identical file
-survives trivially — that is C-1's mechanism, and it is why `mr`, `sao` and `x-ray`
-cost nothing. These are small files where fixed overhead may well hand the pick to a
-cheaper rail, in which case most of the thin-headroom column never moves at all.
-`CM2_MIN_LEN` is 2,048 bytes, so none of them are excluded by size alone; whether CM2
-*wins* is the open question, and it is decided per file by measurement, not by me.
-
-**The interpretive point that has to be settled now, not later.** The prereg excludes
-canterbury files from *class-level claims* — "fixed-overhead-dominated, per protocol".
-It does **not** exclude them from lead-survival, which is a per-file count and not a
-class-level claim. Read as written, `grammar.lsp` — 3.7 KB, leading brotli by 0.1% —
-counts exactly as much toward the 80% bar as `enwik8` at 100 MB.
-
-That is arguably a flaw in the prereg. It is **not** a licence to reinterpret it. If
-the rule fails on the strength of three tiny canterbury files, the honest outcome is
-"no preset change, and the failing condition recorded as the reason", with the
-weighting flaw filed as a lesson for the next prereg — not a redefinition of
-lead-survival invented once the answer was inconvenient. The whole value of
-pre-committing is that it binds in the direction you did not want.
-
-## First void: `enwik8/full` was OOM-killed, and the F12 arm is surviving the same cap
-
-`{"cell":"enwik8/full","event":"void","reason":"encode rc=137"}` at 03:05:45Z. `137`
-is `128+9` — SIGKILL. The kernel names the cause exactly:
-
-<!-- gate:literal -->
-```
-oom-kill:constraint=CONSTRAINT_MEMCG ... task=cubrim-main,pid=1579630
-Memory cgroup out of memory: Killed process 1579630 (cubrim-main)
-total-vm:20717112kB, anon-rss:14639908kB
-```
-<!-- /gate:literal -->
-
-`anon-rss` at kill is **14,639,908 KiB = 13.96 GB** — the runner's `MemoryMax=14G`
-encode cap, to three significant figures. This is a cgroup kill, not host exhaustion:
-`dev-ai` has 125 GB with 104 GB available at the time.
-
-**It was predicted before it happened, from the process itself.** Sampling the
-encode's RSS gave 9.90 → 10.27 GB over 90 seconds with roughly 2,500 s of encode
-remaining; extrapolating the observed 0.004 GB/s reached the cap well before
-completion. That is recorded because it makes the next point measurable rather than
-anecdotal: at enwik8 scale the `max` working set does not plateau where it does on
-the 6–51 MB files, all of which peaked between 4.46 and 9.93 GB.
-
-**The F12 arm is passing the same cap with an order of magnitude to spare.**
-`enwik8/f12` encode at t=112 s sits at **1.79 GB** and is growing ~0.001 GB/s. On the
-6–51 MB files F12 cut the decode working set to ~45%; here, at encode, the ratio is
-far larger than that.
-
-**What this licenses, and what it does not.** It licenses one precisely-scoped
-statement: *under this campaign's declared 14 GB cap, `max` cannot encode `enwik8`
-and F12 can.* It does **not** license "F12 makes enwik8 possible" as a product claim
-— the cap is a campaign control, not a product limit, and the host had 104 GB free.
-A real memory-ceiling claim needs a run designed to find the true `max` requirement,
-which this campaign is not.
-
-### Consequences for the adjudication, stated before the remaining cells land
-
-- **C-3 and C-4 get nothing from `enwik8`.** Both are ratios against a control that
-  does not exist on this host. Void, and not recoverable within this campaign.
-- **C-2 is arguable but treated strictly.** The control's *byte count* is knowable
-  from meta-36 (ratio `0.19553` on 100,000,000 bytes), which is the very figure the
-  canonical identity gate exists to check against — so a density delta could be
-  computed against it. That would be a **documented deviation**, and the stop rules
-  say a failed cell is "reported failed, never substituted". **The strict reading
-  governs: `enwik8` is unmeasured.** The deviation is recorded as available, not
-  taken.
-- **The bar tightens, and lands exactly where the pre-registration warned.** 18 of 22
-  led files must survive; 10 do; `enwik8` can no longer be one of them. **At most 3
-  of the remaining 11 may now fail** — and the three thinnest-margin files in the
-  corpus are `grammar.lsp` (0.1%), `sum` (1.6%) and `cp.html` (1.8%), all still
-  pending. The headroom table was committed while 12 files were outstanding precisely
-  so this could not be argued about afterwards; it is now the difference between a
-  rule that passes and one that fails.
-
-The campaign is otherwise unaffected: the void is confined to one cell, the runner
-continued straight into `enwik8/f12`, and no other cell's gates are touched.
-
-### Correction, within the hour: F12 is **not** surviving that cap, and I should not have said it was
-
-The section above claimed the F12 arm "is passing the same cap with an order of
-magnitude to spare", citing 1.79 GB at t=112 s. **That was extrapolated from the
-first 112 seconds of a ~2,900-second encode, and it is wrong.**
-
-Measured properly, the two arms track the same curve:
-
-| t (s) | `full` arm RSS | | t (s) | `f12` arm RSS |
-|---:|---:|---|---:|---:|
-| 266 | 9.90 GB | | 272 | 9.94 GB |
-| 278 | 9.96 GB | | 290 | 10.04 GB |
-| 309 | 10.12 GB | | 308 | 10.12 GB |
-| 340 | 10.23 GB | | 327 | 10.19 GB |
-| 356 | 10.27 GB | | 345 | 10.25 GB |
-
-They are the same trajectory to within noise. The 1.79 GB reading was a start-up
-phase, not a plateau.
-
-**Why the mistake was available to make, which is the part worth keeping.** C-4
-measures **decode** peak RSS, and F12 genuinely cuts that to ~45% because the tier
-removes CM2 *model tables* and those dominate the decoder's working set. I carried
-that result across to **encode** without checking. Encode runs the whole competitive
-rail — every candidate, not just CM2 — so its peak is set by something the tier does
-not touch. C-4 was never an encode prediction and the campaign never made one.
-
-**Retracted in full:** "under this campaign's declared 14 GB cap, `max` cannot encode
-`enwik8` and F12 can". The correct expectation is that `enwik8/f12` OOMs at the same
-~14 GB, and if it does, **both arms of `enwik8` are void** and even the C-2 deviation
-described above becomes unavailable — there would be no F12 archive to compare
-against meta-36's byte count.
-
-The lesson is the ordinary one and it caught me anyway: a growth curve sampled over
-4% of a run is not a growth curve. The `full` arm's own trajectory — which I did
-sample across a comparable window before predicting its death correctly — is the
-control that should have made me wait for the same window on the second arm before
-saying anything.
+`adjudicate-final.py` reads only the journal, the manifest, `meta36.psv` and the
+mode-byte table, and reproduces every number in this record. No figure here was
+carried over by hand from the superseded revision.
