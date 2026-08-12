@@ -112,6 +112,32 @@ fn payloads() -> Vec<(&'static str, Vec<u8>)> {
     }
     v.push(("x86-calls", code));
 
+    // The ten committed corpus fixtures. They are real recorded data rather than
+    // synthetic shapes, they are tracked in git (CUBR-0094), and the crate's own
+    // round-trip tests already run against them — so if any decode path can be
+    // seeded from material already in the repo, it is these that will do it.
+    let fixtures = Path::new("../../documentation/ephemeral/research/corpus");
+    if let Ok(rd) = fs::read_dir(fixtures) {
+        let mut paths: Vec<_> = rd
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|x| x == "bin").unwrap_or(false))
+            .collect();
+        paths.sort();
+        for path in paths {
+            if let Ok(bytes) = fs::read(&path) {
+                let name: &'static str = Box::leak(
+                    format!(
+                        "fixture-{}",
+                        path.file_stem().unwrap_or_default().to_string_lossy()
+                    )
+                    .into_boxed_str(),
+                );
+                v.push((name, bytes));
+            }
+        }
+    }
+
     v
 }
 
