@@ -155,12 +155,50 @@ billing state, which is precisely what happened, and which no self-hosted runner
 is exposed to. The outage is a genuine data point against the original choice, not
 merely an accident that befell it.
 
-The balance, stated plainly: restoring billing is the cheapest fix and restores
-the design the workflow's author chose and documented. Moving to
-`arcana-ai`+`ci-general` is a working alternative that is available today and
-removes this failure mode at the cost of reintroducing another. That remains a
-fleet/account decision; what has changed is that it can now be taken on evidence
-instead of on an open question.
+### The move was then tried, and declined on two costs it had not been charged
+
+The paragraph above used to end by calling the move a working alternative and
+leaving it there. It was taken further — built, run, and adversarially reviewed —
+and the answer is **do not move**. Recorded here because the case for moving was
+mine, and it was wrong for reasons that only appeared once it was costed properly.
+
+**Capability was confirmed.** The full suite was run on arcana-devs as an
+unprivileged user: PHP 8.3.6 passes the job's own assertion, `npm ci` is clean,
+`npx playwright install chromium` succeeds *without* `--with-deps` (the runner
+user `ci-isolated` has no sudo, so the flag as written would fail), and the suite
+is **121 passed in 3.9m**. The host's chromium libs are already present. So the
+job can run there. That was never the binding constraint.
+
+Two costs are, and neither is visible from the runner table:
+
+1. **The target is one runner, and it is already saturated.** `arcana-ci-general`
+   is a single registered runner, not a pool, so jobs serialise. Checked live:
+   five `auth-arcana` CI runs sat **queued**, the oldest 2h29m, with the runner
+   busy and the host at load 28–36 on 16 cores. Adding a browser suite does not
+   restore a signal — it converts "red for billing" into "pending for hours",
+   which on a repo with no branch protection is a weaker signal, not a stronger
+   one. `arcanada-llm-proxy` already documents being bitten by this exact
+   starvation on this exact label.
+2. **Co-tenancy with an auth service's CI.** `ci-isolated` is in the `docker`
+   group, which is root-equivalent on that host, and the same runner executes
+   `auth-arcana`'s CI. A `pull_request`-triggered job runs arbitrary dependency
+   install hooks — a poisoned transitive npm package in a dependabot PR is
+   sufficient, no fork required — so this would place less-trusted PR code on
+   non-ephemeral infrastructure shared with a security-sensitive pipeline. That
+   is a real lateral-movement path and not a trade worth making to un-red a gate.
+
+One challenge to the table was checked and does not hold: `arcana-ci-general`
+(agent 13) and `arcana-devs` (agent 11) are two runner *processes co-located on
+the same box* — confirmed from their own `.runner` files under
+`/home/ci-isolated/runner-general/` and `/opt/actions-runner/`. The PHP and
+library facts describe the host both share.
+
+**Conclusion, and it is the workflow author's after all:** the gate stays
+GitHub-hosted. Restoring billing is the fix. The header's reasoning survives
+contact with an outage it did not predict, because the self-hosted alternative
+fails for reasons the header did not need to name. This is now a costed decision,
+not an open question — and the thing still owed is an account action, which no
+amount of code can substitute for.
 
 ## Verification
 
