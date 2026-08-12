@@ -714,6 +714,28 @@ fn encode_rans_family_value_stream(
     let encoded_values =
         encoded_values.expect("context_huffman always participates, so a winner always exists");
 
+    // CUBR-0096 (ported from CUBR-0087 F18): record the FINAL winner of the block,
+    // not the running improvements. `win()` above fires every time a candidate
+    // becomes the running minimum, so several candidates "win" per block and those
+    // counts cannot answer the question a sticky-selection lever turns on: does one
+    // scheme win *the block*, and does it keep winning across the file? If it does,
+    // the other seven passes spend ~700 CPU-seconds per 2 MB recomputing a constant.
+    //
+    // Ported onto the candidates-array shape rather than copied from the F18
+    // if-chain: on this revision a BWT-family candidate may decline (None) and is
+    // then never scored, so the winner is an Option that is unwrapped above.
+    crate::prof::win(match winner_scheme {
+        ValueScheme::BwtRans => "FINAL:bwt_rans",
+        ValueScheme::BwtEntropy => "FINAL:bwt_huff",
+        ValueScheme::EntropyContext => "FINAL:t4_huff",
+        ValueScheme::Order2Rans => "FINAL:order2_rans",
+        ValueScheme::BwtAdaptive => "FINAL:adaptive",
+        ValueScheme::BwtContextMix => "FINAL:ctxmix",
+        ValueScheme::BwtGeoMix => "FINAL:geomix",
+        ValueScheme::LzRans => "FINAL:lz_rans",
+        _ => "FINAL:other",
+    });
+
     (winner_scheme, encoded_values)
 }
 
