@@ -1,0 +1,731 @@
+{
+  "admission_after": {
+    "cpus": 16,
+    "load_1m": 37.19482421875,
+    "load_per_cpu": 2.324676513671875,
+    "max_temperature_c": 86.0,
+    "quiet_ceiling_load_per_cpu": 1.0,
+    "within_quiet_ceiling": false
+  },
+  "admission_before": {
+    "cpus": 16,
+    "load_1m": 36.1669921875,
+    "load_per_cpu": 2.26043701171875,
+    "max_temperature_c": 85.0,
+    "quiet_ceiling_load_per_cpu": 1.0,
+    "within_quiet_ceiling": false
+  },
+  "codecs": {
+    "brotli-11": {
+      "library": {
+        "bytes": 51512,
+        "path": "/usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.1.0",
+        "sha256": "64d8a5019d4c294b89fde1193343ea324bbd8603652554e5545f0a01595fa2c5"
+      },
+      "mb_per_s_median": 463.63708411782034,
+      "mb_per_s_min": 687.1009515912128,
+      "samples": [
+        {
+          "compressed_bytes": 9161,
+          "median_ns": 204748.5,
+          "min_ns": 135622,
+          "observations": 210,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 11746,
+          "median_ns": 255014.5,
+          "min_ns": 176728,
+          "observations": 210,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 4763,
+          "median_ns": 101374.5,
+          "min_ns": 64262,
+          "observations": 210,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 8672,
+          "median_ns": 158140.0,
+          "min_ns": 102062,
+          "observations": 210,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3280,
+          "median_ns": 64311.5,
+          "min_ns": 46950,
+          "observations": 210,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2467,
+          "median_ns": 46441.0,
+          "min_ns": 27517,
+          "observations": 210,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 14910,
+          "median_ns": 327932.0,
+          "min_ns": 244610,
+          "observations": 210,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 8344,
+          "median_ns": 178392.5,
+          "min_ns": 120033,
+          "observations": 210,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1383,
+          "median_ns": 28397.5,
+          "min_ns": 16010,
+          "observations": 210,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 17827,
+          "median_ns": 316020.0,
+          "min_ns": 206252,
+          "observations": 210,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2319,
+          "median_ns": 44523.0,
+          "min_ns": 27857,
+          "observations": 210,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 18250,
+          "median_ns": 357374.0,
+          "min_ns": 251955,
+          "observations": 210,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23623,
+          "median_ns": 119141.5,
+          "min_ns": 65864,
+          "observations": 210,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "brotli-5": {
+      "library": {
+        "bytes": 51512,
+        "path": "/usr/lib/x86_64-linux-gnu/libbrotlidec.so.1.1.0",
+        "sha256": "64d8a5019d4c294b89fde1193343ea324bbd8603652554e5545f0a01595fa2c5"
+      },
+      "mb_per_s_median": 489.22354456689186,
+      "mb_per_s_min": 735.4513211728422,
+      "samples": [
+        {
+          "compressed_bytes": 10233,
+          "median_ns": 179146.0,
+          "min_ns": 117869,
+          "observations": 210,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 13863,
+          "median_ns": 247306.5,
+          "min_ns": 165799,
+          "observations": 210,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 5367,
+          "median_ns": 87663.5,
+          "min_ns": 50252,
+          "observations": 210,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 9748,
+          "median_ns": 148966.5,
+          "min_ns": 93900,
+          "observations": 210,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3565,
+          "median_ns": 56367.0,
+          "min_ns": 38446,
+          "observations": 210,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2738,
+          "median_ns": 40755.0,
+          "min_ns": 23021,
+          "observations": 210,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 18820,
+          "median_ns": 307745.0,
+          "min_ns": 205192,
+          "observations": 210,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 9980,
+          "median_ns": 170017.0,
+          "min_ns": 106515,
+          "observations": 210,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1522,
+          "median_ns": 25581.5,
+          "min_ns": 13371,
+          "observations": 210,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 21142,
+          "median_ns": 341101.0,
+          "min_ns": 209513,
+          "observations": 210,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2507,
+          "median_ns": 40141.5,
+          "min_ns": 24495,
+          "observations": 210,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 20405,
+          "median_ns": 320585.0,
+          "min_ns": 274959,
+          "observations": 210,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23649,
+          "median_ns": 121280.0,
+          "min_ns": 64715,
+          "observations": 210,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "cubrim-web": {
+      "library": {
+        "bytes": 424640,
+        "path": "/home/dev/.worktrees/cubrim/CUBR-0074-PHASEB/code/cubrim-web-decoder/target/release/libcubrim_web_decoder.so",
+        "sha256": "35395a7e87d0409782a316e9e724768c8c59fe44b646668513a5b2c4270be7d6"
+      },
+      "mb_per_s_median": 173.53371978506686,
+      "mb_per_s_min": 264.97401240925626,
+      "samples": [
+        {
+          "compressed_bytes": 10361,
+          "median_ns": 503895.5,
+          "min_ns": 332201,
+          "observations": 210,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 14428,
+          "median_ns": 661995.5,
+          "min_ns": 477076,
+          "observations": 210,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 5563,
+          "median_ns": 277767.0,
+          "min_ns": 183040,
+          "observations": 210,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 9375,
+          "median_ns": 403488.0,
+          "min_ns": 269123,
+          "observations": 210,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3522,
+          "median_ns": 182114.0,
+          "min_ns": 117003,
+          "observations": 210,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2797,
+          "median_ns": 121527.0,
+          "min_ns": 75912,
+          "observations": 210,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 18590,
+          "median_ns": 949149.5,
+          "min_ns": 589086,
+          "observations": 210,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 9630,
+          "median_ns": 444479.0,
+          "min_ns": 279562,
+          "observations": 210,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1558,
+          "median_ns": 100352.5,
+          "min_ns": 77270,
+          "observations": 210,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 19058,
+          "median_ns": 830580.5,
+          "min_ns": 591568,
+          "observations": 210,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2407,
+          "median_ns": 113479.5,
+          "min_ns": 70154,
+          "observations": 210,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 20551,
+          "median_ns": 822114.0,
+          "min_ns": 540411,
+          "observations": 210,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23650,
+          "median_ns": 471724.5,
+          "min_ns": 250202,
+          "observations": 210,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "gzip-9": {
+      "library": null,
+      "mb_per_s_median": 391.37048928930847,
+      "mb_per_s_min": 575.4056649929768,
+      "samples": [
+        {
+          "compressed_bytes": 11278,
+          "median_ns": 220362.0,
+          "min_ns": 152973,
+          "observations": 210,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 15804,
+          "median_ns": 391722.5,
+          "min_ns": 243931,
+          "observations": 210,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 5801,
+          "median_ns": 97248.0,
+          "min_ns": 81349,
+          "observations": 210,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 9896,
+          "median_ns": 177868.0,
+          "min_ns": 119893,
+          "observations": 210,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3705,
+          "median_ns": 56170.0,
+          "min_ns": 36793,
+          "observations": 210,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2895,
+          "median_ns": 41591.0,
+          "min_ns": 35493,
+          "observations": 210,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 21196,
+          "median_ns": 494563.5,
+          "min_ns": 317820,
+          "observations": 210,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 10516,
+          "median_ns": 219867.0,
+          "min_ns": 149085,
+          "observations": 210,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1674,
+          "median_ns": 25668.5,
+          "min_ns": 14425,
+          "observations": 210,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 20194,
+          "median_ns": 365769.5,
+          "min_ns": 257885,
+          "observations": 210,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2546,
+          "median_ns": 36739.0,
+          "min_ns": 24018,
+          "observations": 210,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 21483,
+          "median_ns": 331195.5,
+          "min_ns": 264420,
+          "observations": 210,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23688,
+          "median_ns": 149610.5,
+          "min_ns": 76039,
+          "observations": 210,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "zstd-19": {
+      "library": {
+        "bytes": 755864,
+        "path": "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5",
+        "sha256": "0a2128bc10841fb29e76d08d945864dfb0b6a66da5df6df5d8299197439e54bb"
+      },
+      "mb_per_s_median": 926.2798671974173,
+      "mb_per_s_min": 1474.4878209424326,
+      "samples": [
+        {
+          "compressed_bytes": 10131,
+          "median_ns": 103231.0,
+          "min_ns": 58098,
+          "observations": 210,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 13543,
+          "median_ns": 155034.5,
+          "min_ns": 91208,
+          "observations": 210,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 5573,
+          "median_ns": 44182.5,
+          "min_ns": 23695,
+          "observations": 210,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 9293,
+          "median_ns": 83602.0,
+          "min_ns": 58520,
+          "observations": 210,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3525,
+          "median_ns": 34576.5,
+          "min_ns": 18889,
+          "observations": 210,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 2802,
+          "median_ns": 24603.5,
+          "min_ns": 13763,
+          "observations": 210,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 16664,
+          "median_ns": 172204.0,
+          "min_ns": 126577,
+          "observations": 210,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 8980,
+          "median_ns": 103422.0,
+          "min_ns": 72028,
+          "observations": 210,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1599,
+          "median_ns": 15293.5,
+          "min_ns": 9322,
+          "observations": 210,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 18484,
+          "median_ns": 188016.5,
+          "min_ns": 111248,
+          "observations": 210,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2390,
+          "median_ns": 25006.0,
+          "min_ns": 14149,
+          "observations": 210,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 19810,
+          "median_ns": 145507.5,
+          "min_ns": 88937,
+          "observations": 210,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23678,
+          "median_ns": 7407.5,
+          "min_ns": 5902,
+          "observations": 210,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    },
+    "zstd-3": {
+      "library": {
+        "bytes": 755864,
+        "path": "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5",
+        "sha256": "0a2128bc10841fb29e76d08d945864dfb0b6a66da5df6df5d8299197439e54bb"
+      },
+      "mb_per_s_median": 925.4497992204523,
+      "mb_per_s_min": 1540.8246280540172,
+      "samples": [
+        {
+          "compressed_bytes": 11691,
+          "median_ns": 94499.5,
+          "min_ns": 53804,
+          "observations": 210,
+          "original_bytes": 65257,
+          "sample_id": "css-medium-tailwind-v2"
+        },
+        {
+          "compressed_bytes": 17066,
+          "median_ns": 167041.5,
+          "min_ns": 123151,
+          "observations": 210,
+          "original_bytes": 227968,
+          "sample_id": "html-large-web-codec-v2"
+        },
+        {
+          "compressed_bytes": 6224,
+          "median_ns": 36624.0,
+          "min_ns": 27440,
+          "observations": 210,
+          "original_bytes": 25031,
+          "sample_id": "html-medium-home-v2"
+        },
+        {
+          "compressed_bytes": 10975,
+          "median_ns": 81353.0,
+          "min_ns": 44756,
+          "observations": 210,
+          "original_bytes": 42936,
+          "sample_id": "javascript-medium-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 3982,
+          "median_ns": 35205.0,
+          "min_ns": 19711,
+          "observations": 210,
+          "original_bytes": 14590,
+          "sample_id": "javascript-medium-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 3112,
+          "median_ns": 26263.0,
+          "min_ns": 18371,
+          "observations": 210,
+          "original_bytes": 9866,
+          "sample_id": "javascript-small-resolve-uri-v2"
+        },
+        {
+          "compressed_bytes": 20235,
+          "median_ns": 176688.5,
+          "min_ns": 102890,
+          "observations": 210,
+          "original_bytes": 320976,
+          "sample_id": "json-api-large-world-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 11802,
+          "median_ns": 115089.0,
+          "min_ns": 62794,
+          "observations": 210,
+          "original_bytes": 98948,
+          "sample_id": "json-api-medium-web-benchmark-v2"
+        },
+        {
+          "compressed_bytes": 1827,
+          "median_ns": 18672.5,
+          "min_ns": 10046,
+          "observations": 210,
+          "original_bytes": 13880,
+          "sample_id": "json-api-small-hypotheses-v2"
+        },
+        {
+          "compressed_bytes": 23955,
+          "median_ns": 190762.5,
+          "min_ns": 111417,
+          "observations": 210,
+          "original_bytes": 112594,
+          "sample_id": "source-map-large-magic-string-v2"
+        },
+        {
+          "compressed_bytes": 2770,
+          "median_ns": 29039.5,
+          "min_ns": 15180,
+          "observations": 210,
+          "original_bytes": 9700,
+          "sample_id": "source-map-small-sourcemap-codec-v2"
+        },
+        {
+          "compressed_bytes": 22290,
+          "median_ns": 124550.5,
+          "min_ns": 68659,
+          "observations": 210,
+          "original_bytes": 55431,
+          "sample_id": "wasm-medium-cubrim-decoder-v3"
+        },
+        {
+          "compressed_bytes": 23678,
+          "median_ns": 7287.0,
+          "min_ns": 4310,
+          "observations": 210,
+          "original_bytes": 23664,
+          "sample_id": "woff2-medium-inter-latin-v20"
+        }
+      ],
+      "total_original_bytes": 1020841
+    }
+  },
+  "corpus": {
+    "manifest_name": "manifest.v3.json",
+    "manifest_sha256": "43474bfc8fafe7cba96b4843a1700141c49b29f0cda5711861a11f654923f9d5",
+    "sample_count": 13
+  },
+  "gate": {
+    "bar": 0.5,
+    "criterion": "decode_throughput_vs_brotli5",
+    "passes": false,
+    "value_from_median": 0.3547125270487457,
+    "value_from_min": 0.36028762853630575
+  },
+  "method": "in-process decode; compress once, then N rounds over a seeded randomized cell order, warm-up plus R repeats per visit, output verified byte-exact on every timed iteration; per-cell minimum kept",
+  "repeats_per_visit": 30,
+  "rounds": 7,
+  "schema_version": 1,
+  "scope": "decode_throughput_in_process",
+  "seed": 74074,
+  "warmups_per_visit": 5
+}
