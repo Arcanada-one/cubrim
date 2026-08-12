@@ -212,3 +212,42 @@ the prereg's whole purpose is that the decision follows the rule rather than the
 early returns. The remaining files include `enwik8`, which has never been run at
 this scale in any prior Cubrim campaign, and `x-ray` / `ptt5` / `kennedy.xls`, which
 carry the rest of C-1.
+
+## Stand contention, observed live: the quiet gate held, but only by luck
+
+At 2026-08-12T02:27Z, mid-`webster/f12`, `dev-ai`'s load average went from 1.34 to
+**31.01** in under three minutes. Cause, identified from `ps`: the CUBR-0096
+sticky-selection lane started `/root/cubr0096/ooffice-decide.sh`, a
+baseline-versus-candidate encode pair at `CUBR_THREADS=64`, taking 42 cores.
+
+Two lanes, one stand, and **no reservation mechanism of any kind** — no lock file,
+no runbook convention, nothing on the box that would make either lane aware of the
+other. Both were behaving correctly by their own lights.
+
+**Why nothing was killed, and why no cell was voided.** The runner's `quiet()` gate
+polls `load < 8.0` once a minute for up to 90 minutes before voiding a cell. The
+colliding job is a short paired encode on a 6 MB file at 64 threads — minutes, not
+hours. The gate absorbs it. Intervening would have meant destroying another lane's
+in-flight measurement to protect against a stall the design already handles.
+
+**Why the other lane's result is not damaged either.** Reading
+`ooffice-decide.sh` before assuming: its verdict is a **sha256 comparison** of the
+baseline and sticky archives — it asks whether forcing one value-stream winner
+changes the output bytes at all. Byte-identity is load-independent. The script also
+records `WALL`/`RSS`, and *those* figures are contaminated by this campaign's
+concurrent `webster` encode and should not be quoted; the byte comparison that
+actually decides its question is untouched.
+
+**The finding is that this was luck, not design.** The same collision with a job of
+campaign scale — the 4-hour `enwik8` cell, say — would have blown through the
+90-minute budget and voided cells that then get "reported failed, never
+substituted" per the stop rules. The remedy is small and worth having before the
+next campaign: an advisory lock file under a known path that every stand script
+takes and honours, plus the lane name and expected duration written into it, so a
+second lane can see what it is about to walk into. Recorded here rather than filed
+as its own task because it is a campaign-integrity property, and this is the record
+the next campaign author reads.
+
+FINDINGS F6 already documented that this encoder oversubscribes the machine and
+that the damage shows up as collateral. This is the multi-lane version of the same
+problem, and it is the second time it has cost something.
