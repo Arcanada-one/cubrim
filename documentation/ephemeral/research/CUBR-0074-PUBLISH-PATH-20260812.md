@@ -100,12 +100,32 @@ fabricated timings — because the point was to exercise the write path, not to
 publish a measurement. Nothing here is a benchmark result and none of it went
 anywhere near production.
 
+## The harness is ready; only the host is not
+
+`run.py --phase-a --check --preflight` passes on corpus v3: all 13 payloads
+re-hashed against `manifest.v3.json`, `/usr/bin/time` present, the network
+sandbox verified, and tool provenance resolved for all five Phase A presets
+(gzip 1.12, brotli 1.1.0, zstd 1.5.5, each with binary digest, upstream release
+sha and a build-provenance digest). `--manifest` already defaults to
+`manifest.v3.json`. So nothing in the measurement side is waiting on code.
+
+**One precondition is easy to lose:** preflight fails with `user systemd
+PrivateNetwork sandbox is unavailable` when `XDG_RUNTIME_DIR` is unset, which is
+the case in a non-login agent shell. `adapters.py` forwards
+`XDG_RUNTIME_DIR`/`DBUS_SESSION_BUS_ADDRESS` into `SYSTEMD_ENV` but cannot
+invent them. The user manager is running and lingering; the shell just cannot
+find its bus. Export `XDG_RUNTIME_DIR=/run/user/$(id -u)` before any run. The
+error names the sandbox, not the environment, so it reads as a host capability
+that is missing rather than a variable that is unset.
+
 ## Still open
 
 - **Publishing the real thing still needs a Phase A run on corpus v3 on a quiet
   host.** That was the previously recorded blocker and it remains one; it is now
-  the *only* one. arcana-devs sat at 0.75–3.4 load per CPU against a 1.0
-  admission ceiling through the night.
+  the *only* one. arcana-devs was at 32–35 load across 16 CPUs while this was
+  written — 2.0–2.2 per CPU against a 1.0 admission ceiling, so a run would be
+  refused at admission, which is the gate working. The same saturation is why
+  CI checks queue rather than start.
 - **`pg_dump` version skew is unverified on whatever host would publish.** The
   writer shells out to `pg_dump`/`pg_restore`; arcana-devs carries the 16.14
   client against an 18.4 server, which refuses. This run used the container's
