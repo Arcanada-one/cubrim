@@ -1,17 +1,28 @@
 # Copyright 2026 The Cubrim Authors (demo fork, CUBR-0079).
-#
-# INTEGRATION-CHECK target only. It provides the cbm_stream_* symbols as
-# stubs so //net links and the CbmSourceStream integration compiles against
-# the real tree. The REAL decoder is the vendored Rust crate
-# (code/cubrim-web-decoder), which needs blake3 vendored via gnrt — the one
-# isolated remaining sub-task of CUBR-0079 P2. Swap `stub_ffi.cc` for the
-# rust_static_library once blake3 is vendored.
-import("//build/buildflag_header.gni")
+# The vendored Cubrim Web Profile reference decoder, linked into //net so
+# CbmSourceStream can decode `Content-Encoding: cbm`. forbid(unsafe_op_in_
+# unsafe_fn) throughout; the extern "C" FFI (ffi.rs, cbm_stream_*) is the
+# surface net/filter/cbm_source_stream.cc calls.
+import("//build/rust/rust_static_library.gni")
 
-static_library("cubrim") {
+rust_static_library("cubrim_web_decoder") {
+  crate_name = "cubrim_web_decoder"
+  crate_root = "decoder/src/lib.rs"
   sources = [
-    "ffi/cubrim_web_decoder.h",
-    "ffi/stub_ffi.cc",
+    "decoder/src/ffi.rs",
+    "decoder/src/lib.rs",
+    "decoder/src/wasm.rs",
   ]
+  edition = "2021"
+
+  # ffi.rs / wasm.rs expose extern "C" entry points over raw pointers.
+  allow_unsafe = true
+
+  deps = [ "//third_party/rust/blake3/v1:lib" ]
+}
+
+# The C header net/filter includes, plus the decoder symbols.
+source_set("cubrim") {
   public = [ "ffi/cubrim_web_decoder.h" ]
+  public_deps = [ ":cubrim_web_decoder" ]
 }
