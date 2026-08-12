@@ -12,7 +12,8 @@ Measured 2026-08-12 on `dev-ai`. Companion to
 > It also **corrects a claim the gate result inherits from F18**. F18 measured
 > `geomix` winning 384/384 blocks on both `x-ray` and `ooffice` and concluded the
 > competition "computes a constant". Both cells were 2 MB slices. At full-file scale
-> `x-ray` holds and **`ooffice` does not**.
+> `x-ray` holds, **`ooffice` does not**, and on `mozilla` — the largest executable in the
+> corpus, 9384 competed blocks — **`geomix` is not even the plurality winner**.
 
 ## How this lane arrived here, in one paragraph
 
@@ -50,6 +51,7 @@ Full files from the 24-file world corpus, `CUBRIM_PROFILE=1`, `CUBR_THREADS=64`,
 | `mr` | image | 1836 | `geomix` 1836 | **yes** |
 | `ptt5` | image | 96 | `geomix` 81, `lz_rans` 15 | no — 15.6% |
 | `ooffice` | exe | 1128 | `geomix` 1000, `lz_rans` 128 | no — 11.3% |
+| `mozilla` | exe | 9384 | **`lz_rans` 5141, `geomix` 4215, `ctxmix` 28** | **no — geomix loses** |
 | `sao` | binary | 1332 | `geomix` 1331, `ctxmix` 1 | no — 0.08% |
 | `kennedy.xls` | binary | 192 | `geomix` 129, `lz_rans` 63 | no — 32.8% |
 | `osdb` | database | 0 | — | competition never runs |
@@ -76,16 +78,27 @@ are deliberately omitted rather than quoted with a caveat.
 
 ## What this corrects
 
-**1. "The competition computes a constant" is a slice artefact on `ooffice`.**
+**1. "The competition computes a constant" is a slice artefact, and on the largest
+executable it is not merely non-constant — `geomix` loses.**
+
 F18 measured 384/384 on a 2 MB `ooffice` slice. The full 6,152,192-byte file competes
 1128 blocks and `lz_rans` takes 128 of them. The gate result carries the slice claim
 forward when it explains its identical-bytes cell as "consistent with F18's finding that
 the competition computes a constant where it runs". That explanation does not hold for
-`ooffice`: the winner there is not constant.
+`ooffice`.
+
+`mozilla` — 51,220,480 bytes, the largest executable in the corpus and 9384 competed
+blocks — is the sharper case. Three schemes take real shares, and the plurality winner is
+**`lz_rans` with 5141 blocks (54.8%) against `geomix`'s 4215 (44.9%)**. On this file the
+premise is not just "the constant is sometimes wrong"; the scheme the whole lever was
+designed to pin to is **not the one that usually wins**. A sticky rule anchored on early
+blocks would be pinning to a minority scheme across half the file.
 
 This is the same failure mode F19 recorded and forbade — a 2 MB slice giving a number the
 full file contradicts — recurring on a different quantity. F19 caught it on ratio; it also
-applies to *which scheme wins*.
+applies to *which scheme wins*. Note the direction of the error scales with file size:
+`x-ray` and `mr` (8.5 and 10 MB) are constant, `ooffice` (6 MB) is 11% divergent, and
+`mozilla` (51 MB) inverts. Slices were never going to show this.
 
 **2. Constancy is a per-file property, not a per-class one.** `x-ray` and `mr` are
 constant; `ptt5` is not, and all three are `image`. Any future lever that assumes "image
@@ -112,13 +125,8 @@ value-stream lever of any design can save anything, because there is nothing to 
   because there is only ever one winner to be sticky about.
 - **It says nothing about `nci`, `dickens`, `webster`, `reymont`, `xml`, `samba`,
   `enwik8` or the remaining canterbury files.** They were not measured.
-- **`mozilla` was started and did not finish inside this lane's window.** It is the one
-  in-scope `exe` file missing from the table. Left running rather than reported: at the
-  cut-off it had spent 4 CPU-hours at 11.4 GiB RSS and entered a serial phase. The
-  `ooffice` row already carries the exe correction, so `mozilla` would add confirmation,
-  not a new conclusion. Its log will appear at
-  `dev-ai:/root/cubr0096/winners/exe.mozilla.log` — **check `exe.mozilla.done` before
-  reading it**, per the note under the table.
+- It measures **13 of the 24 corpus files**. The eleven not measured are `nci`, `dickens`,
+  `webster`, `reymont`, `xml`, `samba`, `enwik8` and four canterbury files.
 
 ## Open question left on the record
 
