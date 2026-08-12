@@ -1,0 +1,26 @@
+{
+  "admission": {
+    "accepted": true,
+    "load_1m": 10.67724609375,
+    "load_per_cpu": 0.667327880859375,
+    "max_load_per_cpu": 1.0,
+    "max_temperature_c": 90,
+    "temperature_c": 80.0
+  },
+  "cells": 65,
+  "cells_with_varying_compressed_bytes": 0,
+  "compression_duration": {
+    "cells_over_1_25x": 24,
+    "median_last_over_first": 1.2048,
+    "p10": 0.8868,
+    "p90": 1.48
+  },
+  "decompression_duration": {
+    "cells_over_1_25x": 29,
+    "median_last_over_first": 1.2304,
+    "p10": 0.9506,
+    "p90": 1.5901
+  },
+  "trials": 1950,
+  "window_seconds": 467.9
+}
