@@ -67,18 +67,25 @@ if "blake3_sse2_rust" not in s:
 io.open(f,'w').write(s); print("  blake3: build.rs dropped, pure-SIMD cfgs set")
 PY
 
-echo "== 7. wire the unittest into net_unittests"
+echo "== 7. wire both cbm tests into net_unittests"
 cp "$CBM_STAGING"/net/filter/cbm_source_stream_unittest.cc net/filter/
+cp "$CBM_STAGING"/net/filter/cbm_url_request_unittest.cc net/filter/
 cp "$CBM_STAGING"/net/filter/cbm_golden.inc net/filter/
 python3 - <<'PY'
 import io
 f="net/BUILD.gn"; s=io.open(f).read()
 if "cbm_source_stream_unittest.cc" not in s:
     a='  if (!disable_brotli_filter) {\n    sources += [ "filter/brotli_source_stream_unittest.cc" ]\n  }\n'
-    s=s.replace(a, a+'  sources += [ "filter/cbm_source_stream_unittest.cc" ]\n')
-    io.open(f,'w').write(s); print("  net_unittests: cbm test wired")
+    add=a + '  sources += [ "filter/cbm_source_stream_unittest.cc" ]\n'
+    add += '  sources += [ "filter/cbm_url_request_unittest.cc" ]\n'
+    s=s.replace(a, add)
+    io.open(f,'w').write(s); print("  net_unittests: cbm SourceStream + URLRequest tests wired")
 else: print("  net_unittests: already wired")
 PY
 
 echo "== DONE. Now: gn gen out/cbm && autoninja -C out/cbm net_unittests"
 echo "   out/cbm/net_unittests --gtest_filter='CbmSourceStream*'  # expect 4/4 PASS"
+echo "   out/cbm/net_unittests --gtest_filter='CbmUrlRequest*'     # expect 2/2 PASS"
+echo "   The URLRequest tests exercise the real browser HTTP path — feature-gated"
+echo "   Accept-Encoding advertisement, SetUpSourceStream dispatch, decode over"
+echo "   EmbeddedTestServer — which the MockSourceStream test does not cover."
