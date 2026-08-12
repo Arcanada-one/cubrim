@@ -141,6 +141,21 @@ in the scope statement.
 blocks.** Seven of the fourteen files measured never reach the competition. For those, no
 value-stream lever of any design can save anything, because there is nothing to save.
 
+**5. The per-file discipline in point 2 cuts both ways — including in this document.**
+Point 2 says constancy is a per-file property, not a per-class one. The identical caution
+applies to *competing at all*, and the table above is its own counterexample: `binary`
+contains `sum` at **zero** blocks and also `sao` at **1332** and `kennedy.xls` at **192**.
+A class does not compete or not-compete; files do.
+
+This matters most for `database`, where the evidence is **n = 1** — `osdb` never competes
+and `nci` was never measured. It is tempting to write "database never reaches the
+competition", and earlier drafts of the surrounding bookkeeping did exactly that. Read the
+zero rows as **seven specific files**, never as four classes.
+
+The temptation is worth naming because it is asymmetric: a *positive* result ("this file
+competes 1128 times") is self-evidently about one file, while a *negative* one ("zero
+blocks") reads like a property of the kind of data. It is not.
+
 ## What this does NOT do
 
 - **It does not reopen the kill.** The gate fired on end-to-end speedup (1.33× / 1.05×
