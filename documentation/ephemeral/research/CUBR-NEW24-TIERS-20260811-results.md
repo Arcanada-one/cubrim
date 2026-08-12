@@ -111,3 +111,37 @@ old decoder rejects tiered archives in O(1) without allocation.
   any full-corpus P-B re-check belong to the future preset campaign.
 - Per-tier decode RSS/miss counters (the mechanism-closure measurement for
   the above-map speedups): not measured; open follow-up.
+
+## Superseded 2026-08-12 — the campaign this record called for has run
+
+Disposition item 2 above ("**No preset adopts a tier yet** … requires its own
+preregistered world-benchmark campaign … the natural next NEW-24 stage") is
+**discharged**. That campaign ran 2026-08-11/12 and its pre-committed adoption rule
+**fired**: a new `fast` preset = F12 + M8S on database inputs, with
+`max`/`balanced`/`web` untouched. Verdicts, per-file numbers and the full journal:
+`CUBR-NEW24-PRESET-CAMPAIGN-RESULTS-20260812.md`. Nothing is restated here; this is a
+pointer so the tier characterisation and the product decision cannot drift apart.
+
+**Both voids above are now answered, and one of them is answered against this
+record's expectation:**
+
+- *Per-tier decode RSS — the mechanism-closure measurement.* **Measured, and the
+  mechanism is closed.** F12 decode peak RSS is **44–47% of full** on every CM2-won
+  file ≥ 16 MB (`mozilla` 45.8%, `samba` 45.5%, `webster` 46.9%, `nci` 43.7%),
+  against a ≤60% prediction derived from 12+3 of 27 tables ≈ 56%. The above-map
+  speedups are a working-set effect, and the RSS says so directly. Miss counters
+  remain unmeasured; the RSS measurement makes them optional rather than necessary.
+- *Full-enwik8 (100 MB) densities.* **Not obtainable at `--preset max` within a
+  14 GiB cap** — both campaign arms were OOM-killed by the cgroup limit
+  (`constraint=CONSTRAINT_MEMCG`, `anon-rss:14639908kB`) on a host with 100 GB free.
+  This is a memory ceiling on the encoder at that scale, not a stand failure and not
+  a density result, so the void does not close so much as change into a measured
+  fact. Any future enwik8 density figure has to state the cap it ran under.
+
+One correction this record should carry forward: its trade summary says "lead
+retained at F12 everywhere measured". Across the full 24-file corpus that is no
+longer everywhere — cubrim loses meta-36 rank-1 on `cp.html`, `grammar.lsp` and
+`sum` under F12. All three are tiny canterbury files, lead-survival still clears its
+80% bar under every scoping (81.2–100%), and the adoption rule fired on that basis —
+but "everywhere measured" was true of this record's corpus and is not true of the
+campaign's.
