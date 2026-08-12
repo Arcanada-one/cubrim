@@ -487,10 +487,10 @@ pub enum Preset {
     /// model tables a >=16 MB file otherwise demands of the **decoder**.
     ///
     /// Caps the CM2 table exponent at 20. On the full 24-file world corpus peak
-    /// decode RSS falls **12,561 MiB -> 221 MiB, a 56.8× cut** (the 2 MB slice
+    /// decode RSS falls **12,561 MiB -> 221.5 MiB, a 56.7× cut** (the 2 MB slice
     /// showed only 13.5×, because a slice never derives the full `tbits = 27`
-    /// model that a >= 16 MB file does). Peak encode RSS falls 18,603 -> 7,007
-    /// MiB. 221 MiB is comfortably under the wasm32 4 GiB ceiling, which is what
+    /// model that a >= 16 MB file does). Peak encode RSS falls 18,603 -> 7,008
+    /// MiB. 221.5 MiB is comfortably under the wasm32 4 GiB ceiling, which is what
     /// makes a browser decoder possible at all. **Corpus cost +9.32% output** on the full 24-file
     /// world corpus — three times dearer than the +3.32% a 2 MB slice suggested,
     /// because a 2 MB slice derives `tbits = 24` so capping at 20 costs four
