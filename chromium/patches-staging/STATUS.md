@@ -1,6 +1,15 @@
 # CUBR-0079 patch drafts — status
 
-**Phase:** P1 (patch series drafted) → P2 (compile + `net_unittests`) in progress.
+**Phase:** P2 COMPLETE — the real decoder links and the golden test passes.
+
+**Verified on the synced arcana-kb tree (Chromium 151.0.7922.137):**
+`net_unittests` builds, links the vendored Rust decoder + blake3, and passes
+all four `CbmSourceStreamTest` cases — a real `Content-Encoding: cbm` frame
+decodes **byte-exact** inside Chromium's net stack, at 1/7/64/512-byte chunks,
+with corrupt and truncated frames rejected `ERR_CONTENT_DECODING_FAILED`.
+`vendor-decoder.sh` reproduces the decoder-vendoring half; `apply.sh` the
+net/ integration half. The stub is superseded — `third_party/cubrim/BUILD.gn`
+here is the real `rust_static_library`.
 
 ## What is here
 
