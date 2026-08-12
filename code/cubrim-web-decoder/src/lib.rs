@@ -50,6 +50,7 @@ use alloc::vec::Vec;
 // Measuring through this ABI rather than through `decode_with_limits` directly
 // is deliberate: it is the same entry point the browser calls, so a number
 // measured here describes the artefact that actually ships.
+pub mod ffi;
 pub mod wasm;
 
 /// Why a decode stopped.

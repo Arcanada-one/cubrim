@@ -34,8 +34,7 @@ thread_local! {
 /// length, and must not be used after that.
 #[no_mangle]
 pub extern "C" fn cbr_alloc(len: usize) -> *mut u8 {
-    let mut buf = Vec::with_capacity(len);
-    buf.resize(len, 0);
+    let mut buf = alloc::vec![0u8; len];
     let ptr = buf.as_mut_ptr();
     core::mem::forget(buf);
     ptr

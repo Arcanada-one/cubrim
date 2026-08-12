@@ -70,10 +70,12 @@ cargo run --release --manifest-path code/cubrimd/Cargo.toml -- \
 
 # the patched browser:
 out/cbm/content_shell --enable-features=CbmContentEncoding \
-  --log-net-log=/tmp/cbm-demo-netlog.json https://... # (loopback TLS or the
-  # HTTPS-only advertisement rule needs a local cert; alternatively relax the
-  # secure-connection check for loopback in patch 0002 — decide at P1 and
-  # record which.)
+  --log-net-log=/tmp/cbm-demo-netlog.json http://127.0.0.1:8078/
+# No TLS needed: the advanced-encoding guard at the pinned tag is
+# `url.SchemeIsCryptographic() || IsLocalhost(url)`
+# (net/http/http_request_headers.cc, SetAcceptEncodingIfMissing), so br/zstd —
+# and cbm alongside them — advertise on plain-http localhost. The P0-era open
+# decision (loopback TLS vs relaxing the check) is RESOLVED: neither is needed.
 ```
 
 Evidence to record (PRD V-AC2/V-AC3): netlog with `Accept-Encoding: … cbm`
@@ -88,6 +90,18 @@ control run without the flag receiving identity via the proxy's fallback.
   after any decoder change before touching the Chromium tree.
 - `testdata/golden-manifest.tsv` — sha256 pins for the 12 census originals
   and their single-block frames (regeneration recipe in `testdata/README.md`).
+
+## FFI surface the patch links (verified 2026-08-12)
+
+The wasm ABI (`src/wasm.rs`, `cbr_*`) keeps stream state in a thread_local
+single slot — correct for a wasm instance, wrong for the network service,
+which interleaves many response streams per thread. The Chromium patch links
+the handle-based native ABI instead (`src/ffi.rs`, `cbm_stream_*`): one owned
+heap object per stream, any number interleaved. Proven by
+`tests/ffi_handles.rs`, including three streams interleaved on one thread,
+1-byte-chunk feeds, poisoning after corruption, output-cap enforcement and
+raw-store passthrough. `cbm_stream_declared_len` lets CbmSourceStream check
+its output budget before decoding a block.
 
 ## Hard gate
 
