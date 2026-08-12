@@ -158,8 +158,15 @@ mechanism fired rather than silently no-opping: `STICKY:reused = 1104`, `FINAL:g
 **Hypothesis 2 is confirmed and hypothesis 1 is not needed.** On `ooffice` the per-block
 value-stream winner does not reach the output at all. The container those blocks belong to
 loses the *outer* competition and is discarded whole, so which scheme won inside it is
-invisible in the emitted bytes. The `ooffice` attribution is consistent with this —
-`bcj_cm2`, `cm2`, `med16` and `base` all take outer wins.
+invisible in the emitted bytes.
+
+That last sentence is **read off the artefact, not inferred from it**. The emitted
+container's mode byte (offset 5, after `[MAGIC 4B][VERSION 1B]`) is **8 = `MODE_BCJ`** on
+both arms — not `MODE_MED16` (7) and not `MODE_CHUNKED` (2). The `med16` → nested chunked
+`base` path that ran all 1128 value-stream competitions is therefore absent from the
+output. An earlier draft of this document asserted the discard while citing only evidence
+*consistent* with it (`bcj_cm2`, `cm2`, `med16` and `base` all taking outer wins, which
+does not by itself say which one was emitted); the mode byte settles it.
 
 This **corrects the gate result's explanation without touching its verdict.** The gate
 explained its identical-bytes cell as "consistent with F18's finding that the competition
@@ -186,10 +193,25 @@ candidate's narrow scoping — a second, independently written implementation wi
 reach fails the same gate. **The verdict stands, now from two implementations.**
 
 What remains genuinely un-refuted is what the gate result already named: a mechanism that
-removes the losers *without probing*, or one that makes the winner itself cheaper. On
-`ooffice` specifically there is a larger prize visible from here — not running the
-discarded container at all — but that is an outer-rail question, not a value-stream one,
-and nothing here measures it.
+removes the losers *without probing*, or one that makes the winner itself cheaper.
+
+### The obvious next lever from here is already refuted — do not re-derive it
+
+The discard makes a larger prize look available: `med16` costs 53.39 s of `ooffice`'s
+169.16 s encode wall, and every second of it is spent on a container that is thrown away.
+Abandoning that candidate earlier would be **byte-exact**, unlike sticky selection.
+
+**F17 already measured this and it does not work.** Branch-and-bound on the deferred base
+moved its share 73.52% → 71.84% — essentially unchanged — because `base` *wins* the inner
+competition as `med16`'s nested encoder, so the bound never fires on it. The outer
+container losing and the inner candidate winning are not in tension: they are different
+competitions, and only the inner one is what the bound can see.
+
+So the shape of the waste is now fully characterised — the work is discarded, and the
+existing bound cannot stop it — and neither of the two obvious attacks (sticky selection;
+branch-and-bound) is available. Any future proposal here has to be a third thing, and
+should state up front why it is not one of these two wearing a different name. Recorded
+this explicitly because this lane has already paid once for re-deriving a settled negative.
 
 ## Provenance
 
