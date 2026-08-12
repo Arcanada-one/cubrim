@@ -81,9 +81,37 @@ cost of progressive decode, not a footnote.
 
 ## Serving
 
-`Content-Type: application/cubrim`, no `Content-Encoding` negotiation: the page
-decodes explicitly. `web/serve.mjs` is a minimal static server that does this
-correctly and applies a strict CSP.
+`web/serve.mjs` is a minimal static server that speaks both transports the
+frame travels over, and applies a strict CSP:
+
+1. **`Content-Type: application/cubrim`** — a direct request for a `.cbr`
+   file; the page decodes explicitly. This is the CUBR-0077 transport and it
+   needs nothing from the client's `Accept-Encoding`.
+
+2. **`Content-Encoding: cbm`** — the epic's namesake (CUBR-0072). A client
+   that lists `cbm` in `Accept-Encoding` gets the resource under its own
+   `Content-Type` with `Content-Encoding: cbm` and the frame as the body;
+   every other client gets identity. Negotiation is RFC 9110 §12.5.3 parsing
+   (`web/encoding.mjs`) with one deliberate narrowing: `*` never selects
+   `cbm`, because a generic client advertising `*` has no Cubrim decoder —
+   the coding is chosen only on an explicit `cbm` token with non-zero weight.
+   Every resource with a precompressed variant carries
+   `Vary: Accept-Encoding`, whichever representation is sent, so a shared
+   cache cannot hand cbm bytes to a client that never asked.
+
+**What transport 2 is and is not.** It is the real HTTP mechanism — the same
+negotiation gzip, br and zstd use, exercised end-to-end by
+`web/encoding-check.mjs` (a Node client sets `Accept-Encoding: cbm`, the
+response body pipes through the real WASM module, output verified
+byte-exact). It is **not** reachable from today's browsers: page JavaScript
+cannot set `Accept-Encoding` (a forbidden request header), and a browser will
+refuse a `Content-Encoding` it did not offer. Native `cbm` in the browser's
+network stack is exactly CUBR-0079 (Chromium technology preview); until then
+transport 1 is what a web page can use, and transport 2 is for clients that
+control their own headers (Node, native apps, proxies, Electron).
+
+The token `cbm` is a working name; it is **not** IANA-registered, and
+registration is an operator-gated step (CUBR-0080).
 
 Two deployment details this PoC surfaced, both worth knowing before shipping:
 
@@ -112,6 +140,15 @@ Headless check without a browser (same V8 engine, no display):
 
 ```sh
 node web/node-check.mjs target/wasm32-unknown-unknown/release/cubrim_web_decoder.wasm site/fixtures
+```
+
+The `Content-Encoding: cbm` transport has its own end-to-end suite — real
+server on an ephemeral port, real module, negotiation edge cases, streaming
+decode from a `fetch` body (multi-block fixtures in the second directory):
+
+```sh
+cargo run --release --example make_web_fixtures -- ../../bench/web-corpus/payloads-v2 site/fixtures-4k 4096
+node web/encoding-check.mjs target/wasm32-unknown-unknown/release/cubrim_web_decoder.wasm site/fixtures site/fixtures-4k
 ```
 
 ## Measured

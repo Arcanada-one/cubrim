@@ -128,6 +128,25 @@ jobs:
       - name: Differential tests against the cubrim decoder
         run: cargo test --release
 
+      # The JS glue and the HTTP transports run only under Node, so cargo
+      # tests alone leave them unexecuted — node-check.mjs and stream-check.mjs
+      # existed since CUBR-0077 but ran in no CI job (the enumerated-by-name
+      # omission this repo has hit before). Fixtures are produced by the real
+      # encoder; the block-size directory makes multi-block frames so the
+      # streaming path is exercised through fetch.
+      - name: Generate census fixtures (single-block and 4 KiB blocks)
+        run: |
+          cargo run --release --example make_web_fixtures -- ../../bench/web-corpus/payloads-v2 /tmp/fixtures
+          cargo run --release --example make_web_fixtures -- ../../bench/web-corpus/payloads-v2 /tmp/fixtures-4k 4096
+
+      - name: WASM module in Node (decode + streaming)
+        run: |
+          node web/node-check.mjs target/wasm32-unknown-unknown/release/cubrim_web_decoder.wasm /tmp/fixtures
+          node web/stream-check.mjs target/wasm32-unknown-unknown/release/cubrim_web_decoder.wasm /tmp/fixtures-4k
+
+      - name: Content-Encoding cbm end to end
+        run: node web/encoding-check.mjs target/wasm32-unknown-unknown/release/cubrim_web_decoder.wasm /tmp/fixtures /tmp/fixtures-4k
+
   web-cli:
     name: Web Profile CLI
     runs-on: ubuntu-latest
