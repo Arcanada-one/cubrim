@@ -16,7 +16,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-from capabilities import PHASE_A_CODECS
+from capabilities import (
+    CANDIDATE_CODECS,
+    PHASE_A_CODECS,
+    validate_codec_attribution,
+)
 from model import (
     CODE_SHA_RE,
     SHA256_RE,
@@ -176,6 +180,22 @@ SUMMARY_FIELDS = {
 }
 
 
+def expected_codecs(phase: str) -> tuple[str, ...]:
+    """The codec set a bundle of this phase must contain, exactly.
+
+    Phase A is the published five-codec comparison and its expected set is
+    unchanged. Phase B is that same comparison plus the candidate, measured in
+    one schedule so both sides saw the same host — which is why the incumbents
+    are expected here too, and why a Phase B bundle missing one of them is as
+    invalid as a Phase A bundle missing one.
+    """
+    if phase == "A":
+        return PHASE_A_CODECS
+    if phase == "B":
+        return PHASE_A_CODECS + CANDIDATE_CODECS
+    raise ValueError(f"unknown benchmark phase: {phase!r}")
+
+
 def verify_bundle(
     bundle: dict[str, object],
     *,
@@ -185,16 +205,17 @@ def verify_bundle(
     _require_exact_fields(bundle, TOP_LEVEL_FIELDS, "bundle")
     if bundle["schema_version"] != 1 or bundle["scope"] != "resource_codec":
         raise ValueError("bundle must use resource_codec schema version 1")
-    if bundle["phase"] != "A" or "voids" in bundle:
-        raise ValueError("bundle must contain Phase A results and no void records")
+    if "voids" in bundle:
+        raise ValueError("a bundle carrying void records is not a result")
+    codecs = expected_codecs(bundle["phase"])
     run_timing = _verify_run_timing(bundle["run_timing"])
     _verify_environment(bundle["environment"])
     samples = _verify_corpus(bundle["corpus"])
     if require_canonical_corpus:
         _verify_canonical_corpus(bundle["corpus"])
-    tools = _verify_toolchain(bundle["toolchain"])
-    protocol = _verify_protocol(bundle["protocol"])
-    _verify_applicability(bundle["applicability"])
+    tools = _verify_toolchain(bundle["toolchain"], codecs)
+    protocol = _verify_protocol(bundle["protocol"], codecs)
+    _verify_applicability(bundle["applicability"], tools)
     if bundle["page_results"] != {
         "explicit_wasm_application": [],
         "transparent_http_page": [],
@@ -344,16 +365,18 @@ def _verify_canonical_corpus(value: object) -> None:
         )
 
 
-def _verify_toolchain(value: object) -> dict[str, dict[str, object]]:
-    if not isinstance(value, list) or len(value) != len(PHASE_A_CODECS):
-        raise ValueError("toolchain must contain exactly the Phase A codecs")
+def _verify_toolchain(
+    value: object, codecs: tuple[str, ...] = PHASE_A_CODECS
+) -> dict[str, dict[str, object]]:
+    if not isinstance(value, list) or len(value) != len(codecs):
+        raise ValueError("toolchain must contain exactly the phase's codecs")
     tools: dict[str, dict[str, object]] = {}
     for tool in value:
         if not isinstance(tool, dict):
             raise ValueError("tool provenance must be an object")
         _require_exact_fields(tool, TOOL_FIELDS, "tool provenance")
         name = tool["name"]
-        if name not in PHASE_A_CODECS or name in tools:
+        if name not in codecs or name in tools:
             raise ValueError("toolchain codec is not uniquely allowlisted")
         for key in (
             "version",
@@ -379,9 +402,30 @@ def _verify_toolchain(value: object) -> dict[str, dict[str, object]]:
         ):
             raise ValueError("tool flags are invalid")
         capabilities = tool["capabilities"]
-        if (
-            not isinstance(capabilities, dict)
-            or set(capabilities) != {"whole_buffer_decode", "incremental_decode"}
+        if not isinstance(capabilities, dict):
+            raise ValueError("tool capabilities must be an object")
+        if name in CANDIDATE_CODECS:
+            # The candidate is held to MORE than the incumbents, not less: it
+            # must declare the profile it claims and pass the attribution gate
+            # here as well as at run time, because a bundle can be verified long
+            # after the run that produced it.
+            required = {
+                "whole_buffer_decode",
+                "incremental_decode",
+                "web_profile",
+                "encode",
+                "decode",
+                "web_profile_version",
+            }
+            if set(capabilities) != required:
+                raise ValueError("candidate capabilities are incomplete")
+            if capabilities["whole_buffer_decode"] is not True:
+                raise ValueError("candidate must declare whole-buffer decode")
+            if not isinstance(capabilities["incremental_decode"], bool):
+                raise ValueError("candidate incremental_decode must be boolean")
+            validate_codec_attribution(name, capabilities)
+        elif (
+            set(capabilities) != {"whole_buffer_decode", "incremental_decode"}
             or capabilities["whole_buffer_decode"] is not True
             or capabilities["incremental_decode"] is not False
         ):
@@ -404,16 +448,18 @@ def _verify_toolchain(value: object) -> dict[str, dict[str, object]]:
         if stable_fingerprint(provenance_input) != tool["codec_build_provenance_sha256"]:
             raise ValueError("tool build provenance digest does not match its source fields")
         tools[name] = tool
-    if tuple(sorted(tools)) != tuple(sorted(PHASE_A_CODECS)):
-        raise ValueError("toolchain Phase A allowlist is incomplete")
+    if tuple(sorted(tools)) != tuple(sorted(codecs)):
+        raise ValueError("toolchain allowlist for this phase is incomplete")
     return tools
 
 
-def _verify_protocol(value: object) -> dict[str, object]:
+def _verify_protocol(
+    value: object, codecs: tuple[str, ...] = PHASE_A_CODECS
+) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("protocol must be an object")
     _require_exact_fields(value, PROTOCOL_FIELDS, "protocol")
-    if value["codecs"] != list(PHASE_A_CODECS):
+    if value["codecs"] != list(codecs):
         raise ValueError("protocol codec allowlist is invalid")
     trials_per_cell = value["trials_per_cell"]
     if (
@@ -449,19 +495,39 @@ def _verify_protocol(value: object) -> dict[str, object]:
     return value
 
 
-def _verify_applicability(value: object) -> None:
+def _verify_applicability(
+    value: object, tools: dict[str, dict[str, object]] | None = None
+) -> None:
+    """The applicability block must match the toolchain, not a constant.
+
+    time-to-first-decoded-byte is available exactly when some measured tool has
+    an incremental decoder. Hardcoding False was correct while only Phase A
+    existed and would have silently suppressed the one metric the candidate
+    uniquely supports; hardcoding True would be worse, claiming a metric the
+    incumbents cannot produce.
+    """
+    incremental = bool(tools) and any(
+        tool["capabilities"].get("incremental_decode") is True
+        for tool in tools.values()
+    )
     expected = {
         "time_to_first_decoded_byte": {
-            "available": False,
-            "reason": "phase_a_codecs_do_not_offer_incremental_decode",
+            "available": incremental,
+            "reason": (
+                "an_incremental_decoder_is_present"
+                if incremental
+                else "phase_a_codecs_do_not_offer_incremental_decode"
+            ),
         },
         "energy": {
+            # Unconditional: RAPL counters are unreadable to the unprivileged
+            # runner on every host this has run on, candidate or not.
             "available": False,
             "reason": "readable_calibrated_rapl_unavailable",
         },
     }
     if value != expected:
-        raise ValueError("Phase A applicability declaration is invalid")
+        raise ValueError("applicability declaration does not match the toolchain")
 
 
 def _verify_trials(
@@ -511,7 +577,7 @@ def _verify_trials(
         )
     expected_trials = set(range(1, protocol["trials_per_cell"] + 1))
     for sample_id in samples:
-        for codec_key in PHASE_A_CODECS:
+        for codec_key in tools:
             if cell_trials[(sample_id, codec_key)] != expected_trials:
                 raise ValueError(
                     "sample/codec cell requires the complete configured trial set: "
