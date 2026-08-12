@@ -40,6 +40,31 @@ then never scored. Ported, not copied — the old if-chain shape no longer exist
 **Validation against a known result:** re-running F18's exact cell (2 MB `x-ray` slice)
 reproduces `FINAL:geomix = 384`, no other `FINAL:` row. 384/384, as F18 reported.
 
+### The slice control — why "slice artefact" and not "revision drift"
+
+The correction below rests on comparing a slice figure from F18's revision against a
+full-file figure from this one. That comparison has an alternative explanation which must
+be excluded before the correction can stand: **the codebase changed in between**, and
+today's encoder would disagree with F18 on the *slice* too. If that were so, the
+difference would be revision drift and calling it a slice artefact would be wrong.
+
+Run on the same binary, same revision, same instrument as every other row here:
+
+| input | blocks | winners |
+|---|---:|---|
+| `ooffice`, first 2 MB | 384 | `geomix` 384 — **constant** |
+| `ooffice`, full 6,152,192 B | 1128 | `geomix` 1000, `lz_rans` 128 |
+
+**The slice reproduces F18 exactly on current code.** F18 was not wrong about what it
+measured; its cell simply does not survive being scaled to the real file. The difference
+is scale, and revision drift is excluded.
+
+The slice is also byte-for-byte the artefact another lane already measured: it compresses
+to **677,605 bytes**, the figure CUBR-0092 recorded for its L3 thread-cap experiment
+("byte-identical on ALL FIVE rows"). So the slice construction and this binary both agree
+with an independently recorded result, which is a stronger check on the instrument than
+the `x-ray` validation alone.
+
 ## Results
 
 Full files from the 24-file world corpus, `CUBRIM_PROFILE=1`, `CUBR_THREADS=64`, default
@@ -83,8 +108,9 @@ back to back on the same host at the same thread count.
 **1. "The competition computes a constant" is a slice artefact, and on the largest
 executable it is not merely non-constant — `geomix` loses.**
 
-F18 measured 384/384 on a 2 MB `ooffice` slice. The full 6,152,192-byte file competes
-1128 blocks and `lz_rans` takes 128 of them. The gate result carries the slice claim
+F18 measured 384/384 on a 2 MB `ooffice` slice — and so does this revision, per the slice
+control above, so the disagreement is scale rather than drift. The full 6,152,192-byte
+file competes 1128 blocks and `lz_rans` takes 128 of them. The gate result carries the slice claim
 forward when it explains its identical-bytes cell as "consistent with F18's finding that
 the competition computes a constant where it runs". That explanation does not hold for
 `ooffice`.
