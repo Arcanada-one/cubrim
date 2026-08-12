@@ -217,9 +217,19 @@ without anything about the tier changing.
 | nci / M8S | +3.21 | +8% | within |
 | osdb / M8S | +6.50 | +8% | within |
 
-M8S is strictly better than F12 on both database files (+3.21 vs +2.68 is worse, but
-+6.50 vs +8.85 on `osdb` is a clear gain), which is what the adoption rule's
-"+M8S on database-classed inputs" clause anticipated.
+**M8S splits the two database files rather than beating F12 on both**, and the
+adoption rule's "+M8S on database-classed inputs" clause should be read against that,
+not against a uniform win:
+
+| file | F12 | M8S | M8S vs F12 |
+|---|---:|---:|---|
+| nci | +2.68% | +3.21% | **worse** by 0.53 pt |
+| osdb | +8.85% | +6.50% | better by 2.35 pt |
+
+So the clause buys a real gain on `osdb` and pays a small loss on `nci`. Both stay
+inside the +8% M8S ceiling and the +10% database ceiling, so nothing is falsified —
+but "M8S on database inputs" is a net-positive default across these two files, not a
+free improvement, and CUBR-0103 should implement it as such.
 
 ## C-3 — speed — **HOLDS**
 
@@ -309,7 +319,7 @@ What the rule licenses, and nothing more:
 
 ### What a `fast` user is buying, stated plainly
 
-Roughly **2.2× faster decode** and **~55% less decode memory**, for **+2% to +9%**
+Roughly **2.2× faster decode** and **~55% less decode memory**, for **+1.8% to +8.9%**
 archive size on CM2-won files — and up to **+29%** on small binary inputs like
 `kennedy.xls`. On image and RecordCM inputs (`mr`, `ptt5`, `x-ray`, `sao`) the
 preset is a **no-op**: byte-identical archives, identical timings. The implementation
