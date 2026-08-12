@@ -15,22 +15,39 @@ from collections import defaultdict
 
 JOURNAL = sys.argv[1] if len(sys.argv) > 1 else "/tmp/claude-1002/new24/journal.jsonl"
 
-# meta-36 corpus classes. Canterbury entries are carried so they can be shown and
-# then explicitly excluded from class claims, per protocol.
-CLASS = {
-    "dickens": "text", "mozilla": "exe", "mr": "image", "nci": "database",
-    "ooffice": "exe", "osdb": "database", "reymont": "text", "samba": "exe",
-    "sao": "image", "webster": "text", "x-ray": "image", "xml": "text",
-    "enwik8": "text",
-    "alice29.txt": "canterbury", "asyoulik.txt": "canterbury", "cp.html": "canterbury",
-    "fields.c": "canterbury", "grammar.lsp": "canterbury", "kennedy.xls": "canterbury",
-    "lcet10.txt": "canterbury", "plrabn12.txt": "canterbury", "ptt5": "canterbury",
-    "sum": "canterbury", "xargs.1": "canterbury",
+# File classes come from the meta-36 dataset itself, never a hand-typed table.
+# The first version of this script hard-coded them and had `samba` as "exe" while
+# the dataset says "code" — a hand-typed table beside a machine-readable one drifts
+# from it, and here it would have applied the wrong C-2 ceiling.
+META = "/tmp/claude-1002/new24/meta36.psv"
+
+
+def load_classes(path):
+    cls = {}
+    try:
+        for line in open(path):
+            line = line.rstrip("\n")
+            if not line or "|" not in line:
+                continue
+            f, typ, _rest = line.split("|", 2)
+            cls[f] = typ
+    except OSError:
+        pass
+    return cls
+
+
+CLASS = load_classes(META)
+# Canterbury members are reported but excluded from class-level claims per protocol.
+CANTERBURY = {
+    "alice29.txt", "asyoulik.txt", "cp.html", "fields.c", "grammar.lsp",
+    "kennedy.xls", "lcet10.txt", "plrabn12.txt", "ptt5", "sum", "xargs.1",
 }
+
 # C-1 names these as the image/binary class where CM2 is expected not to win.
 C1_FILES = ["mr", "x-ray", "sao", "ptt5", "kennedy.xls"]
 # C-2 per-class worsening ceilings.
 C2_CEIL = {"text": 5.0, "code": 5.0, "exe": 6.0, "database": 10.0}
+# image/binary intentionally absent: C-1 covers them, and the tier should not move them.
 
 cells = defaultdict(dict)
 for line in open(JOURNAL):
@@ -130,9 +147,9 @@ for f in C1_FILES:
 print("\n=== C-2 density (CM2-won files only) ===")
 print("ceilings: text/code <= +5%, exe <= +6%, database <= +10%; M8S on nci/osdb <= +8%")
 for r in cm2_won:
-    ceil = C2_CEIL.get(r["cls"])
+    ceil = None if r["file"] in CANTERBURY else C2_CEIL.get(r["cls"])
     if ceil is None:
-        print(f"  {r['file']:<14} {r['cls']:<10} {r['dens_pct']:+.2f}%  (canterbury: excluded from class claims)")
+        print(f"  {r['file']:<14} {r['cls']:<10} {r['dens_pct']:+.2f}%  (excluded from class-level claims)")
         continue
     print(f"  {r['file']:<14} {r['cls']:<10} {r['dens_pct']:+.2f}%  ceiling +{ceil}%  "
           f"-> {'within' if r['dens_pct'] <= ceil else 'EXCEEDS'}")

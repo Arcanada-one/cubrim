@@ -126,3 +126,9 @@
 {"t":"2026-08-12T02:10:04Z","cell":"webster/full","event":"decode_ok","rep":3,"wall_s":363.491,"rss_kib":8225792}
 {"t":"2026-08-12T02:10:04Z","cell":"webster/full","event":"cell_done"}
 {"t":"2026-08-12T02:10:04Z","cell":"webster/f12","event":"encode_start"}
+{"t":"2026-08-12T02:32:07Z","cell":"webster/f12","event":"encoded","bytes":5985303,"sha":"fe83a7aea9207251b61b7996b21871b90e205c5b0c537d6f42ea00e4794b3f19","enc_s":1323}
+{"t":"2026-08-12T02:34:47Z","cell":"webster/f12","event":"decode_ok","rep":1,"wall_s":159.673,"rss_kib":3859456}
+{"t":"2026-08-12T02:37:26Z","cell":"webster/f12","event":"decode_ok","rep":2,"wall_s":158.730,"rss_kib":3858944}
+{"t":"2026-08-12T02:40:05Z","cell":"webster/f12","event":"decode_ok","rep":3,"wall_s":159.382,"rss_kib":3858432}
+{"t":"2026-08-12T02:40:05Z","cell":"webster/f12","event":"cell_done"}
+{"t":"2026-08-12T02:40:05Z","cell":"x-ray/full","event":"encode_start"}
