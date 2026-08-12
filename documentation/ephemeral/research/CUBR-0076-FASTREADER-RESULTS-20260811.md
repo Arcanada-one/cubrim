@@ -128,3 +128,24 @@ corpus = cubr0074-web-real-v2
 host   = arcana-kb (Ryzen 5 3600), pinned core 11, loadavg 0.17/0.23
 evidence = documentation/ephemeral/research/CUBR-0076-FASTREADER-20260811/raw/
 ```
+
+---
+
+## AMENDMENT 2026-08-12 — which decoder this 0.7896 is about
+
+The verdict here is sound and is not withdrawn: interleaved, seeded, byte-exact
+inside the timed region, preregistered before any number was taken. It measures
+`cubrim::decode` in the main crate.
+
+`CUBR-0074-DECODE-INPROC-20260812.md` measures the same criterion against the
+*reference* decoder — `cubrim-web-decoder`, which the WASM module wraps and a
+browser therefore executes — and gets 0.4102 at `opt-level=3` and 0.3603 in the
+shipped `opt-level="z"` build. Against this document's own brotli-5 baseline of
+559.48 MB/s rather than that run's, the shipped build still misses at 0.474.
+
+So the sentence above — "the only bar still standing between this profile and
+an outright WIN is brotli-11 density parity" — holds for the main crate and not
+for the browser artefact. The two decoders are independent implementations
+bound by a differential test, so no amount of care on one says anything about
+the speed of the other, and the gate's own rationale ("decoding is on the
+browser critical path") points at the one that was not measured here.
