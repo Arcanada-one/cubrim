@@ -106,14 +106,15 @@ that, by label rather than by host:
 | — | dev-ai | n/a | **hosts no Actions runner at all** |
 
 **What the previous revision got wrong.** It listed `ci-general` as a single slot
-on arcana-kb and concluded the label "lacks PHP". `ci-general` is carried by
+on arcana-kb and concluded the label "lacks PHP", so the objection to a move was
+"you would have to install PHP on a shared CI host". `ci-general` is carried by
 *two* runners on two different hosts, and one of them — `arcana-ci-general`,
 which lives on **arcana-devs**, not on any AI host its `arcana-ai` label implies
 — already carries PHP 8.3.6 and would pass the job's own assertion today. The
-"install PHP on a shared host" objection therefore does not apply as written.
+"install PHP" objection does not apply.
 
-Three conclusions follow. They still argue *against* a runner move, but the third
-argues it for a different and stronger reason than before:
+Three conclusions follow, and unlike the previous revision they do *not* add up to
+a clean case against the move:
 
 1. **dev-ai is not in the runner fleet.** The `arcana-ai` label had raised the
    worry that CI work could land on the measurement stand and break quiet-host
@@ -128,25 +129,36 @@ argues it for a different and stronger reason than before:
    four-minute browser suite to that single slot serialises testing against
    deployment, which is exactly the failure the `cubrim-api` CIBLOCK decision
    moved a job *away* from.
-3. **`ci-general` is not one slot, and that is the real objection.** A job pinned
-   to that label lands on whichever of the two runners is idle: on arcana-devs it
-   finds PHP 8.3.6 and runs; on arcana-kb it finds no interpreter and the
-   assertion fails by design. The same commit would pass or fail on runner
-   availability alone — a gate that is red for a reason unrelated to the code,
-   which is the habit this whole note is about. It is fixable (install PHP on
-   arcana-kb, or pin a narrower label), but each fix mutates shared CI
-   infrastructure other repositories depend on, and pinning a narrower label
-   reintroduces precisely the single-label-disappears risk the workflow header
-   rejects.
+3. **Bare `ci-general` is ambiguous, but the org already has the fix.** A job
+   pinned to that label alone lands on whichever of the two runners is idle: on
+   arcana-devs it finds PHP 8.3.6 and runs; on arcana-kb it finds no interpreter
+   and the assertion fails by design — the same commit passing or failing on
+   runner availability. No workflow in the org actually does this. Every live
+   consumer (`auth-arcana`, `arcanada-llm-proxy`) pins
+   `[self-hosted, linux, arcana-ai, docker, ci-general]`, and since `arcana-ai`
+   is carried by exactly one runner, that set resolves deterministically to
+   arcana-devs. Following the existing convention, a moved job would land on a
+   host that satisfies its PHP assertion today, with nothing installed and
+   nothing mutated.
 
-There is a further cost the header names in advance: it takes PHP from the runner
-image so a version move goes "red loudly instead of silently testing something
-else". On GitHub-hosted that image is uniform and disposable. Self-hosted, "the
-image" becomes per-host machine-local state that already differs three ways
-across this fleet — 8.4.19, 8.3.6, absent.
+So the move is **feasible now**, which is more than either earlier revision of
+this note allowed. What survives as an objection is narrower, and it is the
+argument the workflow header already makes for itself: a test job pinned to a
+self-hosted label that later disappears queues forever and leaves "a dead gate
+that still shows a green tick". Add ordinary contention — arcana-devs also serves
+two other repositories' CI — and the case for staying GitHub-hosted is real but
+weaker than "it cannot be done".
 
-So the runner move is *feasible* and *not obviously desirable*. Restoring billing
-restores the design the workflow's author chose and documented. That remains a
+Honesty demands the other side too. The header weighed the vanishing-label risk
+and did not weigh this one: a GitHub-hosted job can be stopped dead by an account
+billing state, which is precisely what happened, and which no self-hosted runner
+is exposed to. The outage is a genuine data point against the original choice, not
+merely an accident that befell it.
+
+The balance, stated plainly: restoring billing is the cheapest fix and restores
+the design the workflow's author chose and documented. Moving to
+`arcana-ai`+`ci-general` is a working alternative that is available today and
+removes this failure mode at the cost of reintroducing another. That remains a
 fleet/account decision; what has changed is that it can now be taken on evidence
 instead of on an open question.
 
@@ -161,7 +173,10 @@ revision. Labels from `gh api orgs/Arcanada-one/actions/runners`; host identity
 from each runner's own `.runner` file (`agentName`), which is what resolves the
 `arcana-ci-general` → arcana-devs mapping the label name obscures; PHP by `php
 --version` on each host over Tailscale. dev-ai checked for both a runner
-directory and an `actions.runner` service — neither exists. The billing block was
+directory and an `actions.runner` service — neither exists. Consumer label sets
+from `gh search code --owner Arcanada-one "ci-general"`, then reading each
+matching workflow's `runs-on`: four repositories reference the label, none with a
+bare `ci-general`. The billing block was
 re-confirmed still live on the newest `test` run (`31558596957`, `main`,
 2026-08-12T02:58Z) by reading the check-run annotation, not the red tick: the job
 has no steps and no runner name because it never started.
