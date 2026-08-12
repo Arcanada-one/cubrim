@@ -386,3 +386,41 @@ which this campaign is not.
 
 The campaign is otherwise unaffected: the void is confined to one cell, the runner
 continued straight into `enwik8/f12`, and no other cell's gates are touched.
+
+### Correction, within the hour: F12 is **not** surviving that cap, and I should not have said it was
+
+The section above claimed the F12 arm "is passing the same cap with an order of
+magnitude to spare", citing 1.79 GB at t=112 s. **That was extrapolated from the
+first 112 seconds of a ~2,900-second encode, and it is wrong.**
+
+Measured properly, the two arms track the same curve:
+
+| t (s) | `full` arm RSS | | t (s) | `f12` arm RSS |
+|---:|---:|---|---:|---:|
+| 266 | 9.90 GB | | 272 | 9.94 GB |
+| 278 | 9.96 GB | | 290 | 10.04 GB |
+| 309 | 10.12 GB | | 308 | 10.12 GB |
+| 340 | 10.23 GB | | 327 | 10.19 GB |
+| 356 | 10.27 GB | | 345 | 10.25 GB |
+
+They are the same trajectory to within noise. The 1.79 GB reading was a start-up
+phase, not a plateau.
+
+**Why the mistake was available to make, which is the part worth keeping.** C-4
+measures **decode** peak RSS, and F12 genuinely cuts that to ~45% because the tier
+removes CM2 *model tables* and those dominate the decoder's working set. I carried
+that result across to **encode** without checking. Encode runs the whole competitive
+rail — every candidate, not just CM2 — so its peak is set by something the tier does
+not touch. C-4 was never an encode prediction and the campaign never made one.
+
+**Retracted in full:** "under this campaign's declared 14 GB cap, `max` cannot encode
+`enwik8` and F12 can". The correct expectation is that `enwik8/f12` OOMs at the same
+~14 GB, and if it does, **both arms of `enwik8` are void** and even the C-2 deviation
+described above becomes unavailable — there would be no F12 archive to compare
+against meta-36's byte count.
+
+The lesson is the ordinary one and it caught me anyway: a growth curve sampled over
+4% of a run is not a growth curve. The `full` arm's own trajectory — which I did
+sample across a comparable window before predicting its death correctly — is the
+control that should have made me wait for the same window on the second arm before
+saying anything.
