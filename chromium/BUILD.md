@@ -140,6 +140,30 @@ the stub `static_library` to a `rust_static_library` over
 in-tree; the decoder itself is already proven byte-exact natively
 (`chromium/ffi-check.c`, and the handle ABI's own `ffi_handles` suite).
 
+## Live demo — P4 (`chromium/run-demo.sh`)
+
+Once `content_shell` is built, the demo is one script. Topology:
+`patched content_shell -> web/serve.mjs (loopback :8078, negotiates
+Content-Encoding: cbm per PR #199) -> pre-generated .cbr frames`.
+
+`run-demo.sh` (copy it and the census fixtures + `web/serve.mjs`/`encoding.mjs`
+to the build host):
+
+1. starts the origin/encoder (`node serve.mjs`);
+2. control curl — a plain `Accept-Encoding: gzip, br` client gets identity;
+3. curl with `Accept-Encoding: cbm` gets `Content-Encoding: cbm` + `Vary`;
+4. `xvfb-run content_shell --enable-features=CbmContentEncoding
+   --log-net-log=… --dump-dom http://127.0.0.1:8078/<doc>` — headless load,
+   the browser decodes the cbm document in its network stack;
+5. evidence: the netlog's `Content-Encoding: cbm`, the DOM dump size vs the
+   original vs the wire `.cbr` size, and a title/body string from the decoded
+   page.
+
+The advertisement works on plain-http localhost with no TLS: the pinned tag's
+guard is `SchemeIsCryptographic() || IsLocalhost(url)` (resolved at P0). The
+codec path itself is already proven at the unit level — this demo is the
+canon-stage-4 optics on top of the passing `CbmSourceStreamTest`.
+
 ## Hard gate
 
 This is a demo fork. **No upstream CL, no chromium.org interaction, no public
