@@ -18,6 +18,10 @@
 
 use cubrim::config::EncodeConfig;
 
+/// A payload generator: `(width, height) -> raw 8-bit greyscale bytes`. Named so the
+/// shape table below stays a plain array rather than a type clippy flags as complex.
+type ShapeFn = fn(usize, usize) -> Vec<u8>;
+
 fn mode_name(m: u8) -> &'static str {
     match m {
         0 => "CUBE",
@@ -69,8 +73,7 @@ fn plasma(w: usize, h: usize) -> Vec<u8> {
 }
 
 fn main() {
-    let shapes: [(&str, fn(usize, usize) -> Vec<u8>); 3] =
-        [("smooth", smooth), ("bands", bands), ("plasma", plasma)];
+    let shapes: [(&str, ShapeFn); 3] = [("smooth", smooth), ("bands", bands), ("plasma", plasma)];
     // Dimensions bracketing the 64 KiB -> 128 KiB floor measured on real x-ray data.
     let dims = [
         (256usize, 256usize),
