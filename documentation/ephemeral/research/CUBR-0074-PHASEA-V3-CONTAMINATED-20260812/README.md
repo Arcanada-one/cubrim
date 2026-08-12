@@ -36,3 +36,27 @@ preference but a correctness condition for half the table.
 The runner now re-reads load every 25 trials and aborts when it passes the
 ceiling it was admitted under (Arcanada-one/cubrim#194), so a later run cannot
 produce this artefact silently again.
+
+## Live fire, twenty minutes later
+
+The same run repeated on the same host with the watchdog in place aborted at
+trial **551 of 1950**, wrote no bundle, and left one line:
+
+```json
+{"load_per_cpu_milli":1031,"randomized_order":551,"reason":"failed_admission_midrun"}
+```
+
+`second-run-host-load-samples.txt` is the outside record of the same window.
+Load crossed the ceiling by 3% and the run stopped rather than carry on
+producing numbers about a host that had changed underneath it.
+
+**The ceiling was deliberately left without tolerance.** A start-of-run check
+that fails costs nothing; a mid-run check that fails costs the run, and that
+asymmetry is an argument for allowing a blip — until you notice that trading
+the guarantee for a completed run is the exact move this task keeps finding
+elsewhere. A gate loosened to fit the host stops being a gate. What this pair of
+runs establishes is a fact about arcana-devs, not a defect in the check: while
+CI work lands on it the box does not hold a quiet eight-minute window, so the
+timing half of a Phase A table cannot be measured there right now. The density
+half could be measured at any load — it is identical in every cell of the
+contaminated run — but the published table is mixed, so it waits.
