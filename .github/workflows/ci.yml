@@ -8,7 +8,7 @@ on:
       - 'code/cubrim-web-decoder/**'
       - 'code/cubrim-web-cli/**'
       - 'bench/web-benchmark/**'
-      - 'bench/web-corpus/payloads-v2/**'
+      - 'bench/web-corpus/**'
       - 'reproducibility/**'
       - '.github/workflows/ci.yml'
   pull_request:
@@ -17,7 +17,7 @@ on:
       - 'code/cubrim-web-decoder/**'
       - 'code/cubrim-web-cli/**'
       - 'bench/web-benchmark/**'
-      - 'bench/web-corpus/payloads-v2/**'
+      - 'bench/web-corpus/**'
       - 'reproducibility/**'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
@@ -196,6 +196,27 @@ jobs:
           echo "discovered ${#modules[@]} test modules"
           if [ "${#modules[@]}" -lt 6 ]; then
             echo "expected at least 6 harness test modules, found ${#modules[@]}" >&2
+            exit 1
+          fi
+          for path in "${modules[@]}"; do
+            module="tests.$(basename "$path" .py)"
+            echo "== $module"
+            python -m unittest "$module"
+          done
+
+      # bench/web-corpus has its own suite, and it was in no path filter and no
+      # job either — the same omission as the harness one, found by following a
+      # manifest reference out of the harness directory. It guards the pinned
+      # corpus: manifest digests, licence coverage, and that v2 stays frozen.
+      - name: Corpus tests
+        working-directory: bench/web-corpus
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          modules=(tests/test_*.py)
+          echo "discovered ${#modules[@]} corpus test modules"
+          if [ "${#modules[@]}" -lt 3 ]; then
+            echo "expected at least 3 corpus test modules, found ${#modules[@]}" >&2
             exit 1
           fi
           for path in "${modules[@]}"; do

@@ -630,7 +630,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v2.json",
+        default=Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v3.json",
     )
     parser.add_argument("--out", type=Path, default=Path(__file__).parent / "out")
     parser.add_argument("--journal", type=Path, default=Path(__file__).parent / "journal")

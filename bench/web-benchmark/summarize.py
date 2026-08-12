@@ -34,10 +34,10 @@ PHASE_A_METRICS = (
     "peak_memory",
 )
 CANONICAL_MANIFEST_PATH = (
-    Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v2.json"
+    Path(__file__).resolve().parents[1] / "web-corpus" / "manifest.v3.json"
 )
 CANONICAL_MANIFEST_SHA256 = (
-    "fecc83c1e6559d361d0029024393a3cc98909f0c45dea3a2f0c4f11b75a3a2bf"
+    "43474bfc8fafe7cba96b4843a1700141c49b29f0cda5711861a11f654923f9d5"
 )
 CANONICAL_SAMPLE_IDENTITIES = (
     ("css-medium-tailwind-v2", "payloads-v2/tailwind.css"),
@@ -51,6 +51,7 @@ CANONICAL_SAMPLE_IDENTITIES = (
     ("json-api-small-hypotheses-v2", "payloads-v2/json-api-small-hypotheses-v2.json"),
     ("source-map-large-magic-string-v2", "payloads-v2/magic-string.umd.js.map"),
     ("source-map-small-sourcemap-codec-v2", "payloads-v2/sourcemap-codec.umd.js.map"),
+    ("wasm-medium-cubrim-decoder-v3", "payloads-v3/cubrim-web-decoder.wasm"),
     ("woff2-medium-inter-latin-v20", "payloads-v2/inter-latin.medium.woff2"),
 )
 RESOURCE_METRIC_UNITS = {
