@@ -5,11 +5,13 @@
 #include "net/filter/cbm_source_stream.h"
 
 #include <algorithm>
-#include <cstring>
 #include <string>
 #include <vector>
 
 #include "base/check.h"
+#include "base/compiler_specific.h"
+#include "base/containers/span.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/numerics/safe_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/filter/source_stream_type.h"
@@ -70,10 +72,11 @@ class CbmSourceStream : public FilterSourceStream {
         *consumed_bytes = input_buffer_size;
         return base::unexpected(ERR_CONTENT_DECODING_FAILED);
       }
-      const uint8_t* fresh = cbm_stream_fresh_ptr(stream_);
       const size_t fresh_len = cbm_stream_fresh_len(stream_);
       if (fresh_len > 0) {
-        pending_.insert(pending_.end(), fresh, fresh + fresh_len);
+        base::span<const uint8_t> fresh_span =
+            UNSAFE_BUFFERS(base::span(cbm_stream_fresh_ptr(stream_), fresh_len));
+        pending_.insert(pending_.end(), fresh_span.begin(), fresh_span.end());
       }
     }
     *consumed_bytes = input_buffer_size;
@@ -83,8 +86,8 @@ class CbmSourceStream : public FilterSourceStream {
     const size_t available = pending_.size() - pending_offset_;
     if (available > 0) {
       const size_t emit = std::min(available, output_buffer_size);
-      std::memcpy(output_buffer->data(), pending_.data() + pending_offset_,
-                  emit);
+      output_buffer->span().first(emit).copy_from(
+          base::span(pending_).subspan(pending_offset_, emit));
       pending_offset_ += emit;
       if (pending_offset_ == pending_.size()) {
         pending_.clear();
@@ -111,7 +114,9 @@ class CbmSourceStream : public FilterSourceStream {
     return 0;
   }
 
-  CbmStream* const stream_;
+  // Owned by Rust (Box::into_raw); not PartitionAlloc memory, so raw_ptr
+  // is wrong here — exclude it explicitly.
+  RAW_PTR_EXCLUSION CbmStream* const stream_;
   std::vector<uint8_t> pending_;
   size_t pending_offset_ = 0;
   bool verified_ = false;
