@@ -94,6 +94,13 @@ answering it got one of the three conclusions wrong. The correction is below,
 because a wrong fact stated confidently is worse than the open question it
 replaced.
 
+> **Outcome first, so this section cannot be quoted against itself.** The move
+> was ultimately **built, run, and declined** — see *The move was then tried*
+> at the end of this section. What follows is the reasoning in the order it was
+> found, including an intermediate finding that the move is *feasible*. That
+> finding is true and is kept. It is not what decided the question, and read on
+> its own it points the wrong way.
+
 The requirement is not "PHP" in the abstract but the assertion the job runs on
 itself: `php -r 'version_compare(PHP_VERSION, "8.3", ">=")'`. Measured against
 that, by label rather than by host:
