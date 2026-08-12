@@ -178,7 +178,31 @@ jobs:
       - name: Round-trip the web census through the binary
         run: cargo test --locked --release
 
-  web-benchmark-harness:
+  cubrimd:
+    name: cubrimd reverse proxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: code/cubrimd
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --locked --release --all-targets -- -D warnings
+
+      # The e2e suite runs a real origin and the real proxy over real HTTP —
+      # negotiation legs asserted from the ORIGIN's point of view too, since
+      # half the proxy's contract is which Accept-Encoding the origin sees.
+      - name: Unit + end-to-end suite
+        run: cargo test --locked --release
     name: Web benchmark harness
     runs-on: ubuntu-latest
     timeout-minutes: 15
