@@ -9,6 +9,7 @@
 // EmbeddedTestServer. It covers exactly the integration edits (feature,
 // advertisement, dispatch switch) the browser demo would exercise manually.
 
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -35,9 +36,9 @@ namespace {
 // Accept-Encoding the client sent (so a test can assert advertisement).
 class CbmTestServer {
  public:
-  CbmTestServer() {
-    server_.RegisterRequestHandler(base::BindRepeating(
-        &CbmTestServer::Handle, base::Unretained(this)));
+  explicit CbmTestServer(bool force_cbm = false) : force_cbm_(force_cbm) {
+    server_.RegisterRequestHandler(
+        base::BindRepeating(&CbmTestServer::Handle, base::Unretained(this)));
   }
 
   bool Start() { return server_.Start(); }
@@ -52,52 +53,105 @@ class CbmTestServer {
 
     std::string frame(reinterpret_cast<const char*>(kCbmGoldenFrame),
                       sizeof(kCbmGoldenFrame));
+    std::string identity(reinterpret_cast<const char*>(kCbmGoldenOriginal),
+                         sizeof(kCbmGoldenOriginal));
+    const bool client_accepts_cbm =
+        last_accept_encoding_.find("cbm") != std::string::npos;
+    const bool serve_cbm = force_cbm_ || client_accepts_cbm;
+    const std::string& body = serve_cbm ? frame : identity;
     std::string headers = "HTTP/1.1 200 OK\r\n";
     headers += "Content-Type: application/json\r\n";
-    headers += "Content-Encoding: cbm\r\n";
-    base::StringAppendF(&headers, "Content-Length: %zu\r\n", frame.size());
-    return std::make_unique<test_server::RawHttpResponse>(headers, frame);
+    headers += "Vary: Accept-Encoding\r\n";
+    if (serve_cbm) {
+      headers += "Content-Encoding: cbm\r\n";
+    }
+    base::StringAppendF(&headers, "Content-Length: %zu\r\n", body.size());
+    return std::make_unique<test_server::RawHttpResponse>(headers, body);
   }
 
   test_server::EmbeddedTestServer server_;
+  const bool force_cbm_;
   std::string last_accept_encoding_;
 };
 
 class CbmUrlRequestTest : public TestWithTaskEnvironment {};
 
-// The load-bearing browser-path test: a cbm response fetched over real HTTP is
-// decoded byte-exact by the network stack — advertisement, dispatch, decode.
-TEST_F(CbmUrlRequestTest, DecodesCbmResponseOverHttp) {
-  base::test::ScopedFeatureList features;
-  features.InitAndEnableFeature(features::kCbmContentEncoding);
-
+// The load-bearing browser-path test: one URL negotiates CBM when enabled and
+// falls back to identity when disabled. The server is conditional, so this
+// fails if the client advertises incorrectly or the response path is not
+// actually controlled by the feature.
+TEST_F(CbmUrlRequestTest, SameUrlNegotiatesCbmAndIdentity) {
   CbmTestServer server;
   ASSERT_TRUE(server.Start());
+  const GURL url = server.url();
 
-  auto context = CreateTestURLRequestContextBuilder()->Build();
-  TestDelegate d;
-  std::unique_ptr<URLRequest> r(context->CreateRequest(
-      server.url(), DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
-  r->Start();
-  d.RunUntilComplete();
+  {
+    base::test::ScopedFeatureList features;
+    features.InitAndEnableFeature(features::kCbmContentEncoding);
 
-  EXPECT_EQ(OK, d.request_status());
-  ASSERT_EQ(sizeof(kCbmGoldenOriginal), d.data_received().size());
-  EXPECT_EQ(std::string_view(reinterpret_cast<const char*>(kCbmGoldenOriginal),
-                             sizeof(kCbmGoldenOriginal)),
-            d.data_received());
-  // The client advertised cbm (feature on, localhost is a secure-enough
-  // context for advanced encodings).
-  EXPECT_NE(std::string::npos, server.last_accept_encoding().find("cbm"));
+    auto context = CreateTestURLRequestContextBuilder()->Build();
+    TestDelegate d;
+    std::unique_ptr<URLRequest> r(context->CreateRequest(
+        url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
+    r->Start();
+    d.RunUntilComplete();
+
+    EXPECT_EQ(OK, d.request_status());
+    ASSERT_EQ(sizeof(kCbmGoldenOriginal), d.data_received().size());
+    EXPECT_EQ(
+        std::string_view(reinterpret_cast<const char*>(kCbmGoldenOriginal),
+                         sizeof(kCbmGoldenOriginal)),
+        d.data_received());
+    // The client advertised cbm (feature on, localhost is a secure-enough
+    // context for advanced encodings), and the server selected it.
+    EXPECT_NE(std::string::npos, server.last_accept_encoding().find("cbm"));
+    ASSERT_TRUE(r->response_headers());
+    const std::optional<std::string> content_encoding =
+        r->response_headers()->GetNormalizedHeader("Content-Encoding");
+    ASSERT_TRUE(content_encoding);
+    EXPECT_EQ("cbm", *content_encoding);
+    const std::optional<std::string> vary =
+        r->response_headers()->GetNormalizedHeader("Vary");
+    ASSERT_TRUE(vary);
+    EXPECT_EQ("Accept-Encoding", *vary);
+  }
+
+  {
+    base::test::ScopedFeatureList features;
+    features.InitAndDisableFeature(features::kCbmContentEncoding);
+
+    auto context = CreateTestURLRequestContextBuilder()->Build();
+    TestDelegate d;
+    std::unique_ptr<URLRequest> r(context->CreateRequest(
+        url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
+    r->Start();
+    d.RunUntilComplete();
+
+    EXPECT_EQ(OK, d.request_status());
+    ASSERT_EQ(sizeof(kCbmGoldenOriginal), d.data_received().size());
+    EXPECT_EQ(
+        std::string_view(reinterpret_cast<const char*>(kCbmGoldenOriginal),
+                         sizeof(kCbmGoldenOriginal)),
+        d.data_received());
+    EXPECT_EQ(std::string::npos, server.last_accept_encoding().find("cbm"));
+    ASSERT_TRUE(r->response_headers());
+    EXPECT_FALSE(
+        r->response_headers()->GetNormalizedHeader("Content-Encoding"));
+    const std::optional<std::string> vary =
+        r->response_headers()->GetNormalizedHeader("Vary");
+    ASSERT_TRUE(vary);
+    EXPECT_EQ("Accept-Encoding", *vary);
+  }
 }
 
-// With the feature off, the client must NOT advertise cbm — the demo coding is
-// gated and a stock build is unchanged.
-TEST_F(CbmUrlRequestTest, DoesNotAdvertiseCbmWhenFeatureOff) {
+// A server that ignores negotiation must not make a disabled client decode an
+// unsolicited cbm response. This is distinct from the same-URL identity
+// control above: it proves the decoder dispatch itself is feature-gated.
+TEST_F(CbmUrlRequestTest, FeatureOffRejectsForcedCbmResponse) {
   base::test::ScopedFeatureList features;
   features.InitAndDisableFeature(features::kCbmContentEncoding);
 
-  CbmTestServer server;
+  CbmTestServer server(/*force_cbm=*/true);
   ASSERT_TRUE(server.Start());
 
   auto context = CreateTestURLRequestContextBuilder()->Build();
@@ -107,9 +161,8 @@ TEST_F(CbmUrlRequestTest, DoesNotAdvertiseCbmWhenFeatureOff) {
   r->Start();
   d.RunUntilComplete();
 
-  // The server still forces cbm and the dispatch still decodes it (recognition
-  // is not feature-gated, only advertisement is), so the body is correct — but
-  // the client did not ASK for cbm.
+  EXPECT_EQ(ERR_CONTENT_DECODING_INIT_FAILED, d.request_status());
+  EXPECT_TRUE(d.data_received().empty());
   EXPECT_EQ(std::string::npos, server.last_accept_encoding().find("cbm"));
 }
 
