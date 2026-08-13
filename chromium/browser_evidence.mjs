@@ -44,6 +44,30 @@ async function waitForPage() {
   throw new Error(`no DevTools page target for /${doc}`);
 }
 
+async function waitForDocument(devtools) {
+  const expression =
+    '({href: location.href, readyState: document.readyState})';
+  while (Date.now() < deadline) {
+    try {
+      const evaluated = await devtools.call('Runtime.evaluate', {
+        expression,
+        returnByValue: true,
+      });
+      const page = evaluated.result?.value;
+      if (
+        page?.href?.includes(`/${doc}`) &&
+        page.readyState !== 'loading'
+      ) {
+        return page;
+      }
+    } catch {
+      // The target URL can be published before its execution context commits.
+    }
+    await sleep(100);
+  }
+  throw new Error(`document execution context did not commit /${doc}`);
+}
+
 function connect(webSocketUrl) {
   const socket = new WebSocket(webSocketUrl);
   const pending = new Map();
@@ -111,50 +135,57 @@ const decodedBodyExpression = `(() => {
 async function main() {
   const target = await waitForPage();
   const devtools = connect(target.webSocketDebuggerUrl);
-  await devtools.open;
+  try {
+    await devtools.open;
+    const page = await waitForDocument(devtools);
 
-  const evaluated = await devtools.call('Runtime.evaluate', {
-    expression: decodedBodyExpression,
-    awaitPromise: true,
-    returnByValue: true,
-  });
-  if (evaluated.exceptionDetails) {
-    throw new Error(JSON.stringify(evaluated.exceptionDetails));
+    const evaluated = await devtools.call('Runtime.evaluate', {
+      expression: decodedBodyExpression,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (evaluated.exceptionDetails) {
+      throw new Error(JSON.stringify(evaluated.exceptionDetails));
+    }
+    const browserBody = evaluated.result?.value;
+    if (!browserBody || typeof browserBody.sha256 !== 'string') {
+      throw new Error('browser did not return decoded-body evidence');
+    }
+
+    const screenshot = await devtools.call('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+    });
+    const screenshotBytes = Buffer.from(screenshot.data, 'base64');
+    writeFileSync(screenshotPath, screenshotBytes, { mode: 0o600 });
+
+    const originBytes = readFileSync(originPath);
+    const originSha256 = createHash('sha256')
+      .update(originBytes)
+      .digest('hex');
+    const bodyMatches =
+      browserBody.status === 200 &&
+      browserBody.byteLength === originBytes.length &&
+      browserBody.sha256 === originSha256;
+    const screenshotSha256 = createHash('sha256')
+      .update(screenshotBytes)
+      .digest('hex');
+
+    console.log(`  browser page URL                : ${page.href}`);
+    console.log(`  browser fetch status             : ${browserBody.status}`);
+    console.log(`  browser decoded body bytes      : ${browserBody.byteLength}`);
+    console.log(`  origin body bytes               : ${originBytes.length}`);
+    console.log(`  browser decoded body SHA-256    : ${browserBody.sha256}`);
+    console.log(`  origin body SHA-256             : ${originSha256}`);
+    console.log(`  decoded body matches origin     : ${bodyMatches}`);
+    console.log(`  rendered screenshot bytes       : ${screenshotBytes.length}`);
+    console.log(`  rendered screenshot SHA-256     : ${screenshotSha256}`);
+    console.log(`  rendered document readyState    : ${browserBody.readyState}`);
+
+    if (!bodyMatches || screenshotBytes.length === 0) process.exitCode = 2;
+  } finally {
+    devtools.socket.close();
   }
-  const browserBody = evaluated.result?.value;
-  if (!browserBody || typeof browserBody.sha256 !== 'string') {
-    throw new Error('browser did not return decoded-body evidence');
-  }
-
-  const screenshot = await devtools.call('Page.captureScreenshot', {
-    format: 'png',
-    fromSurface: true,
-  });
-  const screenshotBytes = Buffer.from(screenshot.data, 'base64');
-  writeFileSync(screenshotPath, screenshotBytes, { mode: 0o600 });
-
-  const originBytes = readFileSync(originPath);
-  const originSha256 = createHash('sha256').update(originBytes).digest('hex');
-  const bodyMatches =
-    browserBody.status === 200 &&
-    browserBody.byteLength === originBytes.length &&
-    browserBody.sha256 === originSha256;
-  const screenshotSha256 = createHash('sha256')
-    .update(screenshotBytes)
-    .digest('hex');
-
-  console.log(`  browser fetch status             : ${browserBody.status}`);
-  console.log(`  browser decoded body bytes      : ${browserBody.byteLength}`);
-  console.log(`  origin body bytes               : ${originBytes.length}`);
-  console.log(`  browser decoded body SHA-256    : ${browserBody.sha256}`);
-  console.log(`  origin body SHA-256             : ${originSha256}`);
-  console.log(`  decoded body matches origin     : ${bodyMatches}`);
-  console.log(`  rendered screenshot bytes       : ${screenshotBytes.length}`);
-  console.log(`  rendered screenshot SHA-256     : ${screenshotSha256}`);
-  console.log(`  rendered document readyState    : ${browserBody.readyState}`);
-
-  devtools.socket.close();
-  if (!bodyMatches || screenshotBytes.length === 0) process.exitCode = 2;
 }
 
 main().catch((error) => {

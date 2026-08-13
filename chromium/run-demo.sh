@@ -36,12 +36,17 @@ cp "$ROOT/demo/serve.mjs" "$ROOT/demo/encoding.mjs" "$SITE/" 2>/dev/null || true
 ORIG_SIZE=$(wc -c < "$SITE/$DOC"); FRAME_SIZE=$(wc -c < "$SITE/$DOC.cbr")
 
 echo "== origin+encoder on :8078 (serve.mjs negotiates Content-Encoding: cbm)"
-( cd "$SITE" && node serve.mjs "$SITE" 8078 >/tmp/srv.log 2>&1 ) &
+( cd "$SITE" && exec node serve.mjs "$SITE" 8078 >/tmp/srv.log 2>&1 ) &
 SRV=$!
 CS_PID=
+CS_MAIN_PID=
 cleanup() {
+  if [ -n "${CS_MAIN_PID:-}" ]; then kill -TERM "$CS_MAIN_PID" 2>/dev/null || true; fi
   if [ -n "${CS_PID:-}" ]; then kill "$CS_PID" 2>/dev/null || true; fi
-  kill "$SRV" 2>/dev/null || true
+  if [ -n "${SRV:-}" ]; then
+    kill "$SRV" 2>/dev/null || true
+    wait "$SRV" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 sleep 2
@@ -57,7 +62,6 @@ CS_LOG=$(mktemp /tmp/cubr-content-shell.XXXXXX.log)
 CDP_PORT=9222
 set +e
 timeout 60 xvfb-run -a "$CS" \
-  --run-web-tests \
   --enable-features=CbmContentEncoding --no-sandbox --disable-gpu \
   --disable-background-networking \
   --remote-debugging-port="$CDP_PORT" \
@@ -66,6 +70,22 @@ timeout 60 xvfb-run -a "$CS" \
 CS_PID=$!
 timeout 45 node "$EVIDENCE" "$CDP_PORT" "$DOC" "$SITE/$DOC" "$SCREENSHOT"
 EVIDENCE_RC=$?
+for candidate in $(pgrep -x content_shell 2>/dev/null); do
+  candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null)
+  case "$candidate_cmd" in
+    *"--remote-debugging-port=$CDP_PORT"*)
+      case "$candidate_cmd" in
+        *"--type="*) ;;
+        *) CS_MAIN_PID=$candidate ;;
+      esac
+      ;;
+  esac
+done
+if [ -n "$CS_MAIN_PID" ]; then
+  kill -TERM "$CS_MAIN_PID" 2>/dev/null || true
+else
+  kill "$CS_PID" 2>/dev/null || true
+fi
 wait "$CS_PID"
 CS_RC=$?
 set -e
@@ -74,7 +94,9 @@ if [ "$EVIDENCE_RC" -ne 0 ]; then
   tail -40 "$CS_LOG" >&2
   exit "$EVIDENCE_RC"
 fi
-if [ "$CS_RC" -ne 0 ]; then
+if [ "$CS_RC" -ne 0 ] && [ "$EVIDENCE_RC" -eq 0 ]; then
+  echo "content_shell stopped after successful browser evidence (exit $CS_RC)"
+elif [ "$CS_RC" -ne 0 ]; then
   echo "content_shell failed (exit $CS_RC); last output:" >&2
   tail -40 "$CS_LOG" >&2
   exit "$CS_RC"

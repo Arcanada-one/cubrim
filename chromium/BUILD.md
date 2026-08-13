@@ -162,12 +162,16 @@ the census fixtures + `web/serve.mjs`/`encoding.mjs` to the build host):
 1. starts the origin/encoder (`node serve.mjs`);
 2. control curl — a plain `Accept-Encoding: gzip, br` client gets identity;
 3. curl with `Accept-Encoding: cbm` gets `Content-Encoding: cbm` + `Vary`;
-4. `xvfb-run content_shell --run-web-tests --remote-debugging-port=…
+4. `xvfb-run content_shell --remote-debugging-port=…
    --enable-features=CbmContentEncoding --log-net-log=…
-   http://127.0.0.1:8078/<doc>` — render the page and exit cleanly after the
-   web-test pass; `browser_evidence.mjs` attaches through the local DevTools
-   endpoint, fetches the same URL inside the browser, hashes the decoded
-   `ArrayBuffer` against the origin file, and captures a rendered screenshot;
+   http://127.0.0.1:8078/<doc>` — render the page while keeping the normal
+   browser execution context alive; `browser_evidence.mjs` attaches through
+   the local DevTools endpoint, waits for the committed document context,
+   fetches the same URL inside the browser, hashes the decoded `ArrayBuffer`
+   against the origin file, and captures a rendered screenshot. The bounded
+   script terminates the browser parent after this probe so Chromium flushes
+   the netlog before the process is reaped, avoiding a web-test teardown race
+   and a truncated netlog;
 5. `netlog_verify.py` follows the document's URLRequest source and requires
    `Accept-Encoding: … cbm`, `Content-Encoding: cbm`, `Vary: Accept-Encoding`,
    and no `FAILED` event. It parses the completed netlog structurally, rather

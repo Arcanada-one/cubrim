@@ -20,6 +20,24 @@ here is the real `rust_static_library`.
 the full `net_unittests` target (1,030 build steps), the six focused CBM tests,
 and `net_cbm_source_stream_fuzzer -runs=1000` all passed on arcana-kb.
 
+**Live browser proof refresh (2026-08-13 UTC, arcana-kb):** Cubrim
+`origin/main` was `393a04d80b5f70849d805f82ca80b26a54d28c77` and the pinned
+Chromium source was `8f5d36bc16f57115aeeff34baf4ad6aa964d509c`. The normal
+component `content_shell` build completed with `Build Succeeded: 37936
+steps - 3.25/s`; its SHA-256 was
+`108ac4f7e46d20dfdb2af9138d4d5e6c8e98a226157d9668648b52c33ed8862d`, with
+`use_libfuzzer = false`. The live browser probe returned status 200, decoded
+227,968 bytes, and matched the origin SHA-256
+`7c9ef50500135a4d14c4d900c5fd6d7fa3b407c321d3aa3efd73a2a86a832119`; it
+captured `browser-proof.png` (10,725 bytes,
+`d8c4d4cf56ae3f2737df88c228fbfa2731df10643c2322e2bfed9c4519bf7b3f`) and a
+valid final `netlog.json` (332,550 bytes,
+`010e8aaf835dba7e85e05504447545b6ccb7c1f4c20e72fb9b5f7a0724bdcf4d`). The
+structural verifier found `Accept-Encoding: cbm`, `Content-Encoding: cbm`,
+`Vary: Accept-Encoding`, and no terminal `FAILED` event. The proof harness now
+keeps the normal browser execution context alive for the DevTools fetch and
+gracefully terminates the browser parent before netlog verification.
+
 ## What is here
 
 - `net/filter/cbm_source_stream.{h,cc}` — the CbmSourceStream, modelled on the
