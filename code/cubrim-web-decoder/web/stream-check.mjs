@@ -94,5 +94,25 @@ for (const name of names) {
   }
 }
 
+// The WASM allocator rejects oversized network chunks before a view is made.
+// A length-only chunk keeps this regression test cheap while exercising the
+// same boundary as a real Uint8Array.
+{
+  let allocationError = false;
+  try {
+    const generator = cubrim.cubrimDecodeStream(
+      [{ length: (64 << 20) + 1 }],
+      64 << 20,
+    );
+    await generator.next();
+  } catch (error) {
+    allocationError = error?.message === 'cubrim: allocation failed';
+  }
+  console.log(
+    `oversized-chunk\t-\t-\t-\t${allocationError ? 'rejected' : 'ACCEPTED (failure)'}`,
+  );
+  if (!allocationError) failures += 1;
+}
+
 console.log(`failures=${failures}`);
 process.exit(failures === 0 ? 0 : 1);

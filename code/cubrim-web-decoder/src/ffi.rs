@@ -43,6 +43,16 @@ pub struct CbmStream {
     error: String,
 }
 
+impl CbmStream {
+    fn poison(&mut self, message: &str) {
+        if self.error.is_empty() {
+            self.error = message.to_string();
+        }
+        self.decoder = None;
+        self.fresh = Vec::new();
+    }
+}
+
 /// Bump when the surface above changes shape.
 #[no_mangle]
 pub extern "C" fn cbm_ffi_abi_version() -> u32 {
@@ -77,14 +87,19 @@ pub unsafe extern "C" fn cbm_stream_push(
     let Some(stream) = (unsafe { handle.as_mut() }) else {
         return 0;
     };
-    if ptr.is_null() && len != 0 {
-        stream.error = "null input pointer".to_string();
-        return 0;
-    }
-    let Some(decoder) = stream.decoder.as_mut() else {
+    if stream.decoder.is_none() {
         if stream.error.is_empty() {
             stream.error = "push after finish".to_string();
         }
+        stream.fresh = Vec::new();
+        return 0;
+    }
+    if ptr.is_null() && len != 0 {
+        stream.poison("null input pointer");
+        return 0;
+    }
+    let Some(decoder) = stream.decoder.as_mut() else {
+        stream.poison("push after finish");
         return 0;
     };
     let chunk = if len == 0 {
@@ -92,21 +107,11 @@ pub unsafe extern "C" fn cbm_stream_push(
     } else {
         unsafe { core::slice::from_raw_parts(ptr, len) }
     };
-    match decoder.push(chunk) {
-        Ok(fresh) => {
-            stream.fresh.clear();
-            if stream.fresh.try_reserve(fresh.len()).is_err() {
-                stream.error = "unable to reserve streaming output bytes".to_string();
-                stream.decoder = None;
-                return 0;
-            }
-            stream.fresh.extend_from_slice(fresh);
-            1
-        }
+    match decoder.push_into(chunk, &mut stream.fresh) {
+        Ok(()) => 1,
         Err(e) => {
-            stream.error = e.to_string();
-            stream.decoder = None; // poisoned: a malformed frame stays failed
-            stream.fresh.clear();
+            let message = e.to_string();
+            stream.poison(&message);
             0
         }
     }
@@ -169,7 +174,7 @@ pub unsafe extern "C" fn cbm_stream_finish(handle: *mut CbmStream) -> i32 {
         }
         return 0;
     };
-    stream.fresh.clear();
+    stream.fresh = Vec::new();
     match decoder.finish() {
         Ok(_verified) => 1,
         Err(e) => {

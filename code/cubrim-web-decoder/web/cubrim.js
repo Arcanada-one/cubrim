@@ -4,8 +4,8 @@
 //   const cubrim = await CubrimDecoder.load(urlOrBytes);
 //   const bytes  = cubrim.cubrimDecode(compressed);   // Uint8Array -> Uint8Array
 //
-// Synchronous by design, per CUBR-0077: a streaming API is out of scope and is
-// sketched in the task's docs instead of half-built here.
+// Single-frame decoding is synchronous by design; the streaming API below is
+// an async generator for network bodies.
 //
 // Works in a browser (fetch + WebAssembly.instantiateStreaming) and in Node
 // (pass the bytes in). No bundler, no wasm-bindgen, no dependencies.
@@ -102,6 +102,9 @@ export class CubrimDecoder {
     try {
       for await (const chunk of iterate(source)) {
         const ptr = cbr_alloc(chunk.length);
+        if (ptr === 0 && chunk.length > 0) {
+          throw new Error('cubrim: allocation failed');
+        }
         try {
           new Uint8Array(this.memory.buffer, ptr, chunk.length).set(chunk);
           if (cbr_stream_push(ptr, chunk.length) !== 1) {
