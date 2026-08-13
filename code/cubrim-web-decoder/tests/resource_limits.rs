@@ -101,22 +101,16 @@ fn streaming_expansion_ratio_is_checked_at_completion() {
         ..DecodeLimits::default()
     });
 
-    let push = stream.push(&frame);
-    if push.is_ok() {
-        let err = stream
-            .finish()
-            .expect_err("ratio ceiling must reject at completion");
-        assert!(
-            err.message().contains("expansion ratio"),
-            "unexpected error: {err:?}"
-        );
-    } else {
-        let err = push.expect_err("ratio push error");
-        assert!(
-            err.message().contains("expansion ratio"),
-            "unexpected error: {err:?}"
-        );
-    }
+    stream
+        .push(&frame)
+        .expect("ratio ceiling is checked only at completion");
+    let err = stream
+        .finish()
+        .expect_err("ratio ceiling must reject at completion");
+    assert!(
+        err.message().contains("expansion ratio"),
+        "unexpected error: {err:?}"
+    );
 
     assert!(data.len() > frame.len(), "fixture must remain compressible");
 }

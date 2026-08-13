@@ -40,6 +40,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::ops::Range;
 
 // The C ABI is not wasm-specific — wasm was simply its first consumer. Built
 // natively it produces a cdylib the benchmark can call in-process, which is the
@@ -150,7 +151,8 @@ pub struct DecodeLimits {
     pub max_input_size: usize,
     /// Largest permitted decoded-to-compressed expansion ratio.
     pub max_expansion_ratio: usize,
-    /// Aggregate decoder memory budget, including decoder state, in bytes.
+    /// Aggregate decoder memory budget, including decoder state and the ABI
+    /// fresh-output window when the native or WASM streaming surface is used.
     pub max_decoder_memory: usize,
 }
 
@@ -221,8 +223,18 @@ fn ensure_decoder_memory(
     retained_output: usize,
     limits: &DecodeLimits,
 ) -> Result<(), DecodeError> {
+    ensure_decoder_memory_with_extra(retained_input, retained_output, 0, limits)
+}
+
+fn ensure_decoder_memory_with_extra(
+    retained_input: usize,
+    retained_output: usize,
+    extra: usize,
+    limits: &DecodeLimits,
+) -> Result<(), DecodeError> {
     let total = retained_input
         .checked_add(retained_output)
+        .and_then(|n| n.checked_add(extra))
         .and_then(|n| n.checked_add(DecodeLimits::DECODER_OVERHEAD));
     if total.is_none_or(|n| n > limits.max_decoder_memory) {
         fail!(
@@ -788,12 +800,52 @@ impl StreamDecoder {
         }
     }
 
+    /// Feed a chunk and copy its fresh output into an ABI-owned buffer while
+    /// charging that copy against the same aggregate decoder-memory budget.
+    pub(crate) fn push_into(
+        &mut self,
+        chunk: &[u8],
+        fresh: &mut Vec<u8>,
+    ) -> Result<(), DecodeError> {
+        // The previous window is no longer externally visible once the next
+        // push starts. Release its capacity before the decoder can allocate.
+        fresh.clear();
+        fresh.shrink_to_fit();
+
+        let decoded = self.push_range(chunk)?;
+        let decoded_len = decoded.end - decoded.start;
+        ensure_decoder_memory_with_extra(
+            self.input.capacity(),
+            self.output.capacity(),
+            decoded_len,
+            &self.limits,
+        )?;
+        try_reserve_exact(fresh, decoded_len, "streaming output")?;
+        if let Err(err) = ensure_decoder_memory_with_extra(
+            self.input.capacity(),
+            self.output.capacity(),
+            fresh.capacity(),
+            &self.limits,
+        ) {
+            fresh.clear();
+            fresh.shrink_to_fit();
+            return Err(err);
+        }
+        fresh.extend_from_slice(&self.output[decoded]);
+        Ok(())
+    }
+
     /// Feed the next piece of the frame; returns the bytes newly decoded by
     /// this call, which is empty whenever the chunk did not complete a block.
     ///
     /// A malformed frame fails here and the decoder must not be used again.
     /// Truncation is not a failure — it is the normal state between chunks.
     pub fn push(&mut self, chunk: &[u8]) -> Result<&[u8], DecodeError> {
+        let fresh = self.push_range(chunk)?;
+        Ok(&self.output[fresh])
+    }
+
+    fn push_range(&mut self, chunk: &[u8]) -> Result<Range<usize>, DecodeError> {
         if self.finished {
             fail!("push after finish");
         }
@@ -812,7 +864,8 @@ impl StreamDecoder {
         ensure_decoder_memory(self.input.capacity(), self.output.capacity(), &self.limits)?;
         self.parse_header()?;
         let Some(header) = self.header else {
-            return Ok(&[]);
+            let end = self.output.len();
+            return Ok(end..end);
         };
 
         if header.raw {
@@ -829,7 +882,7 @@ impl StreamDecoder {
 
         let fresh = self.delivered;
         self.delivered = self.output.len();
-        Ok(&self.output[fresh..])
+        Ok(fresh..self.output.len())
     }
 
     /// Finish the frame: verify the decoded length and the checksum, then hand
@@ -971,5 +1024,36 @@ impl StreamDecoder {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DecodeLimits, StreamDecoder};
+    use cubrim::{encode_with_config, EncodeConfig};
+
+    #[test]
+    fn abi_fresh_copy_is_charged_to_decoder_memory() {
+        let data = b"fresh-window-budget".repeat(4096);
+        let mut config = EncodeConfig::v1_default();
+        config.web_profile = true;
+        let frame = encode_with_config(&data, &config);
+        let limits = DecodeLimits {
+            max_decoder_memory: frame.len() + data.len() + (1 << 20),
+            ..DecodeLimits::default()
+        };
+        let mut core_only = StreamDecoder::new(limits);
+        core_only
+            .push(&frame)
+            .expect("core decoder allocation must fit without the ABI copy");
+
+        let mut stream = StreamDecoder::new(limits);
+        let mut fresh = Vec::new();
+
+        let err = stream
+            .push_into(&frame, &mut fresh)
+            .expect_err("the ABI copy must consume budget");
+        assert!(err.message().contains("decoder memory"));
+        assert!(fresh.is_empty());
     }
 }

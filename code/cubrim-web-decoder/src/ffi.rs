@@ -50,6 +50,7 @@ impl CbmStream {
         }
         self.decoder = None;
         self.fresh.clear();
+        self.fresh.shrink_to_fit();
     }
 }
 
@@ -92,6 +93,7 @@ pub unsafe extern "C" fn cbm_stream_push(
             stream.error = "push after finish".to_string();
         }
         stream.fresh.clear();
+        stream.fresh.shrink_to_fit();
         return 0;
     }
     if ptr.is_null() && len != 0 {
@@ -107,16 +109,8 @@ pub unsafe extern "C" fn cbm_stream_push(
     } else {
         unsafe { core::slice::from_raw_parts(ptr, len) }
     };
-    match decoder.push(chunk) {
-        Ok(fresh) => {
-            stream.fresh.clear();
-            if stream.fresh.try_reserve_exact(fresh.len()).is_err() {
-                stream.poison("unable to reserve streaming output bytes");
-                return 0;
-            }
-            stream.fresh.extend_from_slice(fresh);
-            1
-        }
+    match decoder.push_into(chunk, &mut stream.fresh) {
+        Ok(()) => 1,
         Err(e) => {
             let message = e.to_string();
             stream.poison(&message);

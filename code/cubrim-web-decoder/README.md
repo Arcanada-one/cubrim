@@ -183,10 +183,10 @@ WASM linear memory after decoding all 12: 1.6 MiB. Module: 50,110 B.
 - Decoded-to-compressed expansion is capped at 4096x by default and checked
   again when a stream finishes. Callers can select a stricter ratio.
 - Aggregate decoder memory is capped at 256 MiB by default and includes
-  retained input, retained output, and table/state allowance. Streaming block
-  retries are transactional in-place, so a partial block does not allocate a
-  second full output body. Reservations use fallible allocation and fail
-  closed.
+  retained input, retained output, the native/WASM ABI fresh-output window,
+  and table/state allowance. Streaming block retries are transactional
+  in-place, so a partial block does not allocate a second full output body.
+  Reservations use fallible allocation and fail closed.
 - No `unsafe` in the decoder itself; the only `unsafe` is the wasm ABI's
   pointer handling, which is documented and confined to `src/wasm.rs`.
 - `cargo fuzz run decode_frame` targets arbitrary frames, including a variant
