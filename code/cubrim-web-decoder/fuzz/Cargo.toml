@@ -17,3 +17,10 @@ path = "fuzz_targets/decode_frame.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "decode_ffi"
+path = "fuzz_targets/decode_ffi.rs"
+test = false
+doc = false
+bench = false

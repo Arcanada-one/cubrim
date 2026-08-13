@@ -13,6 +13,7 @@ fuzz_target!(|data: &[u8]| {
     // as the fuzzer being OOM-killed.
     let limits = DecodeLimits {
         max_output_size: 4 << 20,
+        ..DecodeLimits::default()
     };
     let _ = decode_with_limits(data, &limits);
 

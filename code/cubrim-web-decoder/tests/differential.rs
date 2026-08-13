@@ -141,6 +141,7 @@ fn hostile_frames_never_panic_and_respect_the_output_limit() {
     frame[6..10].copy_from_slice(&u32::MAX.to_be_bytes());
     let limits = refdec::DecodeLimits {
         max_output_size: 1 << 20,
+        ..refdec::DecodeLimits::default()
     };
     let err = refdec::decode_with_limits(&frame, &limits).unwrap_err();
     assert!(err.0.contains("exceeds the limit"), "got {err:?}");
@@ -262,6 +263,7 @@ fn raw_store_frames_respect_limits_and_truncation() {
     }
     let limits = refdec::DecodeLimits {
         max_output_size: data.len() - 1,
+        ..refdec::DecodeLimits::default()
     };
     let err = refdec::decode_with_limits(&frame, &limits).unwrap_err();
     assert!(err.0.contains("exceeds the limit"), "got {err:?}");

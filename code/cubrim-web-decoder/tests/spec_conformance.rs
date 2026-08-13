@@ -155,6 +155,7 @@ fn output_ceiling_is_enforced_before_decoding() {
     let declared = refdec::declared_len(&frame).unwrap();
     let limits = refdec::DecodeLimits {
         max_output_size: declared - 1,
+        ..refdec::DecodeLimits::default()
     };
     let err = refdec::decode_with_limits(&frame, &limits).expect_err("§10: ceiling");
     assert!(err.0.contains("exceeds the limit"), "got {err:?}");
@@ -162,6 +163,7 @@ fn output_ceiling_is_enforced_before_decoding() {
     // At exactly the declared size it must succeed.
     let limits = refdec::DecodeLimits {
         max_output_size: declared,
+        ..refdec::DecodeLimits::default()
     };
     assert!(refdec::decode_with_limits(&frame, &limits).is_ok());
 }

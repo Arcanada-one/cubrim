@@ -34,7 +34,14 @@ thread_local! {
 /// length, and must not be used after that.
 #[no_mangle]
 pub extern "C" fn cbr_alloc(len: usize) -> *mut u8 {
-    let mut buf = alloc::vec![0u8; len];
+    if len > DecodeLimits::DEFAULT_MAX_INPUT {
+        return core::ptr::null_mut();
+    }
+    let mut buf = Vec::new();
+    if buf.try_reserve_exact(len).is_err() {
+        return core::ptr::null_mut();
+    }
+    buf.resize(len, 0);
     let ptr = buf.as_mut_ptr();
     core::mem::forget(buf);
     ptr
@@ -78,6 +85,7 @@ pub unsafe extern "C" fn cbr_decode(ptr: *const u8, len: usize, max_out: usize) 
         } else {
             max_out
         },
+        ..DecodeLimits::default()
     };
     match decode_with_limits(input, &limits) {
         Ok(out) => {
@@ -171,6 +179,7 @@ pub extern "C" fn cbr_stream_open(max_out: usize) {
         } else {
             max_out
         },
+        ..DecodeLimits::default()
     };
     STREAM.with(|slot| *slot.borrow_mut() = Some(StreamDecoder::new(limits)));
     FRESH.with(|slot| slot.borrow_mut().clear());
@@ -203,12 +212,22 @@ pub unsafe extern "C" fn cbr_stream_push(ptr: *const u8, len: usize) -> u32 {
         };
         match stream.push(chunk) {
             Ok(fresh) => {
-                FRESH.with(|out| {
+                let copied = FRESH.with(|out| {
                     let mut out = out.borrow_mut();
                     out.clear();
+                    if out.try_reserve(fresh.len()).is_err() {
+                        return false;
+                    }
                     out.extend_from_slice(fresh);
+                    true
                 });
-                1
+                if copied {
+                    1
+                } else {
+                    set_error("unable to reserve streaming output bytes");
+                    *slot = None;
+                    0
+                }
             }
             Err(err) => {
                 set_error(&err.0);
