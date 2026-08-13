@@ -10,6 +10,7 @@ on:
       - 'bench/web-benchmark/**'
       - 'bench/web-corpus/**'
       - 'reproducibility/**'
+      - 'chromium/**'
       - '.github/workflows/ci.yml'
   pull_request:
     paths:
@@ -19,6 +20,7 @@ on:
       - 'bench/web-benchmark/**'
       - 'bench/web-corpus/**'
       - 'reproducibility/**'
+      - 'chromium/**'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
 
@@ -102,6 +104,28 @@ jobs:
 
       - name: Run verifier tests
         run: python -m pytest --strict-markers test_verify.py
+
+  chromium-harness:
+    name: Chromium demo harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # The pinned content_shell build is a host-only artefact (see
+      # chromium/BUILD.md). Keep the portable evidence parser and runner
+      # syntax under CI so a stale or tautological verifier cannot land.
+      - name: Test structural netlog verifier
+        run: python -m unittest chromium.test_netlog_verify
+
+      - name: Shellcheck demo runner
+        run: shellcheck chromium/run-demo.sh
 
   web-decoder:
     name: Web Profile reference decoder

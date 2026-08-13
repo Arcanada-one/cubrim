@@ -4,6 +4,8 @@ Everything the Chromium demo fork needs that is NOT the 100 GB tree itself:
 
 - `BUILD.md` — pinned tag (151.0.7922.137), host rules, exact recipe,
   smoke-gate-before-target-build order, demo topology, evidence list.
+- `run-demo.sh` + `netlog_verify.py` — bounded browser demo and structural
+  netlog evidence verifier.
 - `ffi-check.c` — native proof of the decoder's C ABI (the surface the
   patch links against).
 - `testdata/` — golden-vector manifest for the CbmSourceStream unittests.

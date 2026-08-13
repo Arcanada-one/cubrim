@@ -5,19 +5,20 @@
 # in the network stack, and we capture the proof from the netlog.
 #
 # Evidence is the netlog, not a DOM dump: plain content_shell has no --dump-dom
-# (that is a web-test-mode switch). The netlog is conclusive because it shows
-# BOTH the Content-Encoding: cbm response header AND that the request completed
-# without ERR_CONTENT_DECODING_FAILED — which for an encoding the browser
-# recognises (our patch) means it decoded, where a stock browser would have
-# left the frame undecoded.
+# (that is a web-test-mode switch). The verifier follows the document's
+# URLRequest source through request headers, response headers, and terminal
+# events. It must not scan the whole JSON text: Chromium's constants table
+# contains every net error name, including ERR_CONTENT_DECODING_FAILED.
 set -euo pipefail
 ROOT=/root/cubr-0079
 CS=$ROOT/chromium/src/out/cbm/content_shell
+VERIFY=$ROOT/chromium/netlog_verify.py
 SITE=$ROOT/demo/site
 NETLOG=$ROOT/demo/netlog.json
 DOC=html-large-web-codec-v2.html
 
 test -x "$CS" || { echo "content_shell not built yet"; exit 1; }
+test -r "$VERIFY" || { echo "netlog verifier not installed"; exit 1; }
 cp "$ROOT/demo/serve.mjs" "$ROOT/demo/encoding.mjs" "$SITE/" 2>/dev/null || true
 ORIG_SIZE=$(wc -c < "$SITE/$DOC"); FRAME_SIZE=$(wc -c < "$SITE/$DOC.cbr")
 
@@ -32,27 +33,26 @@ curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip, br' "http://127.0.0.1:8078/
 echo "== a cbm client gets Content-Encoding: cbm (wire $FRAME_SIZE B for a $ORIG_SIZE B doc)"
 curl -s -o /dev/null -D - -H 'Accept-Encoding: cbm, br, gzip' "http://127.0.0.1:8078/$DOC" | grep -iE "content-encoding|vary|content-length"
 
-echo "== patched content_shell, cbm feature on, headless via xvfb, full netlog"
-timeout 45 xvfb-run -a "$CS" \
+echo "== patched content_shell, cbm feature on, rendered test page via xvfb, full netlog"
+rm -f "$NETLOG"
+CS_LOG=$(mktemp /tmp/cubr-content-shell.XXXXXX.log)
+set +e
+timeout 60 xvfb-run -a "$CS" \
+  --run-web-tests \
   --enable-features=CbmContentEncoding --no-sandbox --disable-gpu \
+  --disable-background-networking \
   --log-net-log="$NETLOG" --net-log-capture-mode=Everything \
-  "http://127.0.0.1:8078/$DOC" >/dev/null 2>&1 || true
+  "http://127.0.0.1:8078/$DOC" >"$CS_LOG" 2>&1
+CS_RC=$?
+set -e
+if [ "$CS_RC" -ne 0 ]; then
+  echo "content_shell failed (exit $CS_RC); last output:" >&2
+  tail -40 "$CS_LOG" >&2
+  exit "$CS_RC"
+fi
 
 echo "== EVIDENCE (from $NETLOG)"
 [ -s "$NETLOG" ] || { echo "  netlog empty — content_shell may need more time"; exit 1; }
-python3 - "$NETLOG" "$DOC" "$ORIG_SIZE" <<'PY'
-import json, sys
-txt = open(sys.argv[1]).read()
-doc, orig = sys.argv[2], int(sys.argv[3])
-has_cbm = ("Content-Encoding: cbm" in txt) or ('"cbm"' in txt)
-failed = ("ERR_CONTENT_DECODING_FAILED" in txt) or (", -330" in txt)
-saw_doc = doc in txt
-print(f"  request to /{doc} logged        : {saw_doc}")
-print(f"  Content-Encoding: cbm in netlog : {has_cbm}")
-print(f"  ERR_CONTENT_DECODING_FAILED     : {failed}")
-verdict = has_cbm and saw_doc and not failed
-print(f"  VERDICT: browser negotiated + decoded cbm without error: {verdict}")
-sys.exit(0 if verdict else 2)
-PY
+python3 "$VERIFY" "$NETLOG" "$DOC"
 echo "-- served $FRAME_SIZE cbm wire bytes for the $ORIG_SIZE B identity doc; the"
 echo "   patched network stack decoded it (a stock build has no cbm and would 406/garble)."
