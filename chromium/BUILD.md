@@ -88,6 +88,10 @@ Evidence to record (PRD V-AC2/V-AC3): netlog with `Accept-Encoding: … cbm`
 request + `Content-Encoding: cbm` response; rendered-page screenshot;
 wire-vs-decoded byte counts; `sha256(decoded) == sha256(origin file)`; a
 control run without the flag receiving identity via the proxy's fallback.
+The bounded `run-demo.sh` path obtains the decoded hash and screenshot through
+the local DevTools endpoint using `browser_evidence.mjs`, and rejects a
+`use_libfuzzer=true` component build because its shared libraries are not
+ABI-compatible with the normal `content_shell` binary.
 
 ## Prep artefacts already in this directory (P0, done 2026-08-12)
 
@@ -152,16 +156,18 @@ Once `content_shell` is built, the demo is one script. Topology:
 `patched content_shell -> web/serve.mjs (loopback :8078, negotiates
 Content-Encoding: cbm per PR #199) -> pre-generated .cbr frames`.
 
-`run-demo.sh`, `netlog_verify.py` (copy them and the census fixtures +
-`web/serve.mjs`/`encoding.mjs` to the build host):
+`run-demo.sh`, `netlog_verify.py`, and `browser_evidence.mjs` (copy them and
+the census fixtures + `web/serve.mjs`/`encoding.mjs` to the build host):
 
 1. starts the origin/encoder (`node serve.mjs`);
 2. control curl — a plain `Accept-Encoding: gzip, br` client gets identity;
 3. curl with `Accept-Encoding: cbm` gets `Content-Encoding: cbm` + `Vary`;
-4. `xvfb-run content_shell --run-web-tests
+4. `xvfb-run content_shell --run-web-tests --remote-debugging-port=…
    --enable-features=CbmContentEncoding --log-net-log=…
    http://127.0.0.1:8078/<doc>` — render the page and exit cleanly after the
-   web-test pass; the browser decodes the cbm document in its network stack;
+   web-test pass; `browser_evidence.mjs` attaches through the local DevTools
+   endpoint, fetches the same URL inside the browser, hashes the decoded
+   `ArrayBuffer` against the origin file, and captures a rendered screenshot;
 5. `netlog_verify.py` follows the document's URLRequest source and requires
    `Accept-Encoding: … cbm`, `Content-Encoding: cbm`, `Vary: Accept-Encoding`,
    and no `FAILED` event. It parses the completed netlog structurally, rather
