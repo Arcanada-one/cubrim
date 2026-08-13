@@ -45,15 +45,21 @@ git fetch --depth 1 origin refs/tags/151.0.7922.137
 git checkout FETCH_HEAD
 gclient sync -D --no-history
 
-# 3. apply the series (P1 artefacts; ordered)
-for p in ../../patches/0*.patch; do git apply --index "$p"; done
+# 3. apply the checked-in staging inputs
+export CBM_STAGING="$PWD/../patches-staging"
+bash "$CBM_STAGING/apply.sh"
+export CUBRIM_DECODER="$PWD/../../code/cubrim-web-decoder"
+bash "$CBM_STAGING/vendor-decoder.sh"
 
 # 4. smoke gate FIRST (~1.5-2.5 h): prove the decoder in net_unittests
 gn gen out/cbm --args='is_debug=false symbol_level=0 blink_symbol_level=0
   v8_symbol_level=0 is_component_build=true enable_nacl=false
   is_official_build=false use_remoteexec=false'
 autoninja -C out/cbm net_unittests
-out/cbm/net_unittests --gtest_filter='CbmSourceStream*'
+out/cbm/net_unittests --gtest_filter='CbmSourceStreamTest.*:CbmUrlRequestTest.*'
+# Boundary fuzzer smoke (the long ASan/UBSan run remains host evidence):
+autoninja -C out/cbm net_cbm_source_stream_fuzzer
+out/cbm/net_cbm_source_stream_fuzzer -runs=1000
 # NO-GO here = stop; do not spend the target build.
 
 # 5. the preview target (~5-7 h cold on 12 threads)
