@@ -27,8 +27,9 @@ const char kCbmStreamName[] = "CBM";
 // preceding output, so the decoder must hold the full decoded body until the
 // trailing checksum; this cap is therefore a whole-body cap, not a window.
 // 64 MiB matches the reference decoder's default. The Rust decoder also caps
-// retained input, expansion ratio, and aggregate retry memory; this native
-// caller supplies the output ceiling through cbm_stream_new(). Format v2's
+// retained input, expansion ratio, and aggregate decoder memory; streaming
+// retries are transactional in-place. This native caller supplies the output
+// ceiling through cbm_stream_new(). Format v2's
 // window-log field (capped at 8 MiB, mirroring Chromium's zstd clamp) is the
 // real fix for retained output — tracked in the epic, deliberately not
 // invented here.

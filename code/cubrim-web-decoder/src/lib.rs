@@ -139,8 +139,9 @@ const LENGTH_EXTRA: [u32; N_LENGTH_CODES] = [
 /// A hostile frame controls its declared output length, compressed input length,
 /// and match expansion. Every budget is checked before the corresponding
 /// allocation or decode step. `max_decoder_memory` includes retained input,
-/// retained output, one speculative streaming retry, and a fixed allowance for
-/// Huffman tables and small decoder state.
+/// retained output, and a fixed allowance for Huffman tables and small decoder
+/// state. Streaming retries are transactional in-place and do not allocate a
+/// second copy of the decoded body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeLimits {
     /// Largest output this decode may produce, in bytes.
@@ -149,7 +150,7 @@ pub struct DecodeLimits {
     pub max_input_size: usize,
     /// Largest permitted decoded-to-compressed expansion ratio.
     pub max_expansion_ratio: usize,
-    /// Aggregate decoder memory budget, including retry state, in bytes.
+    /// Aggregate decoder memory budget, including decoder state, in bytes.
     pub max_decoder_memory: usize,
 }
 
@@ -162,8 +163,8 @@ impl DecodeLimits {
     /// 4096x — preserves highly repetitive web assets while keeping the
     /// expansion bound finite and caller-overridable for stricter contexts.
     pub const DEFAULT_MAX_EXPANSION_RATIO: usize = 4096;
-    /// 256 MiB — covers 64 MiB input, 64 MiB output, a speculative output copy,
-    /// and decoder/table overhead without making the default unbounded.
+    /// 256 MiB — covers 64 MiB input, 64 MiB output, and decoder/table overhead
+    /// without making the default unbounded.
     pub const DEFAULT_MAX_DECODER_MEMORY: usize = 256 << 20;
 
     /// Fixed allowance for Huffman tables, distance tables, and small vectors.
@@ -218,12 +219,10 @@ fn ensure_expansion_ratio(
 fn ensure_decoder_memory(
     retained_input: usize,
     retained_output: usize,
-    speculative_output: usize,
     limits: &DecodeLimits,
 ) -> Result<(), DecodeError> {
     let total = retained_input
         .checked_add(retained_output)
-        .and_then(|n| n.checked_add(speculative_output))
         .and_then(|n| n.checked_add(DecodeLimits::DECODER_OVERHEAD));
     if total.is_none_or(|n| n > limits.max_decoder_memory) {
         fail!(
@@ -234,8 +233,12 @@ fn ensure_decoder_memory(
     Ok(())
 }
 
-fn try_reserve<T>(buffer: &mut Vec<T>, additional: usize, what: &str) -> Result<(), DecodeError> {
-    buffer.try_reserve(additional).map_err(|_| {
+fn try_reserve_exact<T>(
+    buffer: &mut Vec<T>,
+    additional: usize,
+    what: &str,
+) -> Result<(), DecodeError> {
+    buffer.try_reserve_exact(additional).map_err(|_| {
         DecodeError(
             format!("unable to reserve {what} bytes"),
             ErrorKind::Invalid,
@@ -454,8 +457,8 @@ pub fn decode(frame: &[u8]) -> Result<Vec<u8>, DecodeError> {
 /// output is never returned as success.
 pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, DecodeError> {
     ensure_input_limit(frame.len(), limits)?;
-    if frame.len() < FRAME_HEADER_SIZE {
-        need_more!("frame too short: {} < {FRAME_HEADER_SIZE}", frame.len());
+    if frame.len() < 6 {
+        need_more!("frame too short: {} < 6", frame.len());
     }
     if frame[0..4] != MAGIC {
         fail!("bad magic");
@@ -469,6 +472,9 @@ pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>
     if frame[5] != MODE_WEB {
         fail!("not a Web Profile frame (mode {})", frame[5]);
     }
+    if frame.len() < FRAME_HEADER_SIZE {
+        need_more!("frame too short: {} < {FRAME_HEADER_SIZE}", frame.len());
+    }
     let orig_len = u32::from_be_bytes([frame[6], frame[7], frame[8], frame[9]]) as usize;
     if orig_len > limits.max_output_size {
         fail!(
@@ -477,15 +483,15 @@ pub fn decode_with_limits(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>
         );
     }
     ensure_expansion_ratio(orig_len, frame.len() - FRAME_HEADER_SIZE, limits)?;
-    ensure_decoder_memory(0, orig_len, 0, limits)?;
+    ensure_decoder_memory(0, orig_len, limits)?;
     let expected_checksum = [frame[10], frame[11], frame[12], frame[13]];
 
     let (dist_base, dist_extra) = distance_tables();
     let mut reader = BitReader::new(&frame[FRAME_HEADER_SIZE..]);
     // Reserving the declared length is safe: it was bounded and budgeted above.
     let mut out = Vec::new();
-    try_reserve(&mut out, orig_len, "decoded output")?;
-    ensure_decoder_memory(0, out.capacity(), 0, limits)?;
+    try_reserve_exact(&mut out, orig_len, "decoded output")?;
+    ensure_decoder_memory(0, out.capacity(), limits)?;
 
     loop {
         let final_block =
@@ -631,7 +637,7 @@ fn decode_raw(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, DecodeErro
             limits.max_output_size
         );
     }
-    ensure_decoder_memory(0, length, 0, limits)?;
+    ensure_decoder_memory(0, length, limits)?;
     let payload = &frame[RAW_HEADER_SIZE..];
     if payload.len() < length {
         need_more!(
@@ -640,8 +646,8 @@ fn decode_raw(frame: &[u8], limits: &DecodeLimits) -> Result<Vec<u8>, DecodeErro
         );
     }
     let mut output = Vec::new();
-    try_reserve(&mut output, length, "raw output")?;
-    ensure_decoder_memory(0, output.capacity(), 0, limits)?;
+    try_reserve_exact(&mut output, length, "raw output")?;
+    ensure_decoder_memory(0, output.capacity(), limits)?;
     output.extend_from_slice(&payload[..length]);
     Ok(output)
 }
@@ -797,14 +803,13 @@ impl StreamDecoder {
             .checked_add(chunk.len())
             .ok_or_else(|| DecodeError("input size overflow".into(), ErrorKind::Invalid))?;
         ensure_input_limit(new_len, &self.limits)?;
-        try_reserve(&mut self.input, chunk.len(), "stream input")?;
+        let projected_capacity = self.input.capacity().max(new_len);
+        ensure_decoder_memory(projected_capacity, self.output.capacity(), &self.limits)?;
+        if self.input.capacity() < new_len {
+            try_reserve_exact(&mut self.input, chunk.len(), "stream input")?;
+        }
         self.input.extend_from_slice(chunk);
-        ensure_decoder_memory(
-            self.input.capacity(),
-            self.output.capacity(),
-            0,
-            &self.limits,
-        )?;
+        ensure_decoder_memory(self.input.capacity(), self.output.capacity(), &self.limits)?;
         self.parse_header()?;
         let Some(header) = self.header else {
             return Ok(&[]);
@@ -820,10 +825,6 @@ impl StreamDecoder {
             }
         } else {
             self.decode_ready_blocks(header)?;
-            let compressed_len = self.input.len().saturating_sub(FRAME_HEADER_SIZE);
-            if compressed_len >= 1024 {
-                ensure_expansion_ratio(self.output.len(), compressed_len, &self.limits)?;
-            }
         }
 
         let fresh = self.delivered;
@@ -922,15 +923,9 @@ impl StreamDecoder {
                 self.input[13],
             ]
         };
-        let speculative = if raw { 0 } else { orig_len };
-        ensure_decoder_memory(self.input.capacity(), orig_len, speculative, &self.limits)?;
-        try_reserve(&mut self.output, orig_len, "stream output")?;
-        ensure_decoder_memory(
-            self.input.capacity(),
-            self.output.capacity(),
-            speculative,
-            &self.limits,
-        )?;
+        ensure_decoder_memory(self.input.capacity(), orig_len, &self.limits)?;
+        try_reserve_exact(&mut self.output, orig_len, "stream output")?;
+        ensure_decoder_memory(self.input.capacity(), self.output.capacity(), &self.limits)?;
         self.header = Some(FrameHeader {
             orig_len,
             checksum,
@@ -948,40 +943,32 @@ impl StreamDecoder {
         let body = &self.input[FRAME_HEADER_SIZE..];
         loop {
             let mut reader = BitReader::at(body, self.bit_offset);
-            ensure_decoder_memory(
-                self.input.capacity(),
-                self.output.capacity(),
-                header.orig_len,
-                &self.limits,
-            )?;
-            let mut speculative = Vec::new();
-            try_reserve(&mut speculative, header.orig_len, "speculative output")?;
-            ensure_decoder_memory(
-                self.input.capacity(),
-                self.output.capacity(),
-                speculative.capacity(),
-                &self.limits,
-            )?;
-            speculative.extend_from_slice(&self.output);
+            ensure_decoder_memory(self.input.capacity(), self.output.capacity(), &self.limits)?;
+            let output_before_block = self.output.len();
             match decode_one_block(
                 &mut reader,
-                &mut speculative,
+                &mut self.output,
                 header.orig_len,
                 &self.dist_base,
                 &self.dist_extra,
             ) {
                 Ok(final_block) => {
                     self.bit_offset = reader.bit_pos();
-                    self.output = speculative;
                     if final_block {
                         return Ok(());
                     }
                 }
                 // Out of input: keep the offset where it was and wait. The
-                // partial block's output is discarded with `speculative`, so a
-                // retry re-decodes it from the same boundary.
-                Err(err) if err.needs_more_input() => return Ok(()),
-                Err(err) => return Err(err),
+                // partial block's output is truncated, so a retry re-decodes
+                // it from the same boundary without allocating a second body.
+                Err(err) if err.needs_more_input() => {
+                    self.output.truncate(output_before_block);
+                    return Ok(());
+                }
+                Err(err) => {
+                    self.output.truncate(output_before_block);
+                    return Err(err);
+                }
             }
         }
     }

@@ -278,3 +278,23 @@ fn arbitrary_frames_through_native_handle_never_panic() {
         assert!(result.is_ok(), "native FFI panicked for case {case}");
     }
 }
+
+#[test]
+fn native_null_input_poison_clears_previous_fresh_output() {
+    let original = sample(11, 20_000);
+    let f = frame(&original, Some(256));
+    let handle = cbm_stream_new(0);
+    assert!(!handle.is_null());
+
+    unsafe {
+        assert_eq!(cbm_stream_push(handle, f.as_ptr(), f.len()), 1);
+        assert!(
+            cbm_stream_fresh_len(handle) > 0,
+            "fixture must yield output"
+        );
+        assert_eq!(cbm_stream_push(handle, core::ptr::null(), 1), 0);
+        assert_eq!(cbm_stream_fresh_len(handle), 0);
+        assert_eq!(cbm_stream_push(handle, f.as_ptr(), f.len()), 0);
+        cbm_stream_free(handle);
+    }
+}
