@@ -182,11 +182,7 @@ pub extern "C" fn cbr_stream_open(max_out: usize) {
         ..DecodeLimits::default()
     };
     STREAM.with(|slot| *slot.borrow_mut() = Some(StreamDecoder::new(limits)));
-    FRESH.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        slot.clear();
-        slot.shrink_to_fit();
-    });
+    FRESH.with(|slot| *slot.borrow_mut() = Vec::new());
     LAST_ERROR.with(|slot| slot.borrow_mut().clear());
 }
 
@@ -200,11 +196,7 @@ pub extern "C" fn cbr_stream_open(max_out: usize) {
 pub unsafe extern "C" fn cbr_stream_push(ptr: *const u8, len: usize) -> u32 {
     if ptr.is_null() && len != 0 {
         STREAM.with(|slot| *slot.borrow_mut() = None);
-        FRESH.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            slot.clear();
-            slot.shrink_to_fit();
-        });
+        FRESH.with(|slot| *slot.borrow_mut() = Vec::new());
         set_error("null chunk pointer");
         return 0;
     }
@@ -217,11 +209,7 @@ pub unsafe extern "C" fn cbr_stream_push(ptr: *const u8, len: usize) -> u32 {
     STREAM.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(stream) = slot.as_mut() else {
-            FRESH.with(|out| {
-                let mut out = out.borrow_mut();
-                out.clear();
-                out.shrink_to_fit();
-            });
+            FRESH.with(|out| *out.borrow_mut() = Vec::new());
             set_error("no stream open");
             return 0;
         };
@@ -229,7 +217,7 @@ pub unsafe extern "C" fn cbr_stream_push(ptr: *const u8, len: usize) -> u32 {
         match result {
             Ok(()) => 1,
             Err(err) => {
-                FRESH.with(|out| out.borrow_mut().clear());
+                FRESH.with(|out| *out.borrow_mut() = Vec::new());
                 set_error(&err.0);
                 *slot = None;
                 0
@@ -256,11 +244,11 @@ pub extern "C" fn cbr_stream_fresh_len() -> usize {
 pub extern "C" fn cbr_stream_finish() -> u32 {
     STREAM.with(|slot| {
         let Some(stream) = slot.borrow_mut().take() else {
-            FRESH.with(|out| out.borrow_mut().clear());
+            FRESH.with(|out| *out.borrow_mut() = Vec::new());
             set_error("no stream open");
             return 0;
         };
-        FRESH.with(|out| out.borrow_mut().clear());
+        FRESH.with(|out| *out.borrow_mut() = Vec::new());
         match stream.finish() {
             Ok(all) => {
                 OUTPUT.with(|out| *out.borrow_mut() = all);
@@ -278,9 +266,5 @@ pub extern "C" fn cbr_stream_finish() -> u32 {
 #[no_mangle]
 pub extern "C" fn cbr_stream_close() {
     STREAM.with(|slot| *slot.borrow_mut() = None);
-    FRESH.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        slot.clear();
-        slot.shrink_to_fit();
-    });
+    FRESH.with(|slot| *slot.borrow_mut() = Vec::new());
 }

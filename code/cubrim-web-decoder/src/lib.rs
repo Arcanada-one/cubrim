@@ -809,8 +809,7 @@ impl StreamDecoder {
     ) -> Result<(), DecodeError> {
         // The previous window is no longer externally visible once the next
         // push starts. Release its capacity before the decoder can allocate.
-        fresh.clear();
-        fresh.shrink_to_fit();
+        drop(core::mem::take(fresh));
 
         let decoded = self.push_range(chunk)?;
         let decoded_len = decoded.end - decoded.start;
@@ -820,15 +819,17 @@ impl StreamDecoder {
             decoded_len,
             &self.limits,
         )?;
-        try_reserve_exact(fresh, decoded_len, "streaming output")?;
+        if let Err(err) = try_reserve_exact(fresh, decoded_len, "streaming output") {
+            drop(core::mem::take(fresh));
+            return Err(err);
+        }
         if let Err(err) = ensure_decoder_memory_with_extra(
             self.input.capacity(),
             self.output.capacity(),
             fresh.capacity(),
             &self.limits,
         ) {
-            fresh.clear();
-            fresh.shrink_to_fit();
+            drop(core::mem::take(fresh));
             return Err(err);
         }
         fresh.extend_from_slice(&self.output[decoded]);
@@ -1055,5 +1056,33 @@ mod tests {
             .expect_err("the ABI copy must consume budget");
         assert!(err.message().contains("decoder memory"));
         assert!(fresh.is_empty());
+    }
+
+    #[test]
+    fn abi_fresh_window_is_released_before_next_push() {
+        let data = b"fresh-window-sequence".repeat(4096);
+        let mut config = EncodeConfig::v1_default();
+        config.web_profile = true;
+        config.web_block_size = Some(1024);
+        let frame = encode_with_config(&data, &config);
+        let mut stream = StreamDecoder::new(DecodeLimits::default());
+        let mut fresh = Vec::new();
+        let mut offset = 0;
+
+        while offset < frame.len() && fresh.is_empty() {
+            let end = (offset + 256).min(frame.len());
+            stream
+                .push_into(&frame[offset..end], &mut fresh)
+                .expect("first streaming window");
+            offset = end;
+        }
+        assert!(!fresh.is_empty(), "fixture must produce an initial window");
+        assert!(offset < frame.len(), "fixture must have a later window");
+        assert!(fresh.capacity() >= fresh.len());
+
+        stream
+            .push_into(&frame[offset..], &mut fresh)
+            .expect("later push after releasing the prior window");
+        stream.finish().expect("complete frame");
     }
 }

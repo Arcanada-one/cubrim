@@ -49,8 +49,7 @@ impl CbmStream {
             self.error = message.to_string();
         }
         self.decoder = None;
-        self.fresh.clear();
-        self.fresh.shrink_to_fit();
+        self.fresh = Vec::new();
     }
 }
 
@@ -92,8 +91,7 @@ pub unsafe extern "C" fn cbm_stream_push(
         if stream.error.is_empty() {
             stream.error = "push after finish".to_string();
         }
-        stream.fresh.clear();
-        stream.fresh.shrink_to_fit();
+        stream.fresh = Vec::new();
         return 0;
     }
     if ptr.is_null() && len != 0 {
@@ -176,7 +174,7 @@ pub unsafe extern "C" fn cbm_stream_finish(handle: *mut CbmStream) -> i32 {
         }
         return 0;
     };
-    stream.fresh.clear();
+    stream.fresh = Vec::new();
     match decoder.finish() {
         Ok(_verified) => 1,
         Err(e) => {
