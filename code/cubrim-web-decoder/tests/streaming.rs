@@ -131,6 +131,7 @@ fn streaming_enforces_the_output_ceiling_before_decoding() {
     let frame = encode_with_config(&data, &web_config(Some(512)));
     let mut stream = StreamDecoder::new(DecodeLimits {
         max_output_size: data.len() - 1,
+        ..DecodeLimits::default()
     });
     let err = stream.push(&frame).expect_err("ceiling must be enforced");
     assert!(err.message().contains("exceeds the limit"));

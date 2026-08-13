@@ -51,7 +51,10 @@ document.adoptedStyleSheets = [sheetFrom(new TextDecoder().decode(bytes))];
 `cubrimDecode(compressed, maxOutput)` is synchronous and returns a copy owned by
 the caller. `maxOutput` is a hard ceiling checked against the frame's declared
 length **before** anything is allocated; pass a real bound for known assets.
-A malformed frame throws with the decoder's message.
+The decoder also applies finite defaults for retained input (64 MiB), decoded
+expansion (4096x), and aggregate decoder memory (256 MiB). A native caller that
+needs stricter policy uses the Rust `DecodeLimits` fields directly. A malformed
+frame throws with the decoder's message.
 
 ### Streaming
 
@@ -175,11 +178,20 @@ WASM linear memory after decoding all 12: 1.6 MiB. Module: 50,110 B.
   Corrupt output is never returned as success.
 - The output ceiling is enforced against the declared length before allocation
   and again as output grows.
+- Retained compressed input is capped at 64 MiB by default, so a streaming
+  caller cannot append bytes forever while waiting for a frame to complete.
+- Decoded-to-compressed expansion is capped at 4096x by default and checked
+  again when a stream finishes. Callers can select a stricter ratio.
+- Aggregate decoder memory is capped at 256 MiB by default and includes
+  retained input, retained output, one speculative block retry, and table/state
+  allowance. Reservations use fallible allocation and fail closed.
 - No `unsafe` in the decoder itself; the only `unsafe` is the wasm ABI's
   pointer handling, which is documented and confined to `src/wasm.rs`.
 - `cargo fuzz run decode_frame` targets arbitrary frames, including a variant
   that stamps a valid header on random bytes so the budget is spent inside the
-  bitstream logic rather than at the magic check.
+  bitstream logic rather than at the magic check. `cargo fuzz run decode_ffi`
+  exercises the native handle ABI, including pointer accessors and poisoned
+  stream sequencing.
 
 ## Two containers, one media type
 

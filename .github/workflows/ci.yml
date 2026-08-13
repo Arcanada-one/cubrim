@@ -171,6 +171,10 @@ jobs:
       - name: Content-Encoding cbm end to end
         run: node web/encoding-check.mjs target/wasm32-unknown-unknown/release/cubrim_web_decoder.wasm /tmp/fixtures /tmp/fixtures-4k
 
+      - name: Compile the native FFI fuzz target
+        working-directory: code/cubrim-web-decoder/fuzz
+        run: cargo check --release --bin decode_ffi
+
   web-cli:
     name: Web Profile CLI
     runs-on: ubuntu-latest

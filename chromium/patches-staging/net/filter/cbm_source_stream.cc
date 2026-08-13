@@ -26,10 +26,12 @@ const char kCbmStreamName[] = "CBM";
 // Retained-output ceiling per stream. Format v1's match window is the whole
 // preceding output, so the decoder must hold the full decoded body until the
 // trailing checksum; this cap is therefore a whole-body cap, not a window.
-// 64 MiB matches the reference decoder's wasm default; a larger decoded text
-// asset is already pathological. Format v2's window-log field (capped at
-// 8 MiB, mirroring Chromium's zstd clamp) is the real fix — tracked in the
-// epic, deliberately not invented here.
+// 64 MiB matches the reference decoder's default. The Rust decoder also caps
+// retained input, expansion ratio, and aggregate retry memory; this native
+// caller supplies the output ceiling through cbm_stream_new(). Format v2's
+// window-log field (capped at 8 MiB, mirroring Chromium's zstd clamp) is the
+// real fix for retained output — tracked in the epic, deliberately not
+// invented here.
 constexpr size_t kMaxRetainedOutput = 64 * 1024 * 1024;
 
 // CbmSourceStream applies Cubrim Web Profile ("cbm") content decoding to a

@@ -4,6 +4,7 @@
 
 use cubrim::{encode_with_config, EncodeConfig};
 use cubrim_web_decoder::ffi::*;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 fn frame(data: &[u8], block_size: Option<usize>) -> Vec<u8> {
     let mut config = EncodeConfig::v1_default();
@@ -240,4 +241,40 @@ fn raw_store_frames_stream_through_the_same_surface() {
     }
     s.finish().expect("finish");
     assert_eq!(decoded, original);
+}
+
+#[test]
+fn arbitrary_frames_through_native_handle_never_panic() {
+    // Deterministic bounded fuzz smoke: force a valid-looking header often
+    // enough to exercise the bitstream parser, while retaining arbitrary bytes
+    // for the same malformed-input shape a libFuzzer run receives.
+    let mut state = 0xC0FFEEu32;
+    for case in 0..1000usize {
+        let len = (state as usize % 512).max(1);
+        let mut bytes = Vec::with_capacity(len);
+        for _ in 0..len {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            bytes.push((state >> 24) as u8);
+        }
+        if case % 2 == 0 && bytes.len() >= 14 {
+            bytes[0..4].copy_from_slice(&[0xCB, b'R', b'I', b'M']);
+            bytes[4] = 1;
+            bytes[5] = 18;
+        }
+
+        let handle = cbm_stream_new(4 << 20);
+        assert!(!handle.is_null());
+        let result = catch_unwind(AssertUnwindSafe(|| unsafe {
+            let _ = cbm_stream_push(handle, bytes.as_ptr(), bytes.len());
+            let fresh = cbm_stream_fresh_len(handle);
+            let ptr = cbm_stream_fresh_ptr(handle);
+            if fresh > 0 {
+                assert!(!ptr.is_null());
+                let _ = core::slice::from_raw_parts(ptr, fresh);
+            }
+            let _ = cbm_stream_finish(handle);
+        }));
+        unsafe { cbm_stream_free(handle) };
+        assert!(result.is_ok(), "native FFI panicked for case {case}");
+    }
 }

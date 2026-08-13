@@ -95,6 +95,11 @@ pub unsafe extern "C" fn cbm_stream_push(
     match decoder.push(chunk) {
         Ok(fresh) => {
             stream.fresh.clear();
+            if stream.fresh.try_reserve(fresh.len()).is_err() {
+                stream.error = "unable to reserve streaming output bytes".to_string();
+                stream.decoder = None;
+                return 0;
+            }
             stream.fresh.extend_from_slice(fresh);
             1
         }
