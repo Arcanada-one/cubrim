@@ -16,6 +16,7 @@
 #include "base/strings/string_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "net/base/features.h"
+#include "net/http/http_request_headers.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -158,12 +159,18 @@ TEST_F(CbmUrlRequestTest, FeatureOffRejectsForcedCbmResponse) {
   TestDelegate d;
   std::unique_ptr<URLRequest> r(context->CreateRequest(
       server.url(), DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
+  HttpRequestHeaders request_headers;
+  request_headers.SetHeader(HttpRequestHeaders::kAcceptEncoding, "cbm");
+  r->SetExtraRequestHeaders(request_headers);
   r->Start();
   d.RunUntilComplete();
 
+  // The explicit request header lets the response pass the network
+  // transaction's encoding negotiation check; the feature gate must still
+  // reject dispatch locally at URLRequestJob stream setup.
   EXPECT_EQ(ERR_CONTENT_DECODING_INIT_FAILED, d.request_status());
   EXPECT_TRUE(d.data_received().empty());
-  EXPECT_EQ(std::string::npos, server.last_accept_encoding().find("cbm"));
+  EXPECT_NE(std::string::npos, server.last_accept_encoding().find("cbm"));
 }
 
 }  // namespace

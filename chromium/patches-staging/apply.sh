@@ -105,7 +105,18 @@ source_gate_new = '''        // CUBR-0079: reject unsolicited cbm when the exper
 '''
 f = 'net/filter/filter_source_stream.cc'
 s = io.open(f).read()
-if source_gate_old in s:
+source_gate_unformatted = '''        // CUBR-0079: reject unsolicited cbm when the experiment is off.
+        if (source_type == SourceStreamType::kCbm &&
+            !base::FeatureList::IsEnabled(
+                features::kCbmContentEncoding)) {
+          return {SourceStreamType::kCbm};
+        }
+'''
+if source_gate_unformatted in s:
+    s = s.replace(source_gate_unformatted, source_gate_new, 1)
+    io.open(f, 'w').write(s)
+    print(f'  {f}: cbm gate formatted')
+elif source_gate_old in s:
     s = s.replace(source_gate_old, source_gate_new, 1)
     io.open(f, 'w').write(s)
     print(f'  {f}: cbm gate narrowed to cbm only')

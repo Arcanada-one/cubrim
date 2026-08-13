@@ -58,6 +58,12 @@ class CbmSourceStreamTest : public PlatformTest {
         rv = callback.WaitForResult();
       }
       if (rv <= 0) {
+        // A decoder can reject a corrupt frame before the upstream EOF marker
+        // is read. In that terminal-error case the mock's queued EOF is not
+        // an unconsumed input contract violation.
+        if (rv < 0) {
+          raw_source->set_expect_all_input_consumed(false);
+        }
         *out_error = rv;
         break;
       }
@@ -75,7 +81,8 @@ TEST_F(CbmSourceStreamTest, GoldenFrameDecodesByteExact) {
   std::vector<uint8_t> out = Decode(base::span(kCbmGoldenFrame), 4096, &error);
   EXPECT_EQ(OK, error);
   ASSERT_EQ(sizeof(kCbmGoldenOriginal), out.size());
-  EXPECT_TRUE(std::equal(out.begin(), out.end(), std::begin(kCbmGoldenOriginal)));
+  EXPECT_TRUE(
+      std::equal(out.begin(), out.end(), std::begin(kCbmGoldenOriginal)));
 }
 
 // The same frame arriving in tiny pieces must decode identically — the
@@ -83,11 +90,12 @@ TEST_F(CbmSourceStreamTest, GoldenFrameDecodesByteExact) {
 TEST_F(CbmSourceStreamTest, GoldenFrameDecodesAcrossChunkSizes) {
   for (size_t chunk : {size_t{1}, size_t{7}, size_t{64}, size_t{512}}) {
     int error = 1;
-    std::vector<uint8_t> out = Decode(base::span(kCbmGoldenFrame), chunk, &error);
+    std::vector<uint8_t> out =
+        Decode(base::span(kCbmGoldenFrame), chunk, &error);
     EXPECT_EQ(OK, error) << "chunk " << chunk;
     ASSERT_EQ(sizeof(kCbmGoldenOriginal), out.size()) << "chunk " << chunk;
-    EXPECT_TRUE(std::equal(out.begin(), out.end(),
-                           std::begin(kCbmGoldenOriginal)))
+    EXPECT_TRUE(
+        std::equal(out.begin(), out.end(), std::begin(kCbmGoldenOriginal)))
         << "chunk " << chunk;
   }
 }
@@ -103,9 +111,9 @@ TEST_F(CbmSourceStreamTest, CorruptFrameFails) {
   EXPECT_EQ(ERR_CONTENT_DECODING_FAILED, error);
   // Even if some bytes were emitted before the failure, the result is not a
   // clean copy of the original.
-  EXPECT_FALSE(out.size() == sizeof(kCbmGoldenOriginal) &&
-               std::equal(out.begin(), out.end(),
-                          std::begin(kCbmGoldenOriginal)));
+  EXPECT_FALSE(
+      out.size() == sizeof(kCbmGoldenOriginal) &&
+      std::equal(out.begin(), out.end(), std::begin(kCbmGoldenOriginal)));
 }
 
 // A truncated frame (EOF before the declared length) fails, not silently
