@@ -8,12 +8,12 @@
 #include <string>
 #include <vector>
 
-#include "base/check.h"
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/memory/raw_ptr_exclusion.h"
 #include "base/numerics/safe_conversions.h"
 #include "net/base/io_buffer.h"
+#include "net/base/net_errors.h"
 #include "net/filter/source_stream_type.h"
 #include "third_party/cubrim/ffi/cubrim_web_decoder.h"
 
@@ -45,9 +45,7 @@ class CbmSourceStream : public FilterSourceStream {
  public:
   explicit CbmSourceStream(std::unique_ptr<SourceStream> upstream)
       : FilterSourceStream(SourceStreamType::kCbm, std::move(upstream)),
-        stream_(cbm_stream_new(kMaxRetainedOutput)) {
-    CHECK(stream_);
-  }
+        stream_(cbm_stream_new(kMaxRetainedOutput)) {}
 
   CbmSourceStream(const CbmSourceStream&) = delete;
   CbmSourceStream& operator=(const CbmSourceStream&) = delete;
@@ -64,21 +62,29 @@ class CbmSourceStream : public FilterSourceStream {
                                            size_t input_buffer_size,
                                            size_t* consumed_bytes,
                                            bool upstream_end_reached) override {
+    // The FFI constructor is nullable. Keep allocation failure request-local;
+    // aborting the network service here would turn a decoder resource failure
+    // into a process-wide availability failure.
+    if (!stream_) {
+      *consumed_bytes = input_buffer_size;
+      return base::unexpected(ERR_CONTENT_DECODING_INIT_FAILED);
+    }
+
     // 1. Feed every input byte to the decoder. The decoder buffers input
     //    internally, so consuming the whole chunk keeps the base-class
     //    contract: whenever this call returns 0 output bytes, all input has
     //    been consumed.
     if (input_buffer_size > 0) {
-      if (cbm_stream_push(stream_,
-                          reinterpret_cast<const uint8_t*>(input_buffer->data()),
-                          input_buffer_size) != 1) {
+      if (cbm_stream_push(
+              stream_, reinterpret_cast<const uint8_t*>(input_buffer->data()),
+              input_buffer_size) != 1) {
         *consumed_bytes = input_buffer_size;
         return base::unexpected(ERR_CONTENT_DECODING_FAILED);
       }
       const size_t fresh_len = cbm_stream_fresh_len(stream_);
       if (fresh_len > 0) {
-        base::span<const uint8_t> fresh_span =
-            UNSAFE_BUFFERS(base::span(cbm_stream_fresh_ptr(stream_), fresh_len));
+        base::span<const uint8_t> fresh_span = UNSAFE_BUFFERS(
+            base::span(cbm_stream_fresh_ptr(stream_), fresh_len));
         pending_.insert(pending_.end(), fresh_span.begin(), fresh_span.end());
       }
     }

@@ -19,6 +19,9 @@ echo "== copy new files"
 mkdir -p third_party/cubrim/ffi
 cp "$CBM_STAGING"/net/filter/cbm_source_stream.h net/filter/
 cp "$CBM_STAGING"/net/filter/cbm_source_stream.cc net/filter/
+cp "$CBM_STAGING"/net/filter/cbm_source_stream_fuzzer.cc net/filter/
+cp "$CBM_STAGING"/net/filter/cbm_source_stream_unittest.cc net/filter/
+cp "$CBM_STAGING"/net/filter/cbm_url_request_unittest.cc net/filter/
 cp "$CBM_STAGING"/third_party/cubrim/ffi/cubrim_web_decoder.h third_party/cubrim/ffi/
 # The vendored decoder crate + its BUILD.gn are dropped in by the P2 driver
 # (BUILD.md step) from cubrim main code/cubrim-web-decoder; kept out of this
@@ -53,6 +56,85 @@ edit('net/filter/filter_source_stream.cc',
        '      case SourceStreamType::kZstd:\n      case SourceStreamType::kCbm:\n        if (accepted_stream_types &&'),
       ('      case SourceStreamType::kZstd:\n        downstream = CreateZstdSourceStream(std::move(upstream));\n        break;',
        '      case SourceStreamType::kZstd:\n        downstream = CreateZstdSourceStream(std::move(upstream));\n        break;\n      case SourceStreamType::kCbm:\n        downstream = CreateCbmSourceStream(std::move(upstream));\n        break;')])
+
+# 2c. A response must not be able to opt a feature-disabled client into cbm.
+#     The existing Chromium fallback for an unsupported encoding is identity
+#     pass-through; that is unsafe for this experimental coding because an
+#     unsolicited cbm body is not identity bytes. Return a cbm sentinel and
+#     reject it in CreateDecodingSourceStream so URLRequestJob fails closed at
+#     stream initialization instead of silently handing compressed bytes to
+#     the caller.
+edit('net/filter/filter_source_stream.cc',
+     ['CUBR-0079: reject unsolicited cbm'],
+     [('#include "base/containers/adapters.h"',
+       '#include "base/containers/adapters.h"\n#include "base/feature_list.h"'),
+      ('#include "net/base/io_buffer.h"',
+       '#include "net/base/features.h"\n#include "net/base/io_buffer.h"'),
+      ('      case SourceStreamType::kCbm:\n        if (accepted_stream_types &&',
+       '      case SourceStreamType::kCbm:\n'
+       '        // CUBR-0079: reject unsolicited cbm when the experiment is off.\n'
+       '        if (!base::FeatureList::IsEnabled(\n'
+       '                features::kCbmContentEncoding)) {\n'
+       '          return {SourceStreamType::kCbm};\n'
+       '        }\n'
+       '        if (accepted_stream_types &&'),
+      ('      case SourceStreamType::kCbm:\n        downstream = CreateCbmSourceStream(std::move(upstream));',
+       '      case SourceStreamType::kCbm:\n'
+       '        // CUBR-0079: a disabled client must fail closed rather than\n'
+       '        // pass an unsolicited encoded body through as identity.\n'
+       '        if (!base::FeatureList::IsEnabled(\n'
+       '                features::kCbmContentEncoding)) {\n'
+       '          return nullptr;\n'
+       '        }\n'
+       '        downstream = CreateCbmSourceStream(std::move(upstream));')])
+
+# The switch groups the registered encodings for the common accepted-type
+# handling. Keep the feature gate scoped to cbm; it must not disable gzip,
+# Brotli, or zstd when the experiment is off.
+source_gate_old = '''        // CUBR-0079: reject unsolicited cbm when the experiment is off.
+        if (!base::FeatureList::IsEnabled(
+                features::kCbmContentEncoding)) {
+          return {SourceStreamType::kCbm};
+        }
+'''
+source_gate_new = '''        // CUBR-0079: reject unsolicited cbm when the experiment is off.
+        if (source_type == SourceStreamType::kCbm &&
+            !base::FeatureList::IsEnabled(features::kCbmContentEncoding)) {
+          return {SourceStreamType::kCbm};
+        }
+'''
+f = 'net/filter/filter_source_stream.cc'
+s = io.open(f).read()
+source_gate_unformatted = '''        // CUBR-0079: reject unsolicited cbm when the experiment is off.
+        if (source_type == SourceStreamType::kCbm &&
+            !base::FeatureList::IsEnabled(
+                features::kCbmContentEncoding)) {
+          return {SourceStreamType::kCbm};
+        }
+'''
+if source_gate_unformatted in s:
+    s = s.replace(source_gate_unformatted, source_gate_new, 1)
+    io.open(f, 'w').write(s)
+    print(f'  {f}: cbm gate formatted')
+elif source_gate_old in s:
+    s = s.replace(source_gate_old, source_gate_new, 1)
+    io.open(f, 'w').write(s)
+    print(f'  {f}: cbm gate narrowed to cbm only')
+elif 'source_type == SourceStreamType::kCbm' in s:
+    print(f'  {f}: cbm gate already narrowed')
+else:
+    raise AssertionError(f'{f}: cbm gate block missing')
+
+# Keep the dispatch-side gate in the same Chromium style.
+dispatch_gate_old = '''        if (!base::FeatureList::IsEnabled(
+                features::kCbmContentEncoding)) {
+'''
+dispatch_gate_new = '''        if (!base::FeatureList::IsEnabled(features::kCbmContentEncoding)) {
+'''
+if dispatch_gate_old in s:
+    s = s.replace(dispatch_gate_old, dispatch_gate_new, 1)
+    io.open(f, 'w').write(s)
+    print(f'  {f}: dispatch gate formatted')
 
 # 2b. include for the factory in filter_source_stream.cc
 edit('net/filter/filter_source_stream.cc',
@@ -133,6 +215,51 @@ if '//third_party/cubrim' not in s:
     io.open(f,'w').write(s); print('  net/BUILD.gn: //third_party/cubrim dep added')
 else:
     print('  net/BUILD.gn: dep already present')
+
+# The focused unit tests are part of net_unittests, alongside the existing
+# Brotli filter tests. Keep the staging apply self-contained so a clean tree
+# receives the sources as well as the implementation.
+test_anchor = '''  if (!disable_brotli_filter) {
+    sources += [ "filter/brotli_source_stream_unittest.cc" ]
+  }
+'''
+if 'filter/cbm_source_stream_unittest.cc' not in s:
+    assert s.count(test_anchor) == 1, 'net unit-test source anchor'
+    s = s.replace(
+        test_anchor,
+        test_anchor +
+        '  # CUBR-0079 demo: browser-path decoder coverage.\n'
+        '  sources += [ "filter/cbm_source_stream_unittest.cc" ]\n'
+        '  sources += [ "filter/cbm_url_request_unittest.cc" ]\n',
+        1)
+    io.open(f, 'w').write(s)
+    print('  net/BUILD.gn: cbm unit-test sources added')
+else:
+    print('  net/BUILD.gn: cbm unit-test sources already present')
+PY
+
+echo "== BUILD.gn: add cbm SourceStream fuzzer"
+python3 - <<'PY'
+import io
+f='net/BUILD.gn'; s=io.open(f).read()
+if 'net_cbm_source_stream_fuzzer' not in s:
+    anchor='fuzzer_test("net_gzip_source_stream_fuzzer") {'
+    assert s.count(anchor)==1, 'net gzip fuzzer anchor'
+    block='''fuzzer_test("net_cbm_source_stream_fuzzer") {
+  sources = [ "filter/cbm_source_stream_fuzzer.cc" ]
+  deps = [
+    ":net_fuzzer_test_support",
+    ":test_support",
+    "//base",
+    "//net",
+  ]
+}
+
+'''
+    s=s.replace(anchor, block+anchor, 1)
+    io.open(f,'w').write(s); print('  net/BUILD.gn: cbm fuzzer target added')
+else:
+    print('  net/BUILD.gn: cbm fuzzer target already present')
 PY
 
 echo "== services/network mojom SourceType + traits: add the kCbm case"

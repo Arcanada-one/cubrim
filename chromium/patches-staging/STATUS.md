@@ -7,9 +7,18 @@
 all four `CbmSourceStreamTest` cases — a real `Content-Encoding: cbm` frame
 decodes **byte-exact** inside Chromium's net stack, at 1/7/64/512-byte chunks,
 with corrupt and truncated frames rejected `ERR_CONTENT_DECODING_FAILED`.
+The same URL negotiates CBM when the feature is enabled and returns identity
+when it is disabled; an explicitly requested unsolicited CBM response fails
+closed at stream setup. The boundary fuzzer also builds and completes a
+1,000-run smoke on the pinned host.
 `vendor-decoder.sh` reproduces the decoder-vendoring half; `apply.sh` the
 net/ integration half. The stub is superseded — `third_party/cubrim/BUILD.gn`
 here is the real `rust_static_library`.
+
+**Verification refresh (2026-08-13):** the exact Chromium source commit was
+`8f5d36bc16f57115aeeff34baf4ad6aa964d509c`. `gn gen` with the fuzzer enabled,
+the full `net_unittests` target (1,030 build steps), the six focused CBM tests,
+and `net_cbm_source_stream_fuzzer -runs=1000` all passed on arcana-kb.
 
 ## What is here
 
@@ -27,32 +36,32 @@ here is the real `rust_static_library`.
   `SourceStreamType` switches in `filter_source_stream.cc`, the
   `ToContentEncodingType` switch, a default-off `net::features::kCbmContentEncoding`,
   the HTTPS/localhost-gated advertisement in `http_request_headers.cc`,
-  `net/BUILD.gn` sources). Guarded so a re-run does not double-insert.
+  feature-off fail-closed dispatch, and `net/BUILD.gn` sources, tests, and
+  fuzzer target). Guarded so a re-run does not double-insert.
 
 ## Confidence, stated honestly
 
 - **Applies-clean:** high. Every anchor was taken from the sources at tag
   `151.0.7922.137` read directly from googlesource; `apply.sh` asserts each
   anchor is unique before editing.
-- **Compiles / passes tests:** NOT YET VERIFIED. That is Phase P2 on the
-  synced arcana-kb tree and is the gate that turns these drafts into a landed
-  patch series. Two known unknowns the build will resolve:
-  1. a `services/network` mojom-traits switch over `net::SourceStreamType` may
-     need a `kCbm` case (the LINT.ThenChange on the enum points at
-     `source_type.mojom`); the compile names it if so.
-  2. `third_party/cubrim/BUILD.gn` (`rust_static_library` + blake3 pure-Rust)
-     is the likeliest friction — see `chromium/BUILD.md`.
+- **Compiles / passes tests:** verified on the pinned arcana-kb tree as
+  recorded above. The staged fuzzer and the six focused browser-path tests
+  are both real Chromium targets, not Rust-only substitutes.
+- **Still host-only:** browser-rendered decoded-body SHA-256, screenshot and
+  netlog evidence, a one-hour ASan/UBSan run, and process-wide aggregate
+  memory measurement. The current Rust budget remains decoder-local and the
+  format-v1 retained-output ceiling remains per stream.
 - The resolved P0-era question (no loopback TLS needed — the tag's guard is
   `SchemeIsCryptographic() || IsLocalhost(url)`) is already reflected here and
   in `chromium/BUILD.md`.
 
-## Why land drafts rather than wait for the green build
+## Reproducible verification record
 
-Unpushed work is lost work, and the compile-iterate loop is a multi-hour
-build on a single host. These drafts + `apply.sh` are the exact input P2
-consumes; landing them means the build phase resumes from a reviewed artefact
-rather than from a scratch directory. The backlog row stays `in_progress` and
-says precisely this.
+The staging inputs and `apply.sh` are the exact inputs used for the pinned
+build. Reapplying the script is idempotent; the fuzzer and focused test
+commands above are the bounded regression gate for future Chromium edits.
+The backlog row remains `in_progress` for the separate live-browser and
+resource-measurement gates, not for this compile/test slice.
 
 ## Both P1 unknowns resolved by real builds
 

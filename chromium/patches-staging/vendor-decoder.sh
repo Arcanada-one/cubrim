@@ -6,9 +6,10 @@
 # already be the `pure` feature there — cubrim PR #206).
 #
 # STATUS: this exact sequence was executed on the synced arcana-kb tree
-# (Chromium 151.0.7922.137) and the resulting net_unittests passes all four
-# CbmSourceStreamTest cases (golden byte-exact, chunked 1/7/64/512, corrupt
-# and truncated rejected). Each step below is the fix for a concrete failure
+# (Chromium 151.0.7922.137) and the resulting net_unittests passes the four
+# CbmSourceStreamTest cases plus the two CbmUrlRequestTest negotiation cases
+# (golden byte-exact, chunked 1/7/64/512, corrupt and truncated rejected).
+# Each step below is the fix for a concrete failure
 # the build named, in order.
 set -euo pipefail
 : "${CBM_STAGING:?}"; : "${CUBRIM_DECODER:?}"
