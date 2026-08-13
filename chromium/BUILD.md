@@ -146,18 +146,21 @@ Once `content_shell` is built, the demo is one script. Topology:
 `patched content_shell -> web/serve.mjs (loopback :8078, negotiates
 Content-Encoding: cbm per PR #199) -> pre-generated .cbr frames`.
 
-`run-demo.sh` (copy it and the census fixtures + `web/serve.mjs`/`encoding.mjs`
-to the build host):
+`run-demo.sh`, `netlog_verify.py` (copy them and the census fixtures +
+`web/serve.mjs`/`encoding.mjs` to the build host):
 
 1. starts the origin/encoder (`node serve.mjs`);
 2. control curl — a plain `Accept-Encoding: gzip, br` client gets identity;
 3. curl with `Accept-Encoding: cbm` gets `Content-Encoding: cbm` + `Vary`;
-4. `xvfb-run content_shell --enable-features=CbmContentEncoding
-   --log-net-log=… --dump-dom http://127.0.0.1:8078/<doc>` — headless load,
-   the browser decodes the cbm document in its network stack;
-5. evidence: the netlog's `Content-Encoding: cbm`, the DOM dump size vs the
-   original vs the wire `.cbr` size, and a title/body string from the decoded
-   page.
+4. `xvfb-run content_shell --run-web-tests
+   --enable-features=CbmContentEncoding --log-net-log=…
+   http://127.0.0.1:8078/<doc>` — render the page and exit cleanly after the
+   web-test pass; the browser decodes the cbm document in its network stack;
+5. `netlog_verify.py` follows the document's URLRequest source and requires
+   `Accept-Encoding: … cbm`, `Content-Encoding: cbm`, `Vary: Accept-Encoding`,
+   and no `FAILED` event. It parses the completed netlog structurally, rather
+   than scanning Chromium's constants table for error strings. The script
+   also records the identity and wire `.cbr` byte counts.
 
 The advertisement works on plain-http localhost with no TLS: the pinned tag's
 guard is `SchemeIsCryptographic() || IsLocalhost(url)` (resolved at P0). The
