@@ -161,7 +161,7 @@ fn streaming_expansion_ratio_waits_for_the_complete_body() {
 #[test]
 fn raw_store_stream_is_not_subject_to_compression_ratio() {
     let data: Vec<u8> = (0..50_000u32)
-        .flat_map(|i| (i * 2_654_435_761).to_le_bytes())
+        .flat_map(|i| i.wrapping_mul(2_654_435_761).to_le_bytes())
         .collect();
     let mut config = EncodeConfig::v1_default();
     config.web_profile = true;
