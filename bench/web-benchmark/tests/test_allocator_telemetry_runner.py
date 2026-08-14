@@ -81,7 +81,7 @@ def fixture_bundle(*, samples: int = 13, trials: int = 30, largest: int = 4096, 
             "block_size": 65536,
         },
         "provenance": {
-            "source_sha": "a" * 64,
+            "source_sha": "a" * 40,
             "runner_sha": "e" * 64,
             "probe_source_sha": "f" * 64,
             "probe_sha": "1" * 64,
@@ -131,9 +131,14 @@ class AllocatorTelemetryRunnerTests(unittest.TestCase):
             self.validate(bundle)
 
         bundle = fixture_bundle()
-        bundle["provenance"]["source_sha"] = "a" * 63 + "b"
+        bundle["provenance"]["source_sha"] = "a" * 39 + "b"
         with self.assertRaises(MODULE.MeasurementVoid):
-            self.validate(bundle, source="a" * 64)
+            self.validate(bundle, source="a" * 40)
+
+        bundle = fixture_bundle()
+        bundle["provenance"]["source_sha"] = "a" * 64
+        with self.assertRaises(MODULE.MeasurementVoid):
+            self.validate(bundle)
 
     def test_validate_bundle_rejects_manifest_and_decoded_identity_drift(self):
         bundle = fixture_bundle()
@@ -212,7 +217,7 @@ class AllocatorTelemetryRunnerTests(unittest.TestCase):
             output = root / "bundle.json"
             journal = root / "journal.jsonl"
             values = {
-                "source_sha": "a" * 64,
+                "source_sha": "a" * 40,
                 "runner_sha": "f" * 64,
                 "probe_source_sha": "b" * 64,
                 "probe_sha": "c" * 64,

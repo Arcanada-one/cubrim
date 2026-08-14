@@ -17,8 +17,9 @@ contract before the result is used as current evidence.
 - Every trial's decoded SHA-256, declared output size, caller input size, and
   frame size are checked against the bundle's sample/profile identity. A
   duplicate, reordered, or substituted sample is a journal-only `VOID`.
-- Provenance now carries separate source-commit, runner-source,
-  probe-source, probe-binary, manifest, and preregistration SHA-256 values.
+- Provenance now carries a separate Git source-commit ID plus SHA-256 values
+  for the runner source, probe source, probe binary, manifest, and
+  preregistration.
 - Counting-allocator overflow, underflow, and recursive hook entry set an
   invalid flag and void the trial instead of saturating into a score.
 - Successful native `push` and `finish` calls assert that the ABI error state
