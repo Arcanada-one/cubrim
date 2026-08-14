@@ -134,6 +134,11 @@ def _hex_digest(value: Any, field: str) -> None:
         raise MeasurementVoid(f"{field} is not a lowercase SHA-256 digest")
 
 
+def _git_commit(value: Any, field: str) -> None:
+    if not isinstance(value, str) or len(value) != 40 or any(char not in HEX64 for char in value):
+        raise MeasurementVoid(f"{field} is not a lowercase Git commit ID")
+
+
 def _nonnegative_int(value: Any, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise MeasurementVoid(f"{field} must be a non-negative integer")
@@ -224,7 +229,7 @@ def validate_bundle(
     for field in required_provenance:
         _hex_digest(provenance.get(field), f"provenance.{field}")
     source_sha = provenance.get("source_sha")
-    _hex_digest(source_sha, "provenance.source_sha")
+    _git_commit(source_sha, "provenance.source_sha")
     if expected_source_sha is not None and source_sha != expected_source_sha:
         raise MeasurementVoid(f"source SHA mismatch: {source_sha} != {expected_source_sha}")
     manifest_samples = expected_manifest.get("samples")
