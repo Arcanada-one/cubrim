@@ -581,7 +581,9 @@ fn summarize(results: &[SampleResult]) -> Summary {
 
 fn environment() -> Environment {
     Environment {
-        hostname: env::var("HOSTNAME").unwrap_or_else(|_| "unknown".into()),
+        hostname: env::var("CUBRIM_HOSTNAME")
+            .or_else(|_| env::var("HOSTNAME"))
+            .unwrap_or_else(|_| "unknown".into()),
         effective_affinity: env::var("CUBRIM_EFFECTIVE_AFFINITY")
             .unwrap_or_else(|_| "unknown".into()),
         load_per_cpu: env::var("CUBRIM_LOAD_PER_CPU")

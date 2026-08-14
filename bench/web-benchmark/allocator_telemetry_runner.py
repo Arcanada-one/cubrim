@@ -255,6 +255,7 @@ def _environment_vars(admitted: dict[str, Any], runner_sha: str, prereg_sha: str
     env.update(
         {
             "CUBRIM_EFFECTIVE_AFFINITY": json.dumps(admitted["effective_affinity"]),
+            "CUBRIM_HOSTNAME": str(admitted["hostname"]),
             "CUBRIM_LOAD_PER_CPU": str(admitted["load_per_cpu"]),
             "CUBRIM_MAX_TEMPERATURE_C": str(admitted["max_temperature_c"]),
             "CUBRIM_RUNNER_SHA": runner_sha,
