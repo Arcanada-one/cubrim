@@ -25,7 +25,7 @@ from typing import Any
 from hypothesis_runner import (
     MeasurementVoid,
     _git_sha,
-    _read_temperature_celsius,
+    _read_temperature_celsius as _read_thermal_temperature_celsius,
     _recheck_admission,
     _host_cpu_count,
     _cpu_topology,
@@ -38,6 +38,21 @@ WARMUPS = 3
 BOOTSTRAP_ITERATIONS = 5_000
 SEED = 75_075
 DISCLOSURE = "LEGAL-0061:terminal-compliant"
+
+
+def _read_temperature_celsius() -> list[float]:
+    """Read thermal-zone sensors, falling back to hwmon on bare-metal hosts."""
+
+    temperatures = _read_thermal_temperature_celsius()
+    if temperatures:
+        return temperatures
+    for name_path in sorted(Path("/sys/class/hwmon").glob("hwmon*/name")):
+        for temp_path in sorted(name_path.parent.glob("temp*_input")):
+            try:
+                temperatures.append(int(temp_path.read_text(encoding="ascii").strip()) / 1000.0)
+            except (OSError, ValueError):
+                continue
+    return temperatures
 
 
 def sha256_bytes(value: bytes) -> str:
