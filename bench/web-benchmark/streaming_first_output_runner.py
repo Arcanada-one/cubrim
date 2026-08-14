@@ -46,15 +46,16 @@ def load_temperature_c() -> list[float]:
 
 def admission_snapshot() -> dict[str, object]:
     affinity = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else []
+    logical_cpu_count = os.cpu_count()
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else None
-    per_cpu = load / len(affinity) if load is not None and affinity else None
+    per_cpu = load / logical_cpu_count if load is not None and logical_cpu_count else None
     temperatures = load_temperature_c()
     return {
         "pid": os.getpid(),
         "affinity": affinity,
-        "logical_cpu_count": os.cpu_count(),
+        "logical_cpu_count": logical_cpu_count,
         "load_1m": load,
-        "load_per_affined_cpu": per_cpu,
+        "load_per_logical_cpu": per_cpu,
         "temperatures_c": temperatures,
     }
 
@@ -72,7 +73,7 @@ def assert_admitted(snapshot: dict[str, object], label: str) -> None:
     affinity = snapshot["affinity"]
     if not isinstance(affinity, list) or len(affinity) != 1:
         raise RuntimeError(f"{label}: expected singleton affinity, got {affinity!r}")
-    per_cpu = snapshot["load_per_affined_cpu"]
+    per_cpu = snapshot["load_per_logical_cpu"]
     if per_cpu is not None and float(per_cpu) > 1.0:
         raise RuntimeError(f"{label}: load per affined CPU {per_cpu} > 1.0")
     temperatures = snapshot["temperatures_c"]
