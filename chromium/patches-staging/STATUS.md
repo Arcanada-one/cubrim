@@ -1,6 +1,8 @@
 # CUBR-0079 patch drafts — status
 
-**Phase:** P2 COMPLETE — the real decoder links and the golden test passes.
+**Phase:** P2 COMPLETE + R2 resource-policy/sanitizer closure — the real
+decoder links, the golden test passes, and the browser seam has bounded
+native and process-wide memory admission.
 
 **Verified on the synced arcana-kb tree (Chromium 151.0.7922.137):**
 `net_unittests` builds, links the vendored Rust decoder + blake3, and passes
@@ -38,6 +40,51 @@ structural verifier found `Accept-Encoding: cbm`, `Content-Encoding: cbm`,
 keeps the normal browser execution context alive for the DevTools fetch and
 gracefully terminates the browser parent before netlog verification.
 
+## R2 resource-policy and sanitizer closure (2026-08-14 UTC)
+
+Cubrim PR #219 (`7b9321b8376c0e5f0b78a85c0ee4b7af2a07b32b`, all required CI
+checks green) adds the native policy at the Chromium seam: 64 MiB retained
+output, expansion ratio 1024, 192 MiB per-decoder memory, and a 512 MiB
+process-wide admission budget. The Rust FFI now accepts the explicit native
+limits and reports decoder/fresh-output capacity; the C++ stream charges its
+pending-output copy and releases the reservation on success, failure, EOF, and
+destruction. The Rust FFI limit test and the Chromium aggregate-admission test
+are both in the shipped regression surface.
+
+The aggregate guard is mutation-proven on `arcana-kb`: temporarily changing
+the rejection return made
+`CbmSourceStreamTest.AggregateAdmissionIsRequestLocalAndReleased` fail with
+the expected blocked-stream error mismatch (exit 1); restoring the exact line,
+rebuilding, and rerunning the test passed (exit 0). The final restored focused
+run passed all 7 tests: 5 source-stream cases and 2 URLRequest cases.
+
+The authoritative sanitizer campaign ran on Chromium source
+`8f5d36bc16f57115aeeff34baf4ad6aa964d509c` with binary SHA-256
+`8dcdbd93fdcb08c71c7474195af02a906ef396cd9222019cba01f1954bbc9ab3`, the
+staged libFuzzer harness patch SHA-256
+`01c2b67dd99d73fa9fb38b72f3fdda1b0ac08a8a80993db98b954f6a07128065`,
+`is_asan=true`, `is_ubsan=true`, `is_ubsan_no_recover=true`, and
+`-max_total_time=3600 -timeout=10 -rss_limit_mb=49152`. Unit
+`cubr-0079-asan-ubsan-20260814` completed with `Result=success`, exit 0, no
+residual fuzzer process, no sanitizer/error markers, and no crash artifacts:
+`Done 10606486 runs in 3601 second(s)`, 2,945 average exec/s, and 400 MiB
+peak RSS. The terminal run log SHA-256 is
+`44f48f3e280673abef143a8442833d21e7eb5bacf132573a519edc27d76768f1`;
+the manifest is under
+`/root/cubr-0079/evidence/cbm-r2-sanitizer-20260814/meta.txt` on the host.
+
+The live browser proof remains byte-exact: the decoded body SHA-256 is
+`7c9ef50500135a4d14c4d900c5fd6d7fa3b407c321d3aa3efd73a2a86a832119`,
+`browser-proof.png` is 10,725 bytes with SHA-256
+`d8c4d4cf56ae3f2737df88c228fbfa2731df10643c2322e2bfed9c4519bf7b3f`, and
+the final `netlog.json` is 322,097 bytes with SHA-256
+`4567a734f4d4db487b5039ca3042d57eb74b32292af1162f76235c296686b95b`.
+The normal `content_shell` SHA-256 is
+`108ac4f7e46d20dfdb2af9138d4d5e6c8e98a226157d9668648b52c33ed8862d`, and
+the current normal `libnet.so` SHA-256 is
+`e9b6dc0ee6197acfeccb403154ad93946379e5dfb6dcb17a0279f7381905c38c`.
+No upstream Chromium PR, public release, or standards action was taken.
+
 ## What is here
 
 - `net/filter/cbm_source_stream.{h,cc}` — the CbmSourceStream, modelled on the
@@ -65,10 +112,10 @@ gracefully terminates the browser parent before netlog verification.
 - **Compiles / passes tests:** verified on the pinned arcana-kb tree as
   recorded above. The staged fuzzer and the six focused browser-path tests
   are both real Chromium targets, not Rust-only substitutes.
-- **Still host-only:** browser-rendered decoded-body SHA-256, screenshot and
-  netlog evidence, a one-hour ASan/UBSan run, and process-wide aggregate
-  memory measurement. The current Rust budget remains decoder-local and the
-  format-v1 retained-output ceiling remains per stream.
+- **Still host-only:** the proof artifacts above are host evidence from the
+  pinned Chromium fork; no upstream Chromium or public release is implied.
+  The native process-wide admission policy and the format-v1 retained-output
+  ceiling remain deliberately scoped to this demo fork.
 - The resolved P0-era question (no loopback TLS needed — the tag's guard is
   `SchemeIsCryptographic() || IsLocalhost(url)`) is already reflected here and
   in `chromium/BUILD.md`.
@@ -78,8 +125,9 @@ gracefully terminates the browser parent before netlog verification.
 The staging inputs and `apply.sh` are the exact inputs used for the pinned
 build. Reapplying the script is idempotent; the fuzzer and focused test
 commands above are the bounded regression gate for future Chromium edits.
-The backlog row remains `in_progress` for the separate live-browser and
-resource-measurement gates, not for this compile/test slice.
+The parent workspace disposition is updated only after Cubrim PR #219's
+resulting `origin/main` tree is read back; no external standardization action
+is part of this closure.
 
 ## Both P1 unknowns resolved by real builds
 

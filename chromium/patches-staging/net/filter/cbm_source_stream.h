@@ -5,6 +5,8 @@
 #ifndef NET_FILTER_CBM_SOURCE_STREAM_H_
 #define NET_FILTER_CBM_SOURCE_STREAM_H_
 
+#include <stddef.h>
+
 #include <memory>
 
 #include "net/base/net_export.h"
@@ -17,6 +19,11 @@ namespace net {
 // net::features::kCbmContentEncoding.
 NET_EXPORT_PRIVATE std::unique_ptr<FilterSourceStream> CreateCbmSourceStream(
     std::unique_ptr<SourceStream> upstream);
+
+// Test-only controls for proving request-local aggregate admission and
+// release. Production callers must use the fixed 512 MiB policy.
+NET_EXPORT_PRIVATE size_t CbmAggregateMemoryBudgetForTesting();
+NET_EXPORT_PRIVATE void SetCbmAggregateMemoryBudgetForTesting(size_t bytes);
 
 }  // namespace net
 

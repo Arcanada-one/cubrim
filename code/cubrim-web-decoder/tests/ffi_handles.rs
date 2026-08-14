@@ -197,6 +197,25 @@ fn output_cap_is_enforced() {
 }
 
 #[test]
+fn explicit_native_limits_are_enforced_and_memory_is_visible() {
+    let original = sample(8, 100_000);
+    let f = frame(&original, Some(4096));
+    let handle = cbm_stream_new_with_limits(0, 1, 8 << 20);
+    assert!(!handle.is_null());
+    unsafe {
+        assert_eq!(cbm_stream_push(handle, f.as_ptr(), f.len()), 1);
+        assert!(cbm_stream_memory_usage(handle) > 0);
+        assert_eq!(
+            cbm_stream_finish(handle),
+            0,
+            "ratio 1 must reject expansion"
+        );
+        assert_eq!(cbm_stream_memory_usage(handle), 0);
+        cbm_stream_free(handle);
+    }
+}
+
+#[test]
 fn finish_twice_and_push_after_finish_fail_cleanly() {
     let original = sample(6, 30_000);
     let f = frame(&original, None);

@@ -920,6 +920,16 @@ impl StreamDecoder {
         self.output.len()
     }
 
+    /// Capacity charged to the decoder's own resource budget. Native callers
+    /// use this as a conservative, pointer-free measurement when they also
+    /// own an output queue outside Rust.
+    pub(crate) fn memory_usage(&self) -> usize {
+        self.input
+            .capacity()
+            .saturating_add(self.output.capacity())
+            .saturating_add(DecodeLimits::DECODER_OVERHEAD)
+    }
+
     /// The frame's declared output length, once the header has arrived.
     pub fn declared_len(&self) -> Option<usize> {
         self.header.map(|h| h.orig_len)

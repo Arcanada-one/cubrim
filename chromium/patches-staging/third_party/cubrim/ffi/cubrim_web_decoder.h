@@ -19,6 +19,16 @@ uint32_t cbm_ffi_abi_version(void);
 // max_output 0 = the decoder's default ceiling. Returns NULL on failure.
 CbmStream* cbm_stream_new(size_t max_output);
 
+// Explicit native policy. Zero selects the decoder default for that field.
+// The browser seam uses this to pin its ratio and per-stream memory rules.
+CbmStream* cbm_stream_new_with_limits(size_t max_output,
+                                      size_t max_expansion_ratio,
+                                      size_t max_decoder_memory);
+
+// Conservative current capacity charge for the Rust decoder and its ABI
+// fresh-output window. Returns 0 for NULL or a finished stream.
+size_t cbm_stream_memory_usage(const CbmStream* stream);
+
 // 1 = ok, 0 = error (message via cbm_stream_error_*; the stream is poisoned).
 int32_t cbm_stream_push(CbmStream* stream, const uint8_t* ptr, size_t len);
 
