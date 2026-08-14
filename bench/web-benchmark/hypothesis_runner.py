@@ -185,15 +185,11 @@ def _ensure_taskset() -> int | None:
     return completed.returncode
 
 
-def _xorshift_bytes(size: int, seed: int) -> bytes:
-    state = seed & 0xFFFFFFFFFFFFFFFF
-    output = bytearray(size)
-    for index in range(size):
-        state ^= (state << 13) & 0xFFFFFFFFFFFFFFFF
-        state ^= state >> 7
-        state ^= (state << 17) & 0xFFFFFFFFFFFFFFFF
-        output[index] = (state >> 24) & 0xFF
-    return bytes(output)
+def _deterministic_bytes(size: int, seed: int) -> bytes:
+    """Produce deterministic high-entropy bytes without a Python byte loop."""
+
+    seed_bytes = (seed & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "big")
+    return hashlib.shake_256(seed_bytes).digest(size)
 
 
 def write_payload(path: Path, size: int, kind: str, seed: int) -> None:
@@ -213,7 +209,7 @@ def write_payload(path: Path, size: int, kind: str, seed: int) -> None:
         offset = 0
         while remaining:
             chunk_size = min(1024 * 1024, remaining)
-            handle.write(_xorshift_bytes(chunk_size, seed + offset))
+            handle.write(_deterministic_bytes(chunk_size, seed + offset))
             remaining -= chunk_size
             offset += chunk_size
 
