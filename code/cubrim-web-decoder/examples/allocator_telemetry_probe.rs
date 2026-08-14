@@ -20,7 +20,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const BLOCK_SIZE: usize = 65_536;
@@ -39,6 +39,7 @@ struct CounterState {
     baseline_live_bytes: AtomicU64,
     peak_live_bytes: AtomicU64,
     largest_single_allocation_bytes: AtomicU64,
+    invalid: AtomicBool,
 }
 
 static COUNTERS: CounterState = CounterState {
@@ -49,6 +50,7 @@ static COUNTERS: CounterState = CounterState {
     baseline_live_bytes: AtomicU64::new(0),
     peak_live_bytes: AtomicU64::new(0),
     largest_single_allocation_bytes: AtomicU64::new(0),
+    invalid: AtomicBool::new(false),
 };
 
 thread_local! {
@@ -60,16 +62,54 @@ struct CountingAllocator;
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
-fn saturating_add(atom: &AtomicU64, value: u64) {
-    let _ = atom.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        Some(current.saturating_add(value))
-    });
+fn checked_add_with_flag(atom: &AtomicU64, invalid: &AtomicBool, value: u64) -> bool {
+    let mut overflow = false;
+    let _ = atom.fetch_update(
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+        |current| match current.checked_add(value) {
+            Some(next) => Some(next),
+            None => {
+                overflow = true;
+                None
+            }
+        },
+    );
+    if overflow {
+        invalid.store(true, Ordering::Relaxed);
+        false
+    } else {
+        true
+    }
 }
 
-fn saturating_sub(atom: &AtomicU64, value: u64) {
-    let _ = atom.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-        Some(current.saturating_sub(value))
-    });
+fn checked_sub_with_flag(atom: &AtomicU64, invalid: &AtomicBool, value: u64) -> bool {
+    let mut underflow = false;
+    let _ = atom.fetch_update(
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+        |current| match current.checked_sub(value) {
+            Some(next) => Some(next),
+            None => {
+                underflow = true;
+                None
+            }
+        },
+    );
+    if underflow {
+        invalid.store(true, Ordering::Relaxed);
+        false
+    } else {
+        true
+    }
+}
+
+fn checked_add(atom: &AtomicU64, value: u64) -> bool {
+    checked_add_with_flag(atom, &COUNTERS.invalid, value)
+}
+
+fn checked_sub(atom: &AtomicU64, value: u64) -> bool {
+    checked_sub_with_flag(atom, &COUNTERS.invalid, value)
 }
 
 fn update_max(atom: &AtomicU64, value: u64) {
@@ -81,90 +121,92 @@ fn update_max(atom: &AtomicU64, value: u64) {
 fn record_live_peak() {
     let current = COUNTERS.current_live_bytes.load(Ordering::Relaxed);
     let baseline = COUNTERS.baseline_live_bytes.load(Ordering::Relaxed);
-    update_max(&COUNTERS.peak_live_bytes, current.saturating_sub(baseline));
+    if let Some(delta) = current.checked_sub(baseline) {
+        update_max(&COUNTERS.peak_live_bytes, delta);
+    } else {
+        COUNTERS.invalid.store(true, Ordering::Relaxed);
+    }
 }
 
 fn record_allocated(size: usize) {
     let size = size as u64;
-    saturating_add(&COUNTERS.allocation_count, 1);
-    saturating_add(&COUNTERS.allocated_bytes, size);
-    saturating_add(&COUNTERS.current_live_bytes, size);
+    checked_add(&COUNTERS.allocation_count, 1);
+    checked_add(&COUNTERS.allocated_bytes, size);
+    checked_add(&COUNTERS.current_live_bytes, size);
     update_max(&COUNTERS.largest_single_allocation_bytes, size);
     record_live_peak();
 }
 
 fn record_deallocated(size: usize) {
     let size = size as u64;
-    saturating_add(&COUNTERS.deallocated_bytes, size);
-    saturating_sub(&COUNTERS.current_live_bytes, size);
+    checked_add(&COUNTERS.deallocated_bytes, size);
+    checked_sub(&COUNTERS.current_live_bytes, size);
 }
 
 fn record_reallocation(old_size: usize, new_size: usize) {
     let old_size = old_size as u64;
     let new_size = new_size as u64;
-    saturating_add(&COUNTERS.allocation_count, 1);
-    saturating_add(&COUNTERS.allocated_bytes, new_size);
-    saturating_add(&COUNTERS.deallocated_bytes, old_size);
+    checked_add(&COUNTERS.allocation_count, 1);
+    checked_add(&COUNTERS.allocated_bytes, new_size);
+    checked_add(&COUNTERS.deallocated_bytes, old_size);
     if new_size >= old_size {
-        saturating_add(&COUNTERS.current_live_bytes, new_size - old_size);
+        checked_add(&COUNTERS.current_live_bytes, new_size - old_size);
     } else {
-        saturating_sub(&COUNTERS.current_live_bytes, old_size - new_size);
+        checked_sub(&COUNTERS.current_live_bytes, old_size - new_size);
     }
     update_max(&COUNTERS.largest_single_allocation_bytes, new_size);
     record_live_peak();
 }
 
+fn enter_allocator_hook() -> bool {
+    let reentrant = IN_ALLOCATOR_HOOK.with(|guard| {
+        if guard.get() {
+            true
+        } else {
+            guard.set(true);
+            false
+        }
+    });
+    if reentrant {
+        COUNTERS.invalid.store(true, Ordering::Relaxed);
+    }
+    reentrant
+}
+
+fn leave_allocator_hook() {
+    IN_ALLOCATOR_HOOK.with(|guard| guard.set(false));
+}
+
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let reentrant = IN_ALLOCATOR_HOOK.with(|guard| {
-            if guard.get() {
-                true
-            } else {
-                guard.set(true);
-                false
-            }
-        });
+        let reentrant = enter_allocator_hook();
         let pointer = unsafe { System.alloc(layout) };
         if !reentrant {
             if !pointer.is_null() {
                 record_allocated(layout.size());
             }
-            IN_ALLOCATOR_HOOK.with(|guard| guard.set(false));
+            leave_allocator_hook();
         }
         pointer
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        let reentrant = IN_ALLOCATOR_HOOK.with(|guard| {
-            if guard.get() {
-                true
-            } else {
-                guard.set(true);
-                false
-            }
-        });
+        let reentrant = enter_allocator_hook();
         unsafe { System.dealloc(pointer, layout) };
         if !reentrant {
             record_deallocated(layout.size());
-            IN_ALLOCATOR_HOOK.with(|guard| guard.set(false));
+            leave_allocator_hook();
         }
     }
 
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let reentrant = IN_ALLOCATOR_HOOK.with(|guard| {
-            if guard.get() {
-                true
-            } else {
-                guard.set(true);
-                false
-            }
-        });
+        let reentrant = enter_allocator_hook();
         let new_pointer = unsafe { System.realloc(pointer, layout, new_size) };
         if !reentrant {
             if !new_pointer.is_null() {
                 record_reallocation(layout.size(), new_size);
             }
-            IN_ALLOCATOR_HOOK.with(|guard| guard.set(false));
+            leave_allocator_hook();
         }
         new_pointer
     }
@@ -177,7 +219,7 @@ struct AllocationSnapshot {
     deallocated_bytes: u64,
     peak_live_bytes: u64,
     largest_single_allocation_bytes: u64,
-    live_bytes_after: u64,
+    allocator_live_bytes_after: u64,
 }
 
 fn begin_measurement() {
@@ -192,12 +234,19 @@ fn begin_measurement() {
     COUNTERS
         .largest_single_allocation_bytes
         .store(0, Ordering::Relaxed);
+    COUNTERS.invalid.store(false, Ordering::Relaxed);
 }
 
-fn snapshot() -> AllocationSnapshot {
+fn snapshot() -> Result<AllocationSnapshot, String> {
+    if COUNTERS.invalid.load(Ordering::Relaxed) {
+        return Err("allocator counter overflow, underflow, or recursion detected".into());
+    }
     let current = COUNTERS.current_live_bytes.load(Ordering::Relaxed);
     let baseline = COUNTERS.baseline_live_bytes.load(Ordering::Relaxed);
-    AllocationSnapshot {
+    let allocator_live_bytes_after = current
+        .checked_sub(baseline)
+        .ok_or_else(|| "allocator live-byte baseline underflow".to_string())?;
+    Ok(AllocationSnapshot {
         allocation_count: COUNTERS.allocation_count.load(Ordering::Relaxed),
         allocated_bytes: COUNTERS.allocated_bytes.load(Ordering::Relaxed),
         deallocated_bytes: COUNTERS.deallocated_bytes.load(Ordering::Relaxed),
@@ -205,8 +254,8 @@ fn snapshot() -> AllocationSnapshot {
         largest_single_allocation_bytes: COUNTERS
             .largest_single_allocation_bytes
             .load(Ordering::Relaxed),
-        live_bytes_after: current.saturating_sub(baseline),
-    }
+        allocator_live_bytes_after,
+    })
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -251,6 +300,7 @@ struct Protocol {
 struct Provenance {
     source_sha: String,
     runner_sha: String,
+    probe_source_sha: String,
     probe_sha: String,
     binary_sha: String,
     manifest_sha: String,
@@ -277,11 +327,10 @@ struct Trial {
     deallocated_bytes: u64,
     peak_live_bytes: u64,
     largest_single_allocation_bytes: u64,
-    live_bytes_after: u64,
     caller_input_bytes: u64,
     declared_output_bytes: u64,
     decoder_retained_peak_bytes: u64,
-    decoder_retained_after_drop_bytes: u64,
+    allocator_live_bytes_after: u64,
     auxiliary_peak_bytes: u64,
     auxiliary_ratio_numerator_bytes: u64,
     auxiliary_ratio_denominator_bytes: u64,
@@ -447,6 +496,17 @@ fn ffi_error(handle: *mut cubrim_web_decoder::ffi::CbmStream) -> String {
     }
 }
 
+fn ensure_ffi_error_empty(
+    handle: *const cubrim_web_decoder::ffi::CbmStream,
+    stage: &str,
+) -> Result<(), String> {
+    let length = unsafe { cbm_stream_error_len(handle) };
+    if length != 0 {
+        return Err(format!("native decoder retained an error after {stage}"));
+    }
+    Ok(())
+}
+
 fn measure_trial(
     sample: &LoadedSample,
     frame: &[u8],
@@ -472,6 +532,10 @@ fn measure_trial(
             let error = ffi_error(handle);
             unsafe { cbm_stream_free(handle) };
             return Err(format!("push failed: {error}"));
+        }
+        if let Err(error) = ensure_ffi_error_empty(handle, "successful push") {
+            unsafe { cbm_stream_free(handle) };
+            return Err(error);
         }
         let declared = unsafe { cbm_stream_declared_len(handle) };
         if declared != u64::MAX {
@@ -503,6 +567,10 @@ fn measure_trial(
         unsafe { cbm_stream_free(handle) };
         return Err(format!("finish failed: {error}"));
     }
+    if let Err(error) = ensure_ffi_error_empty(handle, "successful finish") {
+        unsafe { cbm_stream_free(handle) };
+        return Err(error);
+    }
     unsafe { cbm_stream_free(handle) };
     if decoded_offset != sample.data.len() {
         return Err(format!(
@@ -516,10 +584,11 @@ fn measure_trial(
     if !roundtrip_exact {
         return Err("decoded SHA-256 differs from the canonical sample".into());
     }
-    let snapshot = snapshot();
+    let snapshot = snapshot()?;
     let auxiliary_peak_bytes = decoder_retained_peak_bytes
-        .saturating_sub(frame.len() as u64)
-        .saturating_sub(declared_output_bytes);
+        .checked_sub(frame.len() as u64)
+        .and_then(|value| value.checked_sub(declared_output_bytes))
+        .ok_or_else(|| "decoder retained peak is below its measured components".to_string())?;
     let auxiliary_ratio_denominator_bytes = frame.len() as u64;
     let auxiliary_memory_bound_ratio =
         auxiliary_peak_bytes as f64 / auxiliary_ratio_denominator_bytes.max(1) as f64;
@@ -533,11 +602,10 @@ fn measure_trial(
         deallocated_bytes: snapshot.deallocated_bytes,
         peak_live_bytes: snapshot.peak_live_bytes,
         largest_single_allocation_bytes: snapshot.largest_single_allocation_bytes,
-        live_bytes_after: snapshot.live_bytes_after,
         caller_input_bytes: frame.len() as u64,
         declared_output_bytes,
         decoder_retained_peak_bytes,
-        decoder_retained_after_drop_bytes: snapshot.live_bytes_after,
+        allocator_live_bytes_after: snapshot.allocator_live_bytes_after,
         auxiliary_peak_bytes,
         auxiliary_ratio_numerator_bytes: auxiliary_peak_bytes,
         auxiliary_ratio_denominator_bytes,
@@ -616,6 +684,9 @@ fn measure(manifest_path: &Path) -> Result<ProbeOutput, String> {
     let manifest_sha = sha256_file(manifest_path)?;
     let source_sha = git_sha(&repo_root)?;
     let probe_sha = probe_sha()?;
+    let probe_source_sha = sha256_file(
+        &repo_root.join("code/cubrim-web-decoder/examples/allocator_telemetry_probe.rs"),
+    )?;
     let (_, samples) = load_samples(manifest_path)?;
     let mut operations = Vec::with_capacity(samples.len() * 2);
     for sample_index in 0..samples.len() {
@@ -688,7 +759,7 @@ fn measure(manifest_path: &Path) -> Result<ProbeOutput, String> {
         .collect::<Vec<_>>();
     let summary = summarize(&results);
     Ok(ProbeOutput {
-        schema_version: 1,
+        schema_version: 2,
         task_id: "CUBR-0075".into(),
         phase: "allocator_telemetry".into(),
         protocol: Protocol {
@@ -703,6 +774,7 @@ fn measure(manifest_path: &Path) -> Result<ProbeOutput, String> {
         provenance: Provenance {
             source_sha,
             runner_sha: env::var("CUBRIM_RUNNER_SHA").unwrap_or_else(|_| "unbound".into()),
+            probe_source_sha,
             probe_sha: probe_sha.clone(),
             binary_sha: probe_sha,
             manifest_sha,
@@ -733,5 +805,47 @@ fn main() {
             eprintln!("allocator telemetry measurement void: {error}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counter_overflow_and_underflow_mark_the_measurement_invalid() {
+        let value = AtomicU64::new(u64::MAX);
+        let invalid = AtomicBool::new(false);
+        assert!(!checked_add_with_flag(&value, &invalid, 1));
+        assert!(invalid.load(Ordering::Relaxed));
+
+        let value = AtomicU64::new(0);
+        let invalid = AtomicBool::new(false);
+        assert!(!checked_sub_with_flag(&value, &invalid, 1));
+        assert!(invalid.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn successful_counter_updates_preserve_exact_values() {
+        let value = AtomicU64::new(10);
+        let invalid = AtomicBool::new(false);
+        assert!(checked_add_with_flag(&value, &invalid, 5));
+        assert!(checked_sub_with_flag(&value, &invalid, 3));
+        assert_eq!(value.load(Ordering::Relaxed), 12);
+        assert!(!invalid.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn native_error_state_is_empty_on_success_and_visible_on_failure() {
+        let handle = cbm_stream_new_with_limits(
+            DecodeLimits::DEFAULT_MAX_OUTPUT,
+            DecodeLimits::DEFAULT_MAX_EXPANSION_RATIO,
+            DecodeLimits::DEFAULT_MAX_DECODER_MEMORY,
+        );
+        assert!(!handle.is_null());
+        assert!(ensure_ffi_error_empty(handle, "new stream").is_ok());
+        assert_eq!(unsafe { cbm_stream_push(handle, core::ptr::null(), 1) }, 0);
+        assert!(ensure_ffi_error_empty(handle, "failed push").is_err());
+        unsafe { cbm_stream_free(handle) };
     }
 }
