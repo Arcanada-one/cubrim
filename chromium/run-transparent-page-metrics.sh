@@ -162,7 +162,7 @@ terminate_trial_processes() {
   local candidate_cmd
   for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
     [ -r "/proc/$candidate/cmdline" ] || continue
-    candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
+    candidate_cmd=$(tr '\0' ' ' "/proc/$candidate/cmdline" 2>/dev/null || true)
     case "$candidate_cmd" in
       *"--remote-debugging-port=$trial_port"*)
         case "$candidate_cmd" in
@@ -177,7 +177,7 @@ terminate_trial_processes() {
   else
     for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
       [ -r "/proc/$candidate/cmdline" ] || continue
-      candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
+      candidate_cmd=$(tr '\0' ' ' "/proc/$candidate/cmdline" 2>/dev/null || true)
       case "$candidate_cmd" in
         *"--remote-debugging-port=$trial_port"*) kill -TERM "$candidate" 2>/dev/null || true ;;
       esac
