@@ -124,8 +124,20 @@ jobs:
       - name: Test structural netlog verifier
         run: python -m unittest chromium.test_netlog_verify
 
+      - name: Test transparent page bundle validator
+        run: python -m unittest chromium.test_transparent_page_bundle
+
+      - name: Test transparent page metric helper
+        run: node --test chromium/test_page_metrics.mjs
+
+      - name: Check transparent page evidence syntax
+        run: node --check chromium/transparent_page_evidence.mjs
+
       - name: Shellcheck demo runner
         run: shellcheck chromium/run-demo.sh
+
+      - name: Shellcheck transparent page runner
+        run: shellcheck chromium/run-transparent-page-metrics.sh
 
   web-decoder:
     name: Web Profile reference decoder

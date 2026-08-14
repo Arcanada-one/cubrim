@@ -86,6 +86,56 @@ class NetlogVerifyTests(unittest.TestCase):
         self.assertFalse(evidence.verdict)
         self.assertTrue(evidence.request_failed)
 
+    def test_identity_arm_requires_no_cbm_advertisement_or_response(self):
+        payload = self._payload(
+            self._event(
+                self.types["URL_REQUEST_START_JOB"],
+                {"url": "http://127.0.0.1:8078/page.html"},
+                phase=1,
+            ),
+            self._event(
+                self.types["HTTP_TRANSACTION_SEND_REQUEST_HEADERS"],
+                {"headers": ["Accept-Encoding: gzip, br"]},
+            ),
+            self._event(
+                self.types["HTTP_TRANSACTION_READ_RESPONSE_HEADERS"],
+                {"headers": ["Vary: Accept-Encoding"]},
+            ),
+        )
+
+        evidence = verify_payload(payload, "page.html", expected_encoding="identity")
+
+        self.assertTrue(evidence.verdict)
+        self.assertFalse(evidence.accepts_cbm)
+        self.assertFalse(evidence.response_cbm)
+
+    def test_identity_arm_rejects_a_cbm_response(self):
+        payload = self._payload(
+            self._event(
+                self.types["URL_REQUEST_START_JOB"],
+                {"url": "http://127.0.0.1:8078/page.html"},
+                phase=1,
+            ),
+            self._event(
+                self.types["HTTP_TRANSACTION_SEND_REQUEST_HEADERS"],
+                {"headers": ["Accept-Encoding: gzip, br"]},
+            ),
+            self._event(
+                self.types["HTTP_TRANSACTION_READ_RESPONSE_HEADERS"],
+                {
+                    "headers": [
+                        "Vary: Accept-Encoding",
+                        "Content-Encoding: cbm",
+                    ]
+                },
+            ),
+        )
+
+        evidence = verify_payload(payload, "page.html", expected_encoding="identity")
+
+        self.assertFalse(evidence.verdict)
+        self.assertTrue(evidence.response_cbm)
+
 
 if __name__ == "__main__":
     unittest.main()

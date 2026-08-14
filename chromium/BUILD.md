@@ -196,6 +196,33 @@ the census fixtures + `web/serve.mjs`/`encoding.mjs` to the build host):
    than scanning Chromium's constants table for error strings. The script
    also records the identity and wire `.cbr` byte counts.
 
+## Transparent HTTP page metrics — CUBR-0072 follow-up
+
+The byte-exact P4 proof above establishes native response-body delivery but
+does not measure user-visible navigation timing. The paired
+`run-transparent-page-metrics.sh` harness closes that evidence boundary on the
+same pinned build host without touching production:
+
+1. the loopback origin serves one fixed document and exposes both the
+   negotiated `cbm` and identity controls;
+2. a deterministic schedule randomizes three warmups and 30 measured trials
+   per arm;
+3. each trial starts a fresh normal `content_shell`, installs buffered paint
+   and long-task observers before navigation through DevTools, and captures
+   TTFB, FCP, LCP, TBT, and page-load duration;
+4. the browser evidence probe verifies the decoded document hash and a
+   rendered screenshot, while `netlog_verify.py` proves the expected
+   `Content-Encoding` arm and `Vary` header; and
+5. `transparent_page_bundle.py` rejects missing/duplicate trials, missing
+   browser timing entries, non-exact body hashes, invalid screenshots, and
+   transport mismatches before writing the bundle.
+
+The runner requires `CUBRIM_SOURCE_SHA` and `CHROMIUM_SOURCE_SHA` so the
+measurement cannot silently inherit a stale checkout. It stores raw proof
+files under the evidence directory and emits only hashes plus aggregates in
+`transparent-page.json`. The result remains evidence for page timing; it does
+not promote the resource candidate or imply a Brotli-11 win.
+
 The advertisement works on plain-http localhost with no TLS: the pinned tag's
 guard is `SchemeIsCryptographic() || IsLocalhost(url)` (resolved at P0). The
 codec path itself is already proven at the unit level — this demo is the
