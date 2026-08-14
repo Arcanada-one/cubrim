@@ -5,7 +5,7 @@
 //! format from drifting away from the first. If someone changes the frame in
 //! `cubrim` without changing this crate, these tests fail.
 
-use cubrim::{encode_with_config, EncodeConfig};
+use cubrim::{encode_web_dynamic, encode_with_config, EncodeConfig};
 use cubrim_web_decoder as refdec;
 
 const SAMPLES: [&str; 12] = [
@@ -91,6 +91,21 @@ fn reference_decoder_matches_cubrim_on_synthetic_shapes() {
         let ours = refdec::decode(&frame).expect("reference decode");
         assert_eq!(&ours, data, "case {idx}: reference decoder lost bytes");
         assert_eq!(ours, theirs, "case {idx}: decoders disagree");
+    }
+}
+
+#[test]
+fn reference_decoder_matches_the_dynamic_profile() {
+    let cases = [
+        b"dynamic web profile ".repeat(500),
+        br#"{"stream":true,"items":[1,2,3]}"#.repeat(300),
+        (0..=255u8).cycle().take(12_000).collect::<Vec<_>>(),
+    ];
+    for (index, data) in cases.iter().enumerate() {
+        let frame = encode_web_dynamic(data, Some(257)).expect("dynamic frame");
+        assert_eq!(frame[5], refdec::MODE_WEB, "case {index}: mode");
+        assert_eq!(cubrim::decode(&frame).unwrap(), *data);
+        assert_eq!(refdec::decode(&frame).unwrap(), *data);
     }
 }
 

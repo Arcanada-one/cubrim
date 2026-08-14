@@ -27,6 +27,12 @@ no origin `Content-Encoding`, no `Cache-Control: no-transform`, body within
 A frame that fails to beat identity is discarded and identity is served —
 negative-value encoding is never shipped.
 
+The proxy uses the Web Profile's near-realtime dynamic encoder: it emits the
+same version-1 frame and uses the same decoder as the density-first static
+profile, but bounds match-search work for request latency. Archive callers can
+still opt into the static `EncodeConfig::web_profile` path when encode time is
+less important than density.
+
 Every resource the proxy would negotiate carries `Vary: Accept-Encoding`
 whichever representation is sent — the canon calls this the critical header:
 without it a shared cache hands `cbm` bytes to a client that never asked.

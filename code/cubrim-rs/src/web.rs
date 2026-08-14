@@ -80,6 +80,13 @@ const WEB_HEADER_SIZE: usize = 14;
 const HASH_BITS: u32 = 18;
 /// Chain depth walked per position by the match finder.
 const MAX_CHAIN: usize = 256;
+/// Chain depth for the near-realtime dynamic encoder.
+///
+/// Dynamic mode deliberately gives up the static mode's exhaustive search
+/// budget. A bounded greedy/lazy parse with this smaller chain still uses the
+/// same wire format and decoder, while keeping request-path encoding work
+/// predictable.
+const DYNAMIC_MAX_CHAIN: usize = 32;
 /// Shortest-path parse refinement passes.
 const PARSE_ITERATIONS: usize = 3;
 /// Match lengths below this are all probed by the optimal parse; above it only
@@ -475,6 +482,10 @@ fn hash3(data: &[u8], pos: usize) -> usize {
 /// A pair `(l, d)` means every match length in `(previous reported l, l]` is
 /// available at distance `d`.
 fn collect_candidates(data: &[u8]) -> Vec<Vec<(u32, u32)>> {
+    collect_candidates_with_chain(data, MAX_CHAIN)
+}
+
+fn collect_candidates_with_chain(data: &[u8], max_chain: usize) -> Vec<Vec<(u32, u32)>> {
     let n = data.len();
     let mut out: Vec<Vec<(u32, u32)>> = vec![Vec::new(); n];
     if n < MIN_MATCH {
@@ -487,7 +498,7 @@ fn collect_candidates(data: &[u8]) -> Vec<Vec<(u32, u32)>> {
         let mut candidate = head[h];
         let max_len = MAX_MATCH.min(n - pos);
         let mut best_len = 0usize;
-        let mut chain = MAX_CHAIN;
+        let mut chain = max_chain;
         while candidate != u32::MAX && chain > 0 {
             let cand = candidate as usize;
             let distance = pos - cand;
@@ -643,6 +654,18 @@ fn optimal_parse(
     tokens
 }
 
+/// Fast greedy/lazy parse for the near-realtime Web Profile mode.
+///
+/// The static mode spends three shortest-path refinement passes and walks a
+/// deeper hash chain. That is appropriate for pre-compressed assets, but not
+/// for a response path. Dynamic mode keeps the same match representation and
+/// table emission, while using the bounded seed parse once over a shallower
+/// chain. The decoder cannot distinguish the modes — and does not need to.
+fn dynamic_parse(data: &[u8]) -> Vec<Token> {
+    let candidates = collect_candidates_with_chain(data, DYNAMIC_MAX_CHAIN);
+    seed_parse(data, &candidates)
+}
+
 /// Per-context literal/length histograms and the shared distance histogram.
 fn histograms(
     tokens: &[Token],
@@ -733,6 +756,33 @@ pub(crate) fn encode_web_blocked(data: &[u8], block_size: Option<usize>) -> Opti
     for contexts in [1usize, 3] {
         let tokens = optimal_parse(data, contexts, &dist_base, &dist_extra);
         let groups = plan_blocks(&tokens, block_size);
+        let candidate = emit_frame(data, &tokens, &groups, contexts, &dist_base, &dist_extra)?;
+        if best.as_ref().is_none_or(|b| candidate.len() < b.len()) {
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
+/// Encode `data` as a MODE_WEB frame using the near-realtime dynamic profile.
+///
+/// Dynamic mode is intentionally a separate entry point from
+/// `EncodeConfig::web_profile`: the latter remains the static, density-first
+/// research encoder and therefore keeps its public configuration and byte
+/// behaviour unchanged. Both modes emit the same version-1 frame and are
+/// decoded by the same fail-closed implementation.
+pub(crate) fn encode_web_dynamic_blocked(
+    data: &[u8],
+    block_size: Option<usize>,
+) -> Option<Vec<u8>> {
+    if data.is_empty() {
+        return None;
+    }
+    let (dist_base, dist_extra) = distance_tables();
+    let tokens = dynamic_parse(data);
+    let groups = plan_blocks(&tokens, block_size);
+    let mut best: Option<Vec<u8>> = None;
+    for contexts in [1usize, 3] {
         let candidate = emit_frame(data, &tokens, &groups, contexts, &dist_base, &dist_extra)?;
         if best.as_ref().is_none_or(|b| candidate.len() < b.len()) {
             best = Some(candidate);
@@ -1161,6 +1211,23 @@ mod tests {
         assert_eq!(blob[5], MODE_WEB, "mode byte");
         let decoded = decode_web(&blob).expect("web decode");
         assert_eq!(decoded, data, "MODE_WEB round trip must be byte-exact");
+    }
+
+    #[test]
+    fn dynamic_mode_round_trips_with_and_without_streaming_blocks() {
+        let cases = [
+            b"the quick brown fox jumps over the lazy dog ".repeat(160),
+            br#"{"alpha":1,"items":["x","y","z"]}"#.repeat(240),
+            (0..=255u8).cycle().take(12_000).collect::<Vec<_>>(),
+        ];
+        for data in cases {
+            for block_size in [None, Some(257), Some(4096)] {
+                let blob =
+                    encode_web_dynamic_blocked(&data, block_size).expect("dynamic web encode");
+                assert_eq!(blob[5], MODE_WEB, "mode byte");
+                assert_eq!(decode_web(&blob).expect("dynamic web decode"), data);
+            }
+        }
     }
 
     #[test]
