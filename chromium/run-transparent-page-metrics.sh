@@ -157,31 +157,37 @@ run_trial() {
 
 terminate_trial_processes() {
   local trial_port=$1
+  local main_pid=
   local candidate
   local candidate_cmd
   for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
+    [ -r "/proc/$candidate/cmdline" ] || continue
     candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
     case "$candidate_cmd" in
-      *"--remote-debugging-port=$trial_port"*) kill -TERM "$candidate" 2>/dev/null || true ;;
+      *"--remote-debugging-port=$trial_port"*)
+        case "$candidate_cmd" in
+          *"--type="*) ;;
+          *) main_pid=$candidate ;;
+        esac
+        ;;
     esac
   done
-  for _ in $(seq 1 50); do
-    local remaining=0
+  if [ -n "$main_pid" ]; then
+    kill -TERM "$main_pid" 2>/dev/null || true
+  else
     for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
+      [ -r "/proc/$candidate/cmdline" ] || continue
       candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
       case "$candidate_cmd" in
-        *"--remote-debugging-port=$trial_port"*) remaining=1 ;;
+        *"--remote-debugging-port=$trial_port"*) kill -TERM "$candidate" 2>/dev/null || true ;;
       esac
     done
-    [ "$remaining" -eq 0 ] && return 0
+  fi
+  for _ in $(seq 1 50); do
+    if [ -z "$main_pid" ] || ! kill -0 "$main_pid" 2>/dev/null; then return 0; fi
     sleep 0.1
   done
-  for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
-    candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
-    case "$candidate_cmd" in
-      *"--remote-debugging-port=$trial_port"*) kill -KILL "$candidate" 2>/dev/null || true ;;
-    esac
-  done
+  kill -KILL "$main_pid" 2>/dev/null || true
 }
 
 wait_for_content_shell_wrapper() {
