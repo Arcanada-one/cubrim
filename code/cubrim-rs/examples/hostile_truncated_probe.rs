@@ -124,7 +124,7 @@ fn mode(frame: &[u8]) -> Result<String, String> {
         Some(cubrim::header::MODE_CUBE) => Ok("cube".into()),
         Some(cubrim::header::MODE_RAW) => Ok("raw_store".into()),
         Some(cubrim::header::MODE_WEB) => Ok("web".into()),
-        Some(other) => Err(format!("unknown frame mode {other}")),
+        Some(other) => Ok(format!("mode-{other}")),
         None => Err("frame is too short to carry a mode".into()),
     }
 }
