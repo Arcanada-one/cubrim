@@ -70,7 +70,9 @@ class HypothesisEvaluationTests(unittest.TestCase):
                             {
                                 "trial_no": trial,
                                 "randomized_order": trial,
+                                "encode_ns": size,
                                 "decode_ns": size,
+                                "peak_memory_bytes": 4096,
                                 "decoded_sha256": "a" * 64,
                                 "roundtrip_exact": True,
                             }
