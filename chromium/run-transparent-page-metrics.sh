@@ -38,17 +38,20 @@ mkdir -p "$OUT"
 
 python3 - "$OUT/metadata.json" "$CS" "$CUBRIM_SOURCE_SHA" "$CHROMIUM_SOURCE_SHA" "$DOC" <<'PY'
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 out, browser, source_sha, chromium_sha, document = sys.argv[1:]
-version = subprocess.run(
-    [browser, "--version"], check=True, capture_output=True, text=True
-).stdout.strip()
-browser_sha = subprocess.run(
-    ["sha256sum", browser], check=True, capture_output=True, text=True
-).stdout.split()[0]
+version_file = Path(browser).parents[2] / "chrome" / "VERSION"
+version_fields = {}
+for line in version_file.read_text().splitlines():
+    key, value = line.split("=", 1)
+    version_fields[key] = value.strip()
+version = "Chromium " + ".".join(
+    version_fields[key] for key in ("MAJOR", "MINOR", "BUILD", "PATCH")
+)
+import hashlib
+browser_sha = hashlib.sha256(Path(browser).read_bytes()).hexdigest()
 Path(out).write_text(json.dumps({
     "schema_version": 1,
     "source_sha": source_sha,
@@ -166,6 +169,6 @@ while IFS=$'\t' read -r kind arm number; do
   run_trial "$kind" "$arm" "$number"
 done < "$OUT/schedule.tsv"
 
-python3 "$BUNDLE" --root "$OUT" --origin "$SITE/$DOC" \
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 "$BUNDLE" --root "$OUT" --origin "$SITE/$DOC" \
   --out "$OUT/transparent-page.json" --trials "$TRIALS" --warmups "$WARMUPS"
 echo "transparent page evidence: $OUT/transparent-page.json"
