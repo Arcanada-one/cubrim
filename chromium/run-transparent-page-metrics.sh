@@ -135,12 +135,7 @@ run_trial() {
     >"$stdout_log" 2>&1
   evidence_rc=$?
   terminate_trial_processes "$trial_port"
-  if kill -0 "$CS_PID" 2>/dev/null; then kill "$CS_PID" 2>/dev/null || true; fi
-  if [ -n "${CS_MAIN_PID:-}" ]; then
-    kill -TERM "$CS_MAIN_PID" 2>/dev/null || true
-  else
-    kill "$CS_PID" 2>/dev/null || true
-  fi
+  wait_for_content_shell_wrapper
   wait "$CS_PID"
   cs_rc=$?
   set -e
@@ -156,6 +151,7 @@ run_trial() {
     echo "$arm $tag: content_shell failed (exit $cs_rc)" >&2
     exit "$cs_rc"
   fi
+  wait_for_complete_netlog "$netlog"
   python3 "$VERIFY" "$netlog" "$DOC" "$arm" >"$OUT/$arm/$tag.netlog-verdict.txt"
 }
 
@@ -169,13 +165,43 @@ terminate_trial_processes() {
       *"--remote-debugging-port=$trial_port"*) kill -TERM "$candidate" 2>/dev/null || true ;;
     esac
   done
-  sleep 1
+  for _ in $(seq 1 50); do
+    local remaining=0
+    for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
+      candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
+      case "$candidate_cmd" in
+        *"--remote-debugging-port=$trial_port"*) remaining=1 ;;
+      esac
+    done
+    [ "$remaining" -eq 0 ] && return 0
+    sleep 0.1
+  done
   for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
     candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
     case "$candidate_cmd" in
       *"--remote-debugging-port=$trial_port"*) kill -KILL "$candidate" 2>/dev/null || true ;;
     esac
   done
+}
+
+wait_for_content_shell_wrapper() {
+  for _ in $(seq 1 50); do
+    kill -0 "$CS_PID" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  kill "$CS_PID" 2>/dev/null || true
+}
+
+wait_for_complete_netlog() {
+  local netlog_path=$1
+  for _ in $(seq 1 50); do
+    if [ -s "$netlog_path" ] && python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$netlog_path" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "$netlog_path is not a complete JSON netlog after browser teardown" >&2
+  return 1
 }
 
 run_index=0
