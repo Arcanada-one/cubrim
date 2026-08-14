@@ -165,6 +165,23 @@ async function waitForDocument(devtools) {
   throw new Error(`document execution context did not commit ${pageUrl}`);
 }
 
+async function closePageTarget(targetId) {
+  const response = await fetch(`${baseUrl}/json/version`);
+  if (!response.ok) throw new Error(`DevTools version returned ${response.status}`);
+  const version = await response.json();
+  if (typeof version.webSocketDebuggerUrl !== 'string') {
+    throw new Error('DevTools browser WebSocket URL is missing');
+  }
+  const browser = connect(version.webSocketDebuggerUrl);
+  try {
+    await browser.open;
+    const result = await browser.call('Target.closeTarget', { targetId });
+    if (result?.success !== true) throw new Error('page target did not close');
+  } finally {
+    browser.socket.close();
+  }
+}
+
 async function main() {
   const target = await waitForPage();
   const devtools = connect(target.webSocketDebuggerUrl);
@@ -244,6 +261,7 @@ async function main() {
     writeFileSync(outputPath, `${JSON.stringify(row, null, 2)}\n`, { mode: 0o600 });
     console.log(JSON.stringify(row));
   } finally {
+    await closePageTarget(target.id);
     devtools.socket.close();
   }
 }
