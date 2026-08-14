@@ -3,8 +3,9 @@
 //! The existing resource runner measures a subprocess protocol over a fixed
 //! real-world corpus.  That is the wrong clock for the CUBR-0075 size ladders:
 //! at the 4--64 KiB cube sizes, process startup would dominate the decoder.
-//! This probe encodes each manifest sample once, then measures the library
-//! `decode` call in-process while retaining a byte-exact check for every trial.
+//! This probe builds each manifest sample once for the decode ladder, then
+//! measures both the canonical encoder path and the library `decode` call
+//! in-process while retaining a byte-exact check for every trial.
 //!
 //! Usage:
 //!
@@ -43,6 +44,7 @@ struct ManifestSample {
 struct Trial {
     trial_no: usize,
     randomized_order: usize,
+    encode_ns: u128,
     decode_ns: u128,
     decoded_sha256: String,
     roundtrip_exact: bool,
@@ -222,6 +224,19 @@ fn measure(manifest_path: &str, trials: usize, warmups: usize, seed: u64) -> Res
         }
         for (position, sample_index) in order.into_iter().enumerate() {
             let sample = &samples[sample_index];
+            let encode_start = Instant::now();
+            let (encoded, encoder_path) =
+                build_frame(&sample.data, &sample.manifest.expected_mode)?;
+            let encode_ns = encode_start.elapsed().as_nanos();
+            if encoded != sample.frame
+                || encoder_path != sample.encoder_path
+                || sha256(&encoded) != sample.frame_sha256
+            {
+                return Err(format!(
+                    "{} trial {trial_no} changed its content-addressed frame",
+                    sample.manifest.sample_id
+                ));
+            }
             let start = Instant::now();
             let decoded = cubrim::decode(&sample.frame).map_err(|error| {
                 format!("{} trial decode failed: {error}", sample.manifest.sample_id)
@@ -238,6 +253,7 @@ fn measure(manifest_path: &str, trials: usize, warmups: usize, seed: u64) -> Res
             trial_rows[sample_index].push(Trial {
                 trial_no,
                 randomized_order: position + 1,
+                encode_ns,
                 decode_ns,
                 decoded_sha256,
                 roundtrip_exact,

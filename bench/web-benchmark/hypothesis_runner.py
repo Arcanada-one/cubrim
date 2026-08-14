@@ -26,6 +26,7 @@ import math
 import os
 import platform
 import random
+import resource
 import shutil
 import subprocess
 import sys
@@ -294,9 +295,20 @@ def run_probe(
             f"hypothesis probe failed with {returncode}: {stderr_text.strip()}"
         )
     try:
-        return json.loads(stdout_text)
+        output = json.loads(stdout_text)
     except json.JSONDecodeError as error:
         raise MeasurementVoid(f"probe did not emit JSON: {error}") from error
+    # The normalized evidence schema requires a peak-memory metric for every
+    # resource trial.  The probe is one bounded child process, so its Linux
+    # RUSAGE_CHILDREN max-RSS is the truthful process-level peak for the run;
+    # it is repeated on each trial only as a run-level observation, never
+    # relabelled as allocator telemetry.
+    peak_memory_bytes = int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024)
+    output["peak_memory_bytes"] = peak_memory_bytes
+    for sample in output.get("samples", []):
+        for trial in sample.get("trials", []):
+            trial["peak_memory_bytes"] = peak_memory_bytes
+    return output
 
 
 def _nearest_rank(values: list[float], quantile: float) -> float:
