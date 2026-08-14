@@ -25,6 +25,16 @@ pub(crate) mod web;
 
 pub use codec::{decode, decode_with_limits, encode, encode_with_config, ORDER2_DEFAULT_MIN_CTX};
 
+/// Encode a Web Profile frame with the near-realtime dynamic profile.
+///
+/// The returned frame uses the same `MODE_WEB` version-1 wire format as the
+/// density-first `EncodeConfig::web_profile` path. `None` is returned only for
+/// empty input; callers should compare the frame with identity before sending
+/// it, just as the reverse proxy does.
+pub fn encode_web_dynamic(data: &[u8], block_size: Option<usize>) -> Option<Vec<u8>> {
+    web::encode_web_dynamic_blocked(data, block_size)
+}
+
 /// Write the encoder candidate-attribution table to stderr, given the wall time
 /// of the encode it should be attributed against. No-op unless
 /// `CUBRIM_PROFILE=1`. Development instrumentation — see `prof`.

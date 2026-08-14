@@ -33,7 +33,7 @@ use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use cubrim::{encode_with_config, EncodeConfig};
+use cubrim::encode_web_dynamic;
 use tiny_http::{Header, Method, Response, Server};
 
 pub mod origin;
@@ -623,10 +623,10 @@ fn handle(state: &State, mut request: tiny_http::Request) {
         .original_bytes_total
         .fetch_add(body.len() as u64, Ordering::Relaxed);
 
-    let mut config = EncodeConfig::v1_default();
-    config.web_profile = true;
-    config.web_block_size = state.config.block_size;
-    let frame = encode_with_config(&body, &config);
+    // The reverse proxy is the near-realtime consumer of the Web Profile.
+    // Keep the density-first static encoder available to archive callers, but
+    // do not spend its shortest-path parse budget on a request path.
+    let frame = encode_web_dynamic(&body, state.config.block_size).unwrap_or_default();
 
     // The rail can still hand back a frame that is not worth its header
     // bytes; shipping a larger "compressed" response is negative value, so

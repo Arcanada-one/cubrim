@@ -183,6 +183,11 @@ fn cbm_client_gets_cbm_and_it_round_trips() {
         "byte-exact round trip through the proxy"
     );
     assert_eq!(
+        frame,
+        cubrim::encode_web_dynamic(&original, Some(65536)).expect("dynamic frame"),
+        "the request path must use the near-realtime dynamic encoder"
+    );
+    assert_eq!(
         rig.origin_saw("/page.html"),
         "identity",
         "compress leg must fetch raw bytes from the origin"

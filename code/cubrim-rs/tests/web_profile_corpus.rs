@@ -6,7 +6,7 @@
 //!
 //! Bytes only. Nothing here is timed, on this host or any other.
 
-use cubrim::{decode, encode, encode_with_config, EncodeConfig};
+use cubrim::{decode, encode, encode_web_dynamic, encode_with_config, EncodeConfig};
 use std::path::{Path, PathBuf};
 
 /// Per-sample gzip-9 and brotli-11 baselines, from
@@ -153,4 +153,38 @@ fn web_profile_never_regresses_a_file() {
         incumbent.len()
     );
     assert_eq!(decode(&with_web).unwrap(), data);
+}
+
+#[test]
+fn dynamic_web_profile_is_public_and_streaming_compatible() {
+    let data = br#"{"dynamic":true,"payload":"near-realtime"}"#.repeat(500);
+    let frame = encode_web_dynamic(&data, Some(256)).expect("dynamic frame");
+    assert_eq!(frame[5], 18, "dynamic mode uses the Web Profile frame");
+    assert_eq!(decode(&frame).unwrap(), data);
+}
+
+#[test]
+fn dynamic_web_profile_round_trips_the_real_census() {
+    let dir = corpus_dir();
+    if !dir.is_dir() {
+        eprintln!("census corpus not present at {dir:?}; skipping");
+        return;
+    }
+
+    let mut total = 0usize;
+    let mut selected_smaller_than_identity = 0usize;
+    for (name, _, _) in CENSUS {
+        let data = std::fs::read(dir.join(name)).unwrap();
+        let frame = encode_web_dynamic(&data, Some(65_536)).expect("dynamic frame");
+        assert_eq!(frame[5], 18, "{name}: dynamic mode must emit MODE_WEB");
+        assert_eq!(decode(&frame).unwrap(), data, "{name}: round trip");
+        if frame.len() < data.len() {
+            selected_smaller_than_identity += 1;
+        }
+        total += frame.len();
+    }
+    println!(
+        "dynamic web census: total_frame_bytes={total}, smaller_than_identity={selected_smaller_than_identity}/12"
+    );
+    assert!(selected_smaller_than_identity >= 10);
 }
