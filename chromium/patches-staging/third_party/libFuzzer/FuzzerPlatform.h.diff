@@ -1,0 +1,27 @@
+diff --git a/third_party/libFuzzer/src/FuzzerPlatform.h b/third_party/libFuzzer/src/FuzzerPlatform.h
+--- a/third_party/libFuzzer/src/FuzzerPlatform.h
++++ b/third_party/libFuzzer/src/FuzzerPlatform.h
+@@ -135,11 +135,20 @@
+ #if defined(__has_feature)
++#if __has_feature(undefined_behavior_sanitizer)
++#define ATTRIBUTE_NO_SANITIZE_UNDEFINED \
++  __attribute__((no_sanitize("undefined")))
++#else
++#define ATTRIBUTE_NO_SANITIZE_UNDEFINED
++#endif
+ #if __has_feature(address_sanitizer)
+-#define ATTRIBUTE_NO_SANITIZE_ALL ATTRIBUTE_NO_SANITIZE_ADDRESS
++#define ATTRIBUTE_NO_SANITIZE_ALL \
++  ATTRIBUTE_NO_SANITIZE_ADDRESS ATTRIBUTE_NO_SANITIZE_UNDEFINED
+ #elif __has_feature(memory_sanitizer)
+-#define ATTRIBUTE_NO_SANITIZE_ALL ATTRIBUTE_NO_SANITIZE_MEMORY
++#define ATTRIBUTE_NO_SANITIZE_ALL \
++  ATTRIBUTE_NO_SANITIZE_MEMORY ATTRIBUTE_NO_SANITIZE_UNDEFINED
+ #else
+-#define ATTRIBUTE_NO_SANITIZE_ALL
++#define ATTRIBUTE_NO_SANITIZE_ALL ATTRIBUTE_NO_SANITIZE_UNDEFINED
+ #endif
+ #else
++#define ATTRIBUTE_NO_SANITIZE_UNDEFINED
+ #define ATTRIBUTE_NO_SANITIZE_ALL
+ #endif

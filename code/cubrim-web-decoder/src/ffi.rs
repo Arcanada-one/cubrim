@@ -15,10 +15,13 @@
 //! ```text
 //! cbm_ffi_abi_version() -> 1
 //! cbm_stream_new(max_output) -> handle | NULL      max_output 0 = default
+//! cbm_stream_new_with_limits(max_output, max_ratio, max_memory)
+//!                                                  -> handle | NULL
 //! cbm_stream_push(h, ptr, len) -> 1 | 0            0 = error, message set
 //! cbm_stream_fresh_ptr/len(h)                      bytes newly decoded by
 //!                                                  the LAST push; valid
 //!                                                  until the next call on h
+//! cbm_stream_memory_usage(h) -> usize              conservative live capacity
 //! cbm_stream_declared_len(h) -> u64                u64::MAX until the header
 //! cbm_stream_finish(h) -> 1 | 0                    verifies length+checksum
 //! cbm_stream_error_ptr/len(h)                      UTF-8, last failure
@@ -63,9 +66,28 @@ pub extern "C" fn cbm_ffi_abi_version() -> u32 {
 /// Returns an owned pointer; release it with [`cbm_stream_free`].
 #[no_mangle]
 pub extern "C" fn cbm_stream_new(max_output: usize) -> *mut CbmStream {
+    cbm_stream_new_with_limits(max_output, 0, 0)
+}
+
+/// Construct a stream with explicit caller policy. A zero value selects the
+/// corresponding safe default. The native browser seam uses this entry point
+/// to make its stricter expansion-ratio and per-stream memory policy visible
+/// at the ABI boundary rather than inheriting a Rust-only default.
+#[no_mangle]
+pub extern "C" fn cbm_stream_new_with_limits(
+    max_output: usize,
+    max_expansion_ratio: usize,
+    max_decoder_memory: usize,
+) -> *mut CbmStream {
     let mut limits = DecodeLimits::default();
     if max_output != 0 {
         limits.max_output_size = max_output;
+    }
+    if max_expansion_ratio != 0 {
+        limits.max_expansion_ratio = max_expansion_ratio;
+    }
+    if max_decoder_memory != 0 {
+        limits.max_decoder_memory = max_decoder_memory;
     }
     let stream = CbmStream {
         decoder: Some(StreamDecoder::new(limits)),
@@ -73,6 +95,25 @@ pub extern "C" fn cbm_stream_new(max_output: usize) -> *mut CbmStream {
         error: String::new(),
     };
     alloc::boxed::Box::into_raw(alloc::boxed::Box::new(stream))
+}
+
+/// Current decoder plus ABI fresh-window capacity, in bytes. This is a
+/// conservative capacity measure for native embedders that maintain a second
+/// output queue; it never exposes Rust allocator internals or pointers.
+///
+/// # Safety
+/// `handle` must be live or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn cbm_stream_memory_usage(handle: *const CbmStream) -> usize {
+    match unsafe { handle.as_ref() } {
+        Some(stream) => stream
+            .decoder
+            .as_ref()
+            .map(|decoder| decoder.memory_usage())
+            .unwrap_or(0)
+            .saturating_add(stream.fresh.capacity()),
+        None => 0,
+    }
 }
 
 /// # Safety

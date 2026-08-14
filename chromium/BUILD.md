@@ -66,6 +66,21 @@ out/cbm/net_cbm_source_stream_fuzzer -runs=1000
 autoninja -C out/cbm content_shell
 ```
 
+The native browser seam does not inherit Rust decoder defaults silently.
+`CbmSourceStream` selects a 1024:1 expansion-ratio ceiling, a 192 MiB
+per-stream decoder-memory ceiling, and a 512 MiB process-wide admission budget.
+The budget charges the Rust decoder's reported capacities and the C++ pending
+output queue, rejects a new stream request-locally when the budget is full, and
+releases its reservation on success, failure, EOF, and destruction. The
+focused `CbmSourceStreamTest.AggregateAdmissionIsRequestLocalAndReleased`
+test is the mutation guard for admission and release; the Rust FFI suite also
+proves explicit ratio/memory limits and the pointer-free capacity report.
+
+For sanitizer evidence, use a separate fresh GN output directory only after
+the normal build has been preserved and record the complete args, binary hash,
+seed manifest, sanitizer logs, cgroup memory properties, exact duration, and
+exit status. A normal fuzzer binary is not ASan/UBSan evidence.
+
 ## Demo
 
 ```sh

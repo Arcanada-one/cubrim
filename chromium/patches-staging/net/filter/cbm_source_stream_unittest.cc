@@ -74,6 +74,31 @@ class CbmSourceStreamTest : public PlatformTest {
   }
 };
 
+class ScopedCbmAggregateBudget {
+ public:
+  explicit ScopedCbmAggregateBudget(size_t bytes)
+      : previous_(CbmAggregateMemoryBudgetForTesting()) {
+    SetCbmAggregateMemoryBudgetForTesting(bytes);
+  }
+
+  ScopedCbmAggregateBudget(const ScopedCbmAggregateBudget&) = delete;
+  ScopedCbmAggregateBudget& operator=(const ScopedCbmAggregateBudget&) = delete;
+
+  ~ScopedCbmAggregateBudget() {
+    SetCbmAggregateMemoryBudgetForTesting(previous_);
+  }
+
+ private:
+  const size_t previous_;
+};
+
+std::unique_ptr<FilterSourceStream> EmptyCbmStream() {
+  auto source = std::make_unique<MockSourceStream>();
+  source->AddReadResult(std::string_view(), OK, MockSourceStream::SYNC);
+  source->set_expect_all_input_consumed(false);
+  return CreateCbmSourceStream(std::move(source));
+}
+
 // The load-bearing test: a real frame decodes byte-exact through the whole
 // vendored Rust decoder, checksum and all.
 TEST_F(CbmSourceStreamTest, GoldenFrameDecodesByteExact) {
@@ -124,6 +149,32 @@ TEST_F(CbmSourceStreamTest, TruncatedFrameFails) {
   std::vector<uint8_t> out =
       Decode(whole.first(whole.size() - 8), 4096, &error);
   EXPECT_EQ(ERR_CONTENT_DECODING_FAILED, error);
+}
+
+TEST_F(CbmSourceStreamTest, AggregateAdmissionIsRequestLocalAndReleased) {
+  // The base admission floor deliberately admits two streams but not three.
+  // Removing the shared guard makes the third stream read through; failing to
+  // release on destruction makes the recycled stream fail as well.
+  ScopedCbmAggregateBudget budget(2 * 1024 * 1024);
+  auto first = EmptyCbmStream();
+  auto second = EmptyCbmStream();
+  auto blocked = EmptyCbmStream();
+  ASSERT_TRUE(second);
+
+  auto buffer = base::MakeRefCounted<IOBufferWithSize>(64u);
+  TestCompletionCallback blocked_callback;
+  const int blocked_result =
+      blocked->Read(buffer.get(), buffer->size(), blocked_callback.callback());
+  EXPECT_EQ(ERR_CONTENT_DECODING_INIT_FAILED, blocked_result);
+
+  first.reset();
+  auto recycled = EmptyCbmStream();
+  auto blocked_again = EmptyCbmStream();
+  ASSERT_TRUE(recycled);
+  TestCompletionCallback blocked_again_callback;
+  const int blocked_again_result = blocked_again->Read(
+      buffer.get(), buffer->size(), blocked_again_callback.callback());
+  EXPECT_EQ(ERR_CONTENT_DECODING_INIT_FAILED, blocked_again_result);
 }
 
 }  // namespace

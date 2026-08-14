@@ -295,6 +295,20 @@ echo "     compiles+links WITHOUT the real decoder (blake3 not yet vendored)."
 echo "   - real decoder: rust_static_library over code/cubrim-web-decoder once"
 echo "     blake3 + deps are vendored via tools/crates (gnrt). See BUILD.md."
 
+echo "== sanitizer harness: keep libFuzzer's empty coverage range UBSan-clean"
+# Chromium's libFuzzer helper labels this macro "ALL" but, on Clang, its
+# address/memory branches do not suppress UBSan's pointer-overflow check. The
+# startup empty coverage range therefore aborts an otherwise valid UBSan run
+# before one input reaches the CBM target. Apply the narrow third-party fix so
+# sanitizer evidence measures the target rather than the harness bootstrap.
+if grep -q 'ATTRIBUTE_NO_SANITIZE_UNDEFINED' third_party/libFuzzer/src/FuzzerPlatform.h; then
+  echo "  FuzzerPlatform.h: UBSan suppression already present"
+else
+  git apply --whitespace=nowarn \
+    "$CBM_STAGING/third_party/libFuzzer/FuzzerPlatform.h.diff"
+  echo "  FuzzerPlatform.h: UBSan suppression applied"
+fi
+
 echo "== DONE (apply). Next: gn gen out/cbm && autoninja -C out/cbm net_unittests"
 echo "   Env prereqs proven on the tree (see BUILD.md): depot_tools cpython3"
 echo "   bootstrap + build/install-build-deps.sh. gn gen is GREEN with these edits."
