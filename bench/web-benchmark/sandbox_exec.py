@@ -43,6 +43,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--time-report", type=Path, required=True)
     parser.add_argument("--stderr", type=Path, required=True)
     parser.add_argument("--max-output-bytes", type=int, required=True)
+    parser.add_argument("--measure-first-output", action="store_true")
     parser.add_argument("argv", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.argv[:1] != ["--"] or len(args.argv) < 2:
@@ -122,30 +123,57 @@ def main() -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("wb") as output, args.stderr.open("wb") as stderr:
         started_ns = time.monotonic_ns()
-        completed = subprocess.run(
-            (
-                "/usr/bin/time",
-                "--verbose",
-                "--output",
-                str(args.time_report),
-                "--",
-                *args.argv,
-            ),
-            stdin=subprocess.DEVNULL,
-            stdout=output,
-            stderr=stderr,
-            check=False,
-            env=CODEC_ENV,
-            preexec_fn=lambda: _sandbox_limits(args.max_output_bytes),
+        command = (
+            "/usr/bin/time",
+            "--verbose",
+            "--output",
+            str(args.time_report),
+            "--",
+            *args.argv,
         )
+        first_output_duration_ns = None
+        if args.measure_first_output:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=stderr,
+                env=CODEC_ENV,
+                preexec_fn=lambda: _sandbox_limits(args.max_output_bytes),
+            )
+            output_bytes = 0
+            assert process.stdout is not None
+            while chunk := process.stdout.read(64 * 1024):
+                if first_output_duration_ns is None:
+                    first_output_duration_ns = time.monotonic_ns() - started_ns
+                output_bytes += len(chunk)
+                if output_bytes > args.max_output_bytes:
+                    process.kill()
+                    process.wait()
+                    raise RuntimeError("codec output exceeded configured maximum")
+                output.write(chunk)
+            process.stdout.close()
+            returncode = process.wait()
+        else:
+            completed = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=stderr,
+                check=False,
+                env=CODEC_ENV,
+                preexec_fn=lambda: _sandbox_limits(args.max_output_bytes),
+            )
+            returncode = completed.returncode
         duration_ns = time.monotonic_ns() - started_ns
     output_sha256 = _sha256(args.output)
     _atomic_status(
         args.status,
         {
             "duration_ns": duration_ns,
+            "first_output_duration_ns": first_output_duration_ns,
             "output_sha256": output_sha256,
-            "returncode": completed.returncode,
+            "returncode": returncode,
         },
     )
     return 0

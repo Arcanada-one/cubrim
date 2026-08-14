@@ -189,6 +189,16 @@ class PhaseARunner:
                 raise ValueError("decoded output hash disagrees with the executor")
         if decoded_sha256 != original_sha256 or decoded_bytes != original_bytes:
             raise RoundTripError("decoded output failed exact lossless round trip")
+        if adapter.capabilities.get("incremental_decode") is True:
+            if decompression.first_output_duration_ns is None:
+                raise ValueError(
+                    "incremental decoder omitted first decoded byte timing"
+                )
+            first_decoded_byte_ms = (
+                decompression.first_output_duration_ns / 1_000_000
+            )
+        else:
+            first_decoded_byte_ms = None
         identity_json = _identity_json(identity, adapter.capabilities)
         tool_fingerprint = stable_fingerprint(identity_json)
         environment_fingerprint = stable_fingerprint(self.environment)
@@ -220,6 +230,11 @@ class PhaseARunner:
                 "compression_duration": compression.duration_ns / 1_000_000,
                 "decompression_duration": decompression.duration_ns / 1_000_000,
                 "peak_memory": max(compression.peak_rss_bytes, decompression.peak_rss_bytes),
+                **(
+                    {"time_to_first_decoded_byte": first_decoded_byte_ms}
+                    if first_decoded_byte_ms is not None
+                    else {}
+                ),
             },
         )
 

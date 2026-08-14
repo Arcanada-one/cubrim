@@ -22,6 +22,18 @@ CANONICAL_KEY_RE = re.compile(r"^[\x20-\x7e]+$")
 MAX_SAFE_INTEGER = (1 << 53) - 1
 FLOAT64_TAG = "$float64"
 CANONICAL_FINGERPRINT_CONTRACT = "cubrim-canonical-json-v1"
+BASE_RESOURCE_METRICS = frozenset(
+    {
+        "compressed_bytes",
+        "compression_ratio",
+        "compression_duration",
+        "decompression_duration",
+        "peak_memory",
+    }
+)
+CANDIDATE_RESOURCE_METRICS = BASE_RESOURCE_METRICS | {
+    "time_to_first_decoded_byte",
+}
 
 
 class RoundTripError(ValueError):
@@ -138,15 +150,15 @@ class TrialRecord:
             raise RoundTripError("decoded hash does not match original")
         if self.original_bytes != self.decoded_bytes:
             raise RoundTripError("decoded size does not match original")
-        expected_metrics = {
-            "compressed_bytes",
-            "compression_ratio",
-            "compression_duration",
-            "decompression_duration",
-            "peak_memory",
-        }
+        expected_metrics = (
+            CANDIDATE_RESOURCE_METRICS
+            if self.codec_key == "cubrim-web"
+            else BASE_RESOURCE_METRICS
+        )
         if set(self.metrics) != expected_metrics:
-            raise ValueError("Phase A trial metrics must be exactly the required five metrics")
+            raise ValueError(
+                "trial metrics are not exactly the codec capability contract"
+            )
         for name, value in self.metrics.items():
             require_finite_nonnegative(value, name)
 
