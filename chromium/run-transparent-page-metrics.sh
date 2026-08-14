@@ -109,6 +109,7 @@ run_trial() {
   local kind=$1
   local arm=$2
   local number=$3
+  local trial_port=$4
   local tag="$kind-$number"
   local page_url="http://127.0.0.1:$PORT/$DOC"
   local netlog="$OUT/$arm/netlogs/$tag.json"
@@ -119,8 +120,6 @@ run_trial() {
   local feature_flag=--disable-features=CbmContentEncoding
   local evidence_rc=0
   local cs_rc=0
-  local candidate
-  local candidate_cmd
   CS_MAIN_PID=
   mkdir -p "$(dirname "$netlog")" "$(dirname "$screenshot")" "$(dirname "$row")"
   if [ "$arm" = "cbm" ]; then feature_flag=--enable-features=CbmContentEncoding; fi
@@ -128,24 +127,15 @@ run_trial() {
   timeout 75 xvfb-run -a "$CS" \
     --no-sandbox --disable-gpu --disable-background-networking \
     --disable-cache --user-data-dir="$OUT/$arm/profile-$tag" \
-    --remote-debugging-port="$PORT" --log-net-log="$netlog" \
+    --remote-debugging-port="$trial_port" --log-net-log="$netlog" \
     --net-log-capture-mode=Everything "$feature_flag" about:blank \
     >"$log" 2>&1 &
   CS_PID=$!
   timeout 60 node "$EVIDENCE" "$PORT" "$page_url" "$DOC" "$SITE/$DOC" "$screenshot" "$row" \
     >"$stdout_log" 2>&1
   evidence_rc=$?
-  for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
-    candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
-    case "$candidate_cmd" in
-      *"--remote-debugging-port=$PORT"*)
-        case "$candidate_cmd" in
-          *"--type="*) ;;
-          *) CS_MAIN_PID=$candidate ;;
-        esac
-        ;;
-    esac
-  done
+  terminate_trial_processes "$trial_port"
+  if kill -0 "$CS_PID" 2>/dev/null; then kill "$CS_PID" 2>/dev/null || true; fi
   if [ -n "${CS_MAIN_PID:-}" ]; then kill -TERM "$CS_MAIN_PID" 2>/dev/null || true; else kill "$CS_PID" 2>/dev/null || true; fi
   wait "$CS_PID"
   cs_rc=$?
@@ -165,8 +155,29 @@ run_trial() {
   python3 "$VERIFY" "$netlog" "$DOC" "$arm" >"$OUT/$arm/$tag.netlog-verdict.txt"
 }
 
+terminate_trial_processes() {
+  local trial_port=$1
+  local candidate
+  local candidate_cmd
+  for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
+    candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
+    case "$candidate_cmd" in
+      *"--remote-debugging-port=$trial_port"*) kill -TERM "$candidate" 2>/dev/null || true ;;
+    esac
+  done
+  sleep 1
+  for candidate in $(pgrep -x content_shell 2>/dev/null || true); do
+    candidate_cmd=$(tr '\0' ' ' <"/proc/$candidate/cmdline" 2>/dev/null || true)
+    case "$candidate_cmd" in
+      *"--remote-debugging-port=$trial_port"*) kill -KILL "$candidate" 2>/dev/null || true ;;
+    esac
+  done
+}
+
+run_index=0
 while IFS=$'\t' read -r kind arm number; do
-  run_trial "$kind" "$arm" "$number"
+  run_index=$((run_index + 1))
+  run_trial "$kind" "$arm" "$number" "$((PORT + run_index))"
 done < "$OUT/schedule.tsv"
 
 PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" python3 "$BUNDLE" --root "$OUT" --origin "$SITE/$DOC" \
