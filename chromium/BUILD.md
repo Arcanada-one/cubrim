@@ -79,7 +79,10 @@ proves explicit ratio/memory limits and the pointer-free capacity report.
 For sanitizer evidence, use a separate fresh GN output directory only after
 the normal build has been preserved and record the complete args, binary hash,
 seed manifest, sanitizer logs, cgroup memory properties, exact duration, and
-exit status. A normal fuzzer binary is not ASan/UBSan evidence.
+exit status. The staging apply also carries a narrow libFuzzer
+`FuzzerPlatform.h` fix: Chromium's `ATTRIBUTE_NO_SANITIZE_ALL` otherwise leaves
+the empty coverage-range pointer arithmetic UBSan-instrumented and aborts
+before the first input. A normal fuzzer binary is not ASan/UBSan evidence.
 
 ## Demo
 
