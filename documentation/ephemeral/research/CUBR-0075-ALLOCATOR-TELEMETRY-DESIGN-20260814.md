@@ -82,7 +82,7 @@ The measurement window is:
 4. Drop the returned output and take the post-drop live snapshot. Record
    allocation count, allocated bytes, deallocated bytes, peak live bytes,
    largest single allocation, decoder-retained capacity, caller-owned frame
-   bytes, output capacity, and the post-drop retained delta.
+   bytes, declared output bytes, and the post-drop retained delta.
 5. Derive `auxiliary_memory_bound_ratio` from decoder-owned peak auxiliary
    capacity divided by the measured frame input bytes, with the numerator and
    denominator persisted so the ratio is auditable. Caller input and returned
@@ -107,7 +107,7 @@ Every result records:
 - `allocation_count`, `allocated_bytes`, `deallocated_bytes`,
   `peak_live_bytes`, `largest_single_allocation_bytes`;
 - `caller_input_bytes`, `decoder_retained_peak_bytes`,
-  `decoder_retained_after_drop_bytes`, `output_capacity_bytes`,
+  `decoder_retained_after_drop_bytes`, `declared_output_bytes`,
   `auxiliary_peak_bytes`, and the ratio numerator/denominator; and
 - a protocol status and error/void reason, when applicable.
 
