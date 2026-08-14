@@ -755,7 +755,15 @@ fn encode_base_bounded(data: &[u8], config: &EncodeConfig, bound: EncBound) -> O
     }
 }
 
-fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
+/// Encode one input through the canonical cube/raw base path without the
+/// outer competitive transforms.
+///
+/// This is intentionally separate from [`encode_with_config`].  The public
+/// encoder may select a different self-describing top-level mode (for example
+/// CM2) when that candidate is smaller.  Hypothesis measurements that claim a
+/// cube-mode result must call this path and verify the emitted mode byte rather
+/// than treating a competitive winner as a cube result.
+pub fn encode_base(data: &[u8], config: &EncodeConfig) -> Vec<u8> {
     let l = data.len();
     let b = config.b;
     let gap_scheme = config.gap_scheme;
