@@ -26,7 +26,6 @@ from hypothesis_runner import (
     MeasurementVoid,
     _git_sha,
     _read_temperature_celsius as _read_thermal_temperature_celsius,
-    _recheck_admission,
     _host_cpu_count,
     _cpu_topology,
     choose_cpu,
@@ -94,6 +93,27 @@ def _ensure_taskset() -> int | None:
         check=False,
     )
     return completed.returncode
+
+
+def _recheck_admission(cpu: int, host_cpu_count: int) -> None:
+    """Recheck the same load, affinity, and sensor sources during the run."""
+
+    affinity = sorted(os.sched_getaffinity(0))
+    load_per_cpu = os.getloadavg()[0] / host_cpu_count
+    temperatures = _read_temperature_celsius()
+    if affinity != [cpu] or load_per_cpu > 1.0 or not temperatures or max(temperatures) >= 90.0:
+        raise MeasurementVoid(
+            json.dumps(
+                {
+                    "reason": "admission_lapsed",
+                    "effective_affinity": affinity,
+                    "expected_cpu": cpu,
+                    "load_per_cpu": load_per_cpu,
+                    "max_temperature_c": max(temperatures) if temperatures else None,
+                },
+                sort_keys=True,
+            )
+        )
 
 
 def require_clean_tree() -> None:
