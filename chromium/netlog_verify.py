@@ -18,16 +18,17 @@ class Evidence:
     response_cbm: bool
     varies_on_accept_encoding: bool
     request_failed: bool
+    expected_encoding: str
 
     @property
     def verdict(self) -> bool:
-        return (
-            self.request_logged
-            and self.accepts_cbm
-            and self.response_cbm
-            and self.varies_on_accept_encoding
-            and not self.request_failed
-        )
+        if self.expected_encoding == "cbm":
+            encoding_ok = self.accepts_cbm and self.response_cbm
+        elif self.expected_encoding == "identity":
+            encoding_ok = not self.accepts_cbm and not self.response_cbm
+        else:
+            encoding_ok = False
+        return self.request_logged and encoding_ok and self.varies_on_accept_encoding and not self.request_failed
 
 
 def _event_types(payload: dict[str, Any]) -> dict[str, int]:
@@ -78,8 +79,13 @@ def _document_sources(
     return sources
 
 
-def verify_payload(payload: dict[str, Any], doc: str) -> Evidence:
+def verify_payload(
+    payload: dict[str, Any], doc: str, *, expected_encoding: str = "cbm"
+) -> Evidence:
     """Return evidence for the document request, failing closed on missing data."""
+
+    if expected_encoding not in {"cbm", "identity"}:
+        raise ValueError(f"unsupported expected encoding: {expected_encoding}")
 
     events = payload.get("events", [])
     if not isinstance(events, list):
@@ -128,26 +134,31 @@ def verify_payload(payload: dict[str, Any], doc: str) -> Evidence:
             for headers in response_headers
         ),
         request_failed=request_failed,
+        expected_encoding=expected_encoding,
     )
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        print(f"usage: {argv[0]} NETLOG DOC", file=sys.stderr)
+    if len(argv) not in {3, 4} or (len(argv) == 4 and argv[3] not in {"cbm", "identity"}):
+        print(f"usage: {argv[0]} NETLOG DOC [cbm|identity]", file=sys.stderr)
         return 2
+    expected_encoding = argv[3] if len(argv) == 4 else "cbm"
     try:
         payload = json.loads(Path(argv[1]).read_text())
     except (OSError, json.JSONDecodeError) as exc:
         print(f"cannot read valid netlog: {exc}", file=sys.stderr)
         return 2
 
-    evidence = verify_payload(payload, argv[2])
+    evidence = verify_payload(payload, argv[2], expected_encoding=expected_encoding)
     print(f"  request to /{argv[2]} logged        : {evidence.request_logged}")
     print(f"  Accept-Encoding includes cbm      : {evidence.accepts_cbm}")
     print(f"  Content-Encoding: cbm in netlog   : {evidence.response_cbm}")
     print(f"  Vary: Accept-Encoding in netlog   : {evidence.varies_on_accept_encoding}")
     print(f"  request FAILED event               : {evidence.request_failed}")
-    print(f"  VERDICT: browser negotiated + decoded cbm without error: {evidence.verdict}")
+    print(
+        f"  VERDICT: browser received expected {expected_encoding} response without error: "
+        f"{evidence.verdict}"
+    )
     return 0 if evidence.verdict else 2
 
 
