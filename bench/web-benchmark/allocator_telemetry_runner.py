@@ -25,6 +25,9 @@ PREREGISTRATION = (
     / "research"
     / "CUBR-0075-ALLOCATOR-TELEMETRY-PREREG-20260814.md"
 )
+CANONICAL_MANIFEST = REPO_ROOT / "bench" / "web-corpus" / "manifest.v3.json"
+PROBE_SOURCE = REPO_ROOT / "code" / "cubrim-web-decoder" / "examples" / "allocator_telemetry_probe.rs"
+SCHEMA_VERSION = 2
 SAMPLES = 13
 PROFILES = ("static_profile", "dynamic_profile")
 TRIALS = 30
@@ -161,9 +164,39 @@ def summarize(bundle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_bundle(bundle: dict[str, Any], expected_source_sha: str | None = None) -> dict[str, Any]:
-    if not isinstance(bundle, dict) or bundle.get("schema_version") != 1:
-        raise MeasurementVoid("bundle schema_version must be 1")
+def load_canonical_manifest(path: Path = CANONICAL_MANIFEST) -> dict[str, Any]:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise MeasurementVoid(f"canonical manifest cannot be read: {error}") from error
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 2:
+        raise MeasurementVoid("canonical manifest schema_version must be 2")
+    samples = manifest.get("samples")
+    if not isinstance(samples, list) or len(samples) != SAMPLES:
+        raise MeasurementVoid(f"canonical manifest must contain {SAMPLES} samples")
+    seen: set[str] = set()
+    for sample in samples:
+        if not isinstance(sample, dict):
+            raise MeasurementVoid("canonical manifest sample is not an object")
+        sample_id = sample.get("sample_id")
+        if not isinstance(sample_id, str) or not sample_id or sample_id in seen:
+            raise MeasurementVoid("canonical manifest sample IDs are not unique")
+        seen.add(sample_id)
+        if not isinstance(sample.get("path"), str) or not sample["path"]:
+            raise MeasurementVoid(f"canonical manifest path is missing for {sample_id}")
+        _nonnegative_int(sample.get("byte_count"), f"manifest.{sample_id}.byte_count")
+        _hex_digest(sample.get("sha256"), f"manifest.{sample_id}.sha256")
+    return manifest
+
+
+def validate_bundle(
+    bundle: dict[str, Any],
+    expected_source_sha: str | None = None,
+    *,
+    expected_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(bundle, dict) or bundle.get("schema_version") != SCHEMA_VERSION:
+        raise MeasurementVoid(f"bundle schema_version must be {SCHEMA_VERSION}")
     if bundle.get("task_id") != "CUBR-0075" or bundle.get("phase") != "allocator_telemetry":
         raise MeasurementVoid("bundle task/phase identity is invalid")
     protocol = bundle.get("protocol")
@@ -180,22 +213,38 @@ def validate_bundle(bundle: dict[str, Any], expected_source_sha: str | None = No
     provenance = bundle.get("provenance")
     if not isinstance(provenance, dict):
         raise MeasurementVoid("bundle provenance is missing")
-    required_provenance = ("runner_sha", "probe_sha", "binary_sha", "manifest_sha", "preregistration_sha")
+    required_provenance = (
+        "runner_sha",
+        "probe_source_sha",
+        "probe_sha",
+        "binary_sha",
+        "manifest_sha",
+        "preregistration_sha",
+    )
     for field in required_provenance:
         _hex_digest(provenance.get(field), f"provenance.{field}")
     source_sha = provenance.get("source_sha")
-    if not isinstance(source_sha, str) or not source_sha:
-        raise MeasurementVoid("provenance.source_sha is missing")
+    _hex_digest(source_sha, "provenance.source_sha")
     if expected_source_sha is not None and source_sha != expected_source_sha:
         raise MeasurementVoid(f"source SHA mismatch: {source_sha} != {expected_source_sha}")
+    manifest_samples = expected_manifest.get("samples")
     results = bundle.get("results")
-    if not isinstance(results, list) or len(results) != SAMPLES:
+    if not isinstance(manifest_samples, list) or not isinstance(results, list) or len(results) != SAMPLES:
         raise MeasurementVoid(f"expected exactly {SAMPLES} samples")
+    manifest_identity = [(sample["sample_id"], sample["path"]) for sample in manifest_samples]
+    result_identity: list[tuple[str, str]] = []
     for sample in results:
-        if not isinstance(sample, dict) or not sample.get("sample_id") or not sample.get("path"):
+        if not isinstance(sample, dict) or not isinstance(sample.get("sample_id"), str) or not isinstance(sample.get("path"), str):
             raise MeasurementVoid("sample identity is incomplete")
-        _nonnegative_int(sample.get("input_bytes"), f"{sample.get('sample_id')}.input_bytes")
-        _hex_digest(sample.get("input_sha256"), f"{sample.get('sample_id')}.input_sha256")
+        result_identity.append((sample["sample_id"], sample["path"]))
+    if result_identity != manifest_identity or len({sample_id for sample_id, _ in result_identity}) != SAMPLES:
+        raise MeasurementVoid("bundle sample identity does not match the canonical manifest")
+    for sample, manifest_sample in zip(results, manifest_samples):
+        input_bytes = _nonnegative_int(sample.get("input_bytes"), f"{sample.get('sample_id')}.input_bytes")
+        input_sha256 = sample.get("input_sha256")
+        _hex_digest(input_sha256, f"{sample.get('sample_id')}.input_sha256")
+        if input_bytes != manifest_sample["byte_count"] or input_sha256 != manifest_sample["sha256"]:
+            raise MeasurementVoid(f"{sample['sample_id']} input identity differs from the canonical manifest")
         for profile_name in PROFILES:
             profile = sample.get(profile_name)
             if not isinstance(profile, dict) or profile.get("mode") not in {"web", "raw_store"}:
@@ -205,6 +254,8 @@ def validate_bundle(bundle: dict[str, Any], expected_source_sha: str | None = No
             trials = profile.get("trials")
             if not isinstance(trials, list) or len(trials) != TRIALS:
                 raise MeasurementVoid(f"{sample.get('sample_id')} {profile_name} must contain {TRIALS} trials")
+            if any(not isinstance(trial, dict) for trial in trials):
+                raise MeasurementVoid("trial row is not an object")
             trial_numbers = [trial.get("trial_no") for trial in trials if isinstance(trial, dict)]
             if sorted(trial_numbers) != list(range(1, TRIALS + 1)):
                 raise MeasurementVoid(f"{sample.get('sample_id')} {profile_name} trial numbers are not exact")
@@ -218,11 +269,10 @@ def validate_bundle(bundle: dict[str, Any], expected_source_sha: str | None = No
                     "deallocated_bytes",
                     "peak_live_bytes",
                     "largest_single_allocation_bytes",
-                    "live_bytes_after",
                     "caller_input_bytes",
                     "declared_output_bytes",
                     "decoder_retained_peak_bytes",
-                    "decoder_retained_after_drop_bytes",
+                    "allocator_live_bytes_after",
                     "auxiliary_peak_bytes",
                     "auxiliary_ratio_numerator_bytes",
                     "auxiliary_ratio_denominator_bytes",
@@ -233,6 +283,10 @@ def validate_bundle(bundle: dict[str, Any], expected_source_sha: str | None = No
                     raise MeasurementVoid("deallocated bytes exceed allocated bytes")
                 if trial["caller_input_bytes"] == 0 or trial["auxiliary_ratio_denominator_bytes"] != trial["caller_input_bytes"]:
                     raise MeasurementVoid("auxiliary ratio denominator is not the caller input size")
+                if trial["caller_input_bytes"] != profile["frame_bytes"]:
+                    raise MeasurementVoid("caller input size does not match the recorded frame size")
+                if trial["declared_output_bytes"] != sample["input_bytes"]:
+                    raise MeasurementVoid("declared output size does not match the canonical sample size")
                 if trial["auxiliary_ratio_numerator_bytes"] != trial["auxiliary_peak_bytes"]:
                     raise MeasurementVoid("auxiliary ratio numerator is not the auxiliary peak")
                 ratio = trial.get("auxiliary_memory_bound_ratio")
@@ -241,6 +295,8 @@ def validate_bundle(bundle: dict[str, Any], expected_source_sha: str | None = No
                 expected_ratio = trial["auxiliary_peak_bytes"] / trial["caller_input_bytes"]
                 if not math.isclose(float(ratio), expected_ratio, rel_tol=1e-12, abs_tol=1e-12):
                     raise MeasurementVoid("auxiliary ratio does not match its operands")
+                if trial["decoded_sha256"] != sample["input_sha256"]:
+                    raise MeasurementVoid("decoded SHA-256 does not match the canonical sample")
                 minimum_capacity = trial["caller_input_bytes"] + trial["declared_output_bytes"] + trial["auxiliary_peak_bytes"]
                 if trial["decoder_retained_peak_bytes"] < minimum_capacity:
                     raise MeasurementVoid("decoder retained peak is below its recorded components")
@@ -270,16 +326,23 @@ def run(args: argparse.Namespace) -> int:
     probe = Path(args.probe).resolve()
     output = Path(args.out).resolve()
     journal = Path(args.journal).resolve()
+    canonical_manifest = CANONICAL_MANIFEST.resolve()
+    if manifest != canonical_manifest:
+        raise MeasurementVoid(f"only the canonical manifest is accepted: {canonical_manifest}")
     if not manifest.is_file() or not os.access(manifest, os.R_OK):
         raise MeasurementVoid(f"manifest is not readable: {manifest}")
     if not probe.is_file() or not os.access(probe, os.X_OK):
         raise MeasurementVoid(f"probe is not executable: {probe}")
     if not PREREGISTRATION.is_file():
         raise MeasurementVoid(f"preregistration is missing: {PREREGISTRATION}")
+    if not PROBE_SOURCE.is_file() or not os.access(PROBE_SOURCE, os.R_OK):
+        raise MeasurementVoid(f"probe source is not readable: {PROBE_SOURCE}")
     require_clean_tree()
     admitted = admission()
     source_sha = git_sha()
+    expected_manifest = load_canonical_manifest(canonical_manifest)
     runner_sha = sha256_file(Path(__file__).resolve())
+    probe_source_sha = sha256_file(PROBE_SOURCE)
     probe_sha = sha256_file(probe)
     manifest_sha = sha256_file(manifest)
     prereg_sha = sha256_file(PREREGISTRATION)
@@ -309,9 +372,10 @@ def run(args: argparse.Namespace) -> int:
         bundle = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
         raise MeasurementVoid(f"probe stdout is not JSON: {error}") from error
-    validate_bundle(bundle, expected_source_sha=source_sha)
+    validate_bundle(bundle, expected_source_sha=source_sha, expected_manifest=expected_manifest)
     expected_provenance = {
         "runner_sha": runner_sha,
+        "probe_source_sha": probe_source_sha,
         "probe_sha": probe_sha,
         "binary_sha": probe_sha,
         "manifest_sha": manifest_sha,
