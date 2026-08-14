@@ -153,7 +153,7 @@ def main() -> int:
                     raise RuntimeError("codec output exceeded configured maximum")
                 output.write(chunk)
             process.stdout.close()
-            completed = process.wait()
+            returncode = process.wait()
         else:
             completed = subprocess.run(
                 command,
@@ -164,6 +164,7 @@ def main() -> int:
                 env=CODEC_ENV,
                 preexec_fn=lambda: _sandbox_limits(args.max_output_bytes),
             )
+            returncode = completed.returncode
         duration_ns = time.monotonic_ns() - started_ns
     output_sha256 = _sha256(args.output)
     _atomic_status(
@@ -172,7 +173,7 @@ def main() -> int:
             "duration_ns": duration_ns,
             "first_output_duration_ns": first_output_duration_ns,
             "output_sha256": output_sha256,
-            "returncode": completed.returncode,
+            "returncode": returncode,
         },
     )
     return 0
