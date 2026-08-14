@@ -131,12 +131,16 @@ run_trial() {
     --net-log-capture-mode=Everything "$feature_flag" about:blank \
     >"$log" 2>&1 &
   CS_PID=$!
-  timeout 60 node "$EVIDENCE" "$PORT" "$page_url" "$DOC" "$SITE/$DOC" "$screenshot" "$row" \
+  timeout 60 node "$EVIDENCE" "$trial_port" "$page_url" "$DOC" "$SITE/$DOC" "$screenshot" "$row" \
     >"$stdout_log" 2>&1
   evidence_rc=$?
   terminate_trial_processes "$trial_port"
   if kill -0 "$CS_PID" 2>/dev/null; then kill "$CS_PID" 2>/dev/null || true; fi
-  if [ -n "${CS_MAIN_PID:-}" ]; then kill -TERM "$CS_MAIN_PID" 2>/dev/null || true; else kill "$CS_PID" 2>/dev/null || true; fi
+  if [ -n "${CS_MAIN_PID:-}" ]; then
+    kill -TERM "$CS_MAIN_PID" 2>/dev/null || true
+  else
+    kill "$CS_PID" 2>/dev/null || true
+  fi
   wait "$CS_PID"
   cs_rc=$?
   set -e

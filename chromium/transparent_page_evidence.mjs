@@ -8,12 +8,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 import { calculatePageMetrics } from './page_metrics.mjs';
 
-const [portText, pageUrl, doc, originPath, screenshotPath, outputPath] =
+const [devtoolsPortText, pageUrl, doc, originPath, screenshotPath, outputPath] =
   process.argv.slice(2);
-const port = Number(portText);
+const devtoolsPort = Number(devtoolsPortText);
 
 if (
-  !Number.isInteger(port) ||
+  !Number.isInteger(devtoolsPort) ||
   !pageUrl ||
   !doc ||
   !originPath ||
@@ -21,12 +21,12 @@ if (
   !outputPath
 ) {
   console.error(
-    `usage: ${process.argv[1]} PORT PAGE_URL DOC ORIGIN_PATH SCREENSHOT_PATH OUTPUT_JSON`,
+    `usage: ${process.argv[1]} DEVTOOLS_PORT PAGE_URL DOC ORIGIN_PATH SCREENSHOT_PATH OUTPUT_JSON`,
   );
   process.exit(2);
 }
 
-const baseUrl = `http://127.0.0.1:${port}`;
+const baseUrl = `http://127.0.0.1:${devtoolsPort}`;
 const deadline = Date.now() + 45_000;
 
 const sleep = (milliseconds) =>
