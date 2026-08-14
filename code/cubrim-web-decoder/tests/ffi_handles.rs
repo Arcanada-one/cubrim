@@ -250,7 +250,7 @@ fn raw_store_frames_stream_through_the_same_surface() {
     // Already-compressed payloads fall back to MODE_RAW; the embedder decodes
     // both containers through one API (spec §10a).
     let original: Vec<u8> = (0..50_000u32)
-        .flat_map(|i| (i * 2654435761).to_le_bytes())
+        .flat_map(|i| i.wrapping_mul(2654435761).to_le_bytes())
         .collect();
     let f = frame(&original, Some(4096));
     let s = Stream::new(0);
