@@ -68,7 +68,8 @@ class CandidateAdapterTests(unittest.TestCase):
             adapter.compress_argv(path), ("cubrim-web", "encode", str(path))
         )
         self.assertEqual(
-            adapter.decompress_argv(path), ("cubrim-web", "decode", str(path))
+            adapter.decompress_argv(path),
+            ("cubrim-web", "decode", "--stream", "--chunk", "65536", str(path)),
         )
 
     def test_the_candidate_declares_an_incremental_decoder(self):

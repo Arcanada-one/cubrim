@@ -131,6 +131,7 @@ class ProcessMeasurement:
     duration_ns: int
     peak_rss_bytes: int
     output_sha256: str
+    first_output_duration_ns: int | None = None
 
 
 @dataclass(frozen=True)
@@ -435,7 +436,14 @@ def _cubrim_web() -> CodecAdapter:
             "web_profile_version": "1",
         },
         lambda path: ("cubrim-web", "encode", str(path)),
-        lambda path: ("cubrim-web", "decode", str(path)),
+        lambda path: (
+            "cubrim-web",
+            "decode",
+            "--stream",
+            "--chunk",
+            "65536",
+            str(path),
+        ),
         _identity_factory=_cubrim_web_identity,
     )
 
@@ -470,7 +478,11 @@ class SubprocessExecutor:
         source: Path,
         target: Path,
     ) -> ProcessMeasurement:
-        return self._run(self.exact_argv(adapter.decompress_argv(source), identity), target)
+        return self._run(
+            self.exact_argv(adapter.decompress_argv(source), identity),
+            target,
+            measure_first_output=adapter.capabilities.get("incremental_decode") is True,
+        )
 
     @staticmethod
     def exact_argv(argv: tuple[str, ...], identity: ToolIdentity) -> tuple[str, ...]:
@@ -491,9 +503,11 @@ class SubprocessExecutor:
         status_path: Path,
         time_path: Path,
         stderr_path: Path,
+        *,
+        measure_first_output: bool = False,
     ) -> tuple[str, ...]:
         timeout = f"{self.timeout_seconds:g}s"
-        return (
+        command = (
             "systemd-run",
             "--user",
             "--wait",
@@ -518,11 +532,21 @@ class SubprocessExecutor:
             str(stderr_path),
             "--max-output-bytes",
             str(self.max_output_bytes),
+        )
+        if measure_first_output:
+            command += ("--measure-first-output",)
+        return command + (
             "--",
             *argv,
         )
 
-    def _run(self, argv: tuple[str, ...], target: Path) -> ProcessMeasurement:
+    def _run(
+        self,
+        argv: tuple[str, ...],
+        target: Path,
+        *,
+        measure_first_output: bool = False,
+    ) -> ProcessMeasurement:
         target.parent.mkdir(parents=True, exist_ok=True)
         time_path = target.parent / f".{target.name}.time"
         status_path = target.parent / f".{target.name}.status.json"
@@ -534,6 +558,7 @@ class SubprocessExecutor:
                 status_path,
                 time_path,
                 stderr_path,
+                measure_first_output=measure_first_output,
             )
             completed = subprocess.run(
                 command,
@@ -558,6 +583,7 @@ class SubprocessExecutor:
                 duration_ns=status["duration_ns"],
                 peak_rss_bytes=peak_rss_bytes,
                 output_sha256=output_sha256,
+                first_output_duration_ns=status["first_output_duration_ns"],
             )
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError("systemd sandbox did not stop within its outer timeout") from exc
@@ -628,12 +654,22 @@ def _load_status(path: Path) -> dict[str, int | str]:
     import json
 
     value = json.loads(path.read_text(encoding="utf-8"))
-    if set(value) != {"duration_ns", "output_sha256", "returncode"}:
+    if set(value) != {
+        "duration_ns",
+        "first_output_duration_ns",
+        "output_sha256",
+        "returncode",
+    }:
         raise ValueError("sandbox status record has unexpected fields")
     if not isinstance(value["duration_ns"], int) or value["duration_ns"] < 0:
         raise ValueError("sandbox duration is invalid")
     if not isinstance(value["returncode"], int):
         raise ValueError("sandbox return code is invalid")
+    first_output = value["first_output_duration_ns"]
+    if first_output is not None and (
+        not isinstance(first_output, int) or first_output < 0
+    ):
+        raise ValueError("sandbox first-output duration is invalid")
     if not SHA256_RE.fullmatch(str(value["output_sha256"])):
         raise ValueError("sandbox output hash is invalid")
     return value

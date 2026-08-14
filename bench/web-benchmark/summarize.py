@@ -64,6 +64,7 @@ RESOURCE_METRIC_UNITS = {
     "compression_duration": "milliseconds",
     "decompression_duration": "milliseconds",
     "peak_memory": "bytes",
+    "time_to_first_decoded_byte": "milliseconds",
 }
 TOP_LEVEL_FIELDS = {
     "schema_version",
@@ -637,9 +638,14 @@ def _verify_trial(
         if isinstance(trial[key], bool) or not isinstance(trial[key], int) or trial[key] < 0:
             raise ValueError(f"trial {key} is invalid")
     metrics = trial["metrics"]
-    if not isinstance(metrics, dict) or set(metrics) != set(PHASE_A_METRICS):
-        raise ValueError("trial metrics must be exactly the five Phase A metrics")
-    for name in PHASE_A_METRICS:
+    expected_metrics = set(PHASE_A_METRICS)
+    if tool["capabilities"].get("incremental_decode") is True:
+        expected_metrics.add("time_to_first_decoded_byte")
+    if not isinstance(metrics, dict) or set(metrics) != expected_metrics:
+        raise ValueError(
+            "trial metrics are not exactly the codec capability contract"
+        )
+    for name in expected_metrics:
         require_finite_nonnegative(metrics[name], name)
     if metrics["compressed_bytes"] != trial["compressed_bytes"]:
         raise ValueError("trial compressed byte metric is inconsistent")
@@ -712,7 +718,7 @@ def _summary_rows(
 ) -> list[dict[str, object]]:
     grouped: dict[tuple[str, str, str], list[tuple[int, float]]] = defaultdict(list)
     for trial in trials:
-        for metric_name in PHASE_A_METRICS:
+        for metric_name in sorted(trial["metrics"]):
             grouped[(trial["sample_id"], trial["codec_key"], metric_name)].append(
                 (trial["trial_no"], float(trial["metrics"][metric_name]))
             )
