@@ -418,12 +418,21 @@ def _verify_toolchain(
                 "decode",
                 "web_profile_version",
             }
-            if set(capabilities) != required:
+            allowed = required | {"hostile_input_hardened", "hardening_evidence"}
+            if not required.issubset(capabilities) or not set(capabilities).issubset(allowed):
                 raise ValueError("candidate capabilities are incomplete")
             if capabilities["whole_buffer_decode"] is not True:
                 raise ValueError("candidate must declare whole-buffer decode")
             if not isinstance(capabilities["incremental_decode"], bool):
                 raise ValueError("candidate incremental_decode must be boolean")
+            if "hostile_input_hardened" in capabilities:
+                if capabilities["hostile_input_hardened"] is not True:
+                    raise ValueError("candidate hostile hardening must be true when declared")
+                evidence_ref = capabilities.get("hardening_evidence")
+                if not isinstance(evidence_ref, str) or not evidence_ref:
+                    raise ValueError("candidate hostile hardening evidence is missing")
+            elif "hardening_evidence" in capabilities:
+                raise ValueError("candidate hardening evidence is unbound")
             validate_codec_attribution(name, capabilities)
         elif (
             set(capabilities) != {"whole_buffer_decode", "incremental_decode"}
@@ -481,7 +490,10 @@ def _verify_protocol(
         or value["bootstrap_confidence"] != 0.95
     ):
         raise ValueError("protocol deterministic statistics are invalid")
-    if value["network_isolation"] != "systemd_user_unit_plus_seccomp_network_deny":
+    if value["network_isolation"] not in {
+        "systemd_user_unit_plus_seccomp_network_deny",
+        "systemd_system_unit_plus_seccomp_network_deny",
+    }:
         raise ValueError("protocol network isolation is invalid")
     if value["wall_clock"] != "time.monotonic_ns" or value["peak_rss"] != "gnu_time_verbose":
         raise ValueError("protocol instrumentation is invalid")
