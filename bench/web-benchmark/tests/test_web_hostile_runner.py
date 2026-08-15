@@ -1,6 +1,6 @@
 import unittest
 
-from web_hostile_runner import build_hostile_cases, summarize_results
+from web_hostile_runner import CHECKSUM_OFFSET, build_hostile_cases, summarize_results
 
 
 class WebHostileRunnerTests(unittest.TestCase):
@@ -16,6 +16,8 @@ class WebHostileRunnerTests(unittest.TestCase):
         self.assertIn("mutation-version", ids)
         self.assertIn("mutation-mode", ids)
         self.assertIn("mutation-checksum", ids)
+        checksum_case = next(case for case in cases if case["case_id"] == "mutation-checksum")
+        self.assertEqual(checksum_case["payload"][CHECKSUM_OFFSET], frame[CHECKSUM_OFFSET] ^ 0x01)
         self.assertTrue(any(case_id.startswith("prefix-") for case_id in ids))
         self.assertEqual(len(ids), len(set(ids)))
         self.assertTrue(all(case["expect_reject"] for case in cases))

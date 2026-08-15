@@ -31,6 +31,7 @@ TASK_ID = "CUBR-0075"
 PHASE = "web_decoder_hostile"
 MAX_MEMORY_BYTES = 256 * 1024 * 1024
 MAX_CPU_SECONDS = 2
+CHECKSUM_OFFSET = 10
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -72,7 +73,7 @@ def build_hostile_cases(frame: bytes) -> list[dict[str, Any]]:
         ("mutation-magic", 0, frame[0] ^ 0x01),
         ("mutation-version", 4, frame[4] ^ 0x01),
         ("mutation-mode", 5, frame[5] ^ 0x01),
-        ("mutation-checksum", len(frame) - 1, frame[-1] ^ 0x01),
+        ("mutation-checksum", CHECKSUM_OFFSET, frame[CHECKSUM_OFFSET] ^ 0x01),
     ):
         mutated = bytearray(frame)
         mutated[index] = value
