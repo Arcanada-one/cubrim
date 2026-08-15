@@ -27,16 +27,16 @@ public/upstream readiness evidence.
   SHA-256 `b8493a33a3ee603cfce89799c99849abb7203e7c86d8b6953b1bdfb76ec9f4c2`.
 - Publication bundle:
   `/home/dev/evidence/CUBR-0075-STREAMING-PERFORMANCE-R2-20260815/streaming-performance.json`;
-  SHA-256 `540f42d31e6cc746fcd873807fcb24b7a3b858c6cccc626306efd8b5ee3f5dba`.
-- Base-bundle SHA recorded in the publication bundle:
+  SHA-256 `ce9ea4a34900a5a0e798c8cb7c673e7ed9fe222ba4f2014d979a97241a55bf67`.
+- Base-bundle SHA used by the augmentation and recorded in this result:
   `b8493a33a3ee603cfce89799c99849abb7203e7c86d8b6953b1bdfb76ec9f4c2`.
-- Cubrim source commit: `4e847baaf0c17c0561677669ffd0932a4c4a447e`.
+- Cubrim source commit: `0682ce2bfdcaa194d1d0827ab01fddf9c28e48df`.
 - Probe source SHA-256:
   `490f9ac041f99ba3a54e6880f6a621172ce74add093f5256328d778658cf1456`.
 - Probe binary SHA-256:
-  `bf97c9b3d456dcfececf0306495ff8a16cbf2fc6fb91e17bb44a29501890fc8a`.
+  `ea203582854bfc8664da359e2de8b4e3b8553ef2fc4b190c69d14f6fbd7b5bb2`.
 - Runner SHA-256:
-  `2997d64a6aff4c6fdab9fdff988aa7f9da0ab9fe2585d7ed8bbc05967a6e6d52`.
+  `3174e3f27b1680ab5148fd91fa3231f759369dd7e4771813381de22a7de3676e6`.
 - Corpus manifest SHA-256:
   `43474bfc8fafe7cba96b4843a1700141c49b29f0cda5711861a11f654923f9d5`.
 - Host: `arcana-devs`, `x86_64`, CPU affinity `0`.
