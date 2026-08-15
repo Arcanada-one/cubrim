@@ -12,7 +12,7 @@ the publication-compatible bundle.
 
 ## Fixed implementation and corpus
 
-- Source commit: `f4345a6`.
+- Source commit: `3d8d227`.
 - Corpus: `bench/web-corpus/manifest.v3.json`, exactly 13 samples, reused with
   the original manifest SHA-256.
 - Frame producer: `cubrim::encode_with_config` with
@@ -25,13 +25,19 @@ the publication-compatible bundle.
 - Cells: 13 samples × `streaming` and `whole_buffer` control.
 - Each cell has exactly 3 warmups followed by exactly 30 measured trials.
 - Cell order is deterministic Fisher-Yates with seed `75075`.
-- Before every trial's decode timer starts, the probe encodes the canonical
-  sample with the fixed Web Profile configuration, verifies the resulting
-  frame length and SHA-256 against the preloaded frame, and records positive
-  monotonic `compression_duration_ns`.
-- The decode timer then records first output input bytes, first-output latency,
+- For each sample and trial index (3 warmups plus 30 measured indexes), the
+  probe performs exactly one fresh encode with the fixed Web Profile
+  configuration, verifies the resulting frame length and SHA-256 against the
+  preloaded frame, and records positive monotonic
+  `compression_duration_ns`. The duration is attached to the paired streaming
+  and whole-buffer rows for that sample/trial index; the control row does not
+  trigger a second identical encode.
+- The paired decoder observations use the verified preloaded frame. Their
+  decode timers start after the encoding measurement, so encoding time is not
+  included in decoder timings.
+- Each decode timer records first output input bytes, first-output latency,
   last input submission, completion latency, peak ABI memory usage, and exact
-  sink bytes/hash. Encoding time is not included in decode timings.
+  sink bytes/hash.
 - The conservative streaming memory bound remains
   `max(cbm_stream_memory_usage) - frame_bytes - declared_output_bytes`,
   divided by `frame_bytes`.
