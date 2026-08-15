@@ -361,13 +361,6 @@ def augment_bundle(args: argparse.Namespace) -> int:
         "cpu_affinity": "0",
         "rustc": rustc,
     }
-    bundle["publication_augmentation"] = {
-        "kind": "source-derived-compression-timing",
-        "base_bundle_sha256": sha256_path(base_path),
-        "raw_decoder_observations_unchanged": True,
-        "timed_encodes_per_sample": 1,
-        "timing_probe_phase": timing_run["phase"],
-    }
     bundle["admission"] = {"before": before, "after": after}
     # The base runner appends probe_stderr after validating its canonical
     # measurement summary. Replace that derived field before revalidation so
