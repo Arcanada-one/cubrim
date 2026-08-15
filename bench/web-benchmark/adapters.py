@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import re
 import shutil
@@ -40,6 +41,7 @@ INNER_HELPER = Path(__file__).with_name("sandbox_exec.py").resolve()
 # Same expression as run.REPO_ROOT, defined here rather than imported because
 # run.py imports this module.
 REPO_ROOT = Path(__file__).resolve().parents[2]
+HARDENING_EVIDENCE_ENV = "CUBRIM_WEB_HARDENING_EVIDENCE"
 
 
 @dataclass(frozen=True)
@@ -351,6 +353,51 @@ def _crate_version(manifest: Path) -> str:
     raise ValueError(f"no [package] version in {manifest}")
 
 
+def _hardening_evidence_reference() -> str | None:
+    raw_path = os.environ.get(HARDENING_EVIDENCE_ENV)
+    if not raw_path:
+        return None
+    path = Path(raw_path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"{HARDENING_EVIDENCE_ENV} must name a regular evidence file")
+    if path.stat().st_size > 1 * 1024 * 1024:
+        raise ValueError("Cubrim-Web hardening evidence is unexpectedly large")
+    return f"CUBR-0075:web-decoder-hostile:{hash_file(path.resolve())[:32]}"
+
+
+def _verify_hardening_evidence(path: Path, code_sha: str, binary_sha256: str) -> str:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Cubrim-Web hardening evidence must be a regular file")
+    if path.stat().st_size > 1 * 1024 * 1024:
+        raise ValueError("Cubrim-Web hardening evidence is unexpectedly large")
+    try:
+        evidence = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Cubrim-Web hardening evidence is not valid JSON") from exc
+    if not isinstance(evidence, dict):
+        raise ValueError("Cubrim-Web hardening evidence must be an object")
+    if evidence.get("schema_version") != 1 or evidence.get("task_id") != "CUBR-0075":
+        raise ValueError("Cubrim-Web hardening evidence schema/task is invalid")
+    if evidence.get("phase") != "web_decoder_hostile" or evidence.get("status") != "PASS":
+        raise ValueError("Cubrim-Web hardening evidence is not a passing web probe")
+    if evidence.get("source_sha") != code_sha or evidence.get("binary_sha256") != binary_sha256:
+        raise ValueError("Cubrim-Web hardening evidence does not match the measured source/binary")
+    case_count = evidence.get("case_count")
+    if (
+        evidence.get("valid_roundtrip_exact") is not True
+        or not isinstance(case_count, int)
+        or isinstance(case_count, bool)
+        or case_count <= 0
+        or evidence.get("rejected_count") != case_count
+        or evidence.get("fault_count") != 0
+    ):
+        raise ValueError("Cubrim-Web hardening evidence is incomplete")
+    runner_sha = evidence.get("runner_sha256")
+    if not isinstance(runner_sha, str) or not SHA256_RE.fullmatch(runner_sha):
+        raise ValueError("Cubrim-Web hardening evidence runner hash is invalid")
+    return f"CUBR-0075:web-decoder-hostile:{hash_file(path.resolve())[:32]}"
+
+
 def _cubrim_web_identity() -> ToolIdentity:
     """Provenance for a binary we build rather than install.
 
@@ -386,6 +433,12 @@ def _cubrim_web_identity() -> ToolIdentity:
         )
 
     binary_sha256 = hash_file(binary)
+    evidence_path_raw = os.environ.get(HARDENING_EVIDENCE_ENV)
+    hardening_reference = None
+    if evidence_path_raw:
+        hardening_reference = _verify_hardening_evidence(
+            Path(evidence_path_raw), code_sha, binary_sha256
+        )
     package = ("cubrim-web-cli", crate_version, "cubrim", cubrim_version)
     source_reference = (
         f"https://github.com/Arcanada-one/cubrim@{code_sha} :: "
@@ -420,21 +473,30 @@ def _cubrim_web_identity() -> ToolIdentity:
 
 
 def _cubrim_web() -> CodecAdapter:
+    hardening_reference = _hardening_evidence_reference()
+    capabilities = {
+        # Decoding goes through the reference decoder the WASM artefact
+        # wraps, and that decoder is genuinely incremental — so
+        # first-decoded-byte is measurable here, unlike for any incumbent.
+        "whole_buffer_decode": True,
+        "incremental_decode": True,
+        "web_profile": True,
+        "encode": True,
+        "decode": True,
+        "web_profile_version": "1",
+    }
+    if hardening_reference is not None:
+        capabilities.update(
+            {
+                "hostile_input_hardened": True,
+                "hardening_evidence": hardening_reference,
+            }
+        )
     return CodecAdapter(
         "cubrim-web",
         "cubrim-web",
         (),
-        {
-            # Decoding goes through the reference decoder the WASM artefact
-            # wraps, and that decoder is genuinely incremental — so
-            # first-decoded-byte is measurable here, unlike for any incumbent.
-            "whole_buffer_decode": True,
-            "incremental_decode": True,
-            "web_profile": True,
-            "encode": True,
-            "decode": True,
-            "web_profile_version": "1",
-        },
+        capabilities,
         lambda path: ("cubrim-web", "encode", str(path)),
         lambda path: (
             "cubrim-web",
