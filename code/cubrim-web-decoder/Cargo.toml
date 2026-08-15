@@ -26,6 +26,9 @@ allocator-telemetry = []
 name = "allocator_telemetry_probe"
 required-features = ["allocator-telemetry"]
 
+[[example]]
+name = "streaming_performance_probe"
+
 [dependencies]
 blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
 
