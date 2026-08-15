@@ -25,16 +25,16 @@ the publication-compatible bundle.
 - Cells: 13 samples × `streaming` and `whole_buffer` control.
 - Each cell has exactly 3 warmups followed by exactly 30 measured trials.
 - Cell order is deterministic Fisher-Yates with seed `75075`.
-- For each sample and trial index (3 warmups plus 30 measured indexes), the
-  probe performs exactly one fresh encode with the fixed Web Profile
-  configuration, verifies the resulting frame length and SHA-256 against the
-  preloaded frame, and records positive monotonic
-  `compression_duration_ns`. The duration is attached to the paired streaming
-  and whole-buffer rows for that sample/trial index; the control row does not
-  trigger a second identical encode.
-- The paired decoder observations use the verified preloaded frame. Their
-  decode timers start after the encoding measurement, so encoding time is not
-  included in decoder timings.
+- For each sample/configuration pair, the probe performs exactly one fresh
+  encode with the fixed Web Profile configuration, verifies the resulting
+  frame length and SHA-256 against the preloaded frame, and records positive
+  monotonic `compression_duration_ns`. That source-derived duration is
+  attached to every streaming and whole-buffer row for that sample. Repeated
+  rows are decoder observations only; they are not independent encode-timing
+  replicates.
+- The decoder observations use the verified preloaded frame. Their decode
+  timers start after the encoding measurement, so encoding time is not included
+  in decoder timings.
 - Each decode timer records first output input bytes, first-output latency,
   last input submission, completion latency, peak ABI memory usage, and exact
   sink bytes/hash.

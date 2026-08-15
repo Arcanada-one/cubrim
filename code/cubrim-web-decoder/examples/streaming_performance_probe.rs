@@ -214,17 +214,14 @@ fn run() -> Result<(), String> {
 
     let independent_block_probe = probe_independent_capability(&samples[1])?;
     // Compression is a property of the sample/configuration pair, not of the
-    // decoder mode. Measure each sample/trial pair once and attach that
-    // source-derived duration to both paired decoder observations. This keeps
-    // the resource metric genuine while avoiding a second identical encode
-    // for the whole-buffer control row.
+    // decoder mode. Measure each pair once and attach that source-derived
+    // duration to all decoder observations for the sample. This keeps the
+    // resource metric genuine while keeping the fixed decoder matrix bounded;
+    // the publication contract does not treat repeated rows as encode timing
+    // replicates.
     let compression_durations = samples
         .iter()
-        .map(|sample| {
-            (0..(WARMUPS + TRIALS))
-                .map(|_| measure_compression_duration(sample))
-                .collect::<Result<Vec<_>, _>>()
-        })
+        .map(measure_compression_duration)
         .collect::<Result<Vec<_>, _>>()?;
     let mut order: Vec<(usize, &'static str)> = samples
         .iter()
@@ -247,14 +244,14 @@ fn run() -> Result<(), String> {
                     sample,
                     trial_index,
                     warmup,
-                    compression_durations[sample_index][run_index],
+                    compression_durations[sample_index],
                 )?
             } else {
                 whole_buffer_trial(
                     sample,
                     trial_index,
                     warmup,
-                    compression_durations[sample_index][run_index],
+                    compression_durations[sample_index],
                 )?
             };
             trials.push(trial);
