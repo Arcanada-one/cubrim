@@ -12,6 +12,7 @@ from hostile_truncated_runner import (
     WIN_RUNTIME_NS,
     nearest_rank,
     payload_for,
+    parse_peak_rss,
 )
 
 
@@ -37,6 +38,9 @@ class HostileTruncatedRunnerTests(unittest.TestCase):
         self.assertEqual(p99, 300_000_000)
         self.assertEqual(max(GO_RUNTIME_NS, GO_P99_MULTIPLIER * p99 + GO_P99_ADD_NS), 1_210_000_000)
         self.assertEqual(max(WIN_RUNTIME_NS, WIN_P99_MULTIPLIER * p99 + WIN_P99_ADD_NS), 1_000_000_000)
+
+    def test_parses_indented_gnu_time_peak_rss(self) -> None:
+        self.assertEqual(parse_peak_rss("\tMaximum resident set size (kbytes): 1234\n"), 1234 * 1024)
 
 
 if __name__ == "__main__":

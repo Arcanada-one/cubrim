@@ -334,8 +334,9 @@ def prepare(args: argparse.Namespace) -> None:
 
 def parse_peak_rss(report: str) -> int:
     for line in report.splitlines():
-        if line.startswith("Maximum resident set size (kbytes):"):
-            value = int(line.split(":", 1)[1].strip()) * 1024
+        normalized = line.strip()
+        if normalized.startswith("Maximum resident set size (kbytes):"):
+            value = int(normalized.split(":", 1)[1].strip()) * 1024
             if value > 0:
                 return value
     raise MeasurementVoid("GNU time report omitted maximum resident set size")
