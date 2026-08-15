@@ -359,6 +359,7 @@ def contained_trial(
             "--user",
             "--wait",
             "--collect",
+            "--pipe",
             "--quiet",
             "--working-directory",
             str(REPO_ROOT),
