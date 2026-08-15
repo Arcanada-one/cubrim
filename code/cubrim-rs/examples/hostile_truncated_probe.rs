@@ -6,6 +6,7 @@
 //! cases. Every hostile case is a proper prefix or a header mutation of the
 //! content-addressed valid frame; no arbitrary success is treated as an error.
 
+use cubrim::config::EncodeConfig;
 use cubrim::CubrimError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -129,6 +130,10 @@ fn mode(frame: &[u8]) -> Result<String, String> {
     }
 }
 
+fn build_frame(data: &[u8]) -> Vec<u8> {
+    cubrim::codec::encode_base(data, &EncodeConfig::v1_default())
+}
+
 fn proper_prefix_lengths(frame_len: usize) -> Vec<usize> {
     let candidates = [
         0,
@@ -218,7 +223,7 @@ fn load_frame(sample: &ManifestSample, manifest_path: &str) -> Result<(Vec<u8>, 
             sample.sample_id
         ));
     }
-    let frame = cubrim::encode(&data);
+    let frame = build_frame(&data);
     let decoded = cubrim::decode(&frame).map_err(|error| {
         format!(
             "{} valid preflight decode failed: {error}",
@@ -349,7 +354,7 @@ fn trial(
         return Err(format!("{sample_id} input metadata changed before trial"));
     }
     let encode_started = Instant::now();
-    let frame = cubrim::encode(&data);
+    let frame = build_frame(&data);
     let encode_ns = encode_started.elapsed().as_nanos();
     let frame_sha256 = sha256(&frame);
     if frame_sha256 != expected_frame_sha256 {
