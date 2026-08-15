@@ -5,132 +5,104 @@ carry cross-meta competitor speed, labelled as cross-meta, or must comparisons
 always be drawn from the timing aggregate — and then, make reading the wrong one
 structurally impossible.
 
-**Decision: comparisons come from `world_benchmark_timing_aggregate`, and only
-within a single `meta_id`. `world_benchmark_operating_point` must stay
-cubrim-only and must never gain a competitor speed column.**
+**Finding: the schema already answers this, correctly, and better than the
+question's framing suggests. Nothing needs to change.**
 
 Measured read-only against `arcanada_cubrim` on 2026-08-11.
 
-## The measurement that decides it
+> **Revision history matters here.** Two earlier revisions of this note were
+> wrong. The first said a `CHECK` constraint was owed; the second corrected that
+> but still argued the "labelled as cross-meta" option should be rejected. Both
+> errors came from writing before probing the schema. What follows is the
+> measured state.
 
-`world_benchmark_timing_aggregate` — 420 rows:
+## What the schema actually does
 
-| meta_id | distinct archivers | rows |
-|---:|---:|---:|
-| 7 | 10 | 100 |
-| 24 | 10 | 100 |
-| 35 | 10 | 100 |
-| 36 | 10 | 100 |
-| **37** | **1** | 10 |
-| **38** | **1** | 10 |
+There are two views, and the split between them is the answer.
 
-`world_benchmark_operating_point` — 30 rows, `archiver` = `cubrim` on all 30,
-`compress_mib_s`/`decompress_mib_s` populated on all 30, spanning
-`meta_id` ∈ {36, 37, 38}.
-
-So competitors were measured at meta 36 and never at 37 or 38. The operating
-points span all three.
-
-## Why the view must not carry competitor speed
-
-A competitor column on the operating-point view would be **legitimate for meta
-36 and fabricated for metas 37 and 38** — two thirds of its rows. The only way
-to populate those two is to import meta-36 competitor numbers under a
-meta-37/38 row, which states that a competitor was measured at an operating
-point where it was not.
-
-The view's own `competitor_note` already says so:
-
-> Competitors were measured once under meta 36 and are NOT re-run per preset.
-> Any comparison against them must be labelled as cross-meta, or left empty.
-
-"Labelled as cross-meta" is the weaker of the two options that note allows, and
-it is the wrong one here. A label is a property of a *presentation*; the hazard
-is a property of the *row*. Once a competitor figure sits on a meta-38 row, every
-future reader — a query, a chart, an API serialiser, a session in a hurry — has
-to remember to carry the label with it. The project has already established that
-empty is safer than annotated: *a measurement void goes to the journal, never
-the DB; unmeasured stays empty, never estimated.* A cross-meta import is an
-estimate wearing a citation.
-
-Choosing "always draw from the timing aggregate" costs nothing, because the
-comparison that is legitimate — meta 36, ten archivers, same meta — is already
-available there in full.
-
-## The invariants, stated as queries
-
-These are the checks; a reader or a reviewer can run them directly.
-
-**I1 — the operating-point view is single-archiver.**
+**`world_benchmark_operating_point`** — the clean view. Its body ends:
 
 ```sql
-SELECT count(DISTINCT archiver) FROM world_benchmark_operating_point;
--- must be exactly 1, and that archiver must be 'cubrim'
-```
-
-**I2 — no competitor speed leaks into it.** The view must expose speed columns
-for cubrim only; a non-cubrim row with a non-null `compress_mib_s` or
-`decompress_mib_s` is a violation.
-
-```sql
-SELECT count(*) FROM world_benchmark_operating_point
-WHERE archiver <> 'cubrim';
--- must be 0
-```
-
-**I3 — a cross-archiver comparison never spans metas.** Any query comparing
-archivers must group or join on an equal `meta_id`; a comparison that mixes
-`meta_id` values is cross-meta and must be labelled or refused.
-
-```sql
-SELECT meta_id, count(DISTINCT archiver) AS archivers
-FROM world_benchmark_timing_aggregate GROUP BY meta_id;
--- only metas reporting >1 archiver support a comparison at all
-```
-
-I3 is the one that matters most and the one a reader is most likely to skip:
-metas 37 and 38 report a single archiver, so **no competitor comparison exists
-at those operating points in any table**. The correct output there is empty, not
-borrowed.
-
-## On "structurally impossible" — already true, and this corrects an earlier claim
-
-An earlier revision of this note said a `CHECK` or trigger was owed, and deferred
-it because the database was assumed to be under continuous concurrent write.
-Both halves were wrong, and probing settled it.
-
-**`world_benchmark_operating_point` is a VIEW, not a base table**, and its
-definition ends:
-
-```sql
-  FROM world_benchmark_meta m
-    JOIN world_benchmark_aggregate a ON a.meta_id = m.id
-    LEFT JOIN world_benchmark_timing_aggregate t
-      ON t.meta_id = a.meta_id AND t.scope = a.scope AND t.archiver = a.archiver
  WHERE m.task = 'CUBR-0087-phaseC' AND a.archiver = 'cubrim';
 ```
 
-`a.archiver = 'cubrim'` is hardcoded in the view body. **I1 and I2 are therefore
-already structurally impossible to violate** — the view cannot emit a
-non-cubrim row, and no constraint could be attached to it anyway, because a view
-has no rows of its own to constrain. The `competitor_note` documents a property
-the SQL already guarantees rather than a convention a reader must uphold.
+`archiver = 'cubrim'` is hardcoded, so it **cannot** emit a competitor row: 30
+rows, all cubrim, spanning `meta_id` ∈ {36, 37, 38}. Its timing join matches on
+`meta_id`, `scope` **and** `archiver`, so no cross-meta value can enter through
+the join. No constraint is owed — and none could be attached anyway, because a
+view has no rows of its own to constrain.
 
-The timing join is equally tight: it matches on `meta_id`, `scope` **and**
-`archiver`, so the speed columns on any row come from that row's own meta. No
-cross-meta value can enter the view through the join.
+**`world_benchmark_operating_point_vs_competitors`** — the comparison view,
+separate and named for what it is. It pins competitor timing explicitly and
+labels every row with its basis:
 
-The deferral reason was also overstated. Probed directly: one active backend
-(this session's own query) and **zero locks** on the target relation. The
-database was quiet, not busy.
+```sql
+CASE WHEN op.meta_id = 36 THEN 'same-meta-36' ELSE 'cross-meta-36' END
+  AS competitor_timing_basis
+...
+JOIN world_benchmark_timing_aggregate t
+  ON t.meta_id = 36 AND t.scope = op.scope AND t.archiver <> 'cubrim'
+```
 
-**What remains genuinely unenforced is I3, and no constraint can fix it.** I3 is
-a property of how a *reader* queries `world_benchmark_timing_aggregate` — a
-comparison that groups across `meta_id` values is cross-meta, and that mistake
-happens in the query, not in stored data. The defence there is the measurement
-in this note: metas 37 and 38 carry a single archiver, so a competitor
-comparison at those operating points does not exist to be read. Nothing is owed
-against this view.
+Measured contents:
+
+| `competitor_timing_basis` | rows | distinct metas | competitors |
+|---|---:|---:|---:|
+| `same-meta-36` | 90 | 1 | 9 |
+| `cross-meta-36` | 180 | 2 | 9 |
+| **unlabelled** | **0** | — | — |
+
+## Why this is the right design
+
+The mandate framed it as a binary — carry labelled competitor speed, or forbid
+it and always use the timing aggregate. The schema took a third option that is
+stronger than either: **keep the operating-point view free of competitor data,
+and put the comparison in a separate view where every row states its own
+basis.**
+
+An earlier revision of this note argued against labelling on the grounds that
+"a label is a property of a presentation, the hazard is a property of the row."
+That objection does not survive contact with the implementation. Here the label
+*is* a property of the row — `competitor_timing_basis` is a column, populated on
+100% of rows, machine-readable by any consumer. It is not a caption a reader has
+to remember to carry.
+
+The join is also pinned rather than incidental: `t.meta_id = 36` is written into
+the view, so the comparison cannot silently drift onto some other meta as new
+metas land. A row is `cross-meta-36` because the operating point is 37 or 38 —
+stated, not inferred.
+
+## The one residual risk, precisely
+
+Neither view can be misread by accident. What remains is a **consumer** that
+selects from `world_benchmark_operating_point_vs_competitors` and drops
+`competitor_timing_basis` from its projection, then presents the 180 cross-meta
+rows as if they were same-meta measurements.
+
+That is not fixable by a database constraint, because the data is correct and
+fully labelled at the point it leaves the database; the error would occur
+downstream. The defence is the measurement above: **two thirds of that view's
+rows are cross-meta**, so any consumer showing competitor speed at an operating
+point must carry the basis column or restrict to `meta_id = 36`.
+
+Stated as a check a reviewer can run against any consumer:
+
+```sql
+-- A consumer of the comparison view must either carry competitor_timing_basis
+-- or filter to same-meta rows. This shows the split it would be hiding:
+SELECT competitor_timing_basis, count(*)
+FROM world_benchmark_operating_point_vs_competitors
+GROUP BY 1;
+```
+
+## Disposition
+
+- The decision the mandate asks for is already implemented in the schema, and
+  correctly. **No schema change is required or recommended.**
+- Do not add competitor columns to `world_benchmark_operating_point`; the
+  comparison already has its own view.
+- Do not attempt a `CHECK` on either object — both are views.
+- The open item is downstream consumer discipline, not storage.
 
 ## Boundary
 
