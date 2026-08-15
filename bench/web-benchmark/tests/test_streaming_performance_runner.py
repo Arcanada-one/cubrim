@@ -39,6 +39,7 @@ def fixture_bundle() -> tuple[dict, dict]:
                         "warmup": warmup,
                         "input_bytes": sample["byte_count"],
                         "frame_bytes": frame_bytes,
+                        "compression_duration_ns": 1,
                         "first_output_input_bytes": first_input,
                         "first_output_before_eof": mode == "streaming",
                         "first_output_latency_ns": 1,
@@ -112,6 +113,12 @@ class StreamingPerformanceRunnerTests(unittest.TestCase):
     def test_integrity_failure_is_void(self):
         bundle, manifest = fixture_bundle()
         bundle["trials"][0]["roundtrip_exact"] = False
+        with self.assertRaises(MODULE.MeasurementVoid):
+            MODULE.validate_bundle(bundle, manifest)
+
+    def test_missing_compression_duration_is_void(self):
+        bundle, manifest = fixture_bundle()
+        bundle["trials"][0].pop("compression_duration_ns")
         with self.assertRaises(MODULE.MeasurementVoid):
             MODULE.validate_bundle(bundle, manifest)
 

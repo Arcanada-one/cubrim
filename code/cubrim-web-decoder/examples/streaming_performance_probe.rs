@@ -110,6 +110,7 @@ struct Trial {
     warmup: bool,
     input_bytes: usize,
     frame_bytes: usize,
+    compression_duration_ns: u64,
     input_sha256: String,
     frame_sha256: String,
     output_sha256: String,
@@ -128,6 +129,27 @@ struct Trial {
     roundtrip_exact: bool,
     sink_exact: bool,
     status: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct CompressionTimingRun {
+    schema_version: u32,
+    task_id: &'static str,
+    phase: &'static str,
+    status: &'static str,
+    corpus_key: String,
+    samples: Vec<CompressionTimingSample>,
+}
+
+#[derive(Debug, Serialize)]
+struct CompressionTimingSample {
+    sample_id: String,
+    sample_path: String,
+    input_bytes: usize,
+    input_sha256: String,
+    frame_bytes: usize,
+    frame_sha256: String,
+    compression_duration_ns: u64,
 }
 
 struct DigestSink {
@@ -166,16 +188,23 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let mut args = env::args_os().skip(1);
-    let corpus_root = args
+    let first = args
         .next()
-        .map(PathBuf::from)
-        .ok_or("usage: probe <corpus-root> <output-json>")?;
+        .ok_or("usage: probe [--compression-timings] <corpus-root> <output-json>")?;
+    let compression_timings_only = first == "--compression-timings";
+    let corpus_root = if compression_timings_only {
+        args.next()
+            .map(PathBuf::from)
+            .ok_or("usage: probe [--compression-timings] <corpus-root> <output-json>")?
+    } else {
+        PathBuf::from(first)
+    };
     let output_path = args
         .next()
         .map(PathBuf::from)
-        .ok_or("usage: probe <corpus-root> <output-json>")?;
+        .ok_or("usage: probe [--compression-timings] <corpus-root> <output-json>")?;
     if args.next().is_some() {
-        return Err("usage: probe <corpus-root> <output-json>".into());
+        return Err("usage: probe [--compression-timings] <corpus-root> <output-json>".into());
     }
     let manifest_path = corpus_root.join("manifest.v3.json");
     let manifest_bytes =
@@ -196,10 +225,7 @@ fn run() -> Result<(), String> {
         if original.len() != item.byte_count || sha256(&original) != item.sha256 {
             return Err(format!("{} does not match manifest", item.sample_id));
         }
-        let mut config = EncodeConfig::v1_default();
-        config.web_profile = true;
-        config.web_block_size = Some(BLOCK_SIZE);
-        let frame = cubrim::encode_with_config(&original, &config);
+        let frame = encode_web_frame(&original);
         if frame.len() < 10 || frame[5] != 18 {
             return Err(format!(
                 "{} encoder returned a non-Web frame",
@@ -214,7 +240,47 @@ fn run() -> Result<(), String> {
         });
     }
 
+    if compression_timings_only {
+        let timings = samples
+            .iter()
+            .map(|sample| {
+                Ok(CompressionTimingSample {
+                    sample_id: sample.manifest.sample_id.clone(),
+                    sample_path: sample.manifest.path.clone(),
+                    input_bytes: sample.original.len(),
+                    input_sha256: sample.manifest.sha256.clone(),
+                    frame_bytes: sample.frame.len(),
+                    frame_sha256: sample.frame_sha256.clone(),
+                    compression_duration_ns: measure_compression_duration(sample)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let run = CompressionTimingRun {
+            schema_version: 1,
+            task_id: "CUBR-0075",
+            phase: "compression_timing_augmentation",
+            status: "COMPLETE",
+            corpus_key: manifest.corpus_key,
+            samples: timings,
+        };
+        let encoded =
+            serde_json::to_vec_pretty(&run).map_err(|e| format!("serialize timings: {e}"))?;
+        fs::write(&output_path, encoded)
+            .map_err(|e| format!("write {}: {e}", output_path.display()))?;
+        return Ok(());
+    }
+
     let independent_block_probe = probe_independent_capability(&samples[1])?;
+    // Compression is a property of the sample/configuration pair, not of the
+    // decoder mode. Measure each pair once and attach that source-derived
+    // duration to all decoder observations for the sample. This keeps the
+    // resource metric genuine while keeping the fixed decoder matrix bounded;
+    // the publication contract does not treat repeated rows as encode timing
+    // replicates.
+    let compression_durations = samples
+        .iter()
+        .map(measure_compression_duration)
+        .collect::<Result<Vec<_>, _>>()?;
     let mut order: Vec<(usize, &'static str)> = samples
         .iter()
         .enumerate()
@@ -232,9 +298,19 @@ fn run() -> Result<(), String> {
                 run_index - WARMUPS + 1
             };
             let trial = if mode == "streaming" {
-                stream_trial(sample, trial_index, warmup)?
+                stream_trial(
+                    sample,
+                    trial_index,
+                    warmup,
+                    compression_durations[sample_index],
+                )?
             } else {
-                whole_buffer_trial(sample, trial_index, warmup)?
+                whole_buffer_trial(
+                    sample,
+                    trial_index,
+                    warmup,
+                    compression_durations[sample_index],
+                )?
             };
             trials.push(trial);
         }
@@ -286,7 +362,12 @@ fn run() -> Result<(), String> {
     fs::write(&output_path, encoded).map_err(|e| format!("write {}: {e}", output_path.display()))
 }
 
-fn stream_trial(sample: &LoadedSample, trial_index: usize, warmup: bool) -> Result<Trial, String> {
+fn stream_trial(
+    sample: &LoadedSample,
+    trial_index: usize,
+    warmup: bool,
+    compression_duration_ns: u64,
+) -> Result<Trial, String> {
     let started = Instant::now();
     let handle = cbm_stream_new_with_limits(
         DecodeLimits::DEFAULT_MAX_OUTPUT,
@@ -370,6 +451,7 @@ fn stream_trial(sample: &LoadedSample, trial_index: usize, warmup: bool) -> Resu
         warmup,
         input_bytes: sample.original.len(),
         frame_bytes: sample.frame.len(),
+        compression_duration_ns,
         input_sha256: sample.manifest.sha256.clone(),
         frame_sha256: sample.frame_sha256.clone(),
         output_sha256: output_sha256.clone(),
@@ -397,6 +479,7 @@ fn whole_buffer_trial(
     sample: &LoadedSample,
     trial_index: usize,
     warmup: bool,
+    compression_duration_ns: u64,
 ) -> Result<Trial, String> {
     let started = Instant::now();
     let decoded = decode(&sample.frame)
@@ -416,6 +499,7 @@ fn whole_buffer_trial(
         warmup,
         input_bytes: sample.original.len(),
         frame_bytes: sample.frame.len(),
+        compression_duration_ns,
         input_sha256: sample.manifest.sha256.clone(),
         frame_sha256: sample.frame_sha256.clone(),
         output_sha256,
@@ -435,6 +519,32 @@ fn whole_buffer_trial(
         sink_exact: exact,
         status: "valid",
     })
+}
+
+fn encode_web_frame(original: &[u8]) -> Vec<u8> {
+    let mut config = EncodeConfig::v1_default();
+    config.web_profile = true;
+    config.web_block_size = Some(BLOCK_SIZE);
+    cubrim::encode_with_config(original, &config)
+}
+
+fn measure_compression_duration(sample: &LoadedSample) -> Result<u64, String> {
+    let started = Instant::now();
+    let frame = encode_web_frame(&sample.original);
+    let duration_ns = elapsed_ns(&started);
+    if frame.len() != sample.frame.len() || sha256(&frame) != sample.frame_sha256 {
+        return Err(format!(
+            "re-encoded frame drifted for {}",
+            sample.manifest.sample_id
+        ));
+    }
+    if duration_ns == 0 {
+        return Err(format!(
+            "compression timer returned zero for {}",
+            sample.manifest.sample_id
+        ));
+    }
+    Ok(duration_ns)
 }
 
 fn probe_independent_capability(sample: &LoadedSample) -> Result<IndependentBlockProbe, String> {
@@ -512,5 +622,37 @@ mod tests {
         let probe = probe_independent_capability(&sample).expect("capability probe");
         assert!(probe.positive_control && probe.negative_control);
         assert!(!probe.success);
+    }
+
+    #[test]
+    fn every_trial_serializes_source_derived_compression_duration() {
+        let original = b"encode timing fixture ".repeat(2_000);
+        let mut config = EncodeConfig::v1_default();
+        config.web_profile = true;
+        config.web_block_size = Some(BLOCK_SIZE);
+        let frame = cubrim::encode_with_config(&original, &config);
+        let sample = LoadedSample {
+            manifest: ManifestSample {
+                sample_id: "fixture".into(),
+                path: "fixture".into(),
+                byte_count: original.len(),
+                sha256: sha256(&original),
+            },
+            frame_sha256: sha256(&frame),
+            original,
+            frame,
+        };
+        let compression_duration_ns =
+            measure_compression_duration(&sample).expect("compression timing");
+        let trial = whole_buffer_trial(&sample, 1, false, compression_duration_ns)
+            .expect("whole-buffer trial");
+        let serialized = serde_json::to_value(trial).expect("serialize trial");
+        assert!(
+            serialized
+                .get("compression_duration_ns")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|duration| duration > 0),
+            "trial must carry a positive measured encode duration"
+        );
     }
 }
