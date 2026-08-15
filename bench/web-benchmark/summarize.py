@@ -481,7 +481,10 @@ def _verify_protocol(
         or value["bootstrap_confidence"] != 0.95
     ):
         raise ValueError("protocol deterministic statistics are invalid")
-    if value["network_isolation"] != "systemd_user_unit_plus_seccomp_network_deny":
+    if value["network_isolation"] not in {
+        "systemd_user_unit_plus_seccomp_network_deny",
+        "systemd_system_unit_plus_seccomp_network_deny",
+    }:
         raise ValueError("protocol network isolation is invalid")
     if value["wall_clock"] != "time.monotonic_ns" or value["peak_rss"] != "gnu_time_verbose":
         raise ValueError("protocol instrumentation is invalid")

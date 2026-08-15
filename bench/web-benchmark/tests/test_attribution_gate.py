@@ -170,6 +170,21 @@ class AttributionGateTests(unittest.TestCase):
         self.assertIn("RuntimeMaxSec=2s", joined)
         self.assertNotIn("shell", joined.casefold())
 
+    def test_system_mode_is_explicit_when_user_manager_is_unavailable(self):
+        executor = SubprocessExecutor(timeout_seconds=2)
+        with patch.dict(os.environ, {"CUBRIM_SYSTEMD_MODE": "system"}), patch(
+            "adapters.os.geteuid", return_value=0
+        ):
+            command = executor.sandbox_command(
+                ("/usr/bin/gzip", "-9", "-c", "/tmp/input.bin"),
+                Path("/tmp/trial/output.bin"),
+                Path("/tmp/trial/status.json"),
+                Path("/tmp/trial/time.txt"),
+                Path("/tmp/trial/stderr.txt"),
+            )
+        self.assertNotIn("--user", command)
+        self.assertIn("systemd-run", command)
+
     def test_cli_or_package_version_mismatch_fails_closed(self):
         with patch("adapters._tool_version", return_value="gzip 9.99"):
             with self.assertRaisesRegex(ValueError, "version mismatch"):

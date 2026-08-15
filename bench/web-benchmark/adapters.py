@@ -42,6 +42,7 @@ INNER_HELPER = Path(__file__).with_name("sandbox_exec.py").resolve()
 # run.py imports this module.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARDENING_EVIDENCE_ENV = "CUBRIM_WEB_HARDENING_EVIDENCE"
+SYSTEMD_MODE_ENV = "CUBRIM_SYSTEMD_MODE"
 
 
 @dataclass(frozen=True)
@@ -571,7 +572,7 @@ class SubprocessExecutor:
         timeout = f"{self.timeout_seconds:g}s"
         command = (
             "systemd-run",
-            "--user",
+            *self._systemd_scope_args(),
             "--wait",
             "--collect",
             "--quiet",
@@ -601,6 +602,28 @@ class SubprocessExecutor:
             "--",
             *argv,
         )
+
+    @staticmethod
+    def _systemd_scope_args() -> tuple[str, ...]:
+        mode = os.environ.get(SYSTEMD_MODE_ENV, "user").strip().casefold()
+        if mode == "user":
+            return ("--user",)
+        if mode == "system":
+            if os.geteuid() != 0:
+                raise PermissionError(
+                    "system systemd benchmark mode requires root; use the user manager otherwise"
+                )
+            return ()
+        raise ValueError(f"unsupported {SYSTEMD_MODE_ENV}={mode!r}")
+
+    @staticmethod
+    def network_isolation_label() -> str:
+        mode = os.environ.get(SYSTEMD_MODE_ENV, "user").strip().casefold()
+        if mode == "user":
+            return "systemd_user_unit_plus_seccomp_network_deny"
+        if mode == "system":
+            return "systemd_system_unit_plus_seccomp_network_deny"
+        raise ValueError(f"unsupported {SYSTEMD_MODE_ENV}={mode!r}")
 
     def _run(
         self,
@@ -666,7 +689,7 @@ class SubprocessExecutor:
         completed = subprocess.run(
             (
                 "systemd-run",
-                "--user",
+                *SubprocessExecutor._systemd_scope_args(),
                 "--wait",
                 "--collect",
                 "--quiet",
