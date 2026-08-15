@@ -213,6 +213,19 @@ fn run() -> Result<(), String> {
     }
 
     let independent_block_probe = probe_independent_capability(&samples[1])?;
+    // Compression is a property of the sample/configuration pair, not of the
+    // decoder mode. Measure each sample/trial pair once and attach that
+    // source-derived duration to both paired decoder observations. This keeps
+    // the resource metric genuine while avoiding a second identical encode
+    // for the whole-buffer control row.
+    let compression_durations = samples
+        .iter()
+        .map(|sample| {
+            (0..(WARMUPS + TRIALS))
+                .map(|_| measure_compression_duration(sample))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let mut order: Vec<(usize, &'static str)> = samples
         .iter()
         .enumerate()
@@ -230,9 +243,19 @@ fn run() -> Result<(), String> {
                 run_index - WARMUPS + 1
             };
             let trial = if mode == "streaming" {
-                stream_trial(sample, trial_index, warmup)?
+                stream_trial(
+                    sample,
+                    trial_index,
+                    warmup,
+                    compression_durations[sample_index][run_index],
+                )?
             } else {
-                whole_buffer_trial(sample, trial_index, warmup)?
+                whole_buffer_trial(
+                    sample,
+                    trial_index,
+                    warmup,
+                    compression_durations[sample_index][run_index],
+                )?
             };
             trials.push(trial);
         }
@@ -284,8 +307,12 @@ fn run() -> Result<(), String> {
     fs::write(&output_path, encoded).map_err(|e| format!("write {}: {e}", output_path.display()))
 }
 
-fn stream_trial(sample: &LoadedSample, trial_index: usize, warmup: bool) -> Result<Trial, String> {
-    let compression_duration_ns = measure_compression_duration(sample)?;
+fn stream_trial(
+    sample: &LoadedSample,
+    trial_index: usize,
+    warmup: bool,
+    compression_duration_ns: u64,
+) -> Result<Trial, String> {
     let started = Instant::now();
     let handle = cbm_stream_new_with_limits(
         DecodeLimits::DEFAULT_MAX_OUTPUT,
@@ -397,8 +424,8 @@ fn whole_buffer_trial(
     sample: &LoadedSample,
     trial_index: usize,
     warmup: bool,
+    compression_duration_ns: u64,
 ) -> Result<Trial, String> {
-    let compression_duration_ns = measure_compression_duration(sample)?;
     let started = Instant::now();
     let decoded = decode(&sample.frame)
         .map_err(|e| format!("whole-buffer decode rejected: {}", e.message()))?;
@@ -560,7 +587,10 @@ mod tests {
             original,
             frame,
         };
-        let trial = whole_buffer_trial(&sample, 1, false).expect("whole-buffer trial");
+        let compression_duration_ns =
+            measure_compression_duration(&sample).expect("compression timing");
+        let trial = whole_buffer_trial(&sample, 1, false, compression_duration_ns)
+            .expect("whole-buffer trial");
         let serialized = serde_json::to_value(trial).expect("serialize trial");
         assert!(
             serialized
