@@ -131,6 +131,27 @@ struct Trial {
     status: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+struct CompressionTimingRun {
+    schema_version: u32,
+    task_id: &'static str,
+    phase: &'static str,
+    status: &'static str,
+    corpus_key: String,
+    samples: Vec<CompressionTimingSample>,
+}
+
+#[derive(Debug, Serialize)]
+struct CompressionTimingSample {
+    sample_id: String,
+    sample_path: String,
+    input_bytes: usize,
+    input_sha256: String,
+    frame_bytes: usize,
+    frame_sha256: String,
+    compression_duration_ns: u64,
+}
+
 struct DigestSink {
     hasher: Sha256,
     bytes: usize,
@@ -167,16 +188,23 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let mut args = env::args_os().skip(1);
-    let corpus_root = args
+    let first = args
         .next()
-        .map(PathBuf::from)
-        .ok_or("usage: probe <corpus-root> <output-json>")?;
+        .ok_or("usage: probe [--compression-timings] <corpus-root> <output-json>")?;
+    let compression_timings_only = first == "--compression-timings";
+    let corpus_root = if compression_timings_only {
+        args.next()
+            .map(PathBuf::from)
+            .ok_or("usage: probe [--compression-timings] <corpus-root> <output-json>")?
+    } else {
+        PathBuf::from(first)
+    };
     let output_path = args
         .next()
         .map(PathBuf::from)
-        .ok_or("usage: probe <corpus-root> <output-json>")?;
+        .ok_or("usage: probe [--compression-timings] <corpus-root> <output-json>")?;
     if args.next().is_some() {
-        return Err("usage: probe <corpus-root> <output-json>".into());
+        return Err("usage: probe [--compression-timings] <corpus-root> <output-json>".into());
     }
     let manifest_path = corpus_root.join("manifest.v3.json");
     let manifest_bytes =
@@ -210,6 +238,36 @@ fn run() -> Result<(), String> {
             original,
             frame,
         });
+    }
+
+    if compression_timings_only {
+        let timings = samples
+            .iter()
+            .map(|sample| {
+                Ok(CompressionTimingSample {
+                    sample_id: sample.manifest.sample_id.clone(),
+                    sample_path: sample.manifest.path.clone(),
+                    input_bytes: sample.original.len(),
+                    input_sha256: sample.manifest.sha256.clone(),
+                    frame_bytes: sample.frame.len(),
+                    frame_sha256: sample.frame_sha256.clone(),
+                    compression_duration_ns: measure_compression_duration(sample)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let run = CompressionTimingRun {
+            schema_version: 1,
+            task_id: "CUBR-0075",
+            phase: "compression_timing_augmentation",
+            status: "COMPLETE",
+            corpus_key: manifest.corpus_key,
+            samples: timings,
+        };
+        let encoded =
+            serde_json::to_vec_pretty(&run).map_err(|e| format!("serialize timings: {e}"))?;
+        fs::write(&output_path, encoded)
+            .map_err(|e| format!("write {}: {e}", output_path.display()))?;
+        return Ok(());
     }
 
     let independent_block_probe = probe_independent_capability(&samples[1])?;

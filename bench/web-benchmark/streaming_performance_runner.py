@@ -98,6 +98,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--probe-source", type=Path, required=True)
     parser.add_argument("--prereg", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--augment-from",
+        type=Path,
+        help="augment an existing complete decoder bundle with fresh encode timing",
+    )
     return parser.parse_args()
 
 
@@ -247,8 +252,134 @@ def validate_bundle(bundle: dict[str, Any], manifest: dict[str, Any]) -> dict[st
     return measurement
 
 
+def write_json_atomically(path: Path, value: dict[str, Any]) -> None:
+    fd, temporary_name = tempfile.mkstemp(prefix="streaming-performance-", suffix=".json", dir=path.parent)
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def augment_bundle(args: argparse.Namespace) -> int:
+    repo_root = args.repo_root.resolve()
+    corpus_root = args.corpus_root.resolve()
+    probe = args.probe.resolve()
+    probe_source = args.probe_source.resolve()
+    prereg = args.prereg.resolve()
+    output = args.output.resolve()
+    base_path = args.augment_from.resolve()
+    if base_path == output:
+        fail("augmentation input and output must be different files")
+    if not base_path.is_file():
+        fail(f"augmentation input does not exist: {base_path}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if run_checked(["git", "status", "--porcelain"], repo_root):
+        raise MeasurementVoid("working tree is dirty; commit the probe and preregistration first")
+
+    pin_to_cpu_zero()
+    before = admission_snapshot()
+    assert_admitted(before, "before")
+    source_commit = run_checked(["git", "rev-parse", "HEAD"], repo_root)
+    rustc = run_checked(["rustc", "-Vv"], repo_root)
+    manifest_path = corpus_root / "manifest.v3.json"
+    manifest = json.loads(manifest_path.read_text())
+    timing_fd, timing_name = tempfile.mkstemp(prefix="compression-timings-", suffix=".json", dir=output.parent)
+    os.close(timing_fd)
+    timing_path = Path(timing_name)
+    command = [str(probe), "--compression-timings", str(corpus_root), str(timing_path)]
+    if shutil.which("taskset"):
+        command = ["taskset", "--cpu-list", "0", *command]
+    try:
+        completed = subprocess.run(command, cwd=repo_root, text=True, capture_output=True)
+        if completed.returncode != 0:
+            raise MeasurementVoid(f"compression timing probe failed with {completed.returncode}: {completed.stderr.strip()}")
+        try:
+            timing_run = json.loads(timing_path.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            raise MeasurementVoid(f"compression timing probe did not produce JSON: {error}") from error
+    finally:
+        timing_path.unlink(missing_ok=True)
+
+    if timing_run.get("schema_version") != 1 or timing_run.get("task_id") != "CUBR-0075":
+        fail("unexpected compression timing schema or task")
+    if timing_run.get("phase") != "compression_timing_augmentation" or timing_run.get("status") != "COMPLETE":
+        fail("compression timing probe is not complete")
+    timing_samples = timing_run.get("samples")
+    if not isinstance(timing_samples, list) or len(timing_samples) != EXPECTED_SAMPLES:
+        fail("compression timing sample cardinality mismatch")
+    canonical = {row["sample_id"]: row for row in manifest.get("samples", [])}
+    timings: dict[str, int] = {}
+    for sample in timing_samples:
+        if not isinstance(sample, dict):
+            fail("compression timing sample is not an object")
+        sample_id = sample.get("sample_id")
+        expected = canonical.get(sample_id)
+        if expected is None or sample_id in timings:
+            fail(f"compression timing sample identity is not canonical: {sample_id!r}")
+        for key in ("sample_path", "input_bytes", "input_sha256"):
+            expected_key = "path" if key == "sample_path" else ("byte_count" if key == "input_bytes" else "sha256")
+            if sample.get(key) != expected.get(expected_key):
+                fail(f"{sample_id}: compression timing {key} differs from manifest")
+        duration = sample.get("compression_duration_ns")
+        if isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0:
+            fail(f"{sample_id}: compression duration is invalid")
+        timings[sample_id] = duration
+    if set(timings) != set(canonical):
+        fail("compression timing probe does not cover the canonical sample set")
+
+    try:
+        bundle = json.loads(base_path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise MeasurementVoid(f"cannot read augmentation input: {error}") from error
+    trials = bundle.get("trials")
+    if not isinstance(trials, list):
+        fail("augmentation input trial collection is not a list")
+    for trial in trials:
+        if not isinstance(trial, dict):
+            fail("augmentation input trial is not an object")
+        sample_id = trial.get("sample_id")
+        if sample_id not in timings:
+            fail(f"augmentation input has unknown sample: {sample_id!r}")
+        if "compression_duration_ns" in trial:
+            fail("augmentation input already contains compression_duration_ns")
+        trial["compression_duration_ns"] = timings[sample_id]
+
+    after = admission_snapshot()
+    assert_admitted(after, "after")
+    bundle["provenance"] = {
+        "source_commit": source_commit,
+        "probe_source_sha256": sha256_path(probe_source),
+        "probe_binary_sha256": sha256_path(probe),
+        "runner_sha256": sha256_path(Path(__file__).resolve()),
+        "prereg_sha256": sha256_path(prereg),
+        "manifest_sha256": sha256_path(manifest_path),
+        "host": platform.node(),
+        "arch": platform.machine().lower(),
+        "cpu_affinity": "0",
+        "rustc": rustc,
+    }
+    bundle["publication_augmentation"] = {
+        "kind": "source-derived-compression-timing",
+        "base_bundle_sha256": sha256_path(base_path),
+        "raw_decoder_observations_unchanged": True,
+        "timed_encodes_per_sample": 1,
+        "timing_probe_phase": timing_run["phase"],
+    }
+    bundle["admission"] = {"before": before, "after": after}
+    bundle["measurement"] = validate_bundle(bundle, manifest)
+    bundle["measurement"]["probe_stderr"] = completed.stderr.strip()
+    write_json_atomically(output, bundle)
+    print(json.dumps(bundle["measurement"], sort_keys=True))
+    return 0
+
+
 def main() -> int:
     args = parse_args()
+    if args.augment_from is not None:
+        return augment_bundle(args)
     repo_root = args.repo_root.resolve()
     corpus_root = args.corpus_root.resolve()
     probe = args.probe.resolve()
@@ -307,14 +438,7 @@ def main() -> int:
     bundle["admission"] = {"before": before, "after": after}
     bundle["measurement"] = measurement
     bundle["measurement"]["probe_stderr"] = completed.stderr.strip()
-    fd, temporary_name = tempfile.mkstemp(prefix="streaming-performance-", suffix=".json", dir=output.parent)
-    os.close(fd)
-    temporary = Path(temporary_name)
-    try:
-        temporary.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
-        temporary.replace(output)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_json_atomically(output, bundle)
     print(json.dumps(measurement, sort_keys=True))
     return 0
 

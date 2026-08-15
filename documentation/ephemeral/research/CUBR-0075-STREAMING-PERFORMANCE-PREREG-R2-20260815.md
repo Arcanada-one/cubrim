@@ -1,18 +1,19 @@
-# CUBR-0075 Streaming / Early-Output Performance — Publication Rerun Preregistration
+# CUBR-0075 Streaming / Early-Output Performance — Publication Augmentation Preregistration
 
-Status: frozen rerun preregistration  
+Status: frozen publication-augmentation preregistration  
 Scope: internal native Web Profile measurement for `streaming-early-output-performance`  
 Date: 2026-08-15 UTC
 
-This rerun keeps the original CUBR-0075 matrix, thresholds, corpus, capability
-controls, and NO_GO decision rule. It adds only the source-derived encoding
-duration required by the canonical `resource_codec` evidence contract. The
-original measurement and its result remain separate evidence; this rerun is
-the publication-compatible bundle.
+This augmentation keeps the original CUBR-0075 matrix, thresholds, corpus,
+capability controls, raw decoder observations, and NO_GO decision rule. It adds
+only the source-derived encoding duration required by the canonical
+`resource_codec` evidence contract. The original measurement remains the
+authoritative decoder observation set; this augmentation is the
+publication-compatible bundle and does not rerun unchanged decoder trials.
 
 ## Fixed implementation and corpus
 
-- Source commit: `3d8d227`.
+- Source commit: recorded in the augmentation bundle provenance.
 - Corpus: `bench/web-corpus/manifest.v3.json`, exactly 13 samples, reused with
   the original manifest SHA-256.
 - Frame producer: `cubrim::encode_with_config` with
@@ -22,19 +23,23 @@ the publication-compatible bundle.
 
 ## Fixed trial protocol
 
-- Cells: 13 samples × `streaming` and `whole_buffer` control.
-- Each cell has exactly 3 warmups followed by exactly 30 measured trials.
-- Cell order is deterministic Fisher-Yates with seed `75075`.
-- For each sample/configuration pair, the probe performs exactly one fresh
-  encode with the fixed Web Profile configuration, verifies the resulting
+- Base bundle: `/home/dev/evidence/CUBR-0075-STREAMING-PERFORMANCE-20260815/streaming-performance.json`;
+  SHA-256 `b8493a33a3ee603cfce89799c99849abb7203e7c86d8b6953b1bdfb76ec9f4c2`.
+- The base bundle contains exactly 13 samples × `streaming` and
+  `whole_buffer` control, with 3 warmups and 30 measured trials per cell,
+  deterministic Fisher-Yates order with seed `75075`, and the frozen decoder
+  observations.
+- The augmentation probe performs exactly one fresh encode per canonical
+  sample with the fixed Web Profile configuration, verifies the resulting
   frame length and SHA-256 against the preloaded frame, and records positive
-  monotonic `compression_duration_ns`. That source-derived duration is
-  attached to every streaming and whole-buffer row for that sample. Repeated
-  rows are decoder observations only; they are not independent encode-timing
-  replicates.
-- The decoder observations use the verified preloaded frame. Their decode
-  timers start after the encoding measurement, so encoding time is not included
-  in decoder timings.
+  monotonic `compression_duration_ns`.
+- The guarded augmentation copies the base bundle and adds only
+  `compression_duration_ns` to each trial row, using that sample's verified
+  timing. It records the base-bundle SHA and asserts the raw decoder
+  observations are unchanged. Repeated rows are decoder observations only;
+  they are not independent encode-timing replicates.
+- Decoder timers and all threshold observations therefore come from the base
+  bundle; encoding time is not included in decoder timings.
 - Each decode timer records first output input bytes, first-output latency,
   last input submission, completion latency, peak ABI memory usage, and exact
   sink bytes/hash.
