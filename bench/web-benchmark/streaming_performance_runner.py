@@ -369,6 +369,10 @@ def augment_bundle(args: argparse.Namespace) -> int:
         "timing_probe_phase": timing_run["phase"],
     }
     bundle["admission"] = {"before": before, "after": after}
+    # The base runner appends probe_stderr after validating its canonical
+    # measurement summary. Replace that derived field before revalidation so
+    # an old diagnostic key cannot masquerade as changed raw evidence.
+    bundle.pop("measurement", None)
     bundle["measurement"] = validate_bundle(bundle, manifest)
     bundle["measurement"]["probe_stderr"] = completed.stderr.strip()
     write_json_atomically(output, bundle)
