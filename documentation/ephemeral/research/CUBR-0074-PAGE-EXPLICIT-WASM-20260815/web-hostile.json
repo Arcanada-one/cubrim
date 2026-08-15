@@ -1,0 +1,126 @@
+{
+  "binary_sha256": "54a70b3d78b0191cd337b7f11f7ef2a4792a702677d0ce6e5dd6d5e3b69744af",
+  "case_count": 15,
+  "cases": [
+    {
+      "case_id": "empty",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "short-header",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000000",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000001",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000002",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000003",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000004",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000005",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000053",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000106",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "prefix-000212",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "mutation-magic",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "mutation-version",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "mutation-mode",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    },
+    {
+      "case_id": "mutation-checksum",
+      "fault": false,
+      "returncode": 3,
+      "status": "rejected",
+      "stdout_bytes": 0
+    }
+  ],
+  "containment": {
+    "address_space_bytes": 268435456,
+    "cpu_seconds": 2,
+    "network": "not_used",
+    "open_files": 1024
+  },
+  "fault_count": 0,
+  "phase": "web_decoder_hostile",
+  "rejected_count": 15,
+  "runner_sha256": "6a0b37c160a1198403e9ce6d99dcc9523d53d5d235d35360e716ec8d2c990a19",
+  "schema_version": 1,
+  "source_sha": "bb221e7e39e19d853ee9e80f5a92c8b02246555c",
+  "status": "PASS",
+  "task_id": "CUBR-0075",
+  "valid_roundtrip_exact": true
+}
