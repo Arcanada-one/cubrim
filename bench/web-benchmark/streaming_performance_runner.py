@@ -195,6 +195,8 @@ def validate_bundle(bundle: dict[str, Any], manifest: dict[str, Any]) -> dict[st
         for key in ("first_output_latency_ns", "last_input_latency_ns", "output_complete_latency_ns"):
             if not isinstance(trial.get(key), int) or trial[key] < 0:
                 fail(f"{sample_id}/{mode}: {key} is invalid")
+        if not isinstance(trial.get("compression_duration_ns"), int) or trial["compression_duration_ns"] <= 0:
+            fail(f"{sample_id}/{mode}: compression_duration_ns is invalid")
         if trial["first_output_latency_ns"] > trial["last_input_latency_ns"] or trial["last_input_latency_ns"] > trial["output_complete_latency_ns"]:
             fail(f"{sample_id}/{mode}: event timestamps are not ordered")
         if mode == "streaming":

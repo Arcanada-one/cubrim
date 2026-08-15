@@ -110,6 +110,7 @@ struct Trial {
     warmup: bool,
     input_bytes: usize,
     frame_bytes: usize,
+    compression_duration_ns: u64,
     input_sha256: String,
     frame_sha256: String,
     output_sha256: String,
@@ -196,10 +197,7 @@ fn run() -> Result<(), String> {
         if original.len() != item.byte_count || sha256(&original) != item.sha256 {
             return Err(format!("{} does not match manifest", item.sample_id));
         }
-        let mut config = EncodeConfig::v1_default();
-        config.web_profile = true;
-        config.web_block_size = Some(BLOCK_SIZE);
-        let frame = cubrim::encode_with_config(&original, &config);
+        let frame = encode_web_frame(&original);
         if frame.len() < 10 || frame[5] != 18 {
             return Err(format!(
                 "{} encoder returned a non-Web frame",
@@ -287,6 +285,7 @@ fn run() -> Result<(), String> {
 }
 
 fn stream_trial(sample: &LoadedSample, trial_index: usize, warmup: bool) -> Result<Trial, String> {
+    let compression_duration_ns = measure_compression_duration(sample)?;
     let started = Instant::now();
     let handle = cbm_stream_new_with_limits(
         DecodeLimits::DEFAULT_MAX_OUTPUT,
@@ -370,6 +369,7 @@ fn stream_trial(sample: &LoadedSample, trial_index: usize, warmup: bool) -> Resu
         warmup,
         input_bytes: sample.original.len(),
         frame_bytes: sample.frame.len(),
+        compression_duration_ns,
         input_sha256: sample.manifest.sha256.clone(),
         frame_sha256: sample.frame_sha256.clone(),
         output_sha256: output_sha256.clone(),
@@ -398,6 +398,7 @@ fn whole_buffer_trial(
     trial_index: usize,
     warmup: bool,
 ) -> Result<Trial, String> {
+    let compression_duration_ns = measure_compression_duration(sample)?;
     let started = Instant::now();
     let decoded = decode(&sample.frame)
         .map_err(|e| format!("whole-buffer decode rejected: {}", e.message()))?;
@@ -416,6 +417,7 @@ fn whole_buffer_trial(
         warmup,
         input_bytes: sample.original.len(),
         frame_bytes: sample.frame.len(),
+        compression_duration_ns,
         input_sha256: sample.manifest.sha256.clone(),
         frame_sha256: sample.frame_sha256.clone(),
         output_sha256,
@@ -435,6 +437,32 @@ fn whole_buffer_trial(
         sink_exact: exact,
         status: "valid",
     })
+}
+
+fn encode_web_frame(original: &[u8]) -> Vec<u8> {
+    let mut config = EncodeConfig::v1_default();
+    config.web_profile = true;
+    config.web_block_size = Some(BLOCK_SIZE);
+    cubrim::encode_with_config(original, &config)
+}
+
+fn measure_compression_duration(sample: &LoadedSample) -> Result<u64, String> {
+    let started = Instant::now();
+    let frame = encode_web_frame(&sample.original);
+    let duration_ns = elapsed_ns(&started);
+    if frame.len() != sample.frame.len() || sha256(&frame) != sample.frame_sha256 {
+        return Err(format!(
+            "re-encoded frame drifted for {}",
+            sample.manifest.sample_id
+        ));
+    }
+    if duration_ns == 0 {
+        return Err(format!(
+            "compression timer returned zero for {}",
+            sample.manifest.sample_id
+        ));
+    }
+    Ok(duration_ns)
 }
 
 fn probe_independent_capability(sample: &LoadedSample) -> Result<IndependentBlockProbe, String> {
@@ -512,5 +540,34 @@ mod tests {
         let probe = probe_independent_capability(&sample).expect("capability probe");
         assert!(probe.positive_control && probe.negative_control);
         assert!(!probe.success);
+    }
+
+    #[test]
+    fn every_trial_serializes_source_derived_compression_duration() {
+        let original = b"encode timing fixture ".repeat(2_000);
+        let mut config = EncodeConfig::v1_default();
+        config.web_profile = true;
+        config.web_block_size = Some(BLOCK_SIZE);
+        let frame = cubrim::encode_with_config(&original, &config);
+        let sample = LoadedSample {
+            manifest: ManifestSample {
+                sample_id: "fixture".into(),
+                path: "fixture".into(),
+                byte_count: original.len(),
+                sha256: sha256(&original),
+            },
+            frame_sha256: sha256(&frame),
+            original,
+            frame,
+        };
+        let trial = whole_buffer_trial(&sample, 1, false).expect("whole-buffer trial");
+        let serialized = serde_json::to_value(trial).expect("serialize trial");
+        assert!(
+            serialized
+                .get("compression_duration_ns")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|duration| duration > 0),
+            "trial must carry a positive measured encode duration"
+        );
     }
 }
