@@ -339,16 +339,28 @@ fn observe_case(case: HostileCase) -> CaseObservation {
     }
 }
 
-fn trial(
-    payload_path: &str,
-    family: &str,
+struct TrialRequest<'a> {
+    payload_path: &'a str,
+    family: &'a str,
     expected_input_bytes: usize,
-    expected_input_sha256: &str,
-    expected_frame_sha256: &str,
-    sample_id: &str,
+    expected_input_sha256: &'a str,
+    expected_frame_sha256: &'a str,
+    sample_id: &'a str,
     trial_no: usize,
     seed: u64,
-) -> Result<(), String> {
+}
+
+fn trial(request: TrialRequest<'_>) -> Result<(), String> {
+    let TrialRequest {
+        payload_path,
+        family,
+        expected_input_bytes,
+        expected_input_sha256,
+        expected_frame_sha256,
+        sample_id,
+        trial_no,
+        seed,
+    } = request;
     let data = fs::read(payload_path).map_err(|error| format!("read {payload_path}: {error}"))?;
     if data.len() != expected_input_bytes || sha256(&data) != expected_input_sha256 {
         return Err(format!("{sample_id} input metadata changed before trial"));
@@ -422,16 +434,16 @@ fn main() -> ExitCode {
                 .parse::<u64>()
                 .map_err(|_| "invalid trial seed".to_string());
             match (input_bytes, trial_no, seed) {
-                (Ok(input_bytes), Ok(trial_no), Ok(seed)) => trial(
-                    payload,
+                (Ok(input_bytes), Ok(trial_no), Ok(seed)) => trial(TrialRequest {
+                    payload_path: payload,
                     family,
-                    input_bytes,
-                    input_sha,
-                    frame_sha,
+                    expected_input_bytes: input_bytes,
+                    expected_input_sha256: input_sha,
+                    expected_frame_sha256: frame_sha,
                     sample_id,
                     trial_no,
                     seed,
-                ),
+                }),
                 (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => Err(error),
             }
         }
