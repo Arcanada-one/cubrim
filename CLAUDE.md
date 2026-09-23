@@ -97,6 +97,39 @@ The N-dimensionality (strictly 3D? 4D? variable N?) and the edge-bound are open 
 6. **Spike size-models MUST charge the full serialization cost of EVERY fallback level the real decoder needs.** A Python spike size-model that omits a fallback level's header cost produces a falsely-optimistic GO that the real round-trippable codec cannot realize. Measured: CUBR-0026 spike modelled the order-2 context-key scheme as GO (aggregate 0.547730, −6.73% vs T4), but the model charged only order-2 + order-0 table bytes; the real Rust codec (CUBR-0027) must also serialize order-1 fallback tables (the decoder's fallback chain order2→order1→order0 needs all three in the header), and that unmodeled overhead pushed the real aggregate to 0.592215 — WORSE than T4. **Go/No-go gate:** before any spike declares GO for a multi-level-fallback scheme, count the `decode` branches in the wire-format spec and assert the size-model has one cost term per branch (CUBR-0026 had 3 branches, 2 terms → the gap). A GO from a model with fewer cost terms than decoder branches is unsound until the missing terms are added.
 7. **The order-1 entropy probe (Gotcha #3) is necessary but NOT sufficient for any φ that transmits a permutation — charge the φ-map as a decoder branch.** A content-derived φ that sorts/places by value can *pass* the narrow conditional-entropy probe (the sorted value stream has low H(X_t|X_{t−1})), yet the scattered-run penalty does not vanish — it *relocates* into the φ-map (permutation) branch, which the probe never inspects. Only a Gotcha-#6 full-branch size model that charges the φ-map transmission as its own decoder branch exposes it. Measured (CUBR-0032): the steel-man content-derived φ (OIVR — value stream kept i-order, passes Gotcha #3 by construction) gave aggregate 1.981771 (≈2× WORSE than T4 0.587240) once the φ-map cost was charged; on structured files the φ-map alone blew up (`text` +37888 B, `log_like` +31252 B). Root cause is information conservation: a content-derived φ must *pay* for the coordinate it stores, and that payment ≥ the disorder it removes from the value stream, so the distance-map lever can never cost less than the sparsity it buys (corpus-independent). This closes the entire distance-map branch (CUBR-0028/29/30/31/32). BWT (#4) is the only known reorder that escapes the trap — it encodes its permutation implicitly via LF-mapping + one index, never a transmitted map. Lesson: for any coordinate-storing candidate, the φ-map permutation cost is a MANDATORY decoder branch in the size model; a GO that omits it is unsound.
 
+## Benchmark Data Integrity — DB vs Hypothesis Journal (HARD RULE)
+
+> **Set 2026-07-23 by unanimous consilium** (data-integrity + scientific-method + public-trust judges). The authoritative benchmark DB (`arcanada_cubrim` `aggregate_by_type`) feeds the public ranks on cubrim.com («Cubrim #1 at type X»). **The rule is decided — do not re-ask the operator about it.**
+
+Two distinct stores, two distinct admission criteria — never conflate them:
+
+1. **Authoritative benchmark DB** (source of the public ranks) admits a number **only if it reflects the genuine capability of the codec under CORRECT execution** — the mode under test actually activated, the run is reproducible as «commit X on corpus Y → result Z», and every row carries its reproducing commit id. Admission criterion = **measurement validity / provenance**, NOT «did the hypothesis succeed».
+2. **Hypothesis / evolution / incident journal** (`consilium/hypothesis-log.md`, evolution history, `cubr-cm-status.md`) records **everything** — successful hypotheses, genuine negatives, AND invalid measurements — each honestly labelled.
+
+**The decisive distinction (easy to get wrong):**
+
+- **True negative** = the mode under test was *correctly applied* and still lost → a real hypothesis result → **goes in the benchmark DB** (it is the honest capability number).
+- **Measurement void** = a program defect (wrong gating, crash, wrong mode dispatched, corrupted harness) produced a number that does *not* attribute to the mode under test → a broken-instrument reading, NOT a failed hypothesis → **journal ONLY**, labelled `measurement void — instrument fault (commit X → fix Y, valid number Z)`, and **NEVER enters the benchmark DB, not even flagged**.
+
+Recording a bug-artefact's number in the results-of-truth table as a «failed hypothesis» is itself dishonest — it falsely attributes a defect's output to a mode that was never tested. A `buggy` flag in a truth table is an oxymoron: external observers read the number, not the flag; one dirty row makes the whole ranking contestable. Honesty lives in the journal (full story: hypothesis outcome + defect + void number + fix commit + valid number); the DB holds only the single valid, reproducible capability number.
+
+**Litmus before writing any benchmark row:** «Did the mode I'm claiming to measure actually run correctly on this input?» NO → journal only, never the DB. YES → real result (win or loss) → belongs in the DB.
+
+*(Origin: the 28df853 integration artefact carried a `cm2_gate` bug that left mozilla on the old MODE_LZ, producing exe 0.308 instead of the real CM2 0.239 — a measurement void, not a failed hypothesis. The CM-on-exe hypothesis itself succeeded; fix = 6eaefad.)*
+
+### DB is the mandatory home of all results — writing is NOT operator-gated (HARD RULE)
+
+> **Set 2026-07-23 by operator directive.** All data work goes through the DB. The DB (`arcanada_cubrim`) is the single source of truth; the site is only its window.
+
+Writing a **validated** result into the DB and updating hypothesis / result statuses is the **natural, obligatory end of the pipeline — NOT a separate risky action requiring operator sign-off.** Once a number passes the measurement-validity gate above (mode actually ran, RT cmp=0, reproducible «commit X on corpus Y → result Z», independently verified), it MUST be written to the DB. Asking the operator «shall I write this valid result to the DB?» is the same category error as asking «may I save my work» — **do not ask it.**
+
+- The safety wrapper (`pg_dump` backup → guarded transaction → verify-before-commit) is **HOW** to write safely, not a reason to pause for permission. Perform it autonomously.
+- Hypothesis status transitions (proposed → GO/NO-GO, validated, superseded) live in the DB and are updated as a matter of course, not gated.
+- The ONLY genuine hard-gates remain: destructive DB ops (DROP / mass-delete / history-rewrite), force-push, real-money, public social posts, public package release. A guarded INSERT/UPDATE of a verified benchmark result is none of these.
+- Result data never lives «only in a file/journal pending operator approval». Files are transient evidence; the DB is where results become real. (The journal still holds the *narrative* — hypothesis story, voids, fixes — per the rule above; the DB holds the *numbers*.)
+
+*(Origin: operator corrected me twice for gating the DB-write of the confirmed 6eaefad text-#1/exe-#1 result behind a redundant «go». The verification IS the gate; operator re-confirmation is not.)*
+
 ## Datarim Workflow
 
 This project uses [Datarim](https://datarim.club) for structured task execution.
