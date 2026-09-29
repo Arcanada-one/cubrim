@@ -15,4 +15,4 @@
 - [TODO: build & crate layout]
 
 > Mechanism, math, and encoding scheme live only in internal artefacts. Do not
-> add them here — see `../../CLAUDE.md` § Secrecy Constraint.
+> add them here — see `../../AGENTS.md` § Secrecy Constraint.

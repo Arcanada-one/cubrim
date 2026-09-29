@@ -8,7 +8,7 @@ created: 2026-06-17
 
 # Cubrim — Hypothesis Log (running journal)
 
-> **Зачем.** Project CLAUDE.md: «Hypotheses are logged, not lost». Каждая гипотеза о
+> **Зачем.** Project AGENTS.md: «Hypotheses are logged, not lost». Каждая гипотеза о
 > подходе (выбор `N`, граница `B`, схема карты, отображение `Φ`, бит-пакинг,
 > доменизация) фиксируется со своей v1-стартовой позицией, критерием разрешения и
 > статусом — **в т.ч. отклонённые**. Привязка: `PRD-CUBR-0002` §6 (OQ-1..OQ-5),
