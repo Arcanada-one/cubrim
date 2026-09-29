@@ -253,7 +253,7 @@ def gather_env() -> dict:
         return r.stdout.strip() if r.returncode == 0 else "unavailable"
 
     # code_sha: the git commit the sweep ran on. Measured numbers are only
-    # reproducible against a known revision (CLAUDE.md mandate). A "-dirty" suffix
+    # reproducible against a known revision (AGENTS.md mandate). A "-dirty" suffix
     # flags an uncommitted working tree (result not archivable until committed).
     code_sha = run("git rev-parse HEAD")
     dirty = run("git status --porcelain")

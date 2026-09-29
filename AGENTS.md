@@ -111,7 +111,7 @@ This project uses [Datarim](https://datarim.club) for structured task execution.
 
 - **Pipeline:** `init → prd → plan → design → do → qa → compliance → archive`
 - **Complexity routing:** L1 (quick fix) through L4 (major feature) — each level routes through the stages it needs.
-- **Task prefix:** `CUBR` (registered in the ecosystem `~/arcanada/CLAUDE.md` § Task Prefix Registry; archive subdir `cubrim`).
+- **Task prefix:** `CUBR` (registered in the ecosystem `~/arcanada/AGENTS.md` § Task Prefix Registry; archive subdir `cubrim`).
 - **State:** `datarim/` directory at the ecosystem root (local workflow state, gitignored).
 - **Archives:** `~/arcanada/documentation/archive/cubrim/` (committed to git).
 - **Algorithm design rounds:** use the `consilium` skill (`/dr-design` stage, L3-4) — multi-vendor panel is core to this project, not optional.

@@ -47,7 +47,7 @@ created: 2026-06-17
 
 Краеугольный инвариант корректности всего формата — **lossless byte-exact round-trip**
 (`V-AC-1`, PRD §7): декомпрессор обязан восстановить `S` бит-в-бит. Компрессор,
-теряющий данные, — это баг, а не trade-off (project CLAUDE.md «Round-trip correctness
+теряющий данные, — это баг, а не trade-off (project AGENTS.md «Round-trip correctness
 is non-negotiable»).
 
 ---
