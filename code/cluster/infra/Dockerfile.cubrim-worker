@@ -1,6 +1,6 @@
 # Dockerfile.cubrim-worker — Single image for all Cubrim cluster roles.
 #
-# Bundles: Claude Code CLI, claude-code-router, Rust/cargo,
+# Bundles: Node.js 24.22.1, Claude Code CLI, claude-code-router, Rust/cargo,
 #          python3 + numpy, jq, git.
 #
 # All four containers (orchestrator + workers a/b/c) use this same image.
@@ -30,13 +30,31 @@ RUN apt-get update -qq && \
         python3 \
         python3-pip \
         python3-dev \
+        xz-utils \
         && \
     rm -rf /var/lib/apt/lists/*
 
-# ── Node.js LTS (for Claude Code CLI) ───────────────────────────────────────
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
+# ── Node.js 24.22.1 (Active LTS "Krypton") ──────────────────────────────────
+# Exact pin for the 2026-10-21 security release (patched lines: 26.12.1,
+# 24.22.1, 22.23.4). Ubuntu 24.04 apt nodejs is 18.19.1 and is not used.
+# Official linux-x64 tarball. SHA-256 is the linux-x64 line of
+# https://nodejs.org/dist/v24.22.1/SHASUMS256.txt
+# (clearsigned by Node.js release key 5BE8A3F6C8A5C01D106C0AD820B1A390B168D356).
+# The image is amd64; any other architecture fails closed.
+ARG NODE_VERSION=24.22.1
+ARG NODE_SHA256=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
+RUN arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) ;; \
+         *) echo "pinned Node.js tarball is linux-x64 only (got ${arch})" >&2; exit 1 ;; \
+       esac \
+    && tarball="node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && curl -fsSL -o "/tmp/${tarball}" "https://nodejs.org/dist/v${NODE_VERSION}/${tarball}" \
+    && echo "${NODE_SHA256}  /tmp/${tarball}" | sha256sum -c - \
+    && tar -xJf "/tmp/${tarball}" -C /usr/local --strip-components=1 \
+    && rm -f "/tmp/${tarball}" \
+    && node -v \
+    && npm -v
 
 # ── Python dependencies ──────────────────────────────────────────────────────
 # ubuntu:24.04 ships an externally-managed Python (PEP 668); inside this

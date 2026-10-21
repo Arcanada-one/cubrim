@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # bootstrap-host.sh — Idempotent toolchain installer for the Cubrim research cluster host.
 #
-# Installs: Docker engine + compose plugin, rustup + cargo, python3 + numpy,
-#           jq, git, claude (Claude Code CLI), claude-code-router.
+# Installs: Docker engine + compose plugin, Node.js 24.22.1, rustup + cargo,
+#           python3 + numpy, jq, git, claude (Claude Code CLI), claude-code-router.
 #
 # Usage:
 #   ./bootstrap-host.sh              # full install
@@ -21,6 +21,12 @@ set -euo pipefail
 
 # ── constants ────────────────────────────────────────────────────────────────
 REQUIRED_CORES=4  # reserve this many cores free (ecosystem convention)
+
+# Active LTS patched in the 2026-10-21 Node.js security release.
+# SHA-256 is the linux-x64 line of
+# https://nodejs.org/dist/v24.22.1/SHASUMS256.txt
+NODE_VERSION=24.22.1
+NODE_SHA256_X64=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
 
 # ── argument parsing ─────────────────────────────────────────────────────────
 DRY_RUN="${CUBRIM_BOOTSTRAP_DRYRUN:-0}"
@@ -46,6 +52,40 @@ run_or_plan() {
         log "$desc"
         "$@"
     fi
+}
+
+# True when the node that PATH will execute is at least NODE_VERSION.
+node_meets_floor() {
+    command -v node >/dev/null 2>&1 || return 1
+    local ver
+    ver="$(node -v 2>/dev/null | tr -d 'v[:space:]')"
+    [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    dpkg --compare-versions "$ver" ge "$NODE_VERSION"
+}
+
+# Install the official linux-x64 tarball into /usr/local and checksum-verify it.
+# Ubuntu apt nodejs (18.19.1 on 24.04) is never installed.
+install_pinned_node() {
+    local arch tarball url tmp
+    arch="$(dpkg --print-architecture)"
+    case "$arch" in
+        amd64) ;;
+        *)
+            printf 'bootstrap-host: pinned Node.js tarball is linux-x64 only (got %s)\n' "$arch" >&2
+            exit 1
+            ;;
+    esac
+    apt-get update -qq
+    apt-get install -y --no-install-recommends ca-certificates curl xz-utils
+    tarball="node-v${NODE_VERSION}-linux-x64.tar.xz"
+    url="https://nodejs.org/dist/v${NODE_VERSION}/${tarball}"
+    tmp="$(mktemp)"
+    curl -fsSL -o "$tmp" "$url"
+    printf '%s  %s\n' "$NODE_SHA256_X64" "$tmp" | sha256sum -c -
+    tar -xJf "$tmp" -C /usr/local --strip-components=1
+    rm -f "$tmp"
+    hash -r
+    node -v
 }
 
 # ── dry-run guard — do NOT execute installs when sourced or in dry-run ───────
@@ -137,25 +177,24 @@ main() {
             '
     fi
 
-    # ── 6. Claude Code CLI ───────────────────────────────────────────────────
+    # ── 6. Node.js 24.22.1 (patched Active LTS; not Ubuntu apt nodejs) ───────
+    if node_meets_floor; then
+        skip "node $(node -v)"
+    else
+        run_or_plan "install Node.js ${NODE_VERSION} from nodejs.org (sha256-pinned linux-x64 tarball)" \
+            install_pinned_node
+    fi
+
+    # ── 7. Claude Code CLI ───────────────────────────────────────────────────
     # Installs via npm (the official distribution channel).
     if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
         skip "claude CLI"
     else
-        if command -v node >/dev/null 2>&1; then
-            run_or_plan "install Claude Code CLI via npm" \
-                npm install -g @anthropic-ai/claude-code
-        else
-            run_or_plan "install Node.js LTS then Claude Code CLI" \
-                bash -c '
-                    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
-                    apt-get install -y nodejs
-                    npm install -g @anthropic-ai/claude-code
-                '
-        fi
+        run_or_plan "install Claude Code CLI via npm" \
+            npm install -g @anthropic-ai/claude-code
     fi
 
-    # ── 7. claude-code-router (npm — the canonical distribution; provides `ccr`) ─
+    # ── 8. claude-code-router (npm — the canonical distribution; provides `ccr`) ─
     if command -v ccr >/dev/null 2>&1 \
        || command -v claude-code-router >/dev/null 2>&1; then
         skip "claude-code-router"
@@ -164,7 +203,7 @@ main() {
             npm install -g @musistudio/claude-code-router
     fi
 
-    # ── 8. systemd environment file for PATH ─────────────────────────────────
+    # ── 9. systemd environment file for PATH ─────────────────────────────────
     # Ensures /root/.local/bin is in the system PATH so systemd units
     # resolve 'claude' and 'cargo' without a full login shell (PAX lesson).
     run_or_plan "ensure /etc/environment includes /root/.local/bin in PATH" \
@@ -174,7 +213,7 @@ main() {
             fi
         '
 
-    # ── 9. create cluster work directory ────────────────────────────────────
+    # ── 10. create cluster work directory ───────────────────────────────────
     run_or_plan "create /opt/cubrim with correct permissions" \
         bash -c '
             mkdir -p /opt/cubrim
