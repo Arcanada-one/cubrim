@@ -130,15 +130,14 @@ impl<'a> RcDec<'a> {
     #[inline]
     pub fn decode_bit(&mut self, p: u16) -> u8 {
         let bound = (self.range >> PBITS) * p as u32;
-        let bit;
-        if self.code < bound {
+        let bit = if self.code < bound {
             self.range = bound;
-            bit = 1;
+            1
         } else {
             self.code -= bound;
             self.range -= bound;
-            bit = 0;
-        }
+            0
+        };
         while self.range < TOP {
             self.range <<= 8;
             self.code = (self.code << 8) | self.next_byte();
