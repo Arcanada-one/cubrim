@@ -137,6 +137,12 @@ class AttributionGateTests(unittest.TestCase):
                 self.assertRegex(identity.codec_build_provenance_sha256, r"^[0-9a-f]{64}$")
 
     def test_executor_replaces_path_lookup_with_the_resolved_hashed_binary(self):
+        # identity() needs the pinned host toolchain; on hosted CI runners that
+        # ship a newer gzip, skip with both versions named (same contract as
+        # test_installed_releases_keep_upstream_and_build_provenance_distinct).
+        drift = _pin_drift("gzip-9")
+        if drift is not None:
+            self.skipTest(drift)
         adapter = adapter_for("gzip-9")
         identity = adapter.identity()
         source = Path("/tmp/input.bin")
@@ -189,9 +195,15 @@ class AttributionGateTests(unittest.TestCase):
         with patch("adapters._tool_version", return_value="gzip 9.99"):
             with self.assertRaisesRegex(ValueError, "version mismatch"):
                 adapter_for("gzip-9").identity()
+        # Package-mismatch path must see the pinned CLI version; otherwise a
+        # drifted host gzip fails the version gate first and the assertion never
+        # observes "package mismatch" (ubuntu-latest now ships gzip 1.14).
         with patch(
+            "adapters._tool_version",
+            return_value=adapters.RELEASE_PINS["gzip"].cli_version,
+        ), patch(
             "adapters._package_provenance",
-            return_value=("gzip", "1.12-unknown"),
+            return_value=("gzip", "1.12-unknown", "gzip", "1.12-unknown"),
         ):
             with self.assertRaisesRegex(ValueError, "package mismatch"):
                 adapter_for("gzip-9").identity()
