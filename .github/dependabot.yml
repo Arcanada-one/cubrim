@@ -13,9 +13,16 @@ updates:
     directory: /code/cubrim-rs
     schedule:
       interval: weekly
+    # Major bumps of the crypto/IO crates (aes-gcm, argon2, rand, sha2, ureq,
+    # dirs) change public APIs and break the lossless round-trip, Clippy and CLI
+    # jobs (PR 264). They are handled as deliberate migrations, not bot PRs.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       cargo:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
   - package-ecosystem: "pip"
     directory: "/code"
     schedule:
