@@ -1,29 +1,22 @@
-"""
-Holdout robustness benchmark — Cubrim vs gzip-9 vs zstd-19.
+"""Bounded holdout benchmark: Cubrim vs gzip-9 vs zstd-19.
 
-Runs the frozen holdout corpus (documentation/ephemeral/research/holdout/) through:
-  - Cubrim `compress` (competitive rail) with --value-scheme bwt-rans, and also
-    --value-scheme bwt-geomix (the current champion scheme), round-trip verified
-    byte-exact (sha256) per file;
-  - gzip -9 (header bytes included — gzip's real on-disk cost);
-  - zstd -19.
+Validate the frozen manifest before running any codec. Verify every restoration
+byte-for-byte. Publish a complete report only: missing tools, changed inputs,
+failed commands or timeouts are errors, never zero-byte measurements.
 
-Reports per-file ratios and the aggregate metric used by the leaderboard:
-    aggregate = sum(compressed_bytes) / sum(input_bytes)
-
-This corpus is DISJOINT from the frozen leaderboard corpus. The point is to test
-whether Cubrim's tuned-corpus parity with gzip generalises to unseen real data.
-
-Usage:
-  python3 code/bench/run_holdout_bench.py [--report-id h-robust]
+Usage: python3 code/bench/run_holdout_bench.py --report-id holdout-<revision>
+See documentation/how-to/holdout-benchmark.md for limits and report semantics.
 """
 
 import argparse
 import hashlib
 import json
+import math
+import os
 import platform
-import shlex
+import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -36,179 +29,292 @@ HOLDOUT_DIR = _PROJECT / "documentation" / "ephemeral" / "research" / "holdout"
 MANIFEST = HOLDOUT_DIR / "manifest.json"
 RESEARCH_DIR = _PROJECT / "documentation" / "ephemeral" / "research"
 CUBRIM_BIN = _PROJECT / "code" / "cubrim-rs" / "target" / "release" / "cubrim"
-
 SCHEMES = ["bwt-rans", "bwt-geomix"]
+CHUNK_BYTES = 1024 * 1024
 
 
-def sha256_of(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+class BenchmarkError(RuntimeError):
+    """The campaign cannot produce a complete, comparable measurement."""
 
 
-def run_cubrim_roundtrip(src: Path, scheme: str) -> tuple[int, bool]:
-    """Compress src with the given value scheme + verify byte-exact round-trip.
-    Returns (compressed_bytes, round_trip_ok)."""
-    with tempfile.NamedTemporaryFile(suffix=".cub", delete=False) as t1, \
-         tempfile.NamedTemporaryFile(suffix=".dec", delete=False) as t2:
-        out_path, dec_path = Path(t1.name), Path(t2.name)
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def files_equal(left: Path, right: Path) -> bool:
+    """Streaming byte comparison, independent of cached hashes and filecmp."""
+    if not right.is_file() or left.stat().st_size != right.stat().st_size:
+        return False
+    with left.open("rb") as a, right.open("rb") as b:
+        while True:
+            chunk = a.read(CHUNK_BYTES)
+            if chunk != b.read(CHUNK_BYTES):
+                return False
+            if not chunk:
+                return True
+
+
+def load_manifest() -> tuple[list[dict], str]:
+    raw = MANIFEST.read_bytes()
     try:
-        c = subprocess.run(
-            [str(CUBRIM_BIN), "compress", str(src), str(out_path),
-             "--value-scheme", scheme],
-            capture_output=True, text=True)
-        if c.returncode != 0:
-            raise RuntimeError(f"compress failed: {c.stderr}")
-        compressed = out_path.read_bytes()
-        d = subprocess.run(
-            [str(CUBRIM_BIN), "decompress", str(out_path), str(dec_path)],
-            capture_output=True, text=True)
-        if d.returncode != 0:
-            raise RuntimeError(f"decompress failed: {d.stderr}")
-        ok = dec_path.read_bytes() == src.read_bytes()
-        return len(compressed), ok
-    finally:
-        for p in (out_path, dec_path):
+        entries = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise BenchmarkError(f"invalid manifest: {exc}") from exc
+    if not isinstance(entries, list) or not entries:
+        raise BenchmarkError("manifest must be a non-empty list")
+    names = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise BenchmarkError("each manifest entry must be an object")
+        name = entry.get("name")
+        if (not isinstance(name, str) or not name or name in {".", ".."}
+                or "/" in name or "\\" in name or any(ord(c) < 32 for c in name)):
+            raise BenchmarkError("manifest names must be single file names")
+        if name in names:
+            raise BenchmarkError(f"duplicate manifest name: {name}")
+        names.add(name)
+        size = entry.get("size_bytes")
+        if type(size) is not int or size <= 0:
+            raise BenchmarkError(f"{name}: size_bytes must be a positive integer")
+        if not isinstance(entry.get("category"), str) or not entry["category"]:
+            raise BenchmarkError(f"{name}: category is required")
+        sha = entry.get("sha256")
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+            raise BenchmarkError(f"{name}: a lowercase sha256 is required")
+        source = HOLDOUT_DIR / name
+        if source.is_symlink() or not source.is_file():
+            raise BenchmarkError(f"{name}: corpus entry must be a regular file")
+        verify_input(source, entry)
+    return entries, hashlib.sha256(raw).hexdigest()
+
+
+def verify_input(source: Path, entry: dict) -> None:
+    if source.stat().st_size != entry["size_bytes"]:
+        raise BenchmarkError(f"{entry['name']}: manifest size mismatch")
+    if file_sha256(source) != entry["sha256"]:
+        raise BenchmarkError(f"{entry['name']}: manifest sha256 mismatch")
+
+
+def resolve_tools() -> dict[str, str]:
+    if not CUBRIM_BIN.is_file() or not os.access(CUBRIM_BIN, os.X_OK):
+        raise BenchmarkError(f"executable Cubrim binary not found: {CUBRIM_BIN}")
+    tools = {"cubrim": str(CUBRIM_BIN.resolve())}
+    for name in ("gzip", "zstd"):
+        binary = shutil.which(name)
+        if binary is None:
+            raise BenchmarkError(f"required comparator not found: {name}")
+        tools[name] = str(Path(binary).resolve())
+    return tools
+
+
+class Runner:
+    """Bound child processes; compressed bytes and stderr never accumulate in RAM."""
+
+    def __init__(self, timeout_seconds: float, deadline: float):
+        self.timeout_seconds = timeout_seconds
+        self.deadline = deadline
+        self.commands = []
+
+    def run(self, command: list[str], output: Path | None = None) -> float:
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise BenchmarkError("total campaign time limit reached")
+        timeout = min(self.timeout_seconds, remaining)
+        self.commands.append(command)
+        with tempfile.TemporaryFile() as errors, (
+            output.open("wb") if output is not None else tempfile.TemporaryFile()
+        ) as stdout:
+            started = time.perf_counter()
             try:
-                p.unlink()
-            except OSError:
-                pass
+                process = subprocess.Popen(
+                    command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=errors,
+                    start_new_session=(os.name == "posix"),
+                )
+            except OSError as exc:
+                raise BenchmarkError(f"cannot launch {command[0]}: {exc}") from exc
+            try:
+                process.wait(timeout=timeout)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+                # On Unix also stop children that inherited this process group.
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    process.kill()
+                process.wait()
+                if isinstance(exc, KeyboardInterrupt):
+                    raise
+                raise BenchmarkError(f"command timed out: {command[0]}") from exc
+            elapsed = time.perf_counter() - started
+            if process.returncode != 0:
+                errors.seek(0, os.SEEK_END)
+                errors.seek(max(0, errors.tell() - 4096))
+                detail = errors.read().decode("utf-8", errors="replace").strip()
+                raise BenchmarkError(
+                    f"command failed ({process.returncode}): {command[0]}: {detail}"
+                )
+        return elapsed
 
 
-def run_gzip(src: Path) -> int:
-    r = subprocess.run(f"gzip -9 -c {shlex.quote(str(src))} | wc -c",
-                       shell=True, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"gzip failed: {r.stderr}")
-    return int(r.stdout.strip())
+def measure(src: Path, key: str, binary: str, runner: Runner) -> dict:
+    with tempfile.TemporaryDirectory(prefix="cubrim-holdout-") as directory:
+        packed = Path(directory) / "output.bin"
+        decoded = Path(directory) / "decoded.bin"
+        if key.startswith("cubrim_"):
+            encode = [binary, "compress", str(src), str(packed),
+                      "--value-scheme", key.removeprefix("cubrim_")]
+            decode = [binary, "decompress", str(packed), str(decoded)]
+            encode_seconds = runner.run(encode)
+        else:
+            level = "-9" if key == "gzip" else "-19"
+            encode = [binary, level, "-c", "--", str(src)]
+            decode = [binary, "-d", "-c", "--", str(packed)]
+            encode_seconds = runner.run(encode, packed)
+        if not packed.is_file() or packed.stat().st_size == 0:
+            raise BenchmarkError(f"{key}: no compressed output for {src.name}")
+        decode_seconds = runner.run(decode, None if key.startswith("cubrim_") else decoded)
+        if not files_equal(src, decoded):
+            raise BenchmarkError(f"{key}: round-trip mismatch for {src.name}")
+        return {
+            "bytes": packed.stat().st_size,
+            "compression_seconds": encode_seconds,
+            "decompression_seconds": decode_seconds,
+            "round_trip": "PASS",
+        }
 
 
-def run_zstd(src: Path) -> int:
-    if shutil.which("zstd") is None:
-        return 0
-    r = subprocess.run(f"zstd -19 -c -q {shlex.quote(str(src))} | wc -c",
-                       shell=True, capture_output=True, text=True)
-    if r.returncode != 0:
-        return 0
-    return int(r.stdout.strip())
+def gather_env(tools: dict[str, str], manifest_sha: str) -> dict:
+    def info(command: list[str], required: bool = False) -> str:
+        try:
+            result = subprocess.run(
+                command, cwd=_PROJECT, capture_output=True, text=True, timeout=5,
+                check=True, stdin=subprocess.DEVNULL,
+            )
+            return result.stdout.strip()
+        except (OSError, subprocess.SubprocessError) as exc:
+            if required:
+                raise BenchmarkError(f"cannot record repository provenance: {exc}") from exc
+            return "unavailable"
 
-
-def gather_env() -> dict:
-    def run(cmd):
-        r = subprocess.run(cmd, capture_output=True, text=True, shell=True)
-        return r.stdout.strip() if r.returncode == 0 else "unavailable"
-    code_sha = run("git rev-parse HEAD")
-    dirty = run("git status --porcelain")
-    if dirty and dirty != "unavailable":
-        code_sha = f"{code_sha}-dirty"
+    code_sha = info(["git", "rev-parse", "HEAD"], required=True)
+    if not re.fullmatch(r"[0-9a-f]{40}", code_sha):
+        raise BenchmarkError("repository HEAD must be a full commit SHA")
     return {
-        "host": platform.node(),
-        "os": platform.platform(),
-        "python": sys.version.split()[0],
-        "rustc": run("rustc --version"),
-        "zstd": run("zstd --version | head -1"),
-        "gzip": run("gzip --version | head -1"),
+        "host": platform.node(), "os": platform.platform(),
+        "python": sys.version.split()[0], "rustc": info(["rustc", "--version"]),
+        "gzip": info([tools["gzip"], "--version"]),
+        "zstd": info([tools["zstd"], "--version"]),
         "code_sha": code_sha,
+        "working_tree_dirty": bool(info(["git", "status", "--porcelain"], required=True)),
+        "manifest_sha256": manifest_sha,
+        "runner_sha256": file_sha256(Path(__file__)),
+        "binaries": {name: {"path": path, "sha256": file_sha256(Path(path)),
+                              "size_bytes": Path(path).stat().st_size}
+                     for name, path in tools.items()},
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
+def publish_report(report: Path, payload: str) -> None:
+    """Publish a whole file atomically, without replacing any previous run."""
+    report.parent.mkdir(parents=True, exist_ok=True)
+    staging = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=report.parent, prefix=".holdout-",
+            suffix=".tmp", delete=False,
+        ) as target:
+            staging = Path(target.name)
+            target.write(payload)
+            target.flush()
+            os.fsync(target.fileno())
+        # Same-directory hard link is atomic and refuses an existing destination.
+        # Unlike os.replace it cannot erase a concurrent run's report.
+        os.link(staging, report)
+    finally:
+        if staging is not None:
+            staging.unlink(missing_ok=True)
+
+
+def positive_seconds(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError("time limit must be finite and positive")
+    return number
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report-id", default="h-robust")
-    args = parser.parse_args()
-
-    if not CUBRIM_BIN.exists():
-        raise SystemExit(f"cubrim binary not found: {CUBRIM_BIN} (run cargo build --release)")
-    manifest = json.loads(MANIFEST.read_text())
-    env = gather_env()
-
-    print("Environment:")
-    for k, v in env.items():
-        print(f"  {k}: {v}")
-    print(f"\nHoldout robustness benchmark ({len(manifest)} files)\n")
-
-    results = []
-    totals = {"size": 0, "gzip": 0, "zstd": 0}
-    cub_totals = {s: 0 for s in SCHEMES}
-    all_rt_ok = True
-
-    header = f"{'file':14s} {'cat':18s} {'size':>7s}"
-    for s in SCHEMES:
-        header += f" {s:>11s} {'r':>6s}"
-    header += f" {'gzip':>7s} {'r':>6s} {'zstd':>7s} {'r':>6s}  RT"
-    print(header)
-    print("-" * len(header))
-
-    for e in manifest:
-        src = HOLDOUT_DIR / e["name"]
-        size = e["size_bytes"]
-        row = {"name": e["name"], "category": e["category"], "size_bytes": size}
-        cub_sizes = {}
-        rt_file_ok = True
-        for s in SCHEMES:
-            cb, ok = run_cubrim_roundtrip(src, s)
-            cub_sizes[s] = cb
-            rt_file_ok = rt_file_ok and ok
-            row[f"cubrim_{s}_bytes"] = cb
-            row[f"cubrim_{s}_ratio"] = round(cb / size, 6)
-            cub_totals[s] += cb
-        if not rt_file_ok:
-            all_rt_ok = False
-        gz = run_gzip(src)
-        zs = run_zstd(src)
-        row["gzip_bytes"] = gz
-        row["gzip_ratio"] = round(gz / size, 6)
-        row["zstd_bytes"] = zs
-        row["zstd_ratio"] = round(zs / size, 6) if zs else 0
-        row["round_trip"] = "PASS" if rt_file_ok else "FAIL"
-        results.append(row)
-        totals["size"] += size
-        totals["gzip"] += gz
-        totals["zstd"] += zs
-
-        line = f"{e['name']:14s} {e['category']:18s} {size:>7d}"
-        for s in SCHEMES:
-            line += f" {cub_sizes[s]:>11d} {cub_sizes[s]/size:>6.4f}"
-        line += f" {gz:>7d} {gz/size:>6.4f} {zs:>7d} {(zs/size if zs else 0):>6.4f}  {row['round_trip']}"
-        print(line)
-
-    # Aggregates: sum(compressed)/sum(input)
-    agg = {s: cub_totals[s] / totals["size"] for s in SCHEMES}
-    agg_gzip = totals["gzip"] / totals["size"]
-    agg_zstd = totals["zstd"] / totals["size"] if totals["zstd"] else 0
-    print("-" * len(header))
-    aggline = f"{'AGGREGATE':14s} {'':18s} {totals['size']:>7d}"
-    for s in SCHEMES:
-        aggline += f" {cub_totals[s]:>11d} {agg[s]:>6.4f}"
-    aggline += f" {totals['gzip']:>7d} {agg_gzip:>6.4f} {totals['zstd']:>7d} {agg_zstd:>6.4f}"
-    print(aggline)
-    print(f"\nRound-trip (all files): {'PASS' if all_rt_ok else 'FAIL'}")
-
-    out = {
-        "report_id": args.report_id,
-        "corpus": "holdout (diverse real-world; disjoint from leaderboard corpus)",
-        "aggregate_metric": "sum(compressed_bytes)/sum(input_bytes)",
-        "environment": env,
-        "round_trip_all": "PASS" if all_rt_ok else "FAIL",
-        "totals": {
-            "input_bytes": totals["size"],
-            **{f"cubrim_{s}_bytes": cub_totals[s] for s in SCHEMES},
-            "gzip_bytes": totals["gzip"],
-            "zstd_bytes": totals["zstd"],
-        },
-        "aggregate": {
-            **{f"cubrim_{s}": round(agg[s], 6) for s in SCHEMES},
-            "gzip": round(agg_gzip, 6),
-            "zstd": round(agg_zstd, 6),
-        },
-        "results": results,
-    }
-    json_path = RESEARCH_DIR / f"{args.report_id}-bench.json"
-    json_path.write_text(json.dumps(out, indent=2) + "\n")
-    print(f"\nJSON written: {json_path}")
-
-    if not all_rt_ok:
-        sys.exit(1)
+    parser.add_argument("--timeout-seconds", type=positive_seconds, default=120.0)
+    parser.add_argument("--total-timeout-seconds", type=positive_seconds, default=600.0)
+    args = parser.parse_args(argv)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", args.report_id):
+        parser.error("report-id must be 1–96 filename characters, starting with a letter or digit")
+    report = RESEARCH_DIR / f"{args.report_id}-bench.json"
+    started = time.monotonic()
+    deadline = started + args.total_timeout_seconds
+    try:
+        if report.exists():
+            raise BenchmarkError(f"report already exists; choose a new --report-id: {report}")
+        entries, manifest_sha = load_manifest()
+        tools = resolve_tools()
+        env = gather_env(tools, manifest_sha)
+        runner = Runner(args.timeout_seconds, deadline)
+        keys = [f"cubrim_{scheme}" for scheme in SCHEMES] + ["gzip", "zstd"]
+        totals = {key: 0 for key in keys}
+        results = []
+        for entry in entries:
+            # Preserve the original basename/mtime used by gzip, but run every
+            # codec against the same verified private copy, not a moving corpus.
+            with tempfile.TemporaryDirectory(prefix="cubrim-input-") as directory:
+                src = Path(directory) / entry["name"]
+                shutil.copy2(HOLDOUT_DIR / entry["name"], src)
+                verify_input(src, entry)
+                row = {field: entry[field] for field in ("name", "category", "size_bytes", "sha256")}
+                row["timings"] = {}
+                for key in keys:
+                    binary = tools["cubrim" if key.startswith("cubrim_") else key]
+                    measured = measure(src, key, binary, runner)
+                    verify_input(src, entry)
+                    row[f"{key}_bytes"] = measured["bytes"]
+                    row[f"{key}_ratio"] = round(measured["bytes"] / entry["size_bytes"], 6)
+                    row["timings"][key] = measured
+                    totals[key] += measured["bytes"]
+                row["round_trip"] = "PASS"
+                results.append(row)
+                print(f"{entry['name']}: round-trip PASS (all codecs)")
+        # Refuse to attribute a campaign to a binary replaced while it ran.
+        for item in env["binaries"].values():
+            if file_sha256(Path(item["path"])) != item["sha256"]:
+                raise BenchmarkError("codec binary changed during campaign")
+        if time.monotonic() > deadline:
+            raise BenchmarkError("total campaign time limit reached")
+        input_bytes = sum(entry["size_bytes"] for entry in entries)
+        out = {
+            "schema_version": 2, "status": "complete", "report_id": args.report_id,
+            "corpus": "frozen holdout; inputs validated against manifest",
+            "aggregate_metric": "sum(compressed_bytes)/sum(input_bytes)",
+            "environment": env, "round_trip_all": "PASS",
+            "limits": {"command_seconds": args.timeout_seconds, "campaign_seconds": args.total_timeout_seconds},
+            "totals": {"input_bytes": input_bytes, **{f"{key}_bytes": value for key, value in totals.items()}},
+            "aggregate": {key: round(value / input_bytes, 6) for key, value in totals.items()},
+            "results": results, "commands": runner.commands,
+        }
+        payload = json.dumps(out, indent=2, allow_nan=False) + "\n"
+        publish_report(report, payload)
+        print(f"Complete report: {report}")
+        return 0
+    except (BenchmarkError, OSError) as exc:
+        print(f"Benchmark aborted; no complete report written: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

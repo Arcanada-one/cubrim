@@ -1,0 +1,53 @@
+name: holdout-benchmark-tests
+
+on:
+  pull_request:
+    paths:
+      - 'code/bench/run_holdout_bench.py'
+      - 'code/bench/tests/**'
+      - '.github/workflows/holdout-benchmark-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'code/bench/run_holdout_bench.py'
+      - 'code/bench/tests/**'
+      - '.github/workflows/holdout-benchmark-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  holdout-tests:
+    name: Holdout harness (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.10'
+          - os: ubuntu-latest
+            python: '3.12'
+          - os: macos-latest
+            python: '3.12'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      # Tiny stand-in CLIs only. No codec build, corpus generation or benchmark.
+      # Fail on empty collection rather than allowing a green zero-test job.
+      - name: Run holdout harness regression tests
+        run: |
+          python - <<'PY'
+          import sys
+          import unittest
+          suite = unittest.defaultTestLoader.discover('code/bench/tests', pattern='test_*.py')
+          count = suite.countTestCases()
+          if count < 41:
+              raise SystemExit(f'expected at least 41 holdout checks, found {count}')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          sys.exit(not result.wasSuccessful())
+          PY
