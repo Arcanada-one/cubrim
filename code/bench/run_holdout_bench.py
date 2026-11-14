@@ -151,6 +151,16 @@ class Runner:
                 if isinstance(exc, KeyboardInterrupt):
                     raise
                 raise BenchmarkError(f"command timed out: {command[0]}") from exc
+            # A successful leader is not a completed command if inherited
+            # writers/workers are still running. Stop them and reject the run
+            # rather than measuring a file they may still be modifying.
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                else:
+                    raise BenchmarkError(f"command left descendant processes: {command[0]}")
             elapsed = time.perf_counter() - started
             if process.returncode != 0:
                 errors.seek(0, os.SEEK_END)
